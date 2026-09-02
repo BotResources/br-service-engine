@@ -79,6 +79,9 @@ sources will not resolve a single `br-core-*`.
 2. CI gates the PR: fmt, clippy, tests, MSRV, docs, deny, machete,
    semver-checks, changelog + README pins, shellcheck, secret scan, and the
    conformance battery against real infra.
+   The `cargo semver-checks` job pins Rust **1.95** on purpose:
+   `cargo-semver-checks` 0.50.0 reads rustdoc JSON v56/v57 only, and newer
+   toolchains emit v60. Drop the pin once upstream supports v60.
 3. On merge to `main`, the `release-tags` workflow creates the annotated
    `v{version}` tag and the matching GitHub Release (notes lifted from
    `CHANGELOG.md`). That tag *is* the published version.
