@@ -147,10 +147,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
-        with:
-          scandir: .github/scripts
-          severity: warning
+      - name: shellcheck .github/scripts
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          shellcheck --severity=warning .github/scripts/*.sh
 
   trufflehog:
     name: trufflehog (secret scan)
