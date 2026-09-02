@@ -1,0 +1,8 @@
+[package]
+name = "service-engine"
+version.workspace = true
+description = "Reactive personalized delivery and process skeleton for BotResources services"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true

@@ -1,0 +1,8 @@
+[package]
+name = "conformance-service-engine"
+version.workspace = true
+description = "Black-box conformance battery for the BotResources service engine — TEST FIXTURE ONLY"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
