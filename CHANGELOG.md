@@ -7,6 +7,12 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ## Unreleased
 
+### Added
+
+- README: deployment constraint — no transaction-mode pooler in front of an
+  engine service — and the boot-time `LISTEN`/`NOTIFY` readiness probe that
+  enforces it as part of the 0.1.0 contract.
+
 ## 0.0.0 - 2026-09-02
 
 ### Added
