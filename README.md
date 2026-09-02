@@ -71,6 +71,26 @@ sources will not resolve a single `br-core-*`.
 0.1.0 will move both pins forward — to `br-rust-common` `v1.3.0` and
 `br-e2e-harness` `v1.2.0`.
 
+## Deployment constraints
+
+### No transaction-mode pooler in front of an engine service
+
+The engine's realtime transport is a session-level Postgres connection holding
+`LISTEN`. A transaction-mode pooler in front of it — PgBouncer in `transaction`
+mode, a CloudNativePG `Pooler` with `poolMode: transaction` — silently breaks
+that connection: notifications stop arriving and nothing errors. Any pooler in
+front of a service built on this engine MUST run in session mode, or the
+service MUST keep a direct connection for the listener through a second
+database URL.
+
+The engine enforces this itself rather than trusting the deployment: at boot it
+`LISTEN`s on a private channel over the listener connection, sends a `NOTIFY`
+on it from a second connection, and holds readiness DOWN if the notification
+does not arrive within a short timeout. A service behind a transaction-mode
+pooler therefore never becomes ready, and the reason is in the readiness
+payload. This probe is part of the 0.1.0 contract and is not implemented in the
+scaffold.
+
 ## Release process
 
 1. In your PR, bump the workspace `version` in the root `Cargo.toml` and add a
