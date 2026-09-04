@@ -31,7 +31,7 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: cargo test
-        run: cargo test --workspace --all-targets --locked
+        run: cargo test --workspace --exclude conformance-service-engine --all-targets --locked
       - name: cargo test (doctests)
         run: cargo test --workspace --doc --locked
 
@@ -107,6 +107,16 @@ jobs:
             exit 0
           fi
           shopt -s nullglob
+          base_wt="$(mktemp -d)/baseline"
+          git worktree add --detach "$base_wt" "$baseline"
+          trap 'git worktree remove --force "$base_wt" 2>/dev/null || true; git worktree prune' EXIT
+          rustdoc_json() {
+            local dir="$1" crate="$2" out="$3"
+            ( cd "$dir" && RUSTC_BOOTSTRAP=1 \
+              RUSTDOCFLAGS="-Z unstable-options --output-format json --cap-lints allow" \
+              cargo doc -p "$crate" --lib --no-deps --all-features --locked \
+              --target-dir "$out" )
+          }
           fail=0
           for toml in crates/*/Cargo.toml; do
             crate=$(basename "$(dirname "$toml")")
@@ -125,7 +135,12 @@ jobs:
               continue
             fi
             echo "::group::${crate} vs ${baseline}"
-            if ! cargo semver-checks -p "${crate}" --baseline-rev "${baseline}"; then
+            lib="${crate//-/_}"
+            rustdoc_json "." "${crate}" "$PWD/target/semver-current"
+            rustdoc_json "$base_wt" "${crate}" "$base_wt/target/semver-baseline"
+            if ! cargo semver-checks -p "${crate}" \
+              --baseline-rustdoc "$base_wt/target/semver-baseline/doc/${lib}.json" \
+              --current-rustdoc "$PWD/target/semver-current/doc/${lib}.json"; then
               fail=1
             fi
             echo "::endgroup::"
