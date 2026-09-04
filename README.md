@@ -1,121 +1,57 @@
 # br-service-engine
 
-> [!IMPORTANT]
-> **This repository is maintained for BotResources and its authorized clients.**
-> It is published under Apache-2.0 and made available read-only for visibility
-> and dependency consumption. The Apache-2.0 license governs your rights to
-> use, modify, and fork the code; the rest of this notice describes our
-> operational stance, not a legal restriction.
->
-> **We do not accept external pull requests, issues, or support requests.**
-> Issues and Discussions are disabled. PRs from accounts that are not on the
-> internal contributor allowlist will be closed without review. Forks are
-> permitted by Apache-2.0 and we neither monitor nor support them.
->
-> - Clients with a commercial relationship: contact your BR account manager.
-> - Security reports: see [SECURITY.md](SECURITY.md) (private email channel).
-> - This is not a community-supported project. No support is provided through
->   GitHub.
-
-The **reactive personalized delivery and process skeleton** every
-[BotResources](https://botresources.ai) service runs on: sessions, cohorts,
+The reactive personalized delivery and process skeleton every
+[BotResources](https://botresources.ai) service runs on — sessions, cohorts,
 impacts, projection, diff, multi-pod fan-out, streaming sources, boot, relays,
-cron, and mirror supervision.
+cron, and mirror supervision. Two crates share one workspace version: the
+`service-engine` library a service builds on, and `conformance-service-engine`,
+its black-box conformance battery run against real PostgreSQL and NATS
+JetStream. Not published on crates.io and shipped as no image and no CLI: the
+git tag is the release.
 
-> [!NOTE]
-> **This tag is the scaffold only.** Version `0.0.0` contains the repository
-> skeleton — two empty crates, CI/CD, governance — and **no engine code**. The
-> engine ships with **0.1.0**.
+## Install
 
-## Catalog
-
-| Crate | Role | Status | Docs | Changelog |
-|---|---|---|---|---|
-| `service-engine` | The engine itself — the reactive personalized delivery and process skeleton a service builds on | Scaffold; ships with 0.1.0 | [README](crates/service-engine/README.md) | [CHANGELOG](CHANGELOG.md) |
-| `conformance-service-engine` | Black-box conformance battery for the engine, run against real PostgreSQL 16 + NATS JetStream (no infra mocks) | Scaffold; ships with 0.1.0 | [README](crates/conformance-service-engine/README.md) | [CHANGELOG](CHANGELOG.md) |
-
-## Distribution
-
-Not published on crates.io, shipped as no image and no CLI: **the git tag is the
-release**. Both crates share one workspace version and a single tag `v{version}`
-ships the set.
-
-`service-engine` is a **normal dependency** of a service:
+A service depends on the `service-engine` library only. `conformance-service-engine`
+is not a kit to import: it is this repository's own executable spec and lives here.
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.0.0", version = "0.0.0" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.1.0", version = "0.1.0" }
 ```
 
-`conformance-service-engine` is a **dev-dependency**, never a runtime one:
+The `version` beside the `tag` is required: a tag-only git dependency carries a
+`*` version requirement, which `cargo-deny`'s `wildcards = "deny"` rejects. The
+engine has its own version line and depends on `br-rust-common` alone; each
+engine minor pins one exact `br-rust-common` tag.
 
-```toml
-[dev-dependencies]
-conformance-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "conformance-service-engine", tag = "v0.0.0", version = "0.0.0" }
-```
+| Engine version | `br-rust-common` |
+|---|---|
+| 0.1.0 | `v1.3.0` |
 
-The `version` beside the `tag` is required, not decoration: a tag-only git
-dependency carries a `*` version requirement, which `cargo-deny`'s
-`wildcards = "deny"` rejects.
+## Conformance battery
 
-### Pins
-
-The engine has its **own version line**. Each engine minor pins **one exact**
-`br-rust-common` tag and one exact `br-e2e-harness` tag; a consumer that mixes
-sources will not resolve a single `br-core-*`.
-
-| Engine version | `br-rust-common` | `br-e2e-harness` |
-|---|---|---|
-| 0.0.0 (scaffold) | `v1.2.0` | `v1.1.3` |
-
-0.1.0 will move both pins forward — to `br-rust-common` `v1.3.0` and
-`br-e2e-harness` `v1.2.0`.
-
-## Deployment constraints
-
-### No transaction-mode pooler in front of an engine service
-
-The engine's realtime transport is a session-level Postgres connection holding
-`LISTEN`. A transaction-mode pooler in front of it — PgBouncer in `transaction`
-mode, a CloudNativePG `Pooler` with `poolMode: transaction` — silently breaks
-that connection: notifications stop arriving and nothing errors. Any pooler in
-front of a service built on this engine MUST run in session mode, or the
-service MUST keep a direct connection for the listener through a second
-database URL.
-
-The engine enforces this itself rather than trusting the deployment: at boot it
-`LISTEN`s on a private channel over the listener connection, sends a `NOTIFY`
-on it from a second connection, and holds readiness DOWN if the notification
-does not arrive within a short timeout. A service behind a transaction-mode
-pooler therefore never becomes ready, and the reason is in the readiness
-payload. This probe is part of the 0.1.0 contract and is not implemented in the
-scaffold.
-
-## Release process
-
-1. In your PR, bump the workspace `version` in the root `Cargo.toml` and add a
-   matching `## X.Y.Z - YYYY-MM-DD` section to `CHANGELOG.md` (plain heading,
-   hyphen, no brackets — CI greps that exact form).
-2. CI gates the PR: fmt, clippy, tests, MSRV, docs, deny, machete,
-   semver-checks, changelog + README pins, shellcheck, secret scan, and the
-   conformance battery against real infra.
-   The `cargo semver-checks` job pins Rust **1.95** on purpose:
-   `cargo-semver-checks` 0.50.0 reads rustdoc JSON v56/v57 only, and newer
-   toolchains emit v60. Drop the pin once upstream supports v60.
-3. On merge to `main`, the `release-tags` workflow creates the annotated
-   `v{version}` tag and the matching GitHub Release (notes lifted from
-   `CHANGELOG.md`). That tag *is* the published version.
-
-## Development
+The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`
+(fallback `DATABASE_URL`) and `nats-server` on `PATH` (it spawns its own broker
+per test).
 
 ```bash
-cargo build  --workspace
-cargo test   --workspace
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo fmt    --all
+E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+  cargo test -p conformance-service-engine --all-targets
 ```
 
-The conformance battery needs real infra (PostgreSQL 16 + NATS JetStream); CI
-runs it in a dedicated job.
+## Deployment constraint
 
-MSRV: **1.88** (edition 2024). License: Apache-2.0.
+No transaction-mode pooler in front of an engine service: the realtime
+transport holds a session-level `LISTEN`, which such a pooler drops silently —
+the engine proves the path with a boot probe and holds readiness DOWN when it
+fails, so a mispooled service never becomes ready.
+
+## AI disclosure
+
+The code and the documentation of this repository were generated by an AI
+system (Anthropic Claude) under the direction and review of BotResources.
+BotResources takes full responsibility for them. This disclosure is made in
+line with the transparency obligations of the EU Artificial Intelligence Act
+(Regulation (EU) 2024/1689).
+
+License: Apache-2.0.
