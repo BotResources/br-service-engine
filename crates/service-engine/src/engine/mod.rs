@@ -13,9 +13,9 @@ use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::{Budgets, ReactionMessage, ReactionRegistry, Subscription};
+use crate::mirror::{MirrorReady, Project};
 use crate::pipeline::Reaction;
 use crate::presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
-use crate::mirror::{MirrorReady, Project};
 use crate::principal::{Principal, PrincipalResolver, RlsApplier};
 use crate::projector::Projector;
 use crate::registry::RenderRegistry;
@@ -26,9 +26,9 @@ use crate::session::{AttachRequest, SessionStream};
 use crate::transport::probe::ListenerProbe;
 use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
+use br_core_scope::ScopeDeclaration;
 use futures_util::future::BoxFuture;
 use std::fmt::Display;
-use br_core_scope::ScopeDeclaration;
 
 pub struct Engine<P: Principal> {
     config: EngineConfig,
