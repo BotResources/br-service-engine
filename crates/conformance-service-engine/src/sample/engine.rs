@@ -10,13 +10,10 @@ use service_engine::{BlobConfig, BlobPolicy, Engine};
 use crate::infra::TestDb;
 use crate::sample::assignment::{Assignment, AssignmentProjector};
 use crate::sample::blob::{
-    AttachDoc, AttachOwnedDoc, Attachment, DetachDoc, attach_doc, attach_owned_doc, detach_doc,
+    AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, RepointDoc, attach_doc,
+    attach_owned_doc, delete_doc, detach_doc, repoint_doc,
 };
 use crate::sample::blob_view::DocProjector;
-use crate::sample::counter::{
-    BumpCrud, BumpFull, BumpFullCmd, BumpSoft, FullCounterProjector, OpenCrud, OpenFull, OpenSoft,
-    bump_crud, bump_full, bump_full_reaction, bump_soft, open_crud, open_full, open_soft,
-};
 use crate::sample::cron::SampleCronJob;
 use crate::sample::mirror::directory_mirror;
 use crate::sample::note::{Note, NoteProjector};
@@ -142,82 +139,6 @@ pub async fn boot_sample_engine(
     engine
 }
 
-pub async fn boot_persistence_engine(
-    db: &TestDb,
-    nats: Nats,
-    channel: &str,
-    pod: &str,
-) -> Engine<SamplePrincipal> {
-    let mut engine = Engine::boot(
-        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
-        db.app_pool().clone(),
-        nats,
-        ReadinessHandle::ready(),
-    )
-    .await
-    .expect("the persistence engine boots under the low-privilege app role");
-    engine
-        .register_principal_resolver(SamplePrincipalResolver)
-        .expect("register the principal resolver");
-    engine
-        .register_projector(FullCounterProjector)
-        .expect("register the full-EDA counter projector, which auto-binds its noun");
-    engine
-        .register_mutation::<BumpCrud, _>(bump_crud)
-        .expect("register the CRUD bump mutation");
-    engine
-        .register_mutation::<BumpSoft, _>(bump_soft)
-        .expect("register the soft-EDA bump mutation");
-    engine
-        .register_mutation::<BumpFull, _>(bump_full)
-        .expect("register the full-EDA bump mutation");
-    engine
-        .register_reaction::<BumpFullCmd, _, _>("sample-counter-bump", bump_full_reaction)
-        .expect("register the coarse-disposition bump reaction");
-    engine
-}
-
-pub async fn boot_serialization_engine(
-    db: &TestDb,
-    nats: Nats,
-    channel: &str,
-    pod: &str,
-) -> Engine<SamplePrincipal> {
-    let mut engine = Engine::boot(
-        engine_config(channel, pod).with_lock_timeout(Duration::from_secs(5)),
-        db.app_pool().clone(),
-        nats,
-        ReadinessHandle::ready(),
-    )
-    .await
-    .expect("the serialization engine boots under the low-privilege app role");
-    engine
-        .register_principal_resolver(SamplePrincipalResolver)
-        .expect("register the principal resolver");
-    engine
-        .register_projector(FullCounterProjector)
-        .expect("register the full-EDA counter projector, which auto-binds its noun");
-    engine
-        .register_mutation::<BumpCrud, _>(bump_crud)
-        .expect("register the CRUD bump mutation");
-    engine
-        .register_mutation::<BumpSoft, _>(bump_soft)
-        .expect("register the soft-EDA bump mutation");
-    engine
-        .register_mutation::<BumpFull, _>(bump_full)
-        .expect("register the full-EDA bump mutation");
-    engine
-        .register_mutation::<OpenCrud, _>(open_crud)
-        .expect("register the CRUD open mutation");
-    engine
-        .register_mutation::<OpenSoft, _>(open_soft)
-        .expect("register the soft-EDA open mutation");
-    engine
-        .register_mutation::<OpenFull, _>(open_full)
-        .expect("register the full-EDA open mutation");
-    engine
-}
-
 pub async fn boot_blob_engine(
     db: &TestDb,
     nats: Nats,
@@ -255,6 +176,12 @@ pub async fn boot_blob_engine(
     engine
         .register_mutation::<DetachDoc, _>(detach_doc)
         .expect("register the detach mutation");
+    engine
+        .register_mutation::<RepointDoc, _>(repoint_doc)
+        .expect("register the repoint mutation");
+    engine
+        .register_mutation::<DeleteDoc, _>(delete_doc)
+        .expect("register the delete mutation");
     engine
 }
 

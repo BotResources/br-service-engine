@@ -4,6 +4,7 @@ pub mod blob_view;
 pub mod counter;
 pub mod cron;
 pub mod engine;
+pub mod engine_persistence;
 pub mod gate;
 pub mod gated;
 pub mod graphql;
@@ -77,15 +78,15 @@ pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_ru
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
 pub use blob::{
-    AttachDoc, AttachOwnedDoc, Attachment, DetachDoc, DocRow, DocStore, attach_doc,
-    attach_owned_doc, detach_doc,
+    AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, DocRow, DocStore, RepointDoc,
+    attach_doc, attach_owned_doc, delete_doc, detach_doc, repoint_doc,
 };
 pub use blob_view::{Doc, DocProjector, DocView};
 pub use engine::{
     SAMPLE_JOB, SAMPLE_RELAY, boot_blob_engine, boot_offer_engine, boot_offer_engine_reconciling,
-    boot_persistence_engine, boot_presence_engine, boot_render_engine, boot_sample_engine,
-    boot_serialization_engine, engine_config,
+    boot_presence_engine, boot_render_engine, boot_sample_engine, engine_config,
 };
+pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 
 pub use assignment::{
     Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentView,

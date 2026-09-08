@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
-use service_engine::{BlobRef, Blobs};
+use service_engine::{BlobRef, Blobs, UploadUrl};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -99,6 +99,10 @@ impl Aggregate for DocRow {
     fn key(&self) -> Uuid {
         self.id
     }
+
+    fn blob_refs(&self) -> Vec<BlobRef> {
+        self.blob_ref.map(BlobRef).into_iter().collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,7 +116,7 @@ pub struct AttachDoc {
 }
 
 impl MutationInput for AttachDoc {
-    type Output = OneShot<String>;
+    type Output = OneShot<UploadUrl>;
     type Error = SampleFault;
     const NAME: &'static str = "attach_doc";
 }
@@ -120,7 +124,7 @@ impl MutationInput for AttachDoc {
 pub fn attach_doc<'m>(
     cx: &'m mut Mutation<'m, SamplePrincipal>,
     input: AttachDoc,
-) -> BoxFuture<'m, Result<OneShot<String>, SampleFault>> {
+) -> BoxFuture<'m, Result<OneShot<UploadUrl>, SampleFault>> {
     Box::pin(async move {
         let blob = cx.blob::<Attachment>(input.name.clone(), input.content_type)?;
         let doc = DocRow {
@@ -136,7 +140,7 @@ pub fn attach_doc<'m>(
                 "deliberate rollback after staging".into(),
             ));
         }
-        Ok(OneShot(blob.upload_url().into_string()))
+        Ok(OneShot(blob.upload_url()))
     })
 }
 
@@ -150,7 +154,7 @@ pub struct AttachOwnedDoc {
 }
 
 impl MutationInput for AttachOwnedDoc {
-    type Output = OneShot<String>;
+    type Output = OneShot<UploadUrl>;
     type Error = SampleFault;
     const NAME: &'static str = "attach_owned_doc";
 }
@@ -158,7 +162,7 @@ impl MutationInput for AttachOwnedDoc {
 pub fn attach_owned_doc<'m>(
     cx: &'m mut Mutation<'m, SamplePrincipal>,
     input: AttachOwnedDoc,
-) -> BoxFuture<'m, Result<OneShot<String>, SampleFault>> {
+) -> BoxFuture<'m, Result<OneShot<UploadUrl>, SampleFault>> {
     Box::pin(async move {
         let blob = cx.blob_owned::<Attachment>(
             input.name.clone(),
@@ -173,7 +177,7 @@ pub fn attach_owned_doc<'m>(
         };
         cx.create(&doc).await?;
         cx.impact_caused::<Doc, _>(&doc.id, "attached")?;
-        Ok(OneShot(blob.upload_url().into_string()))
+        Ok(OneShot(blob.upload_url()))
     })
 }
 
@@ -202,6 +206,67 @@ pub fn detach_doc<'m>(
         }
         cx.save(&doc).await?;
         cx.impact_caused::<Doc, _>(&doc.id, "detached")?;
+        Ok(())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RepointDoc {
+    pub id: Uuid,
+    pub name: String,
+    pub content_type: String,
+}
+
+impl MutationInput for RepointDoc {
+    type Output = OneShot<UploadUrl>;
+    type Error = SampleFault;
+    const NAME: &'static str = "repoint_doc";
+}
+
+pub fn repoint_doc<'m>(
+    cx: &'m mut Mutation<'m, SamplePrincipal>,
+    input: RepointDoc,
+) -> BoxFuture<'m, Result<OneShot<UploadUrl>, SampleFault>> {
+    Box::pin(async move {
+        let mut doc = cx
+            .load::<DocRow>(&input.id)
+            .await?
+            .ok_or(SampleFault::NotFound)?;
+        let blob = cx.blob::<Attachment>(input.name, input.content_type)?;
+        doc.blob_ref = Some(blob.reference().as_uuid());
+        cx.save(&doc).await?;
+        cx.impact_caused::<Doc, _>(&doc.id, "repointed")?;
+        Ok(OneShot(blob.upload_url()))
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteDoc {
+    pub id: Uuid,
+}
+
+impl MutationInput for DeleteDoc {
+    type Output = ();
+    type Error = SampleFault;
+    const NAME: &'static str = "delete_doc";
+}
+
+pub fn delete_doc<'m>(
+    cx: &'m mut Mutation<'m, SamplePrincipal>,
+    input: DeleteDoc,
+) -> BoxFuture<'m, Result<(), SampleFault>> {
+    Box::pin(async move {
+        let doc = cx
+            .load::<DocRow>(&input.id)
+            .await?
+            .ok_or(SampleFault::NotFound)?;
+        sqlx::query("DELETE FROM sample_doc WHERE id = $1")
+            .bind(doc.id)
+            .execute(cx.connection())
+            .await
+            .map_err(|error| SampleFault::Store(error.to_string()))?;
+        cx.delete(&doc)?;
+        cx.impact_caused::<Doc, _>(&doc.id, "deleted")?;
         Ok(())
     })
 }

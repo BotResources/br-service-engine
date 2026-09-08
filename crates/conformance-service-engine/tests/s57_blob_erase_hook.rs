@@ -1,14 +1,17 @@
 #[allow(dead_code)]
+mod blob_support;
+#[allow(dead_code)]
 mod engine_twin;
 
 use std::time::Duration;
 
+use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
 use conformance_service_engine::sample::blob::AttachOwnedDoc;
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
-use service_engine::{BlobPolicy, OneShot, PersonId};
+use service_engine::{BlobPolicy, OneShot, PersonId, UploadUrl};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -57,7 +60,7 @@ async fn s57_the_erase_hook_purges_a_persons_blobs_from_storage_and_the_referenc
     await_ready(&readiness).await;
 
     let doc = Uuid::now_v7();
-    let upload: OneShot<String> = executor
+    let upload: OneShot<UploadUrl> = executor
         .run::<AttachOwnedDoc>(
             principal,
             AttachOwnedDoc {
@@ -70,11 +73,8 @@ async fn s57_the_erase_hook_purges_a_persons_blobs_from_storage_and_the_referenc
         )
         .await
         .expect("attach an owned blob");
-    http.put(upload.into_inner())
-        .body(b"personal-bytes".to_vec())
-        .send()
-        .await
-        .expect("upload the owned blob's bytes");
+    let status = post_upload(&http, upload.into_inner(), b"personal-bytes".to_vec()).await;
+    assert!(status.is_success(), "MinIO accepted the owned blob upload");
 
     let reference: Uuid = sqlx::query_scalar("SELECT blob_ref FROM sample_doc WHERE id = $1")
         .bind(doc)
