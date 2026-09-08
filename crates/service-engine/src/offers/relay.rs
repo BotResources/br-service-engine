@@ -158,11 +158,13 @@ impl<O: Offer> OfferRelay<O> {
                         .await
                         .map_err(published_language)?;
                 }
-                (Write::Put(value), Some((_, revision))) => {
-                    match bucket.update_if(&marker.kv_key, value, revision).await {
-                        Ok(_) => {}
-                        Err(NatsError::RevisionConflict { .. }) => continue,
-                        Err(error) => return Err(published_language(error)),
+                (Write::Put(value), Some((observed, revision))) => {
+                    if observed != *value {
+                        match bucket.update_if(&marker.kv_key, value, revision).await {
+                            Ok(_) => {}
+                            Err(NatsError::RevisionConflict { .. }) => continue,
+                            Err(error) => return Err(published_language(error)),
+                        }
                     }
                 }
                 (Write::Retract, None) => {}

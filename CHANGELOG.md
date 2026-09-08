@@ -240,21 +240,29 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   the beat) drains the dirty keys: it re-reads the row, calls `publish`, and
   puts or retracts the key on the `PUBLISHED_LANGUAGE` bucket under a per-key
   watermark (`service_engine.kv_relay_watermark`, monotone by the staged
-  sequence) and a bucket-revision compare-and-swap. On its first drain after
-  boot it reconciles the bucket against the store — re-putting every current
-  offerable row, retracting orphans under its prefix — so a rebuilt or drifted
-  bucket is repaired. The `PUBLISHED_LANGUAGE` bucket must exist; a missing
+  sequence) and a bucket-revision compare-and-swap that skips the put when the
+  bucket value already equals `publish(row)`. On its first drain after
+  boot it reconciles the bucket against the store — re-putting a row whose
+  published value differs from (or is missing from) the bucket, retracting
+  orphans under its prefix — so a rebuilt or drifted bucket is repaired. The
+  `PUBLISHED_LANGUAGE` bucket must exist; a missing
   bucket surfaces as a failing relay (readiness DOWN). The offer version lives
   in the key, so a breaking change is a second `register_offer` on the same
   noun.
 - The mirror projection into `known_*` is now leader-gated, as the intent
   requires: `Engine::register_mirror` builds the mirror with a `MirrorLeader`
-  (`build_led`), so only the pod holding the mirror's lease
-  (`leader_slot` name `mirror:{name}`, a renewable fenced lease taken under the
-  mirror's advisory lock) projects; standby pods keep their shadows current from
-  the KV watch and take over within one lease when the leader stops, without
-  missing a change. The lower-level `MirrorReady::build` stays ungated for the
-  battery's direct-drive scenarios.
+  (`build_led`), so only the pod holding the mirror's lease (`leader_slot` name
+  `mirror:{name}`, a fenced lease under the mirror's advisory lock) projects.
+  The lease is renewed **on the beat** (a per-mirror beat tick in the watch
+  loop), not only when a change is projected, so leadership no longer lapses in
+  a quiet period. Standby pods keep their shadows current from the KV watch
+  without projecting. When a standby acquires the lease (the leader stopped and
+  its lease expired) it **re-projects its already-current shadow** — a local
+  reconcile from the in-memory shadow, no bucket re-read — so a put or retract
+  delivered inside the failover window (applied to the standby's shadow before
+  it could take over) reaches `known_*` on takeover and is never missed. The
+  lower-level `MirrorReady::build` stays ungated for the battery's direct-drive
+  scenarios.
 - The app-role grant now includes `USAGE, SELECT` on the engine schema's
   sequences (for `offer_dirty_seq`).
 - Conformance: `s41_offer` (a mutation's dirty key commits in the same tx and
