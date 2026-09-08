@@ -81,6 +81,21 @@ projects a consumed KV offer into `known_*` through the direct lane, and
 `declare_scopes` (U10) runs the boot scope-declaration handshake that gates
 readiness until Identity confirms.
 
+The `graphql` module (U12) is the async-graphql surface kit. A service composes
+its slices' root objects into one schema with `engine_schema`, mounts it with
+`app` (`POST /graphql`, the GraphQL-over-WebSocket subscription on
+`GET /graphql/ws`, and `/readyz`) and runs it with `serve`;
+`Engine::graphql_state` wires the executor, the render runtime and the pool into
+it. Mutation resolvers run on `Engine::mutation_executor` (`execute` /
+`ack` and their bulk forms), answering `{ success }` or a typed error carrying
+the gate's `Reason` code, and returning a `OneShot`'s inner value only in the
+mutation response. Query resolvers read rendered views through `fetch` /
+`fetch_window` and never the database. The subscription maps the engine's
+`Reset`/`Upsert`/`Remove` wire to the `EngineDelta` union with the contiguous
+revision and the causing event, and the axum layer resolves the principal from
+the trusted `X-Passport` header (`PassportPrincipal`) before the executor runs —
+the kit does authZ only, never authN.
+
 ## Conformance battery
 
 The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`

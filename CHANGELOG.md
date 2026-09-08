@@ -169,6 +169,50 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   ops-view impact; and a bulk `impact_all` resetting a fixed `Keys` window on
   the session (`s40`), which a per-key impact would have missed.
 
+### Added (0.1.0 rework, unit U12 — GraphQL surface kit)
+
+- The async-graphql kit in the `graphql` module: a service composes its slices'
+  root objects (async-graphql `MergedObject` / `MergedSubscription`) into one
+  schema with `engine_schema`, and mounts it with `app`, which serves
+  `POST /graphql`, the GraphQL-over-WebSocket subscription transport on
+  `GET /graphql/ws` (`graphql-transport-ws`), and `/readyz`. `serve` runs the
+  router with graceful shutdown. `Engine::graphql_state` hands the router and
+  the schema the executor, the render runtime and the pool.
+- Mutation resolvers run on `Engine::mutation_executor`: `execute` /
+  `execute_bulk` run `MutationExecutor::run` / `run_bulk` and map a
+  `MutationError` to a typed GraphQL error carrying the gate's `Reason` code in
+  the `code` extension; `ack` / `ack_bulk` answer `{ success }` for a `()`
+  output; a `OneShot`'s inner value is returned by the resolver only in the
+  mutation response and never enters a view, an impact, an event or an outbox
+  row.
+- Query resolvers read rendered views through the render kit, never the
+  database: `fetch` / `fetch_json` render one key and `fetch_window` /
+  `fetch_window_json` a window, reusing the frame's `populate` for visibility
+  (a key the principal may not see answers as absent, fail-closed for a
+  non-authoritative window) and the same batched load and affordance pass as a
+  subscription frame.
+- The subscription kit maps the engine's `Reset` / `Upsert` / `Remove` wire to
+  the `EngineDelta` GraphQL union (`ResetPayload` / `UpsertPayload` /
+  `RemovePayload`) with the contiguous revision exposed and the causing domain
+  event riding along as `cause`; `attach` returns the raw `SessionStream` for a
+  service that maps to its own per-projector union, `subscribe` the mapped
+  `EngineDelta` stream. Each delta carries the projector name so a service
+  discriminates one union member per projector.
+- Principal resolution is authZ-only: the axum layer decodes the trusted
+  `X-Passport` header (`br-core-auth`) and builds the service's `P` through the
+  new `PassportPrincipal` trait before calling the executor or attaching a
+  session; a missing or malformed passport is rejected with `401` before any
+  resolver runs. The kit never authenticates the header's origin.
+- Six conformance scenarios over real HTTP against a booted engine
+  (`s41`–`s46`): a mutation denied with the affordance's reason code and then
+  allowed over one pipeline; an allowed mutation answering `{ success }` while
+  the subscription receives `Reset` (revision 1) then `Upsert` (revision 2) for
+  the same view; a one-shot secret present in the mutation response and absent
+  from every subscription frame and the outbox; a query returning the rendered
+  view with its affordances and hiding another tenant's row as absent; an
+  unauthenticated and a malformed-passport request rejected before the pipeline;
+  and two slices' SDL fragments composing into one valid schema.
+
 ### Added (0.1.0 rework, unit U5)
 
 - Gate/affordance author layer (`gate` module): `Gate`/`Reason` (a `Reason` is a
