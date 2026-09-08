@@ -1,6 +1,7 @@
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::blobs::{BlobRowOp, insert_reference, orphan_reference};
 use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::inbound::Source;
@@ -28,6 +29,7 @@ pub(crate) struct Staged {
     pub scheduled_messages: Vec<ScheduledMessage>,
     pub terminal_violation: Option<String>,
     pub offer_dirty: Vec<OfferDirty>,
+    pub blob_ops: Vec<BlobRowOp>,
 }
 
 impl Staged {
@@ -56,6 +58,14 @@ impl Staged {
         }
         for dirty in &self.offer_dirty {
             stage_offer_dirty(conn, dirty).await?;
+        }
+        for op in &self.blob_ops {
+            match op {
+                BlobRowOp::Insert(row) => insert_reference(conn, row).await?,
+                BlobRowOp::Orphan(reference, at) => {
+                    orphan_reference(conn, *reference, *at).await?;
+                }
+            }
         }
         Ok(())
     }

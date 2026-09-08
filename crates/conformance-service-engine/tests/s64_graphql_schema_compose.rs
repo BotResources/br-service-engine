@@ -2,7 +2,7 @@ use async_graphql::Schema;
 use conformance_service_engine::sample::graphql::{MutationRoot, QueryRoot, SubscriptionRoot};
 
 #[test]
-fn s46_two_slices_sdl_fragments_compose_into_one_valid_schema() {
+fn s64_two_slices_sdl_fragments_compose_into_one_valid_schema() {
     let schema = Schema::build(QueryRoot::default(), MutationRoot, SubscriptionRoot).finish();
     let sdl = schema.sdl();
 

@@ -13,7 +13,7 @@ const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s43_a_stable_leader_repairs_out_of_band_drift_on_its_periodic_reconcile() {
+async fn s51_a_stable_leader_repairs_out_of_band_drift_on_its_periodic_reconcile() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -24,8 +24,8 @@ async fn s43_a_stable_leader_repairs_out_of_band_drift_on_its_periodic_reconcile
     let engine = boot_offer_engine_reconciling(
         &db,
         nats.nats().await,
-        "se_s43",
-        "pod-s43",
+        "se_s51",
+        "pod-s51",
         Duration::from_millis(150),
     )
     .await;

@@ -154,6 +154,18 @@ pub enum EngineError {
     #[error(transparent)]
     Scope(#[from] crate::scopes::ScopeError),
 
+    #[error("object storage: {0}")]
+    Blob(String),
+
+    #[error(
+        "object-storage bucket {bucket} is absent (HEAD answered {status}); gitops declares the \
+         bucket, the engine only binds it"
+    )]
+    BlobBucketAbsent { bucket: String, status: u16 },
+
+    #[error("blob kind {kind} is used but was never registered with register_blobs")]
+    BlobKindUnregistered { kind: &'static str },
+
     #[error("the {capability} capability is a later unit of the 0.1.0 rework and has no body yet")]
     NotYet { capability: &'static str },
 }

@@ -8,7 +8,7 @@ use graphql_support::post_json;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s41_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allows_over_one_pipeline()
+async fn s59_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allows_over_one_pipeline()
  {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
@@ -20,7 +20,7 @@ async fn s41_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allow
     let widget = Uuid::now_v7();
     insert_widget(&pool, widget, tenant, "alpha").await;
 
-    let service = boot_graphql_service(&db, nats.nats().await, "se_s41", "pod-s41").await;
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s59", "pod-s59").await;
     let passport = passport_for(user, tenant).to_header();
 
     let query = format!("mutation {{ closeWidget(id: \"{widget}\") {{ success }} }}");

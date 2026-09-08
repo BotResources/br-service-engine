@@ -5,6 +5,7 @@ use futures_util::future::BoxFuture;
 use sqlx::{PgConnection, PgPool};
 
 use crate::accumulator::AccumulatorRuntime;
+use crate::blobs::BlobHandle;
 use crate::error::EngineError;
 use crate::inbound::Incoming;
 use crate::inbound::sqlx_is_terminal;
@@ -24,6 +25,7 @@ pub(crate) struct DirectPipeline {
     accumulators: Arc<AccumulatorRuntime>,
     offers: Arc<OfferStagers>,
     reactions: Arc<ReactionRegistry>,
+    blobs: Option<BlobHandle>,
     lock_timeout: Duration,
     impacts_per_commit: usize,
 }
@@ -36,6 +38,7 @@ impl DirectPipeline {
         accumulators: Arc<AccumulatorRuntime>,
         offers: Arc<OfferStagers>,
         reactions: Arc<ReactionRegistry>,
+        blobs: Option<BlobHandle>,
         lock_timeout: Duration,
         impacts_per_commit: usize,
     ) -> Self {
@@ -45,6 +48,7 @@ impl DirectPipeline {
             accumulators,
             offers,
             reactions,
+            blobs,
             lock_timeout,
             impacts_per_commit,
         }
@@ -92,6 +96,7 @@ impl DirectPipeline {
                 &mut staged,
                 self.accumulators.as_ref(),
                 self.offers.clone(),
+                self.blobs.as_ref(),
                 time::now(),
             );
             let mut cx = Reaction::new(ops);

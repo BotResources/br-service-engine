@@ -6,12 +6,12 @@ use graphql_support::post_json;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s45_a_request_without_a_trusted_passport_is_rejected_before_the_pipeline() {
+async fn s63_a_request_without_a_trusted_passport_is_rejected_before_the_pipeline() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
 
-    let service = boot_graphql_service(&db, nats.nats().await, "se_s45", "pod-s45").await;
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s63", "pod-s63").await;
 
     let widget = Uuid::now_v7();
     let mutation = format!("mutation {{ closeWidget(id: \"{widget}\") {{ success }} }}");

@@ -22,6 +22,7 @@ pub const CHUNK_CONFLICTS_TOTAL: &str = "service_engine_chunk_conflicts_total";
 pub const NOTIFICATION_QUEUE_USAGE: &str = "service_engine_notification_queue_usage";
 pub const TRANSPORT_RECONNECTS_TOTAL: &str = "service_engine_transport_reconnects_total";
 pub const MIRROR_RESTARTS_TOTAL: &str = "service_engine_mirror_restarts_total";
+pub const BLOBS_REAPED_TOTAL: &str = "service_engine_blobs_reaped_total";
 pub const DEPENDENCY_UP: &str = "service_engine_dependency_up";
 
 pub const ALL: &[&str] = &[
@@ -47,6 +48,7 @@ pub const ALL: &[&str] = &[
     NOTIFICATION_QUEUE_USAGE,
     TRANSPORT_RECONNECTS_TOTAL,
     MIRROR_RESTARTS_TOTAL,
+    BLOBS_REAPED_TOTAL,
     DEPENDENCY_UP,
 ];
 

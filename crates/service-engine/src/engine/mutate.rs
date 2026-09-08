@@ -38,6 +38,7 @@ impl<P: Principal> Engine<P> {
             self.accumulators.clone(),
             std::sync::Arc::new(self.offers.clone()),
             self.presence.handle(),
+            self.blobs.maybe_handle(),
             self.config.lock_timeout,
             self.config.impacts_per_commit,
         )

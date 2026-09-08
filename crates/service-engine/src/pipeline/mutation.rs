@@ -7,6 +7,7 @@ use futures_util::future::BoxFuture;
 use sqlx::PgPool;
 
 use crate::accumulator::AccumulatorRuntime;
+use crate::blobs::BlobHandle;
 use crate::error::EngineError;
 use crate::offers::OfferStagers;
 use crate::pipeline::MutationError;
@@ -110,6 +111,7 @@ impl<P: Principal> MutationRegistry<P> {
         accumulators: Arc<AccumulatorRuntime>,
         offers: Arc<OfferStagers>,
         presence: PresenceHandle<P>,
+        blobs: Option<BlobHandle>,
         lock_timeout: Duration,
         impacts_per_commit: usize,
     ) -> MutationExecutor<P> {
@@ -120,6 +122,7 @@ impl<P: Principal> MutationRegistry<P> {
                 accumulators,
                 offers,
                 presence,
+                blobs,
                 lock_timeout,
                 impacts_per_commit,
             },

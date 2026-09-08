@@ -16,7 +16,7 @@ const SUBSCRIPTION: &str = "subscription { widgets { __typename \
     ... on RemovePayload { revision projector } } }";
 
 #[tokio::test]
-async fn s42_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_mutation() {
+async fn s60_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_mutation() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -28,7 +28,7 @@ async fn s42_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_m
     let widget = Uuid::now_v7();
     insert_widget(&pool, widget, tenant, "alpha").await;
 
-    let service = boot_graphql_service(&db, nats.nats().await, "se_s42", "pod-s42").await;
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s60", "pod-s60").await;
     let passport = passport_for(user, tenant).to_header();
 
     let mut ws = GraphqlWs::connect(&service.base_url, &passport).await;

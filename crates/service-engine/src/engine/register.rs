@@ -149,11 +149,9 @@ impl<P: Principal> Engine<P> {
 
     pub fn register_blobs<B: crate::blobs::Blobs>(
         &mut self,
-        _policy: crate::blobs::BlobPolicy,
+        policy: crate::blobs::BlobPolicy,
     ) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_blobs",
-        })
+        self.blobs.register::<B>(policy)
     }
 
     pub fn declare_scopes(

@@ -10,31 +10,110 @@ and a single git tag `v{version}` releases the set. Format follows
 First engine release. `service-engine` ships the reactive personalized delivery
 skeleton; `conformance-service-engine` ships its black-box battery.
 
-### Changed (0.1.0 rework, unit U1)
+### Added (0.1.0 rework, unit U1 — delivery core)
 
-- The engine owns its NATS layer. Its internal loops (stream/bucket bind, KV
-  read/write/watch, outbox publish) run on `async-nats` directly through the new
-  `nats` module (`Nats`, `KvBucket`, `KvKey`, `RelayHealth`, `PublishOutcome`).
-  The engine no longer depends on `br-util-nats-fabric`, `br-util-postgres` or
-  `br-util-directory`; it keeps only the frontier `br-rust-common` crates
-  (`br-core-auth`, `br-core-integration`) plus `br-util-axum-readiness`.
-  `Engine::boot(config, pg, nats, readiness)` now takes a `Nats`, not a fabric.
-- The public surface is the intent's authoring surface. `Engine` exposes
-  `register_reaction` / `register_mutation` / `register_projector` /
-  `register_offer` / `register_mirror` / `register_accumulator` /
-  `register_presence` / `register_blobs` / `register_cron` and `declare_scopes`,
-  plus the author types `Gate`/`Reason`, `OneShot`, `Disposition`,
-  `Persistence`, `Offer`, `Visibility`, `Presence`, `Blobs`, `Erasable`,
-  `ScopeManifest`, `BlobPolicy`, `PersonId` and the `Mutation`/`Reaction`/`Bulk`
-  contexts. The engine internals (`RenderRegistry`, `SessionRuntime`, `Relay`
-  and its `Claim`/`Discipline`/`Drained`, `PgListenNotify`, `ImpactTransport`,
-  `RelayRuntime`, the outbox/kv relays, and the `bind_noun` / `register_relay` /
-  `transport` / `transport_arc` / `accumulators` / `render` accessors) are
-  gated behind the `test-support` feature — the sanctioned battery-only seam,
-  with no semver promise — and are private in a normal service build.
-- The register-methods a later rework unit fills return the typed
-  `EngineError::NotYet` until then; the module map in the README names the unit
-  for each.
+- Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,
+  `register_rls`, `register_principal_resolver`), `SessionRuntime`
+  (connect barrier, snapshot, `Reset`/`Upsert`/`Remove` over a contiguous
+  per-session `Revision`, coalescing render pass, `PassReport`, GC), the delta
+  table, cohort/RLS/foreign-axis routing, `Population::{Keys, Ordered, Query}`
+  with `Interest` routing (a `Query` window's membership is re-evaluated from
+  `populate` on every intersecting impact). A `Query` built with `with_keys` is
+  authoritative: on every re-evaluation its membership becomes exactly
+  `populate`'s result plus the keys discovered this pass, so a key that leaves
+  the result is `Remove`d and per-session membership stays bounded by `populate`;
+  a `Query` without `with_keys` is discovery-only and grows only from its
+  predicate. Per-session fault isolation follows: a failed render or repair is
+  retried and the session is ended after a config-raisable number of failed
+  attempts (`EngineConfig::repair_attempts`), never served a
+  `Reset` rebuilt from its stale last-sent view; a session left `repair_pending`
+  after a failed reconnect resnapshot is retried by the housekeeping beat, so an
+  idle pod with no further impact still repairs or ends it rather than serving
+  the stale pre-gap view indefinitely. Cohort keys are
+  collision-free: an RLS render group is keyed on the exact `PrincipalId` and a
+  declared cohort on the exact bytes of its parts, never a 64-bit hash, so two
+  principals can never share one RLS render. A focused go-live replay holds its
+  replayed impacts only for the session going live, never re-holding them for
+  other pending sessions.
+- `Engine<P>` facade composing the render runtime, transport, accumulators,
+  housekeeping beat and mirror supervision: `boot(config, pg, nats,
+  readiness)` (the caller owns the `ReadinessHandle`, so a boot that fails the
+  posture or listener probe leaves it DOWN with the reason), the
+  fallible `register_*` seams (`register_projector`, `register_rls`,
+  `register_principal_resolver`, `register_accumulator`,
+  `register_cron`, `register_mirror` — each returns `Result` and rejects a
+  duplicate name with a typed error, since every registry is keyed by name and a
+  silent duplicate would overwrite a same-named component's health condition and
+  hide a degraded one), `readiness`, `attach`, `push_chunk`, `seal`, `run`.
+  `run` supervises its render, beat, flush and mirror workers: if one ends or
+  panics before shutdown it flips readiness DOWN (fixed operator reason, the dead
+  worker in the typed `EngineError::WorkerStopped`) and returns `Err`, never
+  serving readiness over a dead loop. A mirror step that panics is caught and
+  takes the same restart-and-backoff path as an error, so a mirror self-heals
+  rather than freezing readiness at Converged over a dead mirror. `RowClaim` relays drain at the end of every render
+  pass, so a command staged with its impact leaves within one window, not only on
+  the beat. `attach` after the engine has begun shutting down returns
+  `AttachError::ShuttingDown` rather than a stream that never ends.
+- Impact transport over PostgreSQL `LISTEN`/`NOTIFY` (`PgListenNotify`):
+  `stage_in` in the caller's transaction, `schedule_in` / `fire_due` for
+  scheduled boundaries, a framed-group payload split that admits a frame only
+  strictly below Postgres's 8000-byte `NOTIFY` limit (7999 bytes is the maximum)
+  and whole reassembly, a self-repairing `listen()` stream surfacing every loss of
+  continuity as `Reconnected`, and `queue_usage()`.
+- Boot posture assertion (`assert_posture`: no superuser, no `rolbypassrls`, no
+  ownership or membership of the engine schema/database) and the boot listener
+  probe (`arm`/`fire`/`hear`) that holds readiness DOWN behind a
+  transaction-mode pooler.
+- Streaming accumulators keyed by the source's own `ChunkSeq` (a checked newtype
+  bounded to the range a `bigint` column stores faithfully — a value above it is
+  refused typed at construction, never wrapped negative and treated as a gap):
+  per-chunk `Durable` flush receipts, fold-stops-at-a-gap, seal verdict on the
+  flush transaction under an advisory lock, buffer ceiling, and a table-verified
+  fold cache bounded by `EngineConfig::fold_cache_capacity` (LRU eviction, so a
+  stream of never-sealed keys cannot grow the cache without bound) with a
+  whole-stream sweep. A chunk resubmitted at an already-durable sequence with
+  identical content is an idempotent `Durable`; the same sequence with different
+  content is a typed `EngineError::ChunkConflict` (never a silent replay), so
+  `Durable` means this payload is durable, not that some payload occupies the
+  sequence.
+- Outbox relays with `RowClaim` and `Leader` disciplines (leader slot as a
+  lease over `leader_slot`, quantised database-clock slot), the hosted
+  `FabricOutboxRelay` draining through its `hosted_drain` seam, and
+  `KvDrainRelay` publishing the identity published language monotonically by key
+  and version. Monotonicity holds across deletion: a per-key watermark persisted
+  in the engine's own schema (so it survives restarts) is consulted before every
+  write, so a stale or replayed `Put` that arrives after a newer `Retract` is a
+  no-op rather than resurrecting the tombstoned key.
+- Cron over slot leases: five-field UTC `croner` grammar plus `EveryBeats` and
+  the anchored `Every { period, anchor }`, once-per-slot claim on `leader_slot`,
+  catch-up bounded by slot retention, and a `Never` schedule refused at
+  registration.
+- Mirror supervision (`MirrorSupervisor`): re-reconcile before re-watch,
+  the registered backfill run once at adoption (none unless the service supplies
+  one), and readiness gated on mirror convergence.
+- Observability: `service_engine_*` metrics through the `metrics` facade.
+- Postgres schema in the reserved migration range, applied by `schema::migrate`
+  (`ignore_missing`) with `grant_engine_access`. The delivery core owns
+  `scheduled_impact`, `leader_slot`, `accumulator_chunk`, `accumulator_seal`,
+  and `kv_relay_watermark` (the per-key KV publish watermark that survives
+  restarts); the inbound loop adds `message_claim`, `sequence_guard` and
+  `dead_letter` (unit U2, documented above). Scheduled boundaries are claimed against the database clock
+  (`now()` in the claiming statement), never the pod clock, so a skewed pod
+  never fires a boundary early or late.
+- `conformance-service-engine`: the named scenarios `s01`–`s25` plus
+  `s26_pooler_probe` and `s27_worker_supervision`, run against a fresh database
+  and a spawned `nats-server` per test; a two-slice sample service with a
+  tenant-bearing sample principal, a synthetic streaming source, and its own
+  infra fixtures (`infra/pg.rs`, `infra/nats.rs` — the sole `async-nats` user,
+  only to declare gitops-owned streams and buckets). Scenarios pin the fixes to
+  the review findings: worker supervision (`s27`), reconnect-resnapshot repair
+  and bounded end (`s13`), the chunk-content conflict verdict (`s14`), the
+  bounded `ChunkSeq` boundary (`s14_chunk_seq_bounds`), and the KV
+  no-resurrection-after-retract guarantee (`s15`).
+- `Timestamp` is a newtype truncated to microseconds at construction, so every
+  instant that crosses the PostgreSQL `timestamptz` boundary (cron and leader
+  slots, scheduled boundaries, seal times) round-trips equal on nanosecond
+  clocks; a sub-microsecond value is unrepresentable.
 
 ### Added (0.1.0 rework, unit U2 — inbound loop + poison/dead-letter)
 
@@ -93,6 +172,7 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   gesture, and the sequence guard rejecting a stale producer sequence. The
   scenarios poll for the committed DB state under a bounded timeout rather than
   sleeping a fixed delay.
+
 ### Added (0.1.0 rework, unit U3 — direct write pipeline + handler contexts)
 
 - The one direct write pipeline for a GraphQL mutation and a NATS command
@@ -220,7 +300,7 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   reads, written synchronously in the effect transaction, so a `fetch` or a
   session `Upsert` and a write-side `load` return the same committed truth, with
   no asynchronous projection between them.
-- Conformance scenarios `s41`–`s46` against real infra, over a `counter` sample
+- Conformance scenarios `s41`–`s48` against real infra, over a `counter` sample
   slice built once and persisted in all three styles: one bump handler unchanged
   across CRUD, soft and full EDA (`s41`); a failing constraint rolling back the
   state row and its events together in soft and full EDA (`s42`); full-EDA replay
@@ -233,49 +313,6 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   styles, exercising the `cx.create` open path and the `cx.save` bump path
   (`s47`); and a unique constraint rejecting a concurrent duplicate `cx.create`
   and rolling its appended events back with it (`s48`).
-### Added (0.1.0 rework, unit U12 — GraphQL surface kit)
-
-- The async-graphql kit in the `graphql` module: a service composes its slices'
-  root objects (async-graphql `MergedObject` / `MergedSubscription`) into one
-  schema with `engine_schema`, and mounts it with `app`, which serves
-  `POST /graphql`, the GraphQL-over-WebSocket subscription transport on
-  `GET /graphql/ws` (`graphql-transport-ws`), and `/readyz`. `serve` runs the
-  router with graceful shutdown. `Engine::graphql_state` hands the router and
-  the schema the executor, the render runtime and the pool.
-- Mutation resolvers run on `Engine::mutation_executor`: `execute` /
-  `execute_bulk` run `MutationExecutor::run` / `run_bulk` and map a
-  `MutationError` to a typed GraphQL error carrying the gate's `Reason` code in
-  the `code` extension; `ack` / `ack_bulk` answer `{ success }` for a `()`
-  output; a `OneShot`'s inner value is returned by the resolver only in the
-  mutation response and never enters a view, an impact, an event or an outbox
-  row.
-- Query resolvers read rendered views through the render kit, never the
-  database: `fetch` / `fetch_json` render one key and `fetch_window` /
-  `fetch_window_json` a window, reusing the frame's `populate` for visibility
-  (a key the principal may not see answers as absent, fail-closed for a
-  non-authoritative window) and the same batched load and affordance pass as a
-  subscription frame.
-- The subscription kit maps the engine's `Reset` / `Upsert` / `Remove` wire to
-  the `EngineDelta` GraphQL union (`ResetPayload` / `UpsertPayload` /
-  `RemovePayload`) with the contiguous revision exposed and the causing domain
-  event riding along as `cause`; `attach` returns the raw `SessionStream` for a
-  service that maps to its own per-projector union, `subscribe` the mapped
-  `EngineDelta` stream. Each delta carries the projector name so a service
-  discriminates one union member per projector.
-- Principal resolution is authZ-only: the axum layer decodes the trusted
-  `X-Passport` header (`br-core-auth`) and builds the service's `P` through the
-  new `PassportPrincipal` trait before calling the executor or attaching a
-  session; a missing or malformed passport is rejected with `401` before any
-  resolver runs. The kit never authenticates the header's origin.
-- Six conformance scenarios over real HTTP against a booted engine
-  (`s41`–`s46`): a mutation denied with the affordance's reason code and then
-  allowed over one pipeline; an allowed mutation answering `{ success }` while
-  the subscription receives `Reset` (revision 1) then `Upsert` (revision 2) for
-  the same view; a one-shot secret present in the mutation response and absent
-  from every subscription frame and the outbox; a query returning the rendered
-  view with its affordances and hiding another tenant's row as absent; an
-  unauthenticated and a malformed-passport request rejected before the pipeline;
-  and two slices' SDL fragments composing into one valid schema.
 
 ### Added (0.1.0 rework, unit U5)
 
@@ -299,6 +336,7 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   reporting a `WindowMismatch` on any drift. One declaration, three enforcement
   points: the query filter, the window membership, and the removal of a row from a
   live session when a principal's facts change.
+
 ### Added (0.1.0 rework, unit U6 — presence lane)
 
 - The presence lane (lane B). `register_presence::<Pr>(ttl)` binds one
@@ -380,173 +418,13 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 - `EngineConfig::offer_reconcile` (`with_offer_reconcile`, default five minutes,
   validated non-zero) sets how often the leader re-reconciles an offer bucket
   against the store.
-- Conformance: `s41_offer` (a mutation's dirty key commits in the same tx and
+- Conformance: `s49_offer` (a mutation's dirty key commits in the same tx and
   the leader publishes it; a rolled-back mutation leaves no dirty key and
   nothing offered; a noun that stops being offerable is retracted; boot
-  reconcile repairs a drifted bucket), `s43_offer_periodic` (a stable leader that
+  reconcile repairs a drifted bucket), `s51_offer_periodic` (a stable leader that
   never restarts repairs out-of-band bucket drift on its periodic reconcile), and
-  `s42_mirror_leader` (two pods, exactly one projects into `known_*`, and the
+  `s50_mirror_leader` (two pods, exactly one projects into `known_*`, and the
   standby takes over after the leader stops).
-
-### Added (0.1.0 rework, unit U10)
-
-- Scope declaration at boot with a readiness gate. `Engine::declare_scopes`
-  takes a `ScopeManifest` (the union of the slices' scope-key groups), validates
-  it into a `br_core_scope::ScopeDeclaration` eagerly (a malformed key, a
-  manifest that spans two services, or an empty manifest is a boot-time error,
-  not a wire failure) and stores it. After the mirrors converge, `Engine::run`
-  runs the scope-declaration handshake over the engine's own NATS connection and
-  holds readiness DOWN until Identity confirms: it subscribes to Identity's two
-  confirmation subjects, publishes the `service_scope.declare` command with a
-  correlation id, and awaits the correlated `accepted`/`rejected` reply. On
-  acceptance boot proceeds and the beat brings the pod UP; on rejection the pod
-  stays DOWN with the rejection reason in the readiness payload and the logs,
-  and `run` returns `EngineError::Scope` so a scope typo is a failed deploy,
-  never a silent deny; while Identity is unreachable the handshake re-publishes
-  and waits, readiness DOWN throughout. A scopeless service never calls
-  `declare_scopes` and skips the gate entirely. New public surface:
-  `ScopeManifest` and `ScopeError`; new `EngineError::Scope` variant. Scope
-  declaration is the one frontier the engine reaches across the service
-  boundary, so it takes the frozen wire from the `br-rust-common` frontier
-  crates `br-core-scope` (the declaration and confirmation DTOs) and
-  `br-scope-declaration-contract` (the subject coordinates); the engine renders
-  the subjects and drives the handshake itself over its own `async-nats`
-  connection, with no `br-util-nats-fabric` dependency.
-- Conformance scenario `s28_scope_declaration` against real NATS with a fake
-  Identity responder: an accepted declaration brings the pod UP, a rejected one
-  keeps it DOWN with the reason, and a service that declares nothing becomes
-  ready without ever publishing a declaration.
-### Changed (0.1.0 rework, unit U15)
-
-- `EngineConfig` now validates every bound of the intent's config table at
-  boot and carries the ones that were missing: `session_max_age` (12h),
-  `lock_timeout` (5s), `nats_grace` (10s), `listener_queue_threshold` (0.5),
-  `window_capacity`, `impacts_per_commit`, and an optional `service` label.
-  `validate` refuses a zero duration or bound, a `listener_queue_threshold`
-  outside `(0.0, 1.0]`, a `lease` that does not outlast the `beat`, and a
-  `session_max_age` that does not outlast the idle `session_ttl`. `config.rs`
-  became `config/{mod,validate}.rs` for the file-size limit.
-- A session now lives at most `session_max_age`: it carries an attach instant
-  that activity never refreshes, and the housekeeping beat ends it with the
-  stream-closing signal once it reaches the bound, so the client reconnects
-  with a fresh passport. This is distinct from `session_ttl`.
-- The degrade table gains its NATS-grace behaviour: a `NatsHealth` tracker
-  keeps the pod UP through an outage shorter than `nats_grace` and takes it
-  DOWN with `REASON_NATS_UNREACHABLE` past it, wired into the readiness verdict
-  after the listener and before the mirrors.
-- Every engine metric is labelled by `service` and `pod`
-  (`observe::install_identity` at boot). New metrics: `impacts_committed_total`
-  (the notify-budget counter), `impacts_received_total`, `sessions_ended_total`
-  (by reason), and `dependency_up` (per degrade-table dependency). Resets carry
-  a `reason` label.
-- The four shipped alerts (notification queue usage, notify budget per Postgres
-  cluster, sustained resets, dead letters present) ship as a `PrometheusRule`
-  in `observability/service-engine-alerts.yaml`.
-
-### Added (0.1.0 rework, unit U1 — delivery core)
-
-- Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,
-  `register_rls`, `register_principal_resolver`), `SessionRuntime`
-  (connect barrier, snapshot, `Reset`/`Upsert`/`Remove` over a contiguous
-  per-session `Revision`, coalescing render pass, `PassReport`, GC), the delta
-  table, cohort/RLS/foreign-axis routing, `Population::{Keys, Ordered, Query}`
-  with `Interest` routing (a `Query` window's membership is re-evaluated from
-  `populate` on every intersecting impact). A `Query` built with `with_keys` is
-  authoritative: on every re-evaluation its membership becomes exactly
-  `populate`'s result plus the keys discovered this pass, so a key that leaves
-  the result is `Remove`d and per-session membership stays bounded by `populate`;
-  a `Query` without `with_keys` is discovery-only and grows only from its
-  predicate. Per-session fault isolation follows: a failed render or repair is
-  retried and the session is ended after a config-raisable number of failed
-  attempts (`EngineConfig::repair_attempts`), never served a
-  `Reset` rebuilt from its stale last-sent view; a session left `repair_pending`
-  after a failed reconnect resnapshot is retried by the housekeeping beat, so an
-  idle pod with no further impact still repairs or ends it rather than serving
-  the stale pre-gap view indefinitely. Cohort keys are
-  collision-free: an RLS render group is keyed on the exact `PrincipalId` and a
-  declared cohort on the exact bytes of its parts, never a 64-bit hash, so two
-  principals can never share one RLS render. A focused go-live replay holds its
-  replayed impacts only for the session going live, never re-holding them for
-  other pending sessions.
-- `Engine<P>` facade composing the render runtime, transport, accumulators,
-  housekeeping beat and mirror supervision: `boot(config, pg, nats,
-  readiness)` (the caller owns the `ReadinessHandle`, so a boot that fails the
-  posture or listener probe leaves it DOWN with the reason), the
-  fallible `register_*` seams (`register_projector`, `register_rls`,
-  `register_principal_resolver`, `register_accumulator`,
-  `register_cron`, `register_mirror` — each returns `Result` and rejects a
-  duplicate name with a typed error, since every registry is keyed by name and a
-  silent duplicate would overwrite a same-named component's health condition and
-  hide a degraded one), `readiness`, `attach`, `push_chunk`, `seal`, `run`.
-  `run` supervises its render, beat, flush and mirror workers: if one ends or
-  panics before shutdown it flips readiness DOWN (fixed operator reason, the dead
-  worker in the typed `EngineError::WorkerStopped`) and returns `Err`, never
-  serving readiness over a dead loop. A mirror step that panics is caught and
-  takes the same restart-and-backoff path as an error, so a mirror self-heals
-  rather than freezing readiness at Converged over a dead mirror. `RowClaim` relays drain at the end of every render
-  pass, so a command staged with its impact leaves within one window, not only on
-  the beat. `attach` after the engine has begun shutting down returns
-  `AttachError::ShuttingDown` rather than a stream that never ends.
-- Impact transport over PostgreSQL `LISTEN`/`NOTIFY` (`PgListenNotify`):
-  `stage_in` in the caller's transaction, `schedule_in` / `fire_due` for
-  scheduled boundaries, a framed-group payload split that admits a frame only
-  strictly below Postgres's 8000-byte `NOTIFY` limit (7999 bytes is the maximum)
-  and whole reassembly, a self-repairing `listen()` stream surfacing every loss of
-  continuity as `Reconnected`, and `queue_usage()`.
-- Boot posture assertion (`assert_posture`: no superuser, no `rolbypassrls`, no
-  ownership or membership of the engine schema/database) and the boot listener
-  probe (`arm`/`fire`/`hear`) that holds readiness DOWN behind a
-  transaction-mode pooler.
-- Streaming accumulators keyed by the source's own `ChunkSeq` (a checked newtype
-  bounded to the range a `bigint` column stores faithfully — a value above it is
-  refused typed at construction, never wrapped negative and treated as a gap):
-  per-chunk `Durable` flush receipts, fold-stops-at-a-gap, seal verdict on the
-  flush transaction under an advisory lock, buffer ceiling, and a table-verified
-  fold cache bounded by `EngineConfig::fold_cache_capacity` (LRU eviction, so a
-  stream of never-sealed keys cannot grow the cache without bound) with a
-  whole-stream sweep. A chunk resubmitted at an already-durable sequence with
-  identical content is an idempotent `Durable`; the same sequence with different
-  content is a typed `EngineError::ChunkConflict` (never a silent replay), so
-  `Durable` means this payload is durable, not that some payload occupies the
-  sequence.
-- Outbox relays with `RowClaim` and `Leader` disciplines (leader slot as a
-  lease over `leader_slot`, quantised database-clock slot), the hosted
-  `FabricOutboxRelay` draining through its `hosted_drain` seam, and
-  `KvDrainRelay` publishing the identity published language monotonically by key
-  and version. Monotonicity holds across deletion: a per-key watermark persisted
-  in the engine's own schema (so it survives restarts) is consulted before every
-  write, so a stale or replayed `Put` that arrives after a newer `Retract` is a
-  no-op rather than resurrecting the tombstoned key.
-- Cron over slot leases: five-field UTC `croner` grammar plus `EveryBeats` and
-  the anchored `Every { period, anchor }`, once-per-slot claim on `leader_slot`,
-  catch-up bounded by slot retention, and a `Never` schedule refused at
-  registration.
-- Mirror supervision (`MirrorSupervisor`): re-reconcile before re-watch,
-  the registered backfill run once at adoption (none unless the service supplies
-  one), and readiness gated on mirror convergence.
-- Observability: `service_engine_*` metrics through the `metrics` facade.
-- Postgres schema in the reserved migration range, applied by `schema::migrate`
-  (`ignore_missing`) with `grant_engine_access`. The delivery core owns
-  `scheduled_impact`, `leader_slot`, `accumulator_chunk`, `accumulator_seal`,
-  and `kv_relay_watermark` (the per-key KV publish watermark that survives
-  restarts); the inbound loop adds `message_claim`, `sequence_guard` and
-  `dead_letter` (unit U2, documented above). Scheduled boundaries are claimed against the database clock
-  (`now()` in the claiming statement), never the pod clock, so a skewed pod
-  never fires a boundary early or late.
-- `conformance-service-engine`: the named scenarios `s01`–`s25` plus
-  `s26_pooler_probe` and `s27_worker_supervision`, run against a fresh database
-  and a spawned `nats-server` per test; a two-slice sample service with a
-  tenant-bearing sample principal, a synthetic streaming source, and its own
-  infra fixtures (`infra/pg.rs`, `infra/nats.rs` — the sole `async-nats` user,
-  only to declare gitops-owned streams and buckets). Scenarios pin the fixes to
-  the review findings: worker supervision (`s27`), reconnect-resnapshot repair
-  and bounded end (`s13`), the chunk-content conflict verdict (`s14`), the
-  bounded `ChunkSeq` boundary (`s14_chunk_seq_bounds`), and the KV
-  no-resurrection-after-retract guarantee (`s15`).
-- `Timestamp` is a newtype truncated to microseconds at construction, so every
-  instant that crosses the PostgreSQL `timestamptz` boundary (cron and leader
-  slots, scheduled boundaries, seal times) round-trips equal on nanosecond
-  clocks; a sub-microsecond value is unrepresentable.
 
 ### Added (0.1.0 rework, unit U8)
 
@@ -581,6 +459,181 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   they are (never projecting to empty); a projection panic takes the same
   restart-and-backoff path as an error. The directory roster is the first
   instance, wired in the conformance sample.
+
+### Added (0.1.0 rework, unit U9 — blobs / S3-compatible object storage)
+
+- `register_blobs::<Kind>(BlobPolicy)` records a per-kind policy (`max_bytes`,
+  `orphan_after`) and `cx.blob::<Kind>(name, content_type)` (plus
+  `cx.blob_owned` carrying an owner for erasure) replaces the pipeline's
+  `NotYet`: it stages a blob **reference row** — reference, object key, kind,
+  content type, file name, owner, size and state — in `service_engine.blob`
+  inside the write pipeline's transaction, so the reference commits with the
+  referencing aggregate and a rolled-back handler leaves neither. The bytes flow
+  client-to-storage directly, so `size` is null at commit and is recorded when
+  the reaper promotes the completed upload. `cx.release_blob(ref)` marks a
+  reference orphaned in the same transaction when a row stops referencing it.
+- The service's S3-compatible bucket is bound at boot (bind-only, fail-loud via
+  a HEAD, never created — `EngineConfig::with_blob_storage(BlobConfig)`); a
+  registered blob kind with no configured storage, or an absent bucket, holds
+  readiness DOWN and fails `run` loud (`EngineError::BlobBucketAbsent`).
+- Upload and download URLs are S3 SigV4 presigned and short-lived. `UploadUrl`
+  (from `cx.blob`) and `DownloadUrl` (from `Engine::download_url`) do not
+  implement `Serialize`, so — mirroring `OneShot` — a URL is structurally unable
+  to enter a view, an impact, an offer, an outbox row or a chunk; a view carries
+  only the opaque `BlobRef`, and the client asks for a URL. Presigning uses the
+  sans-IO `rusty-s3` crate; `reqwest` (rustls, no default features) is the thin
+  HTTP client for the engine's own bucket/object HEAD and DELETE. No cloud SDK.
+- A beat reaper, per `BlobPolicy`, promotes a completed upload past
+  `orphan_after` (recording the object's size from its HEAD), deletes an
+  abandoned upload (a `pending` reference whose object never landed) or one whose
+  object exceeds `max_bytes`, and deletes an orphan (a reference released via
+  `cx.release_blob` past `orphan_after`, whose object it deletes from storage),
+  claiming rows `FOR UPDATE SKIP LOCKED` so pods never double-reap; its cadence
+  is `EngineConfig::with_blob_reaper_interval` and its per-outcome counts export
+  as the `service_engine_blobs_reaped_total` metric. `max_bytes` is best-effort,
+  not a hard cap: a presigned PUT cannot bound the upload, so an over-cap object
+  is promoted first and reaped on a later sweep, leaving a committed `BlobRef`
+  that 404s on download; a hard cap must be enforced out of band. Orphan reaping
+  is signal-driven (`cx.release_blob` when a slice drops the owning row); the
+  engine does not reference-count slice-owned tables.
+- `Engine::purge_person_blobs(person)` is the erase hook U11 calls: it deletes
+  every object a person owns and its reference rows. Only `cx.blob_owned` records
+  an owner; a blob attached with the un-owned `cx.blob` is not reached by it.
+- New engine migration `service_engine.blob` (reserved range) and the eleventh
+  engine table; seven real-infra conformance scenarios (`s52`–`s58`) run against
+  a MinIO the battery spawns per test (a `TestMinio` alongside `TestNats`), and
+  the conformance CI job installs `minio`: the reference commits with the
+  aggregate (rollback leaves no row), a presigned upload/download round-trips
+  real bytes, a presigned URL never appears in the delivered view or impact
+  stream, the reaper removes an abandoned upload and an orphan, promotion records
+  the object's size and an over-`max_bytes` upload is reaped, the erase hook
+  purges a person, and an absent bucket fails boot loud.
+
+### Added (0.1.0 rework, unit U10)
+
+- Scope declaration at boot with a readiness gate. `Engine::declare_scopes`
+  takes a `ScopeManifest` (the union of the slices' scope-key groups), validates
+  it into a `br_core_scope::ScopeDeclaration` eagerly (a malformed key, a
+  manifest that spans two services, or an empty manifest is a boot-time error,
+  not a wire failure) and stores it. After the mirrors converge, `Engine::run`
+  runs the scope-declaration handshake over the engine's own NATS connection and
+  holds readiness DOWN until Identity confirms: it subscribes to Identity's two
+  confirmation subjects, publishes the `service_scope.declare` command with a
+  correlation id, and awaits the correlated `accepted`/`rejected` reply. On
+  acceptance boot proceeds and the beat brings the pod UP; on rejection the pod
+  stays DOWN with the rejection reason in the readiness payload and the logs,
+  and `run` returns `EngineError::Scope` so a scope typo is a failed deploy,
+  never a silent deny; while Identity is unreachable the handshake re-publishes
+  and waits, readiness DOWN throughout. A scopeless service never calls
+  `declare_scopes` and skips the gate entirely. New public surface:
+  `ScopeManifest` and `ScopeError`; new `EngineError::Scope` variant. Scope
+  declaration is the one frontier the engine reaches across the service
+  boundary, so it takes the frozen wire from the `br-rust-common` frontier
+  crates `br-core-scope` (the declaration and confirmation DTOs) and
+  `br-scope-declaration-contract` (the subject coordinates); the engine renders
+  the subjects and drives the handshake itself over its own `async-nats`
+  connection, with no `br-util-nats-fabric` dependency.
+- Conformance scenario `s28_scope_declaration` against real NATS with a fake
+  Identity responder: an accepted declaration brings the pod UP, a rejected one
+  keeps it DOWN with the reason, and a service that declares nothing becomes
+  ready without ever publishing a declaration.
+
+### Added (0.1.0 rework, unit U12 — GraphQL surface kit)
+
+- The async-graphql kit in the `graphql` module: a service composes its slices'
+  root objects (async-graphql `MergedObject` / `MergedSubscription`) into one
+  schema with `engine_schema`, and mounts it with `app`, which serves
+  `POST /graphql`, the GraphQL-over-WebSocket subscription transport on
+  `GET /graphql/ws` (`graphql-transport-ws`), and `/readyz`. `serve` runs the
+  router with graceful shutdown. `Engine::graphql_state` hands the router and
+  the schema the executor, the render runtime and the pool.
+- Mutation resolvers run on `Engine::mutation_executor`: `execute` /
+  `execute_bulk` run `MutationExecutor::run` / `run_bulk` and map a
+  `MutationError` to a typed GraphQL error carrying the gate's `Reason` code in
+  the `code` extension; `ack` / `ack_bulk` answer `{ success }` for a `()`
+  output; a `OneShot`'s inner value is returned by the resolver only in the
+  mutation response and never enters a view, an impact, an event or an outbox
+  row.
+- Query resolvers read rendered views through the render kit, never the
+  database: `fetch` / `fetch_json` render one key and `fetch_window` /
+  `fetch_window_json` a window, reusing the frame's `populate` for visibility
+  (a key the principal may not see answers as absent, fail-closed for a
+  non-authoritative window) and the same batched load and affordance pass as a
+  subscription frame.
+- The subscription kit maps the engine's `Reset` / `Upsert` / `Remove` wire to
+  the `EngineDelta` GraphQL union (`ResetPayload` / `UpsertPayload` /
+  `RemovePayload`) with the contiguous revision exposed and the causing domain
+  event riding along as `cause`; `attach` returns the raw `SessionStream` for a
+  service that maps to its own per-projector union, `subscribe` the mapped
+  `EngineDelta` stream. Each delta carries the projector name so a service
+  discriminates one union member per projector.
+- Principal resolution is authZ-only: the axum layer decodes the trusted
+  `X-Passport` header (`br-core-auth`) and builds the service's `P` through the
+  new `PassportPrincipal` trait before calling the executor or attaching a
+  session; a missing or malformed passport is rejected with `401` before any
+  resolver runs. The kit never authenticates the header's origin.
+- Six conformance scenarios over real HTTP against a booted engine
+  (`s59`–`s64`): a mutation denied with the affordance's reason code and then
+  allowed over one pipeline; an allowed mutation answering `{ success }` while
+  the subscription receives `Reset` (revision 1) then `Upsert` (revision 2) for
+  the same view; a one-shot secret present in the mutation response and absent
+  from every subscription frame and the outbox; a query returning the rendered
+  view with its affordances and hiding another tenant's row as absent; an
+  unauthenticated and a malformed-passport request rejected before the pipeline;
+  and two slices' SDL fragments composing into one valid schema.
+
+### Changed (0.1.0 rework, unit U1)
+
+- The engine owns its NATS layer. Its internal loops (stream/bucket bind, KV
+  read/write/watch, outbox publish) run on `async-nats` directly through the new
+  `nats` module (`Nats`, `KvBucket`, `KvKey`, `RelayHealth`, `PublishOutcome`).
+  The engine no longer depends on `br-util-nats-fabric`, `br-util-postgres` or
+  `br-util-directory`; it keeps only the frontier `br-rust-common` crates
+  (`br-core-auth`, `br-core-integration`) plus `br-util-axum-readiness`.
+  `Engine::boot(config, pg, nats, readiness)` now takes a `Nats`, not a fabric.
+- The public surface is the intent's authoring surface. `Engine` exposes
+  `register_reaction` / `register_mutation` / `register_projector` /
+  `register_offer` / `register_mirror` / `register_accumulator` /
+  `register_presence` / `register_blobs` / `register_cron` and `declare_scopes`,
+  plus the author types `Gate`/`Reason`, `OneShot`, `Disposition`,
+  `Persistence`, `Offer`, `Visibility`, `Presence`, `Blobs`, `Erasable`,
+  `ScopeManifest`, `BlobPolicy`, `PersonId` and the `Mutation`/`Reaction`/`Bulk`
+  contexts. The engine internals (`RenderRegistry`, `SessionRuntime`, `Relay`
+  and its `Claim`/`Discipline`/`Drained`, `PgListenNotify`, `ImpactTransport`,
+  `RelayRuntime`, the outbox/kv relays, and the `bind_noun` / `register_relay` /
+  `transport` / `transport_arc` / `accumulators` / `render` accessors) are
+  gated behind the `test-support` feature — the sanctioned battery-only seam,
+  with no semver promise — and are private in a normal service build.
+- The register-methods a later rework unit fills return the typed
+  `EngineError::NotYet` until then; the module map in the README names the unit
+  for each.
+
+### Changed (0.1.0 rework, unit U15)
+
+- `EngineConfig` now validates every bound of the intent's config table at
+  boot and carries the ones that were missing: `session_max_age` (12h),
+  `lock_timeout` (5s), `nats_grace` (10s), `listener_queue_threshold` (0.5),
+  `window_capacity`, `impacts_per_commit`, and an optional `service` label.
+  `validate` refuses a zero duration or bound, a `listener_queue_threshold`
+  outside `(0.0, 1.0]`, a `lease` that does not outlast the `beat`, and a
+  `session_max_age` that does not outlast the idle `session_ttl`. `config.rs`
+  became `config/{mod,validate}.rs` for the file-size limit.
+- A session now lives at most `session_max_age`: it carries an attach instant
+  that activity never refreshes, and the housekeeping beat ends it with the
+  stream-closing signal once it reaches the bound, so the client reconnects
+  with a fresh passport. This is distinct from `session_ttl`.
+- The degrade table gains its NATS-grace behaviour: a `NatsHealth` tracker
+  keeps the pod UP through an outage shorter than `nats_grace` and takes it
+  DOWN with `REASON_NATS_UNREACHABLE` past it, wired into the readiness verdict
+  after the listener and before the mirrors.
+- Every engine metric is labelled by `service` and `pod`
+  (`observe::install_identity` at boot). New metrics: `impacts_committed_total`
+  (the notify-budget counter), `impacts_received_total`, `sessions_ended_total`
+  (by reason), and `dependency_up` (per degrade-table dependency). Resets carry
+  a `reason` label.
+- The four shipped alerts (notification queue usage, notify budget per Postgres
+  cluster, sustained resets, dead letters present) ship as a `PrometheusRule`
+  in `observability/service-engine-alerts.yaml`.
 
 ### Deployment constraint
 

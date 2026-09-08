@@ -14,7 +14,7 @@ const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s41_a_saved_noun_is_offered_by_the_leader_after_the_commit() {
+async fn s49_a_saved_noun_is_offered_by_the_leader_after_the_commit() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -22,7 +22,7 @@ async fn s41_a_saved_noun_is_offered_by_the_leader_after_the_commit() {
     let fabric = nats.nats().await;
 
     let tenant = Uuid::now_v7();
-    let engine = boot_offer_engine(&db, nats.nats().await, "se_s41a", "pod-s41a").await;
+    let engine = boot_offer_engine(&db, nats.nats().await, "se_s49a", "pod-s49a").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let principal = member(&pool, Uuid::now_v7(), tenant).await;
@@ -57,7 +57,7 @@ async fn s41_a_saved_noun_is_offered_by_the_leader_after_the_commit() {
 }
 
 #[tokio::test]
-async fn s41_a_rolled_back_mutation_leaves_no_dirty_key_and_nothing_offered() {
+async fn s49_a_rolled_back_mutation_leaves_no_dirty_key_and_nothing_offered() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -65,7 +65,7 @@ async fn s41_a_rolled_back_mutation_leaves_no_dirty_key_and_nothing_offered() {
     let fabric = nats.nats().await;
 
     let tenant = Uuid::now_v7();
-    let engine = boot_offer_engine(&db, nats.nats().await, "se_s41b", "pod-s41b").await;
+    let engine = boot_offer_engine(&db, nats.nats().await, "se_s49b", "pod-s49b").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let principal = member(&pool, Uuid::now_v7(), tenant).await;
@@ -107,7 +107,7 @@ async fn s41_a_rolled_back_mutation_leaves_no_dirty_key_and_nothing_offered() {
 }
 
 #[tokio::test]
-async fn s41_a_noun_that_stops_being_offerable_is_retracted() {
+async fn s49_a_noun_that_stops_being_offerable_is_retracted() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -115,7 +115,7 @@ async fn s41_a_noun_that_stops_being_offerable_is_retracted() {
     let fabric = nats.nats().await;
 
     let tenant = Uuid::now_v7();
-    let engine = boot_offer_engine(&db, nats.nats().await, "se_s41c", "pod-s41c").await;
+    let engine = boot_offer_engine(&db, nats.nats().await, "se_s49c", "pod-s49c").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let mint_principal = member(&pool, Uuid::now_v7(), tenant).await;
@@ -155,7 +155,7 @@ async fn s41_a_noun_that_stops_being_offerable_is_retracted() {
 }
 
 #[tokio::test]
-async fn s41_boot_reconcile_repairs_a_bucket_that_drifted() {
+async fn s49_boot_reconcile_repairs_a_bucket_that_drifted() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -177,7 +177,7 @@ async fn s41_boot_reconcile_repairs_a_bucket_that_drifted() {
     seed_bucket(&fabric, kept, "stale-label").await;
     seed_bucket(&fabric, orphan, "orphan").await;
 
-    let engine = boot_offer_engine(&db, nats.nats().await, "se_s41d", "pod-s41d").await;
+    let engine = boot_offer_engine(&db, nats.nats().await, "se_s49d", "pod-s49d").await;
     let shutdown = engine.shutdown_handle();
     let running = tokio::spawn(engine.run());
 

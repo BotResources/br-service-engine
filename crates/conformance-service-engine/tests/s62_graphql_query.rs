@@ -8,7 +8,7 @@ use graphql_support::post_json;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s44_a_query_returns_the_rendered_view_with_affordances_and_hides_what_the_principal_cannot_see()
+async fn s62_a_query_returns_the_rendered_view_with_affordances_and_hides_what_the_principal_cannot_see()
  {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
@@ -24,7 +24,7 @@ async fn s44_a_query_returns_the_rendered_view_with_affordances_and_hides_what_t
     let theirs = Uuid::now_v7();
     insert_widget(&pool, theirs, other_tenant, "beta").await;
 
-    let service = boot_graphql_service(&db, nats.nats().await, "se_s44", "pod-s44").await;
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s62", "pod-s62").await;
     let passport = passport_for(user, tenant).to_header();
 
     let query = format!("query {{ widget(id: \"{mine}\") }}");

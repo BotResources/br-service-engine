@@ -18,7 +18,7 @@ const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s42_exactly_one_pod_projects_and_the_standby_takes_over_when_the_leader_stops() {
+async fn s50_exactly_one_pod_projects_and_the_standby_takes_over_when_the_leader_stops() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

@@ -14,7 +14,7 @@ const SUBSCRIPTION: &str = "subscription { widgets { __typename \
     ... on UpsertPayload { revision view { projector view } } } }";
 
 #[tokio::test]
-async fn s43_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_subscription() {
+async fn s61_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_subscription() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -25,7 +25,7 @@ async fn s43_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_su
     member(&pool, user, tenant).await;
     let widget = Uuid::now_v7();
 
-    let service = boot_graphql_service(&db, nats.nats().await, "se_s43", "pod-s43").await;
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s61", "pod-s61").await;
     let passport = passport_for(user, tenant).to_header();
 
     let mutation = format!(

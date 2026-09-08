@@ -53,7 +53,7 @@ fills its part by adding module files and one method body.
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then — today only `register_blobs` (U9) and `erase` (U11).
+until then — today only `erase` (U11).
 `register_reaction` (U2) is live: it records a reaction and
 derives its inbound subscription, and the engine-owned inbound loop (durable
 consumer, ack-after-durable, `Disposition` routing, poison budget with the
@@ -117,6 +117,38 @@ second `Offer`). `register_mirror` (U8) projects a consumed KV offer into
 only the pod holding the mirror lease projects, standby pods keep their shadows
 current and take over on lease loss. `declare_scopes` (U10) runs the boot
 scope-declaration handshake that gates readiness until Identity confirms.
+`register_blobs` (U9) is filled: it records a `BlobPolicy` per blob kind and, at
+boot, binds the service's S3-compatible object-storage bucket (bind-only,
+fail-loud, never created — configured with `EngineConfig::with_blob_storage`).
+`cx.blob::<Kind>(name, content_type)` stages a blob **reference row**
+(`service_engine.blob`: reference, object key, kind, content type, file name,
+owner, size and state) inside the pipeline transaction, so it commits with the
+referencing aggregate and a rollback leaves no row; it returns a typed
+`UploadUrl`, and `Engine::download_url` a `DownloadUrl`, both S3 SigV4 presigned
+and short-lived. The bytes flow client-to-storage directly, so `size` is unknown
+at commit and is recorded when the reaper sees the completed upload and promotes
+the row. `UploadUrl`/`DownloadUrl` are not `Serialize`, so — like `OneShot` — a
+URL is structurally unable to enter a view, an impact, an offer, an outbox row or
+a chunk; only the opaque reference travels. The beat runs a reaper that, per
+`BlobPolicy`, promotes a completed upload (recording its size), deletes an
+abandoned upload (a `pending` row past `orphan_after` whose object never landed)
+or one whose object exceeds `max_bytes`, and deletes an orphan (a reference
+released via `cx.release_blob` past `orphan_after`). `max_bytes` is a
+**best-effort** cap, not a hard limit: an S3 presigned PUT cannot bound the size
+at upload, so the reaper is the only lever, and it acts *after* the fact — an
+over-cap object is promoted first and reaped on a later sweep, and reaping an
+object whose reference an aggregate already committed leaves a live `BlobRef`
+that then 404s on download. A slice that needs a hard cap must enforce it out of
+band (a bucket policy or an ingress limit), not rely on `max_bytes`. Orphan
+reaping is signal-driven: a slice releases the reference when it drops the owning
+row; the engine does not reference-count slice-owned tables.
+`cx.blob::<Kind>(name, content_type)` records no owner, so its row is **not**
+reached by `purge_person_blobs`; a personal file that must be erasable with its
+owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type, person)`.
+`Engine::purge_person_blobs` is the erase hook U11 calls to drop a person's blobs
+from storage and the reference table. Presigning uses the sans-IO `rusty-s3`
+crate for SigV4 and `reqwest` (rustls) as the thin HTTP client for the engine's
+own bucket HEAD/DELETE — no cloud SDK.
 
 The `graphql` module (U12) is the async-graphql surface kit. A service composes
 its slices' root objects into one schema with `engine_schema`, mounts it with
@@ -136,8 +168,9 @@ the kit does authZ only, never authN.
 ## Conformance battery
 
 The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`
-(fallback `DATABASE_URL`) and `nats-server` on `PATH` (it spawns its own broker
-per test).
+(fallback `DATABASE_URL`), `nats-server` on `PATH` (it spawns its own broker
+per test), and — for the blob scenarios — `minio` on `PATH` (it spawns its own
+S3-compatible server per test).
 
 ```bash
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
