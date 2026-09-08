@@ -50,7 +50,7 @@ fills its part by adding module files and one method body.
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` | U11 |
-| `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
+| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context, per-projector typed subscription union, per-slice SDL assembly checked at boot | U12 / U12b |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
 until then — today only `erase` (U11).
@@ -150,20 +150,31 @@ from storage and the reference table. Presigning uses the sans-IO `rusty-s3`
 crate for SigV4 and `reqwest` (rustls) as the thin HTTP client for the engine's
 own bucket HEAD/DELETE — no cloud SDK.
 
-The `graphql` module (U12) is the async-graphql surface kit. A service composes
-its slices' root objects into one schema with `engine_schema`, mounts it with
-`app` (`POST /graphql`, the GraphQL-over-WebSocket subscription on
-`GET /graphql/ws`, and `/readyz`) and runs it with `serve`;
-`Engine::graphql_state` wires the executor, the render runtime and the pool into
-it. Mutation resolvers run on `Engine::mutation_executor` (`execute` /
-`ack` and their bulk forms), answering `{ success }` or a typed error carrying
-the gate's `Reason` code, and returning a `OneShot`'s inner value only in the
-mutation response. Query resolvers read rendered views through `fetch` /
-`fetch_window` and never the database. The subscription maps the engine's
-`Reset`/`Upsert`/`Remove` wire to the `EngineDelta` union with the contiguous
-revision and the causing event, and the axum layer resolves the principal from
-the trusted `X-Passport` header (`PassportPrincipal`) before the executor runs —
-the kit does authZ only, never authN.
+The `graphql` module (U12, aligned to the intent's authoring ergonomics in
+U12b) is the async-graphql surface kit. A service composes its slices' root
+objects into one schema with `engine_schema`, mounts it with `app` (`POST
+/graphql`, the GraphQL-over-WebSocket subscription on `GET /graphql/ws`, and
+`/readyz`), and runs both the engine loop and that HTTP server with one call:
+`Engine::run_with(app)` (or `run_with_listener(listener, app)` when the caller
+pre-binds), which shuts both down gracefully on the engine's shutdown signal.
+`serve` and `Engine::run` stay for callers that drive the two lifecycles
+themselves. `Engine::graphql_state` wires the executor, the render runtime and
+the pool into the schema. Mutation resolvers run on `Engine::mutation_executor`
+(`execute` / `ack` and their bulk forms), answering `{ success }` or a typed
+error carrying the gate's `Reason` code, and returning a `OneShot`'s inner value
+only in the mutation response. Query resolvers take a typed `Query` context and
+read rendered views through `cx.fetch::<Projector>(key)` /
+`cx.fetch_window::<Projector>(params)`, never the database; a view carrying
+`Affordances` round-trips through the rendered store, so the fetch is typed, not
+opaque JSON. The subscription is one typed union member per projector: the
+`subscription_union!` macro takes a service's `Projector => View` mapping once
+and emits the `Reset`/`Upsert`/`Remove` payloads over a typed view union (so a
+client subscribing to one projector's field receives only that member's deltas)
+with the contiguous revision and the causing event. Slices declare their root
+fields and types to `SchemaSlices`, which fails boot loud if two slices claim
+the same root field or type. The axum layer resolves the principal from the
+trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
+kit does authZ only, never authN.
 
 ## Conformance battery
 

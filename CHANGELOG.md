@@ -582,6 +582,45 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   unauthenticated and a malformed-passport request rejected before the pipeline;
   and two slices' SDL fragments composing into one valid schema.
 
+### Changed (0.1.0 rework, unit U12b — GraphQL kit aligned to the intent's authoring ergonomics)
+
+- Boot ergonomics: `Engine::run_with(app)` and `Engine::run_with_listener(listener, app)`
+  own both the engine run loop and the HTTP server lifecycle in one call and shut
+  both down gracefully on the engine's shutdown signal; `run_with` binds the new
+  `EngineConfig::http_addr` (default `0.0.0.0:8080`, set with `with_http_addr`),
+  `run_with_listener` takes a pre-bound listener. `Engine::run` and `serve` stay
+  for callers that drive the two lifecycles themselves.
+- Query surface: a typed `Query<'_, P>` context, built from the async-graphql
+  `Context` with `Query::new`, replaces the free `fetch` / `fetch_json` /
+  `fetch_window` / `fetch_window_json` functions as the authoring surface.
+  `cx.fetch::<Projector>(key)` and `cx.fetch_window::<Projector>(params)` return
+  the projector's typed `View` (with `fetch_json` variants kept as the untyped
+  escape hatch), reusing the same `populate` visibility and batched render as a
+  subscription frame. The `Projector::View` no longer needs a hand-written
+  `DeserializeOwned` shim to be fetched typed: `Affordances`, `Gate`, `Reason`
+  and `ActionName` now `Deserialize` (a bounded interner keeps `Reason` /
+  `ActionName` as `&'static str`), so a view carrying affordances round-trips
+  through the rendered store, and `Affordances` is an async-graphql scalar so an
+  affordance-carrying view is a valid GraphQL output type.
+- Subscription surface: the `subscription_union!` macro takes a service's
+  `Projector => View` mapping once and emits a typed subscription: a `Union` of
+  one member per projector (each the projector's own `View` type, not a
+  projector-name string over opaque JSON) inside the `Reset` / `Upsert` /
+  `Remove` payloads and the top `EngineDelta` union, with the contiguous revision
+  and the causing event as `cause`. `attach` stays as the engine primitive the
+  generated `from_delta` mapping consumes; the free `subscribe` / `to_engine_delta`
+  and the engine-owned `EngineDelta` / `ProjectedView` / `*Payload` types are
+  removed in favour of the per-service typed union the macro emits.
+- SDL assembly: `SchemaSlices` / `SliceFragment` assemble the slices' root fields
+  and types and fail boot loud (`EngineError::DuplicateSchemaMember`) when two
+  slices claim the same root field or GraphQL type.
+- Conformance: `s59`–`s64` now drive the typed `Query` context, `run_with_listener`
+  boot and the per-projector typed union (`... on WidgetView { .. }` in place of
+  a `ProjectedView { projector view }` shape). Added `s65` (two projectors are two
+  typed union members; a client subscribing to one receives only its own member's
+  deltas) and `s66` (two slices claiming the same root field or type fail the boot
+  assembly loud).
+
 ### Changed (0.1.0 rework, unit U1)
 
 - The engine owns its NATS layer. Its internal loops (stream/bucket bind, KV
