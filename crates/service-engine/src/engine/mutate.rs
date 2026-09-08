@@ -41,4 +41,12 @@ impl<P: Principal> Engine<P> {
             self.config.impacts_per_commit,
         )
     }
+
+    pub fn graphql_state(&self) -> crate::graphql::GraphqlState<P> {
+        crate::graphql::GraphqlState::new(
+            self.mutation_executor(),
+            self.render_runtime(),
+            self.pg.clone(),
+        )
+    }
 }
