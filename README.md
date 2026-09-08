@@ -43,7 +43,7 @@ fills its part by adding module files and one method body.
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 |
 | `persistence` | `Persistence` trait; CRUD, soft-EDA, full-EDA styles behind `load`/`save` | U4 |
-| `gate`, `visibility` | `Gate` / `Reason` (affordance == mutation check); `Visibility` cohorts | U5 |
+| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 |
 | `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 |

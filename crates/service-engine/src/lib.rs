@@ -80,7 +80,9 @@ pub use delta::{Delta, ErasedView, Revision};
 pub use engine::Engine;
 pub use erase::{Erasable, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
-pub use gate::{Gate, Reason};
+pub use gate::{
+    ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,
+};
 pub use graphql::DeltaKind;
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
@@ -129,5 +131,5 @@ pub use time::Timestamp;
 pub use transport::{
     ImpactTransport, ListenerProbe, NOTIFY_PAYLOAD_LIMIT, PendingImpacts, PgListenNotify,
 };
-pub use visibility::{Cohorts, Visibility};
+pub use visibility::{Cohorts, Visibility, WindowMismatch, check_window_matches_visibility};
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};

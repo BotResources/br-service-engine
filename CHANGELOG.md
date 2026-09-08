@@ -93,6 +93,28 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   gesture, and the sequence guard rejecting a stale producer sequence. The
   scenarios poll for the committed DB state under a bounded timeout rather than
   sleeping a fixed delay.
+### Added (0.1.0 rework, unit U5)
+
+- Gate/affordance author layer (`gate` module): `Gate`/`Reason` (a `Reason` is a
+  stable, serialisable error code), `ActionName`, the `Affordances` map that
+  serialises to the client wire (`{ action: { allowed, reason? } }`), the `Gated`
+  trait (`ACTIONS`, `gate`, `affordances`), and the `gated!` macro that declares
+  each gate once so the projector's affordance pass and the mutation's deny-check
+  are the one function — never two implementations. `check_gates_match_affordances`
+  lets the battery enumerate a gate set and prove it equals the rendered affordance
+  surface; a blocked `Gate::require()` yields the `Reason` a mutation refuses with,
+  which is the same code the affordance shows.
+- Visibility author layer (`visibility` module): the `Visibility` trait
+  (`cohorts(row)` / `memberships(principal)`) with three derivations off the one
+  cohort-intersection rule — `visible(row, principal)` (the render/query filter and
+  the facts-change removal, threaded through the projector's `project`), and
+  `visible_keys` / `window`, which build a session window's key set from candidate
+  rows so `populate` derives its membership from the same declaration rather than a
+  second hand-authored query. `check_window_matches_visibility` lets the battery
+  prove a projector's populated window equals the declaration's visible set,
+  reporting a `WindowMismatch` on any drift. One declaration, three enforcement
+  points: the query filter, the window membership, and the removal of a row from a
+  live session when a principal's facts change.
 
 ### Added
 
