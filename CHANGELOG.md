@@ -36,6 +36,56 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `EngineError::NotYet` until then; the module map in the README names the unit
   for each.
 
+### Added (0.1.0 rework, unit U2 — inbound loop + poison/dead-letter)
+
+- The engine-owned inbound loop over integration commands and events. One
+  shared durable consumer per registered reaction, bound on the gitops-declared
+  `INTEGRATION_CMD` / `INTEGRATION_EVT` streams (bind-only, fail-loud, never
+  created by the engine). The engine creates or updates its own durable with a
+  frozen work-loop contract: explicit ack, deliver-all, instant replay, an
+  exact filter subject rendered from the reaction's coordinates, `max_deliver`
+  unlimited (the loop enforces the budget in code), `ack_wait` and
+  `max_ack_pending` from `InboundConfig`. Every pod binds the same durable name,
+  so a message is owned by one pod at a time.
+- Ack-after-durable: a message is acked (double-ack) only once its effect has
+  committed. A retryable failure `Nak`s with a growing, capped backoff and frees
+  the slot; a redelivery after a crash-before-commit finds the idempotency claim
+  and acks as a no-op, so the effect lands exactly once.
+- `Disposition` (Retry / Park / Terminal) routed against per-reaction budgets:
+  a retryable message `Nak`s up to its delivery budget, an early message `Nak`s
+  up to its `parking_budget`, and either exhausted budget, or a Terminal
+  disposition, dead-letters. `sqlx_is_terminal` classifies a Postgres integrity
+  (SQLSTATE class 23) or data (class 22) violation as terminal on the engine's
+  own authority, ahead of the handler's disposition.
+- The engine dead-letter table (`service_engine.dead_letter`) with a
+  `DeadLetters` store: `record` (upsert by reaction + message id, bumping the
+  delivery count), `list` by `DeadLetterSource`, `discard`, and `retry` — retry
+  re-publishes the stored frame with a fresh dedup token but the original
+  logical message id, so it re-enters the pipeline as a fresh delivery while the
+  claim and the sequence guard keep a replay on newer state a no-op.
+- The per-(producer, key) sequence guard (`service_engine.sequence_guard`) and
+  the idempotency claim (`service_engine.message_claim`), applied inside the
+  effect transaction: a message whose producer sequence is not above the last
+  applied is an acked no-op, so a view never walks backwards, and a duplicate
+  message id is an acked no-op. Both are engine tables the direct write pipeline
+  (a later unit) writes alongside the effect.
+- `register_reaction::<M, _, _>(durable, handler)` (and
+  `register_reaction_with_budgets`) records a reaction: it validates the durable
+  name, derives the subscription from the message type's coordinates, and stores
+  the handler behind `ReactionInvoker` for the write pipeline to run.
+  `Engine::inbound_subscriptions()` exposes the derived set.
+- The narrow loop-to-pipeline contract: the `Dispatch` trait
+  (`Applied::{Committed, NoOp}` / `DispatchError` carrying a `Disposition`),
+  implemented by the direct write pipeline in a later unit and, behind the
+  `test-support` feature, by an in-crate `StubDispatch` that exercises the whole
+  loop end-to-end (claim, sequence guard, effect, crash-before-commit, poison
+  and parking verdicts) against real Postgres.
+- `EngineError::Nats` surfaces a fail-loud stream bind. Five conformance
+  scenarios (`s28`–`s32`) cover shared-consumer ownership across two pods,
+  ack-after-durable with a crash before commit, poison budget to dead letter
+  with the discard gesture, early parking then release with the retry gesture,
+  and the sequence guard rejecting a stale producer sequence.
+
 ### Added
 
 - Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,

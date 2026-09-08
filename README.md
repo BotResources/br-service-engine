@@ -53,7 +53,11 @@ fills its part by adding module files and one method body.
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then.
+until then. `register_reaction` is live: it records a reaction and derives its
+inbound subscription, and the engine-owned inbound loop (durable consumer,
+ack-after-durable, `Disposition` routing, poison budget with the
+`service_engine.dead_letter` table and its retry/discard gestures, the
+per-(producer, key) sequence guard beside the idempotency claim) runs over it.
 
 ## Conformance battery
 
