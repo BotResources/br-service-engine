@@ -272,6 +272,7 @@ impl<P: Principal> Engine<P> {
         self.beat.relays().register_erased(Arc::new(r))
     }
 
+    #[cfg(feature = "test-support")]
     pub fn register_mirror_handle(
         &mut self,
         m: crate::mirror::MirrorHandle,
