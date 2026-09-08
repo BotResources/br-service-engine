@@ -66,8 +66,12 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 - The per-(producer, key) sequence guard (`service_engine.sequence_guard`) and
   the idempotency claim (`service_engine.message_claim`), applied inside the
   effect transaction: a message whose producer sequence is not above the last
-  applied is an acked no-op, so a view never walks backwards, and a duplicate
-  message id is an acked no-op. Both are engine tables the direct write pipeline
+  applied is an acked no-op, so a view never walks backwards, and a
+  claim already present for the same (message id, reaction) is an acked no-op.
+  The claim is keyed `(message_id, reaction)` — matching the dead-letter table —
+  so two reactions of one service that subscribe to the same coordinate each run
+  their own effect once; the claim dedupes redeliveries within a reaction, never
+  across sibling reactions. Both are engine tables the direct write pipeline
   (a later unit) writes alongside the effect.
 - `register_reaction::<M, _, _>(durable, handler)` (and
   `register_reaction_with_budgets`) records a reaction: it validates the durable
@@ -81,10 +85,14 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   loop end-to-end (claim, sequence guard, effect, crash-before-commit, poison
   and parking verdicts) against real Postgres.
 - `EngineError::Nats` surfaces a fail-loud stream bind. Five conformance
-  scenarios (`s28`–`s32`) cover shared-consumer ownership across two pods,
-  ack-after-durable with a crash before commit, poison budget to dead letter
-  with the discard gesture, early parking then release with the retry gesture,
-  and the sequence guard rejecting a stale producer sequence.
+  scenarios (`s28`–`s32`) cover shared-consumer ownership across two pods
+  (observed directly: the two pods dispatch each message exactly once, with zero
+  duplicate/stale no-op outcomes, which a regression to per-pod consumers would
+  break), ack-after-durable with a crash before commit, poison budget to dead
+  letter with the discard gesture, early parking then release with the retry
+  gesture, and the sequence guard rejecting a stale producer sequence. The
+  scenarios poll for the committed DB state under a bounded timeout rather than
+  sleeping a fixed delay.
 
 ### Added
 
