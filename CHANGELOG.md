@@ -10,6 +10,32 @@ and a single git tag `v{version}` releases the set. Format follows
 First engine release. `service-engine` ships the reactive personalized delivery
 skeleton; `conformance-service-engine` ships its black-box battery.
 
+### Changed (0.1.0 rework, unit U1)
+
+- The engine owns its NATS layer. Its internal loops (stream/bucket bind, KV
+  read/write/watch, outbox publish) run on `async-nats` directly through the new
+  `nats` module (`Nats`, `KvBucket`, `KvKey`, `RelayHealth`, `PublishOutcome`).
+  The engine no longer depends on `br-util-nats-fabric`, `br-util-postgres` or
+  `br-util-directory`; it keeps only the frontier `br-rust-common` crates
+  (`br-core-auth`, `br-core-integration`) plus `br-util-axum-readiness`.
+  `Engine::boot(config, pg, nats, readiness)` now takes a `Nats`, not a fabric.
+- The public surface is the intent's authoring surface. `Engine` exposes
+  `register_reaction` / `register_mutation` / `register_projector` /
+  `register_offer` / `register_mirror` / `register_accumulator` /
+  `register_presence` / `register_blobs` / `register_cron` and `declare_scopes`,
+  plus the author types `Gate`/`Reason`, `OneShot`, `Disposition`,
+  `Persistence`, `Offer`, `Visibility`, `Presence`, `Blobs`, `Erasable`,
+  `ScopeManifest`, `BlobPolicy`, `PersonId` and the `Mutation`/`Reaction`/`Bulk`
+  contexts. The engine internals (`RenderRegistry`, `SessionRuntime`, `Relay`
+  and its `Claim`/`Discipline`/`Drained`, `PgListenNotify`, `ImpactTransport`,
+  `RelayRuntime`, the outbox/kv relays, and the `bind_noun` / `register_relay` /
+  `transport` / `transport_arc` / `accumulators` / `render` accessors) are
+  gated behind the `test-support` feature — the sanctioned battery-only seam,
+  with no semver promise — and are private in a normal service build.
+- The register-methods a later rework unit fills return the typed
+  `EngineError::NotYet` until then; the module map in the README names the unit
+  for each.
+
 ### Added
 
 - Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,
@@ -36,11 +62,11 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   replayed impacts only for the session going live, never re-holding them for
   other pending sessions.
 - `Engine<P>` facade composing the render runtime, transport, accumulators,
-  housekeeping beat and mirror supervision: `boot(config, pg, fabric,
+  housekeeping beat and mirror supervision: `boot(config, pg, nats,
   readiness)` (the caller owns the `ReadinessHandle`, so a boot that fails the
-  posture or listener probe leaves it DOWN with the reason), `bind_noun`, the
+  posture or listener probe leaves it DOWN with the reason), the
   fallible `register_*` seams (`register_projector`, `register_rls`,
-  `register_principal_resolver`, `register_accumulator`, `register_relay`,
+  `register_principal_resolver`, `register_accumulator`,
   `register_cron`, `register_mirror` — each returns `Result` and rejects a
   duplicate name with a typed error, since every registry is keyed by name and a
   silent duplicate would overwrite a same-named component's health condition and

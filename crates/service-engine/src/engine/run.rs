@@ -37,7 +37,7 @@ impl<P: Principal> RepairRetry for RenderRepairs<P> {
 
 impl<P: Principal> Engine<P> {
     pub async fn run(self) -> Result<(), EngineError> {
-        let render = self.render();
+        let render = self.render_runtime();
         let Engine {
             config,
             pg,

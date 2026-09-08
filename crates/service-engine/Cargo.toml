@@ -27,3 +27,11 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+
+[[test]]
+name = "dyn_compatible"
+required-features = ["test-support"]
+
+[[test]]
+name = "erasure_spike"
+required-features = ["test-support"]

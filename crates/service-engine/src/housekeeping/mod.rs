@@ -7,7 +7,11 @@ pub mod health;
 pub mod leader;
 pub mod mirror;
 pub mod ready;
+#[cfg(feature = "test-support")]
 pub mod relay;
+#[cfg(not(feature = "test-support"))]
+#[allow(dead_code, unused_imports)]
+mod relay;
 pub mod scheduled;
 
 pub use backoff::Backoff;
@@ -23,5 +27,6 @@ pub use mirror::{
     MirrorCondition, MirrorSupervisor, MirrorTasks, MirrorsHealth, MirrorsHealthReceiver,
 };
 pub use ready::ReadinessAssembly;
+#[cfg(feature = "test-support")]
 pub use relay::{RelayRound, RelayRuntime};
 pub use scheduled::{ScheduledBoundaries, ScheduledRound};

@@ -16,6 +16,7 @@ use crate::mirror::MirrorHandle;
 use crate::principal::{Principal, PrincipalResolver, RlsApplier};
 use crate::projector::Projector;
 use crate::registry::RenderRegistry;
+#[cfg(feature = "test-support")]
 use crate::relay::Relay;
 use crate::runtime::SessionRuntime;
 use crate::session::{AttachRequest, SessionStream};
@@ -82,13 +83,6 @@ impl<P: Principal> Engine<P> {
         })
     }
 
-    pub fn bind_noun<N: Noun>(&mut self) -> Result<(), EngineError> {
-        self.with_registry(|registry| {
-            registry.bind_noun::<N>();
-            Ok(())
-        })
-    }
-
     pub fn register_rls<R: RlsApplier<P>>(&mut self, r: R) -> Result<(), EngineError> {
         self.with_registry(|registry| {
             registry.register_rls(r);
@@ -119,10 +113,6 @@ impl<P: Principal> Engine<P> {
             Ok(())
         })?;
         self.accumulators.register(a)
-    }
-
-    pub fn register_relay<R: Relay>(&mut self, r: R) -> Result<(), EngineError> {
-        self.beat.relays().register_erased(Arc::new(r))
     }
 
     pub fn register_cron<J: crate::cron::CronJob>(&mut self, j: J) -> Result<(), EngineError> {
@@ -195,23 +185,11 @@ impl<P: Principal> Engine<P> {
         self.readiness.clone()
     }
 
-    pub fn transport(&self) -> &dyn ImpactTransport {
-        self.transport.as_ref()
-    }
-
-    pub fn transport_arc(&self) -> Arc<dyn ImpactTransport> {
-        self.transport.clone()
-    }
-
-    pub fn accumulators(&self) -> &Arc<AccumulatorRuntime> {
-        &self.accumulators
-    }
-
     pub fn shutdown_handle(&self) -> Arc<tokio::sync::Notify> {
         self.shutdown.clone()
     }
 
-    pub fn render(&self) -> Arc<SessionRuntime<P>> {
+    pub(crate) fn render_runtime(&self) -> Arc<SessionRuntime<P>> {
         self.render
             .get_or_init(|| {
                 let registry = self
@@ -231,7 +209,7 @@ impl<P: Principal> Engine<P> {
     }
 
     pub async fn attach(&self, req: AttachRequest<P>) -> Result<SessionStream, AttachError> {
-        self.render().attach(req).await
+        self.render_runtime().attach(req).await
     }
 
     pub fn push_chunk<A: Accumulator>(
@@ -269,6 +247,36 @@ impl<P: Principal> Engine<P> {
                 "a component was registered after the render runtime was built".into(),
             )),
         }
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl<P: Principal> Engine<P> {
+    pub fn bind_noun<N: Noun>(&mut self) -> Result<(), EngineError> {
+        self.with_registry(|registry| {
+            registry.bind_noun::<N>();
+            Ok(())
+        })
+    }
+
+    pub fn register_relay<R: Relay>(&mut self, r: R) -> Result<(), EngineError> {
+        self.beat.relays().register_erased(Arc::new(r))
+    }
+
+    pub fn transport(&self) -> &dyn ImpactTransport {
+        self.transport.as_ref()
+    }
+
+    pub fn transport_arc(&self) -> Arc<dyn ImpactTransport> {
+        self.transport.clone()
+    }
+
+    pub fn accumulators(&self) -> &Arc<AccumulatorRuntime> {
+        &self.accumulators
+    }
+
+    pub fn render(&self) -> Arc<SessionRuntime<P>> {
+        self.render_runtime()
     }
 }
 
