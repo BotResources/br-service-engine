@@ -4,6 +4,7 @@ pub mod cron;
 pub mod engine;
 pub mod gate;
 pub mod gated;
+pub mod graphql;
 pub mod mirror;
 pub mod note;
 pub mod outbox;

@@ -77,6 +77,10 @@ impl<P: Principal> SessionRuntime<P> {
         &self.registry
     }
 
+    pub(crate) fn chunks(&self) -> &ChunkReader {
+        &self.chunks
+    }
+
     pub fn metrics(&self) -> RenderMetrics {
         self.counters.snapshot()
     }

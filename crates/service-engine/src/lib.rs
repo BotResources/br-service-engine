@@ -83,7 +83,12 @@ pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, Tr
 pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,
 };
-pub use graphql::DeltaKind;
+pub use graphql::{
+    AuthReject, CODE_EXTENSION, DeltaKind, EngineDelta, GraphqlState, MutationAck, PASSPORT_HEADER,
+    PassportPrincipal, PrincipalRejected, ProjectedView, RemovePayload, ResetPayload,
+    UpsertPayload, ack, ack_bulk, app, attach, engine_schema, execute, execute_bulk, fetch,
+    fetch_json, fetch_window, fetch_window_json, mutation_error, serve, subscribe, to_engine_delta,
+};
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
 pub use housekeeping::gc::{Gc, GcRound, SessionGc};
