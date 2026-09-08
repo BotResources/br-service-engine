@@ -2,6 +2,7 @@ pub mod assignment;
 pub mod cron;
 pub mod engine;
 pub mod gate;
+pub mod gated;
 pub mod mirror;
 pub mod note;
 pub mod outbox;
@@ -53,6 +54,9 @@ pub use assignment::{
     Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentView,
 };
 pub use gate::Gate;
+pub use gated::{
+    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, gated_key, reasons,
+};
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use principal::{
