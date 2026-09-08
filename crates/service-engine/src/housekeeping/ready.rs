@@ -1,5 +1,5 @@
+use crate::nats::{RelayHealth, RelayHealthReceiver};
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
-use br_util_nats_fabric::{RelayHealth, RelayHealthReceiver};
 use tokio::sync::watch;
 
 use crate::boot::{REASON_LISTEN_FAILED, REASON_MIRRORS};
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn a_degraded_hosted_fabric_relay_is_read_even_though_the_engine_board_is_clean() {
         let degraded = RelayHealth::Degraded {
-            reason: br_util_nats_fabric::REASON_NO_STREAM,
+            reason: crate::nats::REASON_NO_STREAM,
         };
         assert_eq!(
             verdict(

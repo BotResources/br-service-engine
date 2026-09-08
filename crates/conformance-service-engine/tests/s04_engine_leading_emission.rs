@@ -19,7 +19,7 @@ async fn s04_engine_a_lone_impact_after_idle_is_delivered_before_the_window_elap
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

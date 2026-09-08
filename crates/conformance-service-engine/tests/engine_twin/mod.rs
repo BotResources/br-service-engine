@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
-use br_util_nats_fabric::Fabric;
 use conformance_service_engine::infra::TestDb;
 use conformance_service_engine::sample::assignment::Assignment;
 use conformance_service_engine::sample::note::Note;
@@ -11,6 +10,7 @@ use conformance_service_engine::sample::principal::{
 use service_engine::Engine;
 use service_engine::config::EngineConfig;
 use service_engine::impact::Impact;
+use service_engine::nats::Nats;
 use service_engine::projector::Projector;
 use service_engine::transport::ImpactTransport;
 use sqlx::PgPool;
@@ -45,14 +45,14 @@ pub async fn stage(pool: &PgPool, transport: &dyn ImpactTransport, impacts: &[Im
 
 pub async fn spy_engine<Pr: Projector<Principal = SamplePrincipal>>(
     db: &TestDb,
-    fabric: Fabric,
+    nats: Nats,
     config: EngineConfig,
     projector: Pr,
 ) -> Engine<SamplePrincipal> {
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,
         db.app_pool().clone(),
-        fabric,
+        nats,
         ReadinessHandle::ready(),
     )
     .await

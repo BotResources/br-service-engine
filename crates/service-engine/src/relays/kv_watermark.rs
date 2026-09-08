@@ -1,4 +1,4 @@
-use br_util_nats_fabric::KvKey;
+use crate::nats::KvKey;
 use sqlx::{PgConnection, Row};
 
 use crate::error::RelayError;

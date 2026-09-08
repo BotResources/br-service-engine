@@ -26,7 +26,7 @@ async fn s14_engine_the_run_flush_loop_makes_chunks_durable_folds_them_and_refus
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let mut engine = Engine::<SamplePrincipal>::boot(

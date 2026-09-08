@@ -16,7 +16,7 @@ async fn s08_engine_a_foreign_fact_re_renders_only_the_keys_the_inverse_resolves
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

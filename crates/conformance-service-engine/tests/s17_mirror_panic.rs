@@ -41,7 +41,7 @@ fn a_mirror_whose_supervisor_dies_after_it_converges() -> MirrorHandle {
 async fn s17_a_supervisor_that_dies_after_converging_forces_readiness_down_and_run_returns_err() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let readiness = ReadinessHandle::ready();
 
     let mut engine = Engine::boot(

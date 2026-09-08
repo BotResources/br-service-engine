@@ -2,8 +2,8 @@ mod run;
 
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::nats::Nats;
 use br_util_axum_readiness::ReadinessHandle;
-use br_util_nats_fabric::Fabric;
 use sqlx::{PgConnection, PgPool};
 
 use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, Durable};
@@ -26,7 +26,7 @@ use crate::wire::Noun;
 pub struct Engine<P: Principal> {
     config: EngineConfig,
     pg: PgPool,
-    fabric: Fabric,
+    nats: Nats,
     transport: Arc<PgListenNotify>,
     readiness: ReadinessHandle,
     accumulators: Arc<AccumulatorRuntime>,
@@ -41,16 +41,16 @@ impl<P: Principal> Engine<P> {
     pub async fn boot(
         config: EngineConfig,
         pg: PgPool,
-        fabric: Fabric,
+        nats: Nats,
         readiness: ReadinessHandle,
     ) -> Result<Engine<P>, EngineError> {
-        Self::boot_with_probe(config, pg, fabric, readiness, ListenerProbe::new()).await
+        Self::boot_with_probe(config, pg, nats, readiness, ListenerProbe::new()).await
     }
 
     pub async fn boot_with_probe(
         config: EngineConfig,
         pg: PgPool,
-        fabric: Fabric,
+        nats: Nats,
         readiness: ReadinessHandle,
         probe: ListenerProbe,
     ) -> Result<Engine<P>, EngineError> {
@@ -70,7 +70,7 @@ impl<P: Principal> Engine<P> {
         Ok(Engine {
             config,
             pg,
-            fabric,
+            nats,
             transport,
             readiness,
             accumulators,
@@ -196,8 +196,8 @@ impl<P: Principal> Engine<P> {
         self.accumulators.seal::<A>(tx, key).await
     }
 
-    pub fn fabric(&self) -> &Fabric {
-        &self.fabric
+    pub fn nats(&self) -> &Nats {
+        &self.nats
     }
 
     fn with_registry(

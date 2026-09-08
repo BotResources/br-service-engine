@@ -17,7 +17,7 @@ async fn s05_engine_three_impacts_on_one_key_in_one_window_are_one_coalesced_ups
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();
@@ -87,7 +87,7 @@ async fn s05_engine_per_impact_emits_one_delta_per_cause() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

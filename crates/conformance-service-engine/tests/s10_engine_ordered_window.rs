@@ -18,7 +18,7 @@ async fn s10_engine_a_key_that_sorts_into_the_head_is_upserted_and_pushes_one_ou
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

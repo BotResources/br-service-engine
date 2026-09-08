@@ -22,7 +22,7 @@ async fn s12_engine_a_lagging_session_is_reset_to_last_sent_never_silently_ended
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

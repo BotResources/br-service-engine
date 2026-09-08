@@ -1,4 +1,3 @@
-use br_util_nats_fabric::{Fabric, FabricError, KvKey, PublishedLanguagePublisher};
 use futures_util::future::BoxFuture;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -6,6 +5,7 @@ use sqlx::PgConnection;
 
 use crate::error::RelayError;
 use crate::name::RelayName;
+use crate::nats::{KvBucket, KvKey, Nats, NatsError};
 use crate::relay::{Claim, Discipline, Drained, Relay};
 use crate::relays::kv_watermark;
 
@@ -64,7 +64,7 @@ pub trait KvSource<V>: Send + Sync + 'static {
 
 pub struct KvDrainRelay<V, S> {
     name: RelayName,
-    publisher: PublishedLanguagePublisher<V>,
+    bucket: KvBucket<V>,
     source: S,
     cas_retries: usize,
 }
@@ -74,13 +74,14 @@ where
     V: Serialize + DeserializeOwned + PartialEq + Clone + Versioned + Send + Sync + 'static,
     S: KvSource<V>,
 {
-    pub async fn open(name: RelayName, fabric: &Fabric, source: S) -> Result<Self, RelayError> {
-        let publisher = PublishedLanguagePublisher::open(fabric)
+    pub async fn open(name: RelayName, nats: &Nats, source: S) -> Result<Self, RelayError> {
+        let bucket = nats
+            .published_language::<V>()
             .await
             .map_err(published_language)?;
         Ok(Self {
             name,
-            publisher,
+            bucket,
             source,
             cas_retries: DEFAULT_CAS_RETRIES,
         })
@@ -91,15 +92,11 @@ where
         self
     }
 
-    pub fn publisher(&self) -> &PublishedLanguagePublisher<V> {
-        &self.publisher
-    }
-
     async fn apply(&self, conn: &mut PgConnection, change: &KvChange<V>) -> Result<(), RelayError> {
         let watermark = kv_watermark::read(conn, &self.name, &change.key).await?;
         for _ in 0..=self.cas_retries {
             let observed = self
-                .publisher
+                .bucket
                 .get_with_revision(&change.key)
                 .await
                 .map_err(published_language)?;
@@ -111,27 +108,26 @@ where
             match &change.write {
                 KvWrite::Put(value) => match observed {
                     None => self
-                        .publisher
+                        .bucket
                         .put(&change.key, value)
                         .await
                         .map_err(published_language)?,
                     Some((_, revision)) => {
-                        match self.publisher.update_if(&change.key, value, revision).await {
+                        match self.bucket.update_if(&change.key, value, revision).await {
                             Ok(_) => {}
-                            Err(FabricError::RevisionConflict { .. }) => continue,
+                            Err(NatsError::RevisionConflict { .. }) => continue,
                             Err(error) => return Err(published_language(error)),
                         }
                     }
                 },
                 KvWrite::Retract => match observed {
                     None => {}
-                    Some((_, revision)) => {
-                        match self.publisher.delete_if(&change.key, revision).await {
-                            Ok(()) => {}
-                            Err(FabricError::RevisionConflict { .. }) => continue,
-                            Err(error) => return Err(published_language(error)),
-                        }
-                    }
+                    Some((_, revision)) => match self.bucket.delete_if(&change.key, revision).await
+                    {
+                        Ok(()) => {}
+                        Err(NatsError::RevisionConflict { .. }) => continue,
+                        Err(error) => return Err(published_language(error)),
+                    },
                 },
             }
             kv_watermark::raise(conn, &self.name, &change.key, change.version).await?;
@@ -184,7 +180,7 @@ fn supersedes(published: u64, desired: u64) -> bool {
     desired > published
 }
 
-fn published_language(error: FabricError) -> RelayError {
+fn published_language(error: NatsError) -> RelayError {
     RelayError::Publish(format!("published language: {error}"))
 }
 
@@ -222,10 +218,7 @@ mod tests {
     fn publication_is_monotonic_so_a_replayed_change_never_walks_the_entry_backwards() {
         let published = Roster { version: 7 };
         assert!(!supersedes(published.version(), 6));
-        assert!(
-            !supersedes(published.version(), 7),
-            "a redelivered change at the published version is a no-op, not a rewrite"
-        );
+        assert!(!supersedes(published.version(), 7));
         assert!(supersedes(published.version(), 8));
     }
 }

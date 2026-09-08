@@ -17,7 +17,7 @@ async fn s26_pooler_probe() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let deaf_readiness = ReadinessHandle::ready();
     let refused = Engine::<SamplePrincipal>::boot_with_probe(

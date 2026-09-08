@@ -12,7 +12,7 @@ use sqlx::PgPool;
 
 const CHANNEL: &str = "se_s18_engine";
 
-async fn refused(pool: PgPool, fabric: br_util_nats_fabric::Fabric, pod: &str) {
+async fn refused(pool: PgPool, fabric: service_engine::nats::Nats, pod: &str) {
     let readiness = ReadinessHandle::ready();
     let outcome = Engine::<SamplePrincipal>::boot(
         engine_config(CHANNEL, pod),
@@ -40,7 +40,7 @@ async fn s18_engine_boot_refuses_every_over_privileged_role_and_accepts_the_app_
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let ok = Engine::<SamplePrincipal>::boot(
         engine_config(CHANNEL, "pod-app"),

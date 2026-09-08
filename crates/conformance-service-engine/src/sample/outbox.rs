@@ -1,12 +1,11 @@
 use std::time::Duration;
 
-use br_core_integration::{EventMetadata, IntegrationEvent};
+use br_core_integration::{Aggregate, Bc, EventCoords, EventMetadata, IntegrationEvent, PastFact};
 use br_core_kernel::{Actor, UserId};
-use br_util_nats_fabric::{
-    Aggregate, Bc, EventCoords, Fabric, OutboxRecord, PastFact, stage as stage_outbox,
-};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use service_engine::nats::{INTEGRATION_EVT, Nats};
+use service_engine::relays::outbox::{OutboxRecord, event_subject, stage as stage_outbox};
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
@@ -41,7 +40,7 @@ pub fn envelope(event_id: Uuid, label: &str) -> IntegrationEvent<Relayed> {
 
 pub async fn stage_outbox_row(conn: &mut PgConnection, label: &str) -> Uuid {
     let id = Uuid::now_v7();
-    let record = OutboxRecord::stage_event(id, relayed_coords(), &envelope(id, label))
+    let record = OutboxRecord::stage_event(id, &relayed_coords(), &envelope(id, label))
         .expect("the envelope serializes into an outbox record");
     stage_outbox(&mut *conn, &record)
         .await
@@ -69,27 +68,43 @@ pub async fn row_status(pool: &PgPool, id: Uuid) -> String {
         .expect("read the outbox row status")
 }
 
-pub async fn delivered_event_ids(fabric: &Fabric, durable: &str) -> Vec<Uuid> {
-    let mut consumer = fabric
-        .ensure_event_consumer::<Relayed>(&relayed_coords(), durable)
+pub async fn delivered_event_ids(nats: &Nats, observer: &str) -> Vec<Uuid> {
+    use futures_util::StreamExt;
+
+    let subject = event_subject(&relayed_coords());
+    let stream = nats
+        .context()
+        .get_stream(INTEGRATION_EVT)
         .await
-        .expect("bind a durable consumer on the fixed event stream");
+        .expect("bind the fixed event stream");
+    let consumer = stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            name: Some(observer.to_string()),
+            filter_subject: subject,
+            ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+            deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+            ..Default::default()
+        })
+        .await
+        .expect("create an ephemeral observing consumer on the event stream");
+    let mut messages = consumer
+        .messages()
+        .await
+        .expect("open the message stream of the observing consumer");
     let mut ids = Vec::new();
     loop {
-        match tokio::time::timeout(QUIET_TAIL, consumer.recv()).await {
-            Ok(Ok(Some(delivery))) => {
-                let id = delivery
-                    .payload()
-                    .expect("a frame the relay published decodes")
-                    .event_id;
-                ids.push(id);
-                delivery.ack().await.expect("ack the observed frame");
+        match tokio::time::timeout(QUIET_TAIL, messages.next()).await {
+            Ok(Some(Ok(message))) => {
+                let event: IntegrationEvent<Relayed> = serde_json::from_slice(&message.payload)
+                    .expect("a frame the relay published decodes");
+                ids.push(event.event_id);
+                message.ack().await.expect("ack the observed frame");
             }
-            Ok(Ok(None)) => break,
-            Ok(Err(error)) => panic!("the durable consumer failed: {error}"),
+            Ok(Some(Err(error))) => panic!("the observing consumer failed: {error}"),
+            Ok(None) => break,
             Err(_elapsed) => break,
         }
     }
-    consumer.drain().await;
+    let _ = stream.delete_consumer(observer).await;
     ids
 }

@@ -49,7 +49,7 @@ fn window() -> WindowSpec {
 async fn s11_two_engines_on_one_database_each_deliver_to_their_own_sessions() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
     let principal = member(&pool, Uuid::now_v7(), home).await;

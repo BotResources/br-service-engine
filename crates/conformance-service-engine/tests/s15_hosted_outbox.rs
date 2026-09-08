@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use br_util_nats_fabric::{DEFAULT_MAX_MESSAGES, OutboxRelay};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::{delivered_event_ids, stage_outbox_row};
 use service_engine::housekeeping::relay::RelayRuntime;
 use service_engine::name::{PodId, RelayName};
-use service_engine::relays::outbox::FabricOutboxRelay;
+use service_engine::relays::outbox::HostedOutboxRelay;
+use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -17,14 +17,14 @@ async fn s15_a_hosted_relay_drains_on_a_pool_the_runtime_never_holds() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let mut tx = db.app_pool().begin().await.expect("the write transaction");
     let staged = stage_outbox_row(&mut tx, "hosted-standalone").await;
     tx.commit().await.expect("commit");
 
     let single = single_connection_pool(&db).await;
-    let relay = Arc::new(FabricOutboxRelay::hosting(
+    let relay = Arc::new(HostedOutboxRelay::hosting(
         OUTBOX,
         OutboxRelay::new(single.clone(), fabric.clone()),
         DEFAULT_MAX_MESSAGES,

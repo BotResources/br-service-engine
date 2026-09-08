@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use br_util_nats_fabric::{Fabric, INTEGRATION_CMD, INTEGRATION_EVT, KV_PUBLISHED_LANGUAGE};
+use service_engine::nats::{INTEGRATION_CMD, INTEGRATION_EVT, KV_PUBLISHED_LANGUAGE, Nats};
 use uuid::Uuid;
 
 const BOOT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -66,10 +66,10 @@ impl TestNats {
         format!("nats://127.0.0.1:{}", self.port)
     }
 
-    pub async fn fabric(&self) -> Fabric {
-        Fabric::connect(&self.url())
+    pub async fn nats(&self) -> Nats {
+        Nats::connect(&self.url())
             .await
-            .expect("the fabric dials the ephemeral broker")
+            .expect("the engine nats layer dials the ephemeral broker")
     }
 
     pub async fn provision(&self) {

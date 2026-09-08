@@ -1,5 +1,3 @@
-#[cfg(feature = "directory")]
-pub mod directory;
 mod health;
 #[cfg(test)]
 mod liveness_tests;

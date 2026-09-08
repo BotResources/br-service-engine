@@ -49,7 +49,7 @@ fn a_mirror_whose_supervisor_dies_after_it_converges() -> MirrorHandle {
 async fn s17_a_session_survives_no_longer_than_the_engine_when_a_worker_stops() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();
@@ -121,7 +121,7 @@ async fn s17_a_session_ends_when_the_render_worker_panics_the_one_path_a_sibling
  {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

@@ -18,6 +18,7 @@ pub mod impact;
 pub mod metrics;
 pub mod mirror;
 pub mod name;
+pub mod nats;
 pub mod population;
 pub mod principal;
 pub mod projector;
@@ -58,13 +59,17 @@ pub use name::{
     AccumulatorName, ChannelName, ForeignId, JobName, MirrorName, Namespace, NounName, PodId,
     ProjectorName, RelayName,
 };
+pub use nats::{
+    KvBucket, KvEvent, KvKey, KvKeyError, KvPrefix, Nats, NatsError, PublishFailure,
+    PublishOutcome, REASON_NO_STREAM, RelayHealth, RelayHealthReceiver,
+};
 pub use population::{Interest, Inverse, Population, WindowQuery};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope, Projector};
 pub use registry::RenderRegistry;
 pub use relay::{Claim, Discipline, Drained, Relay};
 pub use relays::kv::{KvChange, KvDrainRelay, KvSource, KvWrite, Versioned};
-pub use relays::outbox::FabricOutboxRelay;
+pub use relays::outbox::{HostedOutboxRelay, OutboxRelay};
 pub use render::{PassReport, SessionFault, Transition};
 pub use runtime::{RenderMetrics, SessionRuntime};
 pub use session::{AttachRequest, SessionId, SessionStream, WindowParams, WindowSpec};

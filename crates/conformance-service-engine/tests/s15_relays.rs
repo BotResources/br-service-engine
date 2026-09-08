@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use br_util_nats_fabric::{DEFAULT_MAX_MESSAGES, OutboxRelay};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::{
     FailingSampleRelay, RecordingTransport, RowClaimSampleRelay, delivered_event_ids,
@@ -11,7 +10,8 @@ use service_engine::housekeeping::health::RelayCondition;
 use service_engine::housekeeping::relay::RelayRuntime;
 use service_engine::impact::{Dims, Impact};
 use service_engine::name::{PodId, RelayName};
-use service_engine::relays::outbox::FabricOutboxRelay;
+use service_engine::relays::outbox::HostedOutboxRelay;
+use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
 use service_engine::transport::ImpactTransport;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -85,9 +85,9 @@ async fn s15_a_row_staged_with_an_impact_is_published_within_one_window() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
-    let relay = Arc::new(FabricOutboxRelay::hosting(
+    let relay = Arc::new(HostedOutboxRelay::hosting(
         OUTBOX,
         OutboxRelay::new(db.app_pool().clone(), fabric.clone()),
         DEFAULT_MAX_MESSAGES,
@@ -131,9 +131,9 @@ async fn s15_a_crash_between_publish_and_status_transition_republishes_once() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
-    let relay = Arc::new(FabricOutboxRelay::hosting(
+    let relay = Arc::new(HostedOutboxRelay::hosting(
         OUTBOX,
         OutboxRelay::new(db.app_pool().clone(), fabric.clone()),
         DEFAULT_MAX_MESSAGES,

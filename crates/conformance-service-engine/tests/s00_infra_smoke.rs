@@ -1,6 +1,6 @@
+use br_core_integration::{Aggregate, Bc, PastFact};
 use br_core_integration::{EventCoords, EventMetadata, IntegrationEvent};
 use br_core_kernel::{Actor, UserId};
-use br_util_nats_fabric::{Aggregate, Bc, PastFact, PublishedLanguageReader};
 use chrono::Utc;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample;
@@ -58,10 +58,6 @@ async fn s00_infra_smoke() {
             .iter()
             .any(|v| (9_113_000_001..=9_113_999_999).contains(v)),
         "the engine's reserved range is absent from {versions:?}"
-    );
-    assert!(
-        versions.contains(&1),
-        "the directory set is absent from {versions:?}"
     );
     assert!(
         versions.iter().any(|v| *v > 20_260_000_000_000),
@@ -122,7 +118,7 @@ async fn s00_infra_smoke() {
 
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     fabric
         .ping()
         .await
@@ -134,7 +130,8 @@ async fn s00_infra_smoke() {
         .await
         .expect("the fixed INTEGRATION_EVT stream binds and accepts the frame");
 
-    PublishedLanguageReader::<Ping>::open(&fabric)
+    fabric
+        .published_language::<Ping>()
         .await
         .expect("the fixed PUBLISHED_LANGUAGE bucket binds");
 
@@ -161,12 +158,12 @@ async fn brokers_spawned_at_once_never_share_a_port_or_a_jetstream() {
     one.provision().await;
     let (coords, event) = sample_event();
 
-    one.fabric()
+    one.nats()
         .await
         .publish_event(&coords, &event)
         .await
         .expect("the provisioned broker accepts the frame");
-    two.fabric()
+    two.nats()
         .await
         .publish_event(&coords, &event)
         .await

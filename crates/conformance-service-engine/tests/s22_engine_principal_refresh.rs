@@ -17,7 +17,7 @@ async fn s22_engine_revoking_a_local_fact_drops_the_row_on_the_same_pass() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();
@@ -81,7 +81,7 @@ async fn s22_engine_a_resolver_returning_none_ends_every_session_of_that_princip
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

@@ -20,7 +20,7 @@ const POLL: Duration = Duration::from_millis(50);
 async fn s02_an_attach_that_finalizes_after_engine_shutdown_is_refused_never_left_live() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

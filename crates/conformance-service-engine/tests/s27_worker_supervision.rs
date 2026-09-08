@@ -17,7 +17,7 @@ const POLL: Duration = Duration::from_millis(50);
 async fn s27_a_worker_that_stops_before_shutdown_takes_the_pod_down_and_run_returns_err() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let victim = db
         .pool_as(db.app_role())
         .await

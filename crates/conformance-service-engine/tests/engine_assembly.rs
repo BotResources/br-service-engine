@@ -29,7 +29,7 @@ async fn the_whole_engine_assembles_boots_serves_and_shuts_down_through_its_publ
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let mirrored = Uuid::now_v7();
     publish_roster(

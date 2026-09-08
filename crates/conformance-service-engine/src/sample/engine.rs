@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use br_util_axum_readiness::ReadinessHandle;
-use br_util_nats_fabric::Fabric;
 use service_engine::Engine;
 use service_engine::config::EngineConfig;
 use service_engine::cron::Schedule;
 use service_engine::name::{ChannelName, PodId, RelayName};
+use service_engine::nats::Nats;
 
 use crate::infra::TestDb;
 use crate::sample::assignment::{Assignment, AssignmentProjector};
@@ -31,14 +31,14 @@ pub fn engine_config(channel: &str, pod: &str) -> EngineConfig {
 
 pub async fn boot_render_engine(
     db: &TestDb,
-    fabric: Fabric,
+    nats: Nats,
     channel: &str,
     pod: &str,
 ) -> Engine<SamplePrincipal> {
     let mut engine = Engine::boot(
         engine_config(channel, pod),
         db.app_pool().clone(),
-        fabric,
+        nats,
         ReadinessHandle::ready(),
     )
     .await
@@ -60,14 +60,14 @@ pub async fn boot_render_engine(
 
 pub async fn boot_sample_engine(
     db: &TestDb,
-    fabric: Fabric,
+    nats: Nats,
     channel: &str,
     pod: &str,
 ) -> Engine<SamplePrincipal> {
     let mut engine = Engine::boot(
         engine_config(channel, pod),
         db.app_pool().clone(),
-        fabric.clone(),
+        nats.clone(),
         ReadinessHandle::ready(),
     )
     .await
@@ -100,7 +100,7 @@ pub async fn boot_sample_engine(
     let transport = engine.transport_arc();
     engine
         .register_mirror(directory_mirror_handle(
-            fabric,
+            nats,
             db.app_pool().clone(),
             transport,
         ))

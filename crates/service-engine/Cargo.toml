@@ -8,15 +8,13 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-directory = ["dep:async-trait", "dep:br-util-directory"]
+test-support = []
 
 [dependencies]
-async-trait = { workspace = true, optional = true }
+async-nats = { workspace = true }
 br-core-auth = { workspace = true }
 br-core-integration = { workspace = true }
 br-util-axum-readiness = { workspace = true }
-br-util-directory = { workspace = true, features = ["consumer"], optional = true }
-br-util-nats-fabric = { workspace = true, features = ["outbox"] }
 bytes = { workspace = true }
 chrono = { workspace = true }
 croner = { workspace = true }

@@ -27,7 +27,7 @@ async fn s13_the_beat_alone_repairs_a_pending_session_with_no_impact_after_the_o
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();
@@ -113,7 +113,7 @@ async fn s13_the_beat_ends_a_session_whose_repair_never_succeeds() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

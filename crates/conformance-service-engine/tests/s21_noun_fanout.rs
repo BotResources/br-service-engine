@@ -105,7 +105,7 @@ async fn s21_the_engine_checks_projector_keys_against_the_bound_noun_not_the_fir
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         engine_config("se_s21_noun_bind", "pod-s21"),

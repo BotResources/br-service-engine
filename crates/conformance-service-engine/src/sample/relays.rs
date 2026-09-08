@@ -10,7 +10,7 @@ use service_engine::relays::kv::{KvChange, KvSource, Versioned};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use br_util_nats_fabric::KvKey;
+use service_engine::nats::KvKey;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SampleRoster {

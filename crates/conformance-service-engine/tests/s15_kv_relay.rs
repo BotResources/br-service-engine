@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use br_util_nats_fabric::{KvKey, PublishedLanguageReader};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::{SampleKvSource, SampleRoster};
 use service_engine::housekeeping::relay::RelayRuntime;
 use service_engine::name::{PodId, RelayName};
+use service_engine::nats::KvKey;
 use service_engine::relays::kv::KvDrainRelay;
 use sqlx::PgPool;
 
@@ -16,8 +16,9 @@ async fn s15_the_kv_relay_publishes_monotonically_under_leadership() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
-    let reader = PublishedLanguageReader::<SampleRoster>::open(&fabric)
+    let fabric = nats.nats().await;
+    let reader = fabric
+        .published_language::<SampleRoster>()
         .await
         .expect("the fixed bucket binds");
     let key = KvKey::new(ROSTER_KEY).expect("a valid published-language key");
@@ -90,8 +91,9 @@ async fn s15_a_change_requeued_mid_drain_is_never_marked_applied_unpublished() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
-    let reader = PublishedLanguageReader::<SampleRoster>::open(&fabric)
+    let fabric = nats.nats().await;
+    let reader = fabric
+        .published_language::<SampleRoster>()
         .await
         .expect("the fixed bucket binds");
     let key = KvKey::new(ROSTER_KEY).expect("a valid published-language key");
@@ -163,8 +165,9 @@ async fn s15_a_stale_put_after_a_newer_retract_never_resurrects_the_key() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
-    let reader = PublishedLanguageReader::<SampleRoster>::open(&fabric)
+    let fabric = nats.nats().await;
+    let reader = fabric
+        .published_language::<SampleRoster>()
         .await
         .expect("the fixed bucket binds");
     let key = KvKey::new(ROSTER_KEY).expect("a valid published-language key");

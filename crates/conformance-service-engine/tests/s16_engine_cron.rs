@@ -21,7 +21,7 @@ async fn s16_engine_a_cron_job_runs_once_per_slot_on_the_beat() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let mut engine = Engine::<SamplePrincipal>::boot(

@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
-use br_util_nats_fabric::{DEFAULT_MAX_MESSAGES, OutboxRelay, RelayHealth};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::{
     DIRECTORY_MIRROR, RecordingTransport, SampleDirectory, backfills, directory_mirror_handle,
@@ -16,7 +15,9 @@ use service_engine::housekeeping::ready::{REASON_RELAY_DEGRADED, ReadinessAssemb
 use service_engine::housekeeping::relay::RelayRuntime;
 use service_engine::impact::Impact;
 use service_engine::name::{PodId, RelayName};
-use service_engine::relays::outbox::FabricOutboxRelay;
+use service_engine::nats::RelayHealth;
+use service_engine::relays::outbox::HostedOutboxRelay;
+use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
@@ -28,7 +29,7 @@ async fn s17_readiness_is_down_until_the_directory_mirror_converges_and_down_aga
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let mirrored = Uuid::now_v7();
     publish_roster(
@@ -111,13 +112,13 @@ async fn s17_readiness_is_down_until_the_directory_mirror_converges_and_down_aga
 async fn s17_a_fabric_relay_that_cannot_publish_takes_a_converged_service_out_of_rotation() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
 
     let mut tx = db.app_pool().begin().await.expect("the write transaction");
     conformance_service_engine::sample::stage_outbox_row(&mut tx, "degraded").await;
     tx.commit().await.expect("commit");
 
-    let hosted = FabricOutboxRelay::hosting(
+    let hosted = HostedOutboxRelay::hosting(
         RelayName::from_static("integration_outbox"),
         OutboxRelay::new(db.app_pool().clone(), fabric.clone()),
         DEFAULT_MAX_MESSAGES,

@@ -63,17 +63,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-trait"
-version = "0.1.92"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.4",
-]
-
-[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -192,17 +181,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "br-core-directory"
-version = "1.3.0"
-source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "br-core-events"
 version = "1.3.0"
 source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
@@ -251,42 +229,6 @@ source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28
 dependencies = [
  "axum",
  "tracing",
-]
-
-[[package]]
-name = "br-util-directory"
-version = "1.3.0"
-source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
-dependencies = [
- "async-trait",
- "br-core-directory",
- "br-util-nats-fabric",
- "br-util-postgres",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "br-util-nats-fabric"
-version = "1.3.0"
-source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
-dependencies = [
- "async-nats",
- "async-trait",
- "br-core-events",
- "br-core-integration",
- "futures-util",
- "metrics",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -367,14 +309,10 @@ name = "conformance-service-engine"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "async-trait",
  "br-core-auth",
- "br-core-directory",
  "br-core-integration",
  "br-core-kernel",
  "br-util-axum-readiness",
- "br-util-directory",
- "br-util-nats-fabric",
  "br-util-postgres",
  "chrono",
  "futures-util",
@@ -1854,12 +1792,10 @@ dependencies = [
 name = "service-engine"
 version = "0.1.0"
 dependencies = [
- "async-trait",
+ "async-nats",
  "br-core-auth",
  "br-core-integration",
  "br-util-axum-readiness",
- "br-util-directory",
- "br-util-nats-fabric",
  "bytes",
  "chrono",
  "croner",

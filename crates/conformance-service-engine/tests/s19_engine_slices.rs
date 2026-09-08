@@ -20,7 +20,7 @@ async fn s19_engine_the_note_slice_runs_end_to_end_with_the_assignment_slice_unr
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    let fabric = nats.fabric().await;
+    let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let home = Uuid::now_v7();

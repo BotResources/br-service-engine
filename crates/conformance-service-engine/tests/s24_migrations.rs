@@ -47,47 +47,6 @@ async fn s24_the_engine_set_and_a_timestamp_versioned_service_set_apply_in_every
     db.cleanup().await;
 }
 
-#[tokio::test]
-async fn s24_a_set_that_does_not_tolerate_a_shared_ledger_must_be_applied_first() {
-    let db = TestDb::fresh().await;
-
-    let directory_first = db.spare_database("directory_first").await;
-    br_util_directory::migrate(&directory_first)
-        .await
-        .expect("the directory set applies on an empty ledger");
-    service_engine::schema::migrate(&directory_first)
-        .await
-        .expect("the engine set tolerates versions it did not write");
-    sample::migrate(&directory_first)
-        .await
-        .expect("the service set tolerates versions it did not write");
-
-    let directory_last = db.spare_database("directory_last").await;
-    service_engine::schema::migrate(&directory_last)
-        .await
-        .expect("the engine set applies on an empty ledger");
-    let refused = br_util_directory::migrate(&directory_last)
-        .await
-        .expect_err(
-            "the directory set does not ignore missing versions, so it cannot follow another set",
-        );
-    assert!(
-        matches!(
-            &refused,
-            br_util_directory::DirectoryError::Migrate(
-                sqlx::migrate::MigrateError::VersionMissing(_)
-            )
-        ),
-        "the refusal is the shared-ledger one, not a schema conflict: {refused}"
-    );
-    assert!(
-        !table_exists(&directory_last, "known_users").await,
-        "a refused set leaves nothing half-applied"
-    );
-
-    db.cleanup().await;
-}
-
 async fn reserved_versions(pool: &PgPool) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations WHERE version BETWEEN $1 AND $2")
         .bind(RESERVED_VERSION_MIN)

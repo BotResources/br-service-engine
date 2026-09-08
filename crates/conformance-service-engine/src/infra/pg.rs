@@ -101,9 +101,6 @@ impl TestDb {
             .await;
         }
 
-        br_util_directory::migrate(&owner)
-            .await
-            .expect("apply the directory migration set");
         service_engine::schema::migrate(&owner)
             .await
             .expect("apply the engine migration set");
