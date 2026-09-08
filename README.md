@@ -53,8 +53,8 @@ fills its part by adding module files and one method body.
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then — today only `register_offer` (U7), `register_blobs` (U9) and
-`erase` (U11). `register_reaction` (U2) is live: it records a reaction and
+until then — today only `register_offer` (U7) and `erase` (U11).
+`register_reaction` (U2) is live: it records a reaction and
 derives its inbound subscription, and the engine-owned inbound loop (durable
 consumer, ack-after-durable, `Disposition` routing, poison budget with the
 `service_engine.dead_letter` table and its retry/discard gestures, the
@@ -80,12 +80,30 @@ lane; name the bucket with `EngineConfig::with_service`. `register_mirror` (U8)
 projects a consumed KV offer into `known_*` through the direct lane, and
 `declare_scopes` (U10) runs the boot scope-declaration handshake that gates
 readiness until Identity confirms.
+`register_blobs` (U9) is filled: it records a `BlobPolicy` per blob kind and, at
+boot, binds the service's S3-compatible object-storage bucket (bind-only,
+fail-loud, never created — configured with `EngineConfig::with_blob_storage`).
+`cx.blob::<Kind>(name, content_type)` stages a blob **reference row**
+(`service_engine.blob`: reference, size, owner, state) inside the pipeline
+transaction, so it commits with the referencing aggregate and a rollback leaves
+no row; it returns a typed `UploadUrl`, and `Engine::download_url` a
+`DownloadUrl`, both S3 SigV4 presigned and short-lived. `UploadUrl`/`DownloadUrl`
+are not `Serialize`, so — like `OneShot` — a URL is structurally unable to enter
+a view, an impact, an offer, an outbox row or a chunk; only the opaque reference
+travels. The beat runs a reaper that deletes an abandoned upload (a `pending`
+row past `orphan_after` whose object never landed) and an orphan
+(a released reference past `orphan_after`), and `Engine::purge_person_blobs` is
+the erase hook U11 calls to drop a person's blobs from storage and the reference
+table. Presigning uses the sans-IO `rusty-s3` crate for SigV4 and `reqwest`
+(rustls) as the thin HTTP client for the engine's own bucket HEAD/DELETE — no
+cloud SDK.
 
 ## Conformance battery
 
 The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`
-(fallback `DATABASE_URL`) and `nats-server` on `PATH` (it spawns its own broker
-per test).
+(fallback `DATABASE_URL`), `nats-server` on `PATH` (it spawns its own broker
+per test), and — for the blob scenarios — `minio` on `PATH` (it spawns its own
+S3-compatible server per test).
 
 ```bash
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \

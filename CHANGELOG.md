@@ -412,6 +412,44 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   restart-and-backoff path as an error. The directory roster is the first
   instance, wired in the conformance sample.
 
+### Added (0.1.0 rework, unit U9 — blobs / S3-compatible object storage)
+
+- `register_blobs::<Kind>(BlobPolicy)` records a per-kind policy (`max_bytes`,
+  `orphan_after`) and `cx.blob::<Kind>(name, content_type)` (plus
+  `cx.blob_owned` carrying an owner for erasure) replaces the pipeline's
+  `NotYet`: it stages a blob **reference row** — reference, object key, kind,
+  content type, file name, owner, state — in `service_engine.blob` inside the
+  write pipeline's transaction, so the reference commits with the referencing
+  aggregate and a rolled-back handler leaves neither. `cx.release_blob(ref)`
+  marks a reference orphaned in the same transaction when a row stops
+  referencing it.
+- The service's S3-compatible bucket is bound at boot (bind-only, fail-loud via
+  a HEAD, never created — `EngineConfig::with_blob_storage(BlobConfig)`); a
+  registered blob kind with no configured storage, or an absent bucket, holds
+  readiness DOWN and fails `run` loud (`EngineError::BlobBucketAbsent`).
+- Upload and download URLs are S3 SigV4 presigned and short-lived. `UploadUrl`
+  (from `cx.blob`) and `DownloadUrl` (from `Engine::download_url`) do not
+  implement `Serialize`, so — mirroring `OneShot` — a URL is structurally unable
+  to enter a view, an impact, an offer, an outbox row or a chunk; a view carries
+  only the opaque `BlobRef`, and the client asks for a URL. Presigning uses the
+  sans-IO `rusty-s3` crate; `reqwest` (rustls, no default features) is the thin
+  HTTP client for the engine's own bucket/object HEAD and DELETE. No cloud SDK.
+- A beat reaper deletes an abandoned upload (a `pending` reference past
+  `orphan_after` whose object never landed — it also promotes one whose object
+  did land) and an orphan (a released reference past `orphan_after`, whose
+  object it deletes from storage), claiming rows `FOR UPDATE SKIP LOCKED` so
+  pods never double-reap; its cadence is `EngineConfig::with_blob_reaper_interval`.
+- `Engine::purge_person_blobs(person)` is the erase hook U11 calls: it deletes
+  every object a person owns and its reference rows.
+- New engine migration `service_engine.blob` (reserved range) and the tenth
+  engine table; six real-infra conformance scenarios (`s41`–`s46`) run against a
+  MinIO the battery spawns per test (a `TestMinio` alongside `TestNats`), and the
+  conformance CI job installs `minio`: the reference commits with the aggregate
+  (rollback leaves no row), a presigned upload/download round-trips real bytes, a
+  presigned URL never appears in the delivered view or impact stream, the reaper
+  removes an abandoned upload and an orphan, the erase hook purges a person, and
+  an absent bucket fails boot loud.
+
 ### Deployment constraint
 
 - No transaction-mode pooler in front of an engine service: `LISTEN` is session
