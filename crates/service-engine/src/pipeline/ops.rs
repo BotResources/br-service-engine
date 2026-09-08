@@ -50,11 +50,26 @@ impl<'a> Ops<'a> {
     }
 
     pub async fn save<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
-        A::Store::save(self.conn, aggregate, &[]).await
+        let outcome = A::Store::save(self.conn, aggregate, aggregate.pending_events()).await;
+        self.note_terminal(&outcome);
+        outcome
     }
 
     pub async fn create<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
-        A::Store::create(self.conn, aggregate, &[]).await
+        let outcome = A::Store::create(self.conn, aggregate, aggregate.pending_events()).await;
+        self.note_terminal(&outcome);
+        outcome
+    }
+
+    fn note_terminal(&mut self, outcome: &Result<(), EngineError>) {
+        if self.staged.terminal_violation.is_some() {
+            return;
+        }
+        if let Err(EngineError::Db(db)) = outcome
+            && crate::inbound::sqlx_is_terminal(db)
+        {
+            self.staged.terminal_violation = Some(db.to_string());
+        }
     }
 
     pub fn impact<N: Noun>(&mut self, key: &N::Key, dims: Dims) -> Result<(), EngineError> {

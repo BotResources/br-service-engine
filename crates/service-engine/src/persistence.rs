@@ -43,4 +43,8 @@ pub trait Aggregate: Send + Sync + Sized + 'static {
     type Store: Persistence<Aggregate = Self>;
 
     fn key(&self) -> <Self::Store as Persistence>::Key;
+
+    fn pending_events(&self) -> &[<Self::Store as Persistence>::Event] {
+        &[]
+    }
 }

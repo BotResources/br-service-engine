@@ -93,6 +93,10 @@ impl DirectPipeline {
         };
         if let Err(error) = handler {
             let _ = tx.rollback().await;
+            let error = match staged.terminal_violation.take() {
+                Some(detail) => DispatchError::terminal(detail),
+                None => error,
+            };
             return DispatchOutcome::Failed(error);
         }
         if !staged.is_within(self.impacts_per_commit) {

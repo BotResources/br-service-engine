@@ -25,6 +25,7 @@ pub(crate) struct Staged {
     pub scheduled_impacts: Vec<(NounName, KeyBytes, Timestamp)>,
     pub outbox: Vec<OutboxRecord>,
     pub scheduled_messages: Vec<ScheduledMessage>,
+    pub terminal_violation: Option<String>,
 }
 
 impl Staged {
