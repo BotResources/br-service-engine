@@ -6,7 +6,7 @@ use service_engine::pipeline::{Bulk, Mutation, MutationFault, MutationInput, One
 use uuid::Uuid;
 
 use crate::sample::principal::SamplePrincipal;
-use crate::sample::widget::{Widget, WidgetRow};
+use crate::sample::widget::{Widget, WidgetProjector, WidgetRow};
 
 pub use crate::sample::pipeline_support::{
     insert_widget, publish_command, publish_raw, wait_for_widget, widget_count, widget_label,
@@ -137,7 +137,7 @@ pub fn import_widgets<'m>(
             };
             cx.create(&widget).await?;
         }
-        cx.impact_all::<Widget>()?;
+        cx.impact_all(WidgetProjector);
         Ok(())
     })
 }

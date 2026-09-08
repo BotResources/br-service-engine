@@ -3,11 +3,11 @@ use std::ops::{Deref, DerefMut};
 use futures_util::future::BoxFuture;
 
 use crate::error::EngineError;
-use crate::impact::{Dims, Impact};
+use crate::impact::Impact;
 use crate::pipeline::ops::Ops;
 use crate::presence::{Presence, PresenceHandle, PresenceKey};
 use crate::principal::Principal;
-use crate::wire::{KeyBytes, Noun};
+use crate::projector::Projector;
 
 pub(crate) type PresencePut =
     Box<dyn FnOnce() -> BoxFuture<'static, Result<(), EngineError>> + Send>;
@@ -100,15 +100,11 @@ impl<'a, P: Principal> Bulk<'a, P> {
         self.principal
     }
 
-    pub fn impact_all<N: Noun>(&mut self) -> Result<(), EngineError> {
-        let key = KeyBytes::encode(&serde_json::Value::Null)?;
-        self.ops.staged.impacts.push(Impact::ResourceChanged {
-            noun: N::NAME,
-            key,
-            dims: Dims::ALL,
-            cause: None,
-        });
-        Ok(())
+    pub fn impact_all<Pr: Projector<Principal = P>>(&mut self, projector: Pr) {
+        self.ops
+            .staged
+            .impacts
+            .push(Impact::projector_reset(projector.name()));
     }
 }
 

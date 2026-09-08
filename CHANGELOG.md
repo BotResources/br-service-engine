@@ -112,16 +112,27 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   reactions consumes over the real pipeline with no `test-support` seam; the
   loop is stopped and joined on shutdown.
 - Handler contexts `Reaction`, `Mutation<P>` and `Bulk<P>` over a shared `Ops`
-  core: `cx.load` / `cx.save` / `cx.create` through the `Persistence` trait,
-  `cx.impact` / `cx.impact_caused` / `cx.impact_at` (a scheduled impact on the
-  DB clock) / `cx.impact_all` (bulk, one coarse refresh per noun), `cx.command`
-  / `cx.emit` (outbox rows), `cx.present` (delegates to U6's presence handle,
-  flushed after commit), `cx.seal` (delegates to the accumulator seal),
-  `cx.schedule_at` (a scheduled reaction), `cx.now`, and `cx.blob` (a typed
-  `NotYet` until U9). Impacts, outbox rows, scheduled impacts and scheduled
-  reactions are staged inside the effect transaction; an ordinary transaction
-  that dirties more than `impacts_per_commit` keys is refused and named the bulk
-  path.
+  core. The shared `Ops` methods are `cx.load` / `cx.save` / `cx.create`
+  through the `Persistence` trait, `cx.impact` / `cx.impact_caused` /
+  `cx.impact_at` (a scheduled impact on the DB clock), `cx.command` / `cx.emit`
+  (outbox rows), `cx.seal` (delegates to the accumulator seal), `cx.schedule_at`
+  (a scheduled reaction), `cx.now`, and `cx.blob` (a typed `NotYet` until U9).
+  `Mutation<P>` adds `cx.principal` and `cx.present`, which delegates to U6's
+  presence handle and is put after commit on the loss-tolerant presence lane —
+  a put that fails once the state has committed is logged, never turning a
+  committed mutation into a failed response. `Bulk<P>` adds `cx.principal` and
+  `cx.impact_all(projector)`, which stages one projector-reset impact so every
+  pod delivers a `Reset` of that projector's windows — a fixed `Keys` window
+  included — rather than one impact per key. Impacts, outbox rows, scheduled
+  impacts and scheduled reactions are staged inside the effect transaction; an
+  ordinary transaction that dirties more than `impacts_per_commit` keys is
+  refused and named the bulk path.
+- `register_projector` auto-binds the projector's noun to its key type (the
+  `add_projector` semantics), so a service that owns a domain noun with a
+  projector assembles it through the public authoring surface alone; binding a
+  noun by hand is no longer required and stays a `test-support` seam. A second
+  projector on the same noun with a different key type is still a typed
+  `NounKeyMismatch`.
 - `register_mutation` / `register_bulk` are live, keyed by `MutationInput::NAME`;
   `Engine::mutation_executor()` hands out a cloneable `MutationExecutor` that
   runs a registered mutation or bulk for a resolved principal and returns
@@ -147,15 +158,16 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 - `engine/mod.rs` is split by capability into `engine/{mod,register,mutate,run}`
   so no file exceeds the size limit, and the wave-1 minor is fixed: the presence
   watch task is now stopped and joined on the scope-handshake early returns.
-- Conformance scenarios `s33`–`s39` against real infra: a mutation gate deny
+- Conformance scenarios `s33`–`s40` against real infra: a mutation gate deny
   (typed error with the affordance's reason) and allow (commit → impact →
   session `Upsert` with the flipped affordance) through one pipeline; a booted
   engine consuming a NATS command through the pipeline exactly once via the
   claim; a `OneShot` secret returned only on the synchronous channel; a row
   lock timeout retried (never dead-lettered) and committed once the lock frees;
   an emitted event staged in the write transaction and published by the leader
-  relay; `schedule_at` firing on the DB clock; and dead-lettering staging an
-  ops-view impact.
+  relay; `schedule_at` firing on the DB clock; dead-lettering staging an
+  ops-view impact; and a bulk `impact_all` resetting a fixed `Keys` window on
+  the session (`s40`), which a per-key impact would have missed.
 
 ### Added (0.1.0 rework, unit U5)
 

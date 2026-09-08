@@ -47,6 +47,7 @@ impl Interest {
             Impact::PrincipalFactsChanged { deps, .. } => {
                 !self.deps.is_empty() && (deps.is_empty() || self.deps.intersects(*deps))
             }
+            Impact::ProjectorReset { .. } => false,
         }
     }
 }

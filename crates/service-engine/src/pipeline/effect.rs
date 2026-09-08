@@ -6,7 +6,7 @@ use sqlx::PgPool;
 
 use crate::accumulator::AccumulatorRuntime;
 use crate::pipeline::context::{Bulk, Mutation};
-use crate::pipeline::dispatch::set_lock_timeout;
+use crate::pipeline::dispatch::{begin_scoped, flush_and_commit};
 use crate::pipeline::mutation::MutationInput;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::staged::Staged;
@@ -49,15 +49,9 @@ where
     M: MutationInput,
     H: for<'m> Fn(&'m mut Mutation<'m, P>, M) -> BoxFuture<'m, Result<M::Output, M::Error>>,
 {
-    let mut tx = services
-        .pool
-        .begin()
+    let mut tx = begin_scoped(&services.pool, services.lock_timeout)
         .await
         .map_err(|error| MutationError::internal(error.to_string()))?;
-    if let Err(error) = set_lock_timeout(&mut tx, services.lock_timeout).await {
-        let _ = tx.rollback().await;
-        return Err(MutationError::internal(error.to_string()));
-    }
     let mut staged = Staged::default();
     let mut presence_puts = Vec::new();
     let result = {
@@ -86,17 +80,18 @@ where
             services.impacts_per_commit
         )));
     }
-    if let Err(error) = staged.flush(&mut tx, services.transport.as_ref()).await {
-        let _ = tx.rollback().await;
-        return Err(MutationError::internal(error.to_string()));
-    }
-    tx.commit()
+    flush_and_commit(tx, &staged, services.transport.as_ref())
         .await
         .map_err(|error| MutationError::internal(error.to_string()))?;
     for put in presence_puts {
-        put()
-            .await
-            .map_err(|error| MutationError::internal(error.to_string()))?;
+        if let Err(error) = put().await {
+            tracing::warn!(
+                reason = %crate::chain::describe(&error),
+                "a presence put failed after the mutation committed; the state change stands \
+                 and the next value on the loss-tolerant presence lane corrects it, so the \
+                 committed mutation is not reported as failed"
+            );
+        }
     }
     Ok(output)
 }
@@ -112,15 +107,9 @@ where
     M: MutationInput,
     H: for<'m> Fn(&'m mut Bulk<'m, P>, M) -> BoxFuture<'m, Result<M::Output, M::Error>>,
 {
-    let mut tx = services
-        .pool
-        .begin()
+    let mut tx = begin_scoped(&services.pool, services.lock_timeout)
         .await
         .map_err(|error| MutationError::internal(error.to_string()))?;
-    if let Err(error) = set_lock_timeout(&mut tx, services.lock_timeout).await {
-        let _ = tx.rollback().await;
-        return Err(MutationError::internal(error.to_string()));
-    }
     let mut staged = Staged::default();
     let result = {
         let ops = Ops::new(
@@ -139,11 +128,7 @@ where
             return Err(MutationError::refused(error.reason(), error.to_string()));
         }
     };
-    if let Err(error) = staged.flush(&mut tx, services.transport.as_ref()).await {
-        let _ = tx.rollback().await;
-        return Err(MutationError::internal(error.to_string()));
-    }
-    tx.commit()
+    flush_and_commit(tx, &staged, services.transport.as_ref())
         .await
         .map_err(|error| MutationError::internal(error.to_string()))?;
     Ok(output)

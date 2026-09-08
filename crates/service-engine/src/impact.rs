@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::EngineError;
-use crate::name::{ForeignId, Namespace, NounName};
+use crate::name::{ForeignId, Namespace, NounName, ProjectorName};
 use crate::principal::PrincipalId;
 use crate::wire::{Cause, KeyBytes, Noun, encode_key};
 
@@ -106,6 +106,9 @@ pub enum Impact {
     ForeignChanged {
         foreign: ForeignKey,
     },
+    ProjectorReset {
+        projector: ProjectorName,
+    },
 }
 
 impl Impact {
@@ -137,6 +140,10 @@ impl Impact {
 
     pub fn foreign(foreign: ForeignKey) -> Self {
         Self::ForeignChanged { foreign }
+    }
+
+    pub fn projector_reset(projector: ProjectorName) -> Self {
+        Self::ProjectorReset { projector }
     }
 
     pub fn cause(&self) -> Option<&Cause> {
@@ -207,6 +214,7 @@ mod tests {
             caused,
             Impact::principal_facts(uuid::Uuid::now_v7().into(), Deps::bit(2).unwrap()),
             Impact::foreign(ForeignKey::new("identity.user", &key.to_string()).unwrap()),
+            Impact::projector_reset(ProjectorName::from_static("assignments")),
         ] {
             let json = serde_json::to_string(&impact).unwrap();
             assert_eq!(serde_json::from_str::<Impact>(&json).unwrap(), impact);

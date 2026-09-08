@@ -20,7 +20,7 @@ use crate::sample::presence::Typing;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::relays::RowClaimSampleRelay;
 use crate::sample::stream::NoteBody;
-use crate::sample::widget::{Widget, WidgetProjector};
+use crate::sample::widget::WidgetProjector;
 
 pub const SAMPLE_RELAY: RelayName = RelayName::from_static("sample_rows");
 pub const SAMPLE_JOB: &str = "sample_heartbeat";
@@ -147,13 +147,12 @@ pub async fn boot_pipeline_engine(
     )
     .await
     .expect("the pipeline engine boots under the low-privilege app role");
-    engine.bind_noun::<Widget>().expect("bind the widget noun");
     engine
         .register_principal_resolver(SamplePrincipalResolver)
         .expect("register the principal resolver");
     engine
         .register_projector(WidgetProjector)
-        .expect("register the widget projector");
+        .expect("register the widget projector, which auto-binds the widget noun");
     engine
         .register_mutation::<CloseWidget, _>(close_widget)
         .expect("register the close mutation");

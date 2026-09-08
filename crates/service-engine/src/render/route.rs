@@ -32,6 +32,7 @@ impl WindowWork {
 #[derive(Debug, Default)]
 pub(crate) struct SessionWork {
     pub(crate) windows: BTreeMap<usize, WindowWork>,
+    pub(crate) reset: bool,
 }
 
 impl SessionWork {
@@ -40,7 +41,7 @@ impl SessionWork {
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.windows.values().all(WindowWork::is_empty)
+        !self.reset && self.windows.values().all(WindowWork::is_empty)
     }
 }
 
@@ -201,6 +202,24 @@ fn route_impact<P: Principal>(
                 {
                     entry.repopulate = true;
                 }
+            }
+        }
+        Impact::ProjectorReset { projector } => {
+            let mut matched = false;
+            for window_index in 0..session.windows.len() {
+                let window = &session.windows[window_index];
+                if &window.projector != projector {
+                    continue;
+                }
+                matched = true;
+                let entry = work.window(window_index);
+                for key in &window.members {
+                    entry.dirty.entry(key.clone()).or_default();
+                }
+                entry.repopulate = true;
+            }
+            if matched {
+                work.reset = true;
             }
         }
         Impact::PrincipalFactsChanged { principal, .. } => {

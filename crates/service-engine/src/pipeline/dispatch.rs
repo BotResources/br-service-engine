@@ -52,14 +52,10 @@ impl DirectPipeline {
                 msg.reaction
             )));
         };
-        let mut tx = match self.pool.begin().await {
+        let mut tx = match begin_scoped(&self.pool, self.lock_timeout).await {
             Ok(tx) => tx,
             Err(error) => return DispatchOutcome::Failed(classify(&error)),
         };
-        if let Err(error) = set_lock_timeout(&mut tx, self.lock_timeout).await {
-            let _ = tx.rollback().await;
-            return DispatchOutcome::Failed(classify(&error));
-        }
         match claim(&mut tx, msg.message_id, &msg.reaction).await {
             Ok(Claimed::Duplicate) => {
                 let _ = tx.rollback().await;
@@ -108,13 +104,9 @@ impl DirectPipeline {
                 self.impacts_per_commit
             )));
         }
-        if let Err(error) = staged.flush(&mut tx, self.transport.as_ref()).await {
-            let _ = tx.rollback().await;
-            return DispatchOutcome::Failed(classify_engine(&error));
-        }
-        match tx.commit().await {
+        match flush_and_commit(tx, &staged, self.transport.as_ref()).await {
             Ok(()) => DispatchOutcome::Applied(Applied::Committed),
-            Err(error) => DispatchOutcome::Failed(classify(&error)),
+            Err(error) => DispatchOutcome::Failed(classify_engine(&error)),
         }
     }
 }
@@ -142,6 +134,30 @@ pub(crate) async fn set_lock_timeout(
         .execute(conn)
         .await
         .map(|_| ())
+}
+
+pub(crate) async fn begin_scoped(
+    pool: &PgPool,
+    lock_timeout: Duration,
+) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    if let Err(error) = set_lock_timeout(&mut tx, lock_timeout).await {
+        let _ = tx.rollback().await;
+        return Err(error);
+    }
+    Ok(tx)
+}
+
+pub(crate) async fn flush_and_commit(
+    mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
+    staged: &Staged,
+    transport: &dyn ImpactTransport,
+) -> Result<(), EngineError> {
+    if let Err(error) = staged.flush(&mut tx, transport).await {
+        let _ = tx.rollback().await;
+        return Err(error);
+    }
+    tx.commit().await.map_err(EngineError::from)
 }
 
 pub(crate) fn classify(error: &sqlx::Error) -> DispatchError {

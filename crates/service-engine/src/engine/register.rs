@@ -36,7 +36,7 @@ impl<P: Principal> Engine<P> {
         &mut self,
         p: Pr,
     ) -> Result<(), EngineError> {
-        self.with_registry(|registry| registry.register_projector(p))
+        self.with_registry(|registry| registry.add_projector(p))
     }
 
     pub fn register_accumulator<A: Accumulator>(&mut self, a: A) -> Result<(), EngineError> {

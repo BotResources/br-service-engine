@@ -95,7 +95,17 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     );
     let vanished = repopulate(ctx, table, &mut work, &mut report, &mut faults).await?;
     work.retain(|id, _| !faults.contains(*id));
+    let reset_sessions: Vec<SessionId> = work
+        .iter()
+        .filter(|(_, session_work)| session_work.reset)
+        .map(|(id, _)| *id)
+        .collect();
     let plans = plan(ctx, table, work)?;
+    for id in reset_sessions {
+        if let Some(session) = table.get_mut(id) {
+            session.reset_pending = true;
+        }
+    }
 
     let mut groups: BTreeMap<GroupKey, Group<P>> = BTreeMap::new();
     for windows in plans.values() {
