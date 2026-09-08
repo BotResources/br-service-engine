@@ -4,8 +4,11 @@ pub const PASS_DURATION_SECONDS: &str = "service_engine_pass_duration_seconds";
 pub const PASS_IMPACTS: &str = "service_engine_pass_impacts";
 pub const PASS_DELTAS: &str = "service_engine_pass_deltas";
 pub const PASS_OVERFLOWS_TOTAL: &str = "service_engine_pass_overflows_total";
+pub const IMPACTS_COMMITTED_TOTAL: &str = "service_engine_impacts_committed_total";
+pub const IMPACTS_RECEIVED_TOTAL: &str = "service_engine_impacts_received_total";
 pub const RESETS_TOTAL: &str = "service_engine_resets_total";
 pub const SESSIONS: &str = "service_engine_sessions";
+pub const SESSIONS_ENDED_TOTAL: &str = "service_engine_sessions_ended_total";
 pub const PENDING_SESSIONS: &str = "service_engine_pending_sessions";
 pub const COHORTS: &str = "service_engine_cohorts";
 pub const RELAY_DRAINS_TOTAL: &str = "service_engine_relay_drains_total";
@@ -19,14 +22,18 @@ pub const CHUNK_CONFLICTS_TOTAL: &str = "service_engine_chunk_conflicts_total";
 pub const NOTIFICATION_QUEUE_USAGE: &str = "service_engine_notification_queue_usage";
 pub const TRANSPORT_RECONNECTS_TOTAL: &str = "service_engine_transport_reconnects_total";
 pub const MIRROR_RESTARTS_TOTAL: &str = "service_engine_mirror_restarts_total";
+pub const DEPENDENCY_UP: &str = "service_engine_dependency_up";
 
 pub const ALL: &[&str] = &[
     PASS_DURATION_SECONDS,
     PASS_IMPACTS,
     PASS_DELTAS,
     PASS_OVERFLOWS_TOTAL,
+    IMPACTS_COMMITTED_TOTAL,
+    IMPACTS_RECEIVED_TOTAL,
     RESETS_TOTAL,
     SESSIONS,
+    SESSIONS_ENDED_TOTAL,
     PENDING_SESSIONS,
     COHORTS,
     RELAY_DRAINS_TOTAL,
@@ -40,11 +47,16 @@ pub const ALL: &[&str] = &[
     NOTIFICATION_QUEUE_USAGE,
     TRANSPORT_RECONNECTS_TOTAL,
     MIRROR_RESTARTS_TOTAL,
+    DEPENDENCY_UP,
 ];
 
+pub const LABEL_SERVICE: &str = "service";
+pub const LABEL_POD: &str = "pod";
 pub const LABEL_JOB: &str = "job";
 pub const LABEL_MIRROR: &str = "mirror";
 pub const LABEL_OUTCOME: &str = "outcome";
+pub const LABEL_REASON: &str = "reason";
+pub const LABEL_DEPENDENCY: &str = "dependency";
 
 #[cfg(test)]
 mod tests {

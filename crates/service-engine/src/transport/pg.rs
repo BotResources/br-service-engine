@@ -113,6 +113,7 @@ impl ImpactTransport for PgListenNotify {
                     .await
                     .map_err(TransportError::Stage)?;
             }
+            crate::observe::record_impacts_committed(impacts.len());
             Ok(())
         })
     }

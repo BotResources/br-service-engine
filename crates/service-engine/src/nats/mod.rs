@@ -1,7 +1,9 @@
+mod grace;
 mod health;
 mod key;
 mod kv;
 
+pub use grace::{NatsCondition, NatsHealth, NatsHealthChannel, NatsHealthReceiver};
 pub use health::{REASON_NO_STREAM, RelayHealth, RelayHealthChannel, RelayHealthReceiver};
 pub use key::{KvKey, KvKeyError, KvPrefix};
 pub use kv::{KvBucket, KvEvent, KvWatch, Revision};

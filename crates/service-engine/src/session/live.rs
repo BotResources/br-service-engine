@@ -106,6 +106,7 @@ pub(crate) struct Session<P: Principal> {
     pub(crate) repair_pending: bool,
     pub(crate) repair_attempts: u32,
     pub(crate) touched_at: Instant,
+    pub(crate) attached_at: Instant,
 }
 
 impl<P: Principal> Session<P> {
@@ -130,6 +131,7 @@ impl<P: Principal> Session<P> {
             repair_pending: false,
             repair_attempts: 0,
             touched_at: Instant::now(),
+            attached_at: Instant::now(),
         }
     }
 

@@ -123,6 +123,22 @@ impl<P: Principal> SessionTable<P> {
         reaped
     }
 
+    pub(crate) fn reap_aged(&mut self, max_age: Duration) -> usize {
+        let now = Instant::now();
+        let aged: Vec<SessionId> = self
+            .sessions
+            .values()
+            .filter(|s| now.duration_since(s.attached_at) >= max_age)
+            .map(|s| s.id)
+            .collect();
+        for id in &aged {
+            if let Some(mut session) = self.sessions.remove(id) {
+                session.end();
+            }
+        }
+        aged.len()
+    }
+
     pub(crate) fn reap_expired(&mut self, ttl: Duration) -> usize {
         let now = Instant::now();
         let expired: Vec<SessionId> = self

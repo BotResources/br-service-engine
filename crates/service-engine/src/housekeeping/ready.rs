@@ -1,13 +1,35 @@
-use crate::nats::{RelayHealth, RelayHealthReceiver};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use crate::nats::{Nats, NatsCondition, NatsHealth, RelayHealth, RelayHealthReceiver};
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use tokio::sync::watch;
 
 use crate::boot::{REASON_LISTEN_FAILED, REASON_MIRRORS};
 use crate::housekeeping::health::{RelaysHealth, RelaysHealthReceiver};
 use crate::housekeeping::mirror::{MirrorsHealth, MirrorsHealthReceiver};
+use crate::observe::{
+    DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency,
+};
 
 pub const REASON_RELAY_DEGRADED: &str = "a relay is not draining";
 pub const REASON_WORKER_STOPPED: &str = "a background worker stopped";
+pub const REASON_NATS_UNREACHABLE: &str = "nats has been unreachable past its grace window";
+
+struct NatsProbe {
+    nats: Nats,
+    health: Mutex<NatsHealth>,
+}
+
+impl NatsProbe {
+    fn sample(&self) -> NatsCondition {
+        let reachable = self.nats.reachable();
+        self.health
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .observe(reachable, Instant::now())
+    }
+}
 
 pub struct ReadinessAssembly {
     handle: ReadinessHandle,
@@ -15,6 +37,7 @@ pub struct ReadinessAssembly {
     relays: Option<RelaysHealthReceiver>,
     fabric: Vec<RelayHealthReceiver>,
     listener: Option<watch::Receiver<bool>>,
+    nats: Option<NatsProbe>,
 }
 
 impl ReadinessAssembly {
@@ -26,6 +49,7 @@ impl ReadinessAssembly {
             relays: None,
             fabric: Vec::new(),
             listener: None,
+            nats: None,
         }
     }
 
@@ -36,6 +60,14 @@ impl ReadinessAssembly {
 
     pub fn with_listener(mut self, listener: watch::Receiver<bool>) -> Self {
         self.listener = Some(listener);
+        self
+    }
+
+    pub fn with_nats(mut self, nats: Nats, grace: Duration) -> Self {
+        self.nats = Some(NatsProbe {
+            nats,
+            health: Mutex::new(NatsHealth::new(grace)),
+        });
         self
     }
 
@@ -55,9 +87,18 @@ impl ReadinessAssembly {
             .map(|health| health.borrow().clone())
             .collect();
         let listener_up = self.listener.as_ref().map(|rx| *rx.borrow());
+        let nats = self.nats.as_ref().map(NatsProbe::sample);
+        let mirrors = self.mirrors.borrow().clone();
+        record_dependency(DEP_POSTGRES, true);
+        record_dependency(DEP_LISTENER, listener_up != Some(false));
+        record_dependency(DEP_MIRRORS, mirrors.converged());
+        if let Some(nats) = nats {
+            record_dependency(DEP_NATS, nats.is_up());
+        }
         verdict(
             listener_up,
-            &self.mirrors.borrow().clone(),
+            nats,
+            &mirrors,
             self.relays.as_ref().map(|r| r.borrow().clone()).as_ref(),
             &fabric,
         )
@@ -85,18 +126,23 @@ impl std::fmt::Debug for ReadinessAssembly {
             .field("mirrors", &self.mirrors.borrow().len())
             .field("relays", &self.relays.is_some())
             .field("fabric_relays", &self.fabric.len())
+            .field("nats", &self.nats.is_some())
             .finish_non_exhaustive()
     }
 }
 
 fn verdict(
     listener_up: Option<bool>,
+    nats: Option<NatsCondition>,
     mirrors: &MirrorsHealth,
     relays: Option<&RelaysHealth>,
     fabric: &[RelayHealth],
 ) -> Option<&'static str> {
     if listener_up == Some(false) {
         return Some(REASON_LISTEN_FAILED);
+    }
+    if nats.is_some_and(NatsCondition::holds_readiness) {
+        return Some(REASON_NATS_UNREACHABLE);
     }
     if !mirrors.converged() {
         return Some(REASON_MIRRORS);
@@ -145,9 +191,12 @@ mod tests {
 
     #[test]
     fn a_service_that_mirrors_nothing_and_relays_nothing_is_ready() {
-        assert_eq!(verdict(None, &MirrorsHealth::default(), None, &[]), None);
         assert_eq!(
-            verdict(Some(true), &MirrorsHealth::default(), None, &[]),
+            verdict(None, None, &MirrorsHealth::default(), None, &[]),
+            None
+        );
+        assert_eq!(
+            verdict(Some(true), None, &MirrorsHealth::default(), None, &[]),
             None
         );
     }
@@ -155,9 +204,45 @@ mod tests {
     #[test]
     fn a_listener_that_dropped_at_runtime_takes_the_pod_out_of_rotation_before_anything_else() {
         assert_eq!(
-            verdict(Some(false), &converged(), Some(&backing_off()), &[]),
+            verdict(
+                Some(false),
+                Some(NatsCondition::PastGrace),
+                &converged(),
+                Some(&backing_off()),
+                &[]
+            ),
             Some(REASON_LISTEN_FAILED),
             "a pod that has lost its LISTEN is blind and must go DOWN even if it once was ready"
+        );
+    }
+
+    #[test]
+    fn nats_within_its_grace_window_keeps_a_converged_pod_up() {
+        assert_eq!(
+            verdict(
+                Some(true),
+                Some(NatsCondition::WithinGrace),
+                &converged(),
+                None,
+                &[]
+            ),
+            None,
+            "a blink shorter than nats_grace never takes the pod out of rotation"
+        );
+    }
+
+    #[test]
+    fn nats_past_its_grace_window_takes_the_pod_out_of_rotation_after_the_listener() {
+        assert_eq!(
+            verdict(
+                Some(true),
+                Some(NatsCondition::PastGrace),
+                &converging(),
+                None,
+                &[]
+            ),
+            Some(REASON_NATS_UNREACHABLE),
+            "a real nats outage goes DOWN loudly, and before the mirrors it also feeds"
         );
     }
 
@@ -176,7 +261,7 @@ mod tests {
     #[test]
     fn a_mirror_that_has_not_converged_holds_readiness_down_before_any_relay_is_considered() {
         assert_eq!(
-            verdict(None, &converging(), Some(&backing_off()), &[]),
+            verdict(None, None, &converging(), Some(&backing_off()), &[]),
             Some(REASON_MIRRORS),
             "the boot order is mirrors first, so the reason names the earliest unmet condition"
         );
@@ -185,10 +270,10 @@ mod tests {
     #[test]
     fn a_relay_backing_off_takes_a_converged_service_back_out_of_rotation() {
         assert_eq!(
-            verdict(None, &converged(), Some(&backing_off()), &[]),
+            verdict(None, None, &converged(), Some(&backing_off()), &[]),
             Some(REASON_RELAY_DEGRADED)
         );
-        assert_eq!(verdict(None, &converged(), None, &[]), None);
+        assert_eq!(verdict(None, None, &converged(), None, &[]), None);
     }
 
     #[test]
@@ -198,6 +283,7 @@ mod tests {
         };
         assert_eq!(
             verdict(
+                None,
                 None,
                 &converged(),
                 Some(&RelaysHealth::default()),
@@ -209,6 +295,7 @@ mod tests {
         assert_eq!(
             verdict(
                 None,
+                None,
                 &converged(),
                 Some(&RelaysHealth::default()),
                 &[RelayHealth::Healthy]
@@ -219,7 +306,11 @@ mod tests {
 
     #[test]
     fn no_readiness_reason_leaks_the_name_of_what_failed() {
-        for reason in [REASON_MIRRORS, REASON_RELAY_DEGRADED] {
+        for reason in [
+            REASON_MIRRORS,
+            REASON_RELAY_DEGRADED,
+            REASON_NATS_UNREACHABLE,
+        ] {
             assert!(!reason.contains("directory"));
             assert!(!reason.contains("integration_outbox"));
             assert!(!reason.contains("no such stream"));

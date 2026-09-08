@@ -101,8 +101,9 @@ pub use name::{
     ProjectorName, RelayName,
 };
 pub use nats::{
-    KvBucket, KvEvent, KvKey, KvKeyError, KvPrefix, Nats, NatsError, PublishFailure,
-    PublishOutcome, REASON_NO_STREAM, RelayHealth, RelayHealthReceiver,
+    KvBucket, KvEvent, KvKey, KvKeyError, KvPrefix, Nats, NatsCondition, NatsError, NatsHealth,
+    NatsHealthChannel, NatsHealthReceiver, PublishFailure, PublishOutcome, REASON_NO_STREAM,
+    RelayHealth, RelayHealthReceiver,
 };
 pub use offer::Offer;
 pub use persistence::{Persistence, PersistenceStyle};

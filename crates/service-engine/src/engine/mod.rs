@@ -56,6 +56,7 @@ impl<P: Principal> Engine<P> {
         probe: ListenerProbe,
     ) -> Result<Engine<P>, EngineError> {
         config.validate()?;
+        crate::observe::install_identity(&config);
         let transport =
             Arc::new(establish_transport_with_probe(pg.clone(), &config, &readiness, probe).await?);
         let accumulators = Arc::new(
