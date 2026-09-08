@@ -20,6 +20,7 @@ pub struct ReaperRound {
     pub promoted: u64,
     pub reaped_incomplete: u64,
     pub reaped_orphan: u64,
+    pub reaped_oversize: u64,
     pub failures: usize,
 }
 
@@ -81,7 +82,8 @@ impl BlobReaper {
     ) -> Result<(), EngineError> {
         let cutoff = chrono::Utc::now()
             - chrono::Duration::from_std(policy.orphan_after).unwrap_or(chrono::Duration::zero());
-        self.reap_incomplete(pg, store, kind, cutoff, round).await?;
+        self.reap_incomplete(pg, store, kind, policy, cutoff, round)
+            .await?;
         self.reap_orphans(pg, store, kind, cutoff, round).await
     }
 
@@ -90,6 +92,7 @@ impl BlobReaper {
         pg: &PgPool,
         store: &BlobStore,
         kind: &str,
+        policy: &BlobPolicy,
         cutoff: chrono::DateTime<chrono::Utc>,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
@@ -107,20 +110,33 @@ impl BlobReaper {
         for row in &rows {
             let id: Uuid = row.get("id");
             let object_key: String = row.get("object_key");
-            if store.object().object_exists(&object_key).await? {
-                sqlx::query(&format!(
-                    "UPDATE {TABLE_BLOB} SET state = 'uploaded', uploaded_at = now() WHERE id = $1"
-                ))
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-                round.promoted += 1;
-            } else {
-                sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
+            match store.object().head_size(&object_key).await? {
+                None => {
+                    sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?;
+                    round.reaped_incomplete += 1;
+                }
+                Some(size) if policy.max_bytes > 0 && size > policy.max_bytes => {
+                    store.object().delete_object(&object_key).await?;
+                    sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?;
+                    round.reaped_oversize += 1;
+                }
+                Some(size) => {
+                    sqlx::query(&format!(
+                        "UPDATE {TABLE_BLOB} \
+                         SET state = 'uploaded', uploaded_at = now(), size = $2 WHERE id = $1"
+                    ))
                     .bind(id)
+                    .bind(size as i64)
                     .execute(&mut *tx)
                     .await?;
-                round.reaped_incomplete += 1;
+                    round.promoted += 1;
+                }
             }
         }
         tx.commit().await?;

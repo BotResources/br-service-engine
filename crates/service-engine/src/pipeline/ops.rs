@@ -142,7 +142,7 @@ impl<'a> Ops<'a> {
 
     pub fn release_blob(&mut self, reference: BlobRef) -> Result<(), EngineError> {
         let handle = self.blob_handle()?;
-        handle.release(&mut self.staged.blob_ops, reference);
+        handle.release(&mut self.staged.blob_ops, reference, self.now);
         Ok(())
     }
 

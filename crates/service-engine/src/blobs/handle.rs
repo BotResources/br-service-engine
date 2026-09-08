@@ -8,6 +8,7 @@ use crate::blobs::store::{BlobRowOp, BlobStore, ReferenceRow};
 use crate::blobs::{BlobPolicy, BlobRef, Blobs, UploadUrl};
 use crate::erase::PersonId;
 use crate::error::EngineError;
+use crate::time::Timestamp;
 
 pub struct Blob {
     reference: BlobRef,
@@ -84,7 +85,7 @@ impl BlobHandle {
         })
     }
 
-    pub(crate) fn release(&self, ops: &mut Vec<BlobRowOp>, reference: BlobRef) {
-        ops.push(BlobRowOp::Orphan(reference));
+    pub(crate) fn release(&self, ops: &mut Vec<BlobRowOp>, reference: BlobRef, at: Timestamp) {
+        ops.push(BlobRowOp::Orphan(reference, at));
     }
 }

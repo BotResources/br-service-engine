@@ -6,6 +6,7 @@ CREATE TABLE service_engine.blob (
     content_type text NOT NULL,
     file_name text NOT NULL,
     owner_id uuid,
+    size bigint,
     state text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     uploaded_at timestamptz,

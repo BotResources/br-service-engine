@@ -26,7 +26,7 @@ pub(crate) struct ReferenceRow {
 
 pub(crate) enum BlobRowOp {
     Insert(ReferenceRow),
-    Orphan(BlobRef),
+    Orphan(BlobRef, Timestamp),
 }
 
 pub(crate) async fn insert_reference(

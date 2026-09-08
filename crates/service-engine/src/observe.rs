@@ -6,8 +6,8 @@ use metrics::Label;
 use crate::config::EngineConfig;
 use crate::housekeeping::beat::BeatRound;
 use crate::metrics::{
-    CHUNK_CONFLICTS_TOTAL, CHUNK_FLUSH_DURATION_SECONDS, CHUNK_FLUSH_SIZE, COHORTS,
-    CRON_DURATION_SECONDS, CRON_RUNS_TOTAL, DEPENDENCY_UP, IMPACTS_COMMITTED_TOTAL,
+    BLOBS_REAPED_TOTAL, CHUNK_CONFLICTS_TOTAL, CHUNK_FLUSH_DURATION_SECONDS, CHUNK_FLUSH_SIZE,
+    COHORTS, CRON_DURATION_SECONDS, CRON_RUNS_TOTAL, DEPENDENCY_UP, IMPACTS_COMMITTED_TOTAL,
     IMPACTS_RECEIVED_TOTAL, LABEL_DEPENDENCY, LABEL_JOB, LABEL_MIRROR, LABEL_OUTCOME, LABEL_POD,
     LABEL_REASON, LABEL_SERVICE, LEADER_SLOT_CLAIMS_TOTAL, MIRROR_RESTARTS_TOTAL,
     NOTIFICATION_QUEUE_USAGE, PASS_DELTAS, PASS_DURATION_SECONDS, PASS_IMPACTS,
@@ -168,5 +168,18 @@ pub fn record_beat(round: &BeatRound) {
     }
     if let Some(usage) = round.queue_usage {
         metrics::gauge!(NOTIFICATION_QUEUE_USAGE, identity()).set(usage);
+    }
+    record_reaped("incomplete", round.blobs.reaped_incomplete);
+    record_reaped("orphan", round.blobs.reaped_orphan);
+    record_reaped("oversize", round.blobs.reaped_oversize);
+}
+
+fn record_reaped(outcome: &'static str, count: u64) {
+    if count > 0 {
+        metrics::counter!(
+            BLOBS_REAPED_TOTAL,
+            labelled([(LABEL_OUTCOME, outcome.to_string())])
+        )
+        .increment(count);
     }
 }

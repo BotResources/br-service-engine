@@ -418,11 +418,12 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `orphan_after`) and `cx.blob::<Kind>(name, content_type)` (plus
   `cx.blob_owned` carrying an owner for erasure) replaces the pipeline's
   `NotYet`: it stages a blob **reference row** — reference, object key, kind,
-  content type, file name, owner, state — in `service_engine.blob` inside the
-  write pipeline's transaction, so the reference commits with the referencing
-  aggregate and a rolled-back handler leaves neither. `cx.release_blob(ref)`
-  marks a reference orphaned in the same transaction when a row stops
-  referencing it.
+  content type, file name, owner, size and state — in `service_engine.blob`
+  inside the write pipeline's transaction, so the reference commits with the
+  referencing aggregate and a rolled-back handler leaves neither. The bytes flow
+  client-to-storage directly, so `size` is null at commit and is recorded when
+  the reaper promotes the completed upload. `cx.release_blob(ref)` marks a
+  reference orphaned in the same transaction when a row stops referencing it.
 - The service's S3-compatible bucket is bound at boot (bind-only, fail-loud via
   a HEAD, never created — `EngineConfig::with_blob_storage(BlobConfig)`); a
   registered blob kind with no configured storage, or an absent bucket, holds
@@ -434,21 +435,31 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   only the opaque `BlobRef`, and the client asks for a URL. Presigning uses the
   sans-IO `rusty-s3` crate; `reqwest` (rustls, no default features) is the thin
   HTTP client for the engine's own bucket/object HEAD and DELETE. No cloud SDK.
-- A beat reaper deletes an abandoned upload (a `pending` reference past
-  `orphan_after` whose object never landed — it also promotes one whose object
-  did land) and an orphan (a released reference past `orphan_after`, whose
-  object it deletes from storage), claiming rows `FOR UPDATE SKIP LOCKED` so
-  pods never double-reap; its cadence is `EngineConfig::with_blob_reaper_interval`.
+- A beat reaper, per `BlobPolicy`, promotes a completed upload past
+  `orphan_after` (recording the object's size from its HEAD), deletes an
+  abandoned upload (a `pending` reference whose object never landed) or one whose
+  object exceeds `max_bytes`, and deletes an orphan (a reference released via
+  `cx.release_blob` past `orphan_after`, whose object it deletes from storage),
+  claiming rows `FOR UPDATE SKIP LOCKED` so pods never double-reap; its cadence
+  is `EngineConfig::with_blob_reaper_interval` and its per-outcome counts export
+  as the `service_engine_blobs_reaped_total` metric. `max_bytes` is best-effort,
+  not a hard cap: a presigned PUT cannot bound the upload, so an over-cap object
+  is promoted first and reaped on a later sweep, leaving a committed `BlobRef`
+  that 404s on download; a hard cap must be enforced out of band. Orphan reaping
+  is signal-driven (`cx.release_blob` when a slice drops the owning row); the
+  engine does not reference-count slice-owned tables.
 - `Engine::purge_person_blobs(person)` is the erase hook U11 calls: it deletes
-  every object a person owns and its reference rows.
+  every object a person owns and its reference rows. Only `cx.blob_owned` records
+  an owner; a blob attached with the un-owned `cx.blob` is not reached by it.
 - New engine migration `service_engine.blob` (reserved range) and the tenth
-  engine table; six real-infra conformance scenarios (`s41`–`s46`) run against a
-  MinIO the battery spawns per test (a `TestMinio` alongside `TestNats`), and the
-  conformance CI job installs `minio`: the reference commits with the aggregate
-  (rollback leaves no row), a presigned upload/download round-trips real bytes, a
-  presigned URL never appears in the delivered view or impact stream, the reaper
-  removes an abandoned upload and an orphan, the erase hook purges a person, and
-  an absent bucket fails boot loud.
+  engine table; seven real-infra conformance scenarios (`s41`–`s47`) run against
+  a MinIO the battery spawns per test (a `TestMinio` alongside `TestNats`), and
+  the conformance CI job installs `minio`: the reference commits with the
+  aggregate (rollback leaves no row), a presigned upload/download round-trips
+  real bytes, a presigned URL never appears in the delivered view or impact
+  stream, the reaper removes an abandoned upload and an orphan, promotion records
+  the object's size and an over-`max_bytes` upload is reaped, the erase hook
+  purges a person, and an absent bucket fails boot loud.
 
 ### Deployment constraint
 

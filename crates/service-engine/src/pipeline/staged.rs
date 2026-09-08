@@ -56,8 +56,8 @@ impl Staged {
         for op in &self.blob_ops {
             match op {
                 BlobRowOp::Insert(row) => insert_reference(conn, row).await?,
-                BlobRowOp::Orphan(reference) => {
-                    orphan_reference(conn, *reference, crate::time::now()).await?;
+                BlobRowOp::Orphan(reference, at) => {
+                    orphan_reference(conn, *reference, *at).await?;
                 }
             }
         }

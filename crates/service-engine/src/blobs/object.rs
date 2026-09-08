@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use reqwest::StatusCode;
+use reqwest::header::CONTENT_LENGTH;
 use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
 
 use crate::blobs::config::BlobConfig;
@@ -80,23 +81,33 @@ impl ObjectStore {
         }
     }
 
-    pub(crate) async fn object_exists(&self, object_key: &str) -> Result<bool, EngineError> {
+    pub(crate) async fn head_size(&self, object_key: &str) -> Result<Option<u64>, EngineError> {
         let url = self
             .bucket
             .head_object(Some(&self.credentials), object_key)
             .sign(Duration::from_secs(60));
-        let status = self
+        let response = self
             .http
             .head(url)
             .send()
             .await
-            .map_err(|error| EngineError::Blob(error.to_string()))?
-            .status();
+            .map_err(|error| EngineError::Blob(error.to_string()))?;
+        let status = response.status();
         if status == StatusCode::NOT_FOUND {
-            return Ok(false);
+            return Ok(None);
         }
         if status.is_success() {
-            return Ok(true);
+            let size = response
+                .headers()
+                .get(CONTENT_LENGTH)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    EngineError::Blob(format!(
+                        "HEAD of object {object_key} carried no parseable Content-Length"
+                    ))
+                })?;
+            return Ok(Some(size));
         }
         Err(EngineError::Blob(format!(
             "HEAD of object {object_key} answered {status}"
