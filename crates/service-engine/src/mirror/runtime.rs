@@ -12,8 +12,10 @@ use crate::config::DEFAULT_BEAT;
 use crate::error::EngineError;
 use crate::housekeeping::leader::try_advisory_xact_lock;
 use crate::impact::Impact;
-use crate::nats::Nats;
+use crate::nats::{Nats, NatsError};
 use crate::transport::ImpactTransport;
+
+const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 use super::builder::{Consumption, ReconcileKeysFn};
 use super::change::{Change, ChangeOp};
@@ -116,6 +118,7 @@ where
         loop {
             tokio::select! {
                 _ = beat.tick() => {
+                    self.heartbeat().await?;
                     self.on_beat(&mut was_leader).await?;
                 }
                 item = merged.next() => {
@@ -136,6 +139,17 @@ where
 
     fn renew_period(&self) -> Duration {
         self.leader.as_ref().map_or(DEFAULT_BEAT, |gate| gate.beat)
+    }
+
+    async fn heartbeat(&self) -> Result<(), EngineError> {
+        match tokio::time::timeout(LIVENESS_PROBE_TIMEOUT, self.nats.ping()).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(EngineError::Nats(error)),
+            Err(_elapsed) => Err(EngineError::Nats(NatsError::Connect(
+                "mirror liveness heartbeat timed out; the consumed bucket's broker is unreachable"
+                    .to_string(),
+            ))),
+        }
     }
 
     async fn on_beat(&self, was_leader: &mut bool) -> Result<(), EngineError> {
