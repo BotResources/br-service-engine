@@ -17,7 +17,7 @@ pub async fn claim(
 ) -> Result<Claimed, sqlx::Error> {
     let sql = format!(
         "INSERT INTO {TABLE_MESSAGE_CLAIM} (message_id, reaction) VALUES ($1, $2) \
-         ON CONFLICT (message_id) DO NOTHING"
+         ON CONFLICT (message_id, reaction) DO NOTHING"
     );
     let done = sqlx::query(&sql)
         .bind(message_id)
@@ -42,6 +42,11 @@ pub async fn advance_sequence(
     key: &SequenceKey,
     seq: u64,
 ) -> Result<Ordering, sqlx::Error> {
+    let seq = i64::try_from(seq).map_err(|_| {
+        sqlx::Error::Protocol(format!(
+            "producer sequence {seq} exceeds the i64 ceiling of the sequence guard column"
+        ))
+    })?;
     let sql = format!(
         "INSERT INTO {TABLE_SEQUENCE_GUARD} (producer, seq_key, last_seq) VALUES ($1, $2, $3) \
          ON CONFLICT (producer, seq_key) DO UPDATE SET last_seq = EXCLUDED.last_seq \
@@ -51,7 +56,7 @@ pub async fn advance_sequence(
     let advanced: Option<(i64,)> = sqlx::query_as(&sql)
         .bind(&key.producer)
         .bind(&key.key)
-        .bind(seq as i64)
+        .bind(seq)
         .fetch_optional(conn)
         .await?;
     Ok(if advanced.is_some() {
