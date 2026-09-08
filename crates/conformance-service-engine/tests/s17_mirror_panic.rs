@@ -63,7 +63,7 @@ async fn s17_a_supervisor_that_dies_after_converging_forces_readiness_down_and_r
         .register_projector(AssignmentProjector)
         .expect("register the projector");
     engine
-        .register_mirror(a_mirror_whose_supervisor_dies_after_it_converges())
+        .register_mirror_handle(a_mirror_whose_supervisor_dies_after_it_converges())
         .expect("register the mirror");
 
     let running = tokio::spawn(engine.run());

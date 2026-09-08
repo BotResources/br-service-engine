@@ -8,6 +8,7 @@ pub mod outbox;
 pub mod principal;
 pub mod relays;
 pub mod render;
+pub mod roster;
 pub mod spy;
 pub mod stream;
 pub mod titles;
@@ -41,11 +42,13 @@ pub const TABLES: &[&str] = &[
 ];
 
 pub use mirror::{
-    DIRECTORY_MIRROR, SampleDirectory, backfills, directory_mirror_handle, known_users,
-    publish_roster,
+    DIRECTORY_MIRROR, SampleDirectory, SamplePublishedUser, backfills, directory_mirror,
+    directory_mirror_handle, known_users, publish_roster, retract_user,
 };
 
 pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs};
+
+pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
 pub use engine::{SAMPLE_JOB, SAMPLE_RELAY, boot_render_engine, boot_sample_engine, engine_config};
 
