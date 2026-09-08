@@ -1,17 +1,15 @@
+mod handshake;
+
 use std::collections::HashSet;
 
 use br_core_scope::{
     KeyValidationError, ScopeDeclaration, ScopeDeclarationError, ScopeKey, ScopeSpec, ServiceKey,
     ServiceManifest,
 };
-use br_util_axum_readiness::ReadinessHandle;
-use br_util_nats_fabric::Fabric;
-use br_util_scope_declaration::{
-    ScopeDeclarationConfig, ScopeDeclarationOutcome, declare_scopes as shared_handshake,
-};
 
 use crate::error::BoxedError;
-use crate::nats::Nats;
+
+pub(crate) use handshake::run_handshake;
 
 pub const REASON_SCOPES_PENDING: &str = "declaring scopes to identity";
 pub const REASON_SCOPES_FAILED: &str = "the scope-declaration handshake could not reach identity";
@@ -126,31 +124,6 @@ impl ScopeError {
             ScopeError::Rejected { reason } => reason.clone(),
             _ => REASON_SCOPES_FAILED.to_string(),
         }
-    }
-}
-
-pub(crate) async fn run_handshake(
-    nats: &Nats,
-    declaration: ScopeDeclaration,
-) -> Result<(), ScopeError> {
-    let fabric = Fabric::new(nats.context().clone());
-    let sink = ReadinessHandle::not_ready(REASON_SCOPES_PENDING);
-    let outcome = shared_handshake(
-        &fabric,
-        declaration,
-        sink,
-        ScopeDeclarationConfig::enabled(),
-    )
-    .await
-    .map_err(|error| ScopeError::Handshake(Box::new(error)))?;
-    match outcome {
-        ScopeDeclarationOutcome::Accepted | ScopeDeclarationOutcome::Disabled => Ok(()),
-        ScopeDeclarationOutcome::Rejected(rejected) => Err(ScopeError::Rejected {
-            reason: format!("scope declaration rejected: {}", rejected.reason),
-        }),
-        other => Err(ScopeError::Rejected {
-            reason: format!("unexpected scope-declaration outcome: {other:?}"),
-        }),
     }
 }
 
