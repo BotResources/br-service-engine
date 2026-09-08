@@ -8,9 +8,7 @@ use tokio::sync::watch;
 use crate::boot::{REASON_LISTEN_FAILED, REASON_MIRRORS};
 use crate::housekeeping::health::{RelaysHealth, RelaysHealthReceiver};
 use crate::housekeeping::mirror::{MirrorsHealth, MirrorsHealthReceiver};
-use crate::observe::{
-    DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency,
-};
+use crate::observe::{DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency};
 
 pub const REASON_RELAY_DEGRADED: &str = "a relay is not draining";
 pub const REASON_WORKER_STOPPED: &str = "a background worker stopped";

@@ -59,8 +59,11 @@ pub fn record_pass(report: &PassReport, duration_seconds: f64, sessions: usize, 
         metrics::counter!(IMPACTS_RECEIVED_TOTAL, identity()).increment(report.impacts as u64);
     }
     if report.resets > 0 {
-        metrics::counter!(RESETS_TOTAL, labelled([(LABEL_REASON, REASON_PASS.to_string())]))
-            .increment(report.resets as u64);
+        metrics::counter!(
+            RESETS_TOTAL,
+            labelled([(LABEL_REASON, REASON_PASS.to_string())])
+        )
+        .increment(report.resets as u64);
     }
     metrics::gauge!(SESSIONS, identity()).set(sessions as f64);
     metrics::gauge!(PENDING_SESSIONS, identity()).set(pending as f64);
