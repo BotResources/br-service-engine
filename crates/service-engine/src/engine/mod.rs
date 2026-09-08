@@ -23,6 +23,7 @@ use crate::session::{AttachRequest, SessionStream};
 use crate::transport::probe::ListenerProbe;
 use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
+use br_core_scope::ScopeDeclaration;
 
 pub struct Engine<P: Principal> {
     config: EngineConfig,
@@ -36,6 +37,7 @@ pub struct Engine<P: Principal> {
     beat: Beat,
     mirrors: MirrorSupervisor,
     shutdown: Arc<tokio::sync::Notify>,
+    declared_scopes: Option<ScopeDeclaration>,
 }
 
 impl<P: Principal> Engine<P> {
@@ -80,6 +82,7 @@ impl<P: Principal> Engine<P> {
             beat,
             mirrors: MirrorSupervisor::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
+            declared_scopes: None,
         })
     }
 
@@ -168,11 +171,11 @@ impl<P: Principal> Engine<P> {
 
     pub fn declare_scopes(
         &mut self,
-        _manifest: crate::scopes::ScopeManifest,
+        manifest: crate::scopes::ScopeManifest,
     ) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "declare_scopes",
-        })
+        let declaration = manifest.declaration()?;
+        self.declared_scopes = Some(declaration);
+        Ok(())
     }
 
     pub async fn erase(&self, _person: crate::erase::PersonId) -> Result<(), EngineError> {

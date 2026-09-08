@@ -36,6 +36,32 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `EngineError::NotYet` until then; the module map in the README names the unit
   for each.
 
+### Added (0.1.0 rework, unit U10)
+
+- Scope declaration at boot with a readiness gate. `Engine::declare_scopes`
+  takes a `ScopeManifest` (the union of the slices' scope-key groups), validates
+  it into a `br_core_scope::ScopeDeclaration` eagerly (a malformed key, a
+  manifest that spans two services, or an empty manifest is a boot-time error,
+  not a wire failure) and stores it. After the mirrors converge, `Engine::run`
+  runs the shared `br_util_scope_declaration::declare_scopes` handshake over the
+  engine's own NATS connection (a `Fabric` built from the same JetStream
+  context) and holds readiness DOWN until Identity confirms: on acceptance boot
+  proceeds and the beat brings the pod UP; on rejection the pod stays DOWN with
+  the rejection reason in the readiness payload and the logs, and `run` returns
+  `EngineError::Scope` so a scope typo is a failed deploy, never a silent deny;
+  while Identity is unreachable the handshake re-publishes and waits, readiness
+  DOWN throughout. A scopeless service never calls `declare_scopes` and skips
+  the gate entirely. New public surface: `ScopeManifest` and `ScopeError`; new
+  `EngineError::Scope` variant. This is the one frontier the engine reaches
+  across the service boundary, so it depends on the frontier `br-rust-common`
+  crates `br-core-scope` and `br-util-scope-declaration` (and, only as the
+  transport that helper requires, `br-util-nats-fabric`); these back the
+  handshake alone and no internal engine loop.
+- Conformance scenario `s28_scope_declaration` against real NATS with a fake
+  Identity responder: an accepted declaration brings the pod UP, a rejected one
+  keeps it DOWN with the reason, and a service that declares nothing becomes
+  ready without ever publishing a declaration.
+
 ### Added
 
 - Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,

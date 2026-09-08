@@ -48,7 +48,7 @@ fills its part by adding module files and one method body.
 | `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
-| `scopes` | `declare_scopes` handshake gating readiness | U10 |
+| `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` | U11 |
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 

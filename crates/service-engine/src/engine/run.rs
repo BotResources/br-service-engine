@@ -41,12 +41,14 @@ impl<P: Principal> Engine<P> {
         let Engine {
             config,
             pg,
+            nats,
             transport,
             readiness,
             accumulators,
             mut beat,
             mirrors,
             shutdown,
+            declared_scopes,
             ..
         } = self;
 
@@ -93,6 +95,31 @@ impl<P: Principal> Engine<P> {
                 render.shutdown().await;
                 readiness_guard.set_not_ready(REASON_WORKER_STOPPED);
                 return Err(EngineError::WorkerStopped { worker: "mirror" });
+            }
+        }
+
+        if let Some(declaration) = declared_scopes {
+            readiness_guard.set_not_ready(crate::scopes::REASON_SCOPES_PENDING);
+            let handshake = crate::scopes::run_handshake(&nats, declaration);
+            tokio::pin!(handshake);
+            let outcome = tokio::select! {
+                () = &mut stopping => {
+                    stop_mirrors.notify_waiters();
+                    render.shutdown().await;
+                    return Ok(());
+                }
+                outcome = &mut handshake => outcome,
+            };
+            if let Err(error) = outcome {
+                readiness_guard.set_not_ready(error.readiness_reason());
+                tracing::error!(
+                    %error,
+                    "scope declaration did not complete; the pod stays out of rotation rather \
+                     than serving with unconfirmed scopes"
+                );
+                stop_mirrors.notify_waiters();
+                render.shutdown().await;
+                return Err(EngineError::Scope(error));
             }
         }
 
