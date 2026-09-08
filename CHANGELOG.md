@@ -469,45 +469,80 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   content type, file name, owner, size and state — in `service_engine.blob`
   inside the write pipeline's transaction, so the reference commits with the
   referencing aggregate and a rolled-back handler leaves neither. The bytes flow
-  client-to-storage directly, so `size` is null at commit and is recorded when
-  the reaper promotes the completed upload. `cx.release_blob(ref)` marks a
-  reference orphaned in the same transaction when a row stops referencing it.
+  client-to-storage directly, so `size` is null at commit and is recorded from
+  the object's head when the reaper first sees the upload completed (promoting
+  the row to `uploaded`), independent of the orphan window (aligned in U9b). A
+  `pending` reference whose object has not landed resolves to no download URL
+  (U9b). Orphan detection is at the aggregate boundary in U9b; `cx.release_blob`
+  stays as the explicit escape hatch.
 - The service's S3-compatible bucket is bound at boot (bind-only, fail-loud via
   a HEAD, never created — `EngineConfig::with_blob_storage(BlobConfig)`); a
   registered blob kind with no configured storage, or an absent bucket, holds
   readiness DOWN and fails `run` loud (`EngineError::BlobBucketAbsent`).
-- Upload and download URLs are S3 SigV4 presigned and short-lived. `UploadUrl`
-  (from `cx.blob`) and `DownloadUrl` (from `Engine::download_url`) do not
-  implement `Serialize`, so — mirroring `OneShot` — a URL is structurally unable
-  to enter a view, an impact, an offer, an outbox row or a chunk; a view carries
-  only the opaque `BlobRef`, and the client asks for a URL. Presigning uses the
-  sans-IO `rusty-s3` crate; `reqwest` (rustls, no default features) is the thin
-  HTTP client for the engine's own bucket/object HEAD and DELETE. No cloud SDK.
-- A beat reaper, per `BlobPolicy`, promotes a completed upload past
-  `orphan_after` (recording the object's size from its HEAD), deletes an
-  abandoned upload (a `pending` reference whose object never landed) or one whose
-  object exceeds `max_bytes`, and deletes an orphan (a reference released via
-  `cx.release_blob` past `orphan_after`, whose object it deletes from storage),
-  claiming rows `FOR UPDATE SKIP LOCKED` so pods never double-reap; its cadence
-  is `EngineConfig::with_blob_reaper_interval` and its per-outcome counts export
-  as the `service_engine_blobs_reaped_total` metric. `max_bytes` is best-effort,
-  not a hard cap: a presigned PUT cannot bound the upload, so an over-cap object
-  is promoted first and reaped on a later sweep, leaving a committed `BlobRef`
-  that 404s on download; a hard cap must be enforced out of band. Orphan reaping
-  is signal-driven (`cx.release_blob` when a slice drops the owning row); the
-  engine does not reference-count slice-owned tables.
+- Upload and download URLs are S3 SigV4 presigned and short-lived. The upload is
+  a **presigned POST** (U9b, see below); the download a presigned GET. `UploadUrl`
+  (from `cx.blob`) carries the POST endpoint and its signed form fields, and
+  `DownloadUrl` (from `Engine::download_url`) does not implement `Serialize`, so
+  — mirroring `OneShot` — neither can enter a view, an impact, an offer, an
+  outbox row or a chunk; a view carries only the opaque `BlobRef`, and the client
+  asks for a URL. `reqwest` (rustls, no default features) is the thin HTTP client
+  for the engine's own bucket/object HEAD and DELETE. No cloud SDK.
+- A beat reaper, per `BlobPolicy`, deletes an abandoned upload (a `pending`
+  reference past `orphan_after` whose object never landed) and an unreferenced
+  blob (a reference released past `orphan_after`, whose object it deletes from
+  storage), and promotes a completed upload (recording the object's size from its
+  head — see U9b for the promotion/reaping split), claiming rows
+  `FOR UPDATE SKIP LOCKED` so pods never double-reap; its cadence is
+  `EngineConfig::with_blob_reaper_interval` and its per-outcome counts export as
+  the `service_engine_blobs_reaped_total` metric. The engine does not
+  reference-count slice-owned tables.
 - `Engine::purge_person_blobs(person)` is the erase hook U11 calls: it deletes
   every object a person owns and its reference rows. Only `cx.blob_owned` records
   an owner; a blob attached with the un-owned `cx.blob` is not reached by it.
 - New engine migration `service_engine.blob` (reserved range) and the eleventh
-  engine table; seven real-infra conformance scenarios (`s52`–`s58`) run against
-  a MinIO the battery spawns per test (a `TestMinio` alongside `TestNats`), and
-  the conformance CI job installs `minio`: the reference commits with the
-  aggregate (rollback leaves no row), a presigned upload/download round-trips
-  real bytes, a presigned URL never appears in the delivered view or impact
-  stream, the reaper removes an abandoned upload and an orphan, promotion records
-  the object's size and an over-`max_bytes` upload is reaped, the erase hook
-  purges a person, and an absent bucket fails boot loud.
+  engine table; real-infra conformance scenarios (`s52`–`s58`, extended in U9b)
+  run against a MinIO the battery spawns per test (a `TestMinio` alongside
+  `TestNats`), and the conformance CI job installs `minio`: the reference commits
+  with the aggregate (rollback leaves no row), a presigned upload/download
+  round-trips real bytes, a presigned URL never appears in the delivered view or
+  impact stream, the reaper removes an abandoned upload and an orphan, promotion
+  records the object's size, the erase hook purges a person, and an absent bucket
+  fails boot loud.
+
+### Changed (0.1.0 rework, unit U9b — blob alignment to the intent)
+
+- **The size cap is enforced at upload, not after the fact.** `cx.blob` now
+  returns a `UploadUrl` that is an S3 SigV4 **presigned POST** whose policy
+  carries `content-length-range = [0, BlobPolicy::max_bytes]`, so object storage
+  refuses an oversize object and it never lands. `UploadUrl` changed shape from a
+  single URL string to a POST endpoint plus its signed form fields
+  (`UploadUrl::{url, fields, into_parts}`). The POST-policy signer is in-engine
+  (`hmac` + `sha2` + `base64`, new deps); the download GET still uses `rusty-s3`.
+  The reaper no longer inspects size: its scope is exactly the intent's two
+  categories, incomplete uploads and unreferenced blobs. `ReaperRound` drops
+  `reaped_oversize` and the `oversize` metric label is gone.
+- **A blob's size is recorded at completion, not after the orphan window.** The
+  reaper promotes a `pending` reference the moment its object is present (heading
+  every `pending` row each sweep, no `orphan_after` gate); only the deletion of a
+  never-completed upload is gated by `orphan_after`.
+- **A `pending` reference whose object never landed resolves to no download URL.**
+  `Engine::download_url` returns `None` for a `pending` row whose object is absent
+  (and for an `orphaned` one); a landed-but-not-yet-promoted object still
+  resolves via a head.
+- **Orphan detection moved to the aggregate boundary — no slice-table scanning.**
+  `Aggregate::blob_refs(&self) -> Vec<BlobRef>` (default empty) exposes a row's
+  live references; the pipeline diffs them between `load` and `save` and releases
+  any dropped or repointed reference in the **same transaction** as the write.
+  `cx.delete::<A>(&agg)` releases all of a deleted aggregate's references.
+  `cx.release_blob` remains as the explicit escape hatch.
+- Conformance: `s58` now asserts an oversize POST is rejected by MinIO and the
+  reference row is reaped as incomplete (no oversize reaping); new scenarios
+  `s65` (repointing releases the old blob in the same tx), `s66` (deleting the
+  aggregate releases), `s67` (a `pending` blob yields no download URL); the
+  round-trip/reaper/erase scenarios upload through the presigned POST form.
+- The blob boot-bind moved out of `engine/run.rs` into `blobs::bind`, and
+  `conformance-service-engine`'s `sample/engine.rs` split its persistence boots
+  into `sample/engine_persistence.rs`, keeping every source file under ~300 lines.
 
 ### Added (0.1.0 rework, unit U10)
 
