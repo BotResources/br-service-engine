@@ -36,6 +36,33 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `EngineError::NotYet` until then; the module map in the README names the unit
   for each.
 
+### Changed (0.1.0 rework, unit U15)
+
+- `EngineConfig` now validates every bound of the intent's config table at
+  boot and carries the ones that were missing: `session_max_age` (12h),
+  `lock_timeout` (5s), `nats_grace` (10s), `listener_queue_threshold` (0.5),
+  `window_capacity`, `impacts_per_commit`, and an optional `service` label.
+  `validate` refuses a zero duration or bound, a `listener_queue_threshold`
+  outside `(0.0, 1.0]`, a `lease` that does not outlast the `beat`, and a
+  `session_max_age` that does not outlast the idle `session_ttl`. `config.rs`
+  became `config/{mod,validate}.rs` for the file-size limit.
+- A session now lives at most `session_max_age`: it carries an attach instant
+  that activity never refreshes, and the housekeeping beat ends it with the
+  stream-closing signal once it reaches the bound, so the client reconnects
+  with a fresh passport. This is distinct from `session_ttl`.
+- The degrade table gains its NATS-grace behaviour: a `NatsHealth` tracker
+  keeps the pod UP through an outage shorter than `nats_grace` and takes it
+  DOWN with `REASON_NATS_UNREACHABLE` past it, wired into the readiness verdict
+  after the listener and before the mirrors.
+- Every engine metric is labelled by `service` and `pod`
+  (`observe::install_identity` at boot). New metrics: `impacts_committed_total`
+  (the notify-budget counter), `impacts_received_total`, `sessions_ended_total`
+  (by reason), and `dependency_up` (per degrade-table dependency). Resets carry
+  a `reason` label.
+- The four shipped alerts (notification queue usage, notify budget per Postgres
+  cluster, sustained resets, dead letters present) ship as a `PrometheusRule`
+  in `observability/service-engine-alerts.yaml`.
+
 ### Added
 
 - Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,
