@@ -53,6 +53,7 @@ impl<P: Principal> Engine<P> {
             mirrors,
             presence,
             shutdown,
+            declared_scopes,
             ..
         } = self;
 
@@ -137,6 +138,30 @@ impl<P: Principal> Engine<P> {
             )));
             futures_util::stream::select(transport.listen(), stream).boxed()
         };
+        if let Some(declaration) = declared_scopes {
+            readiness_guard.set_not_ready(crate::scopes::REASON_SCOPES_PENDING);
+            let handshake = crate::scopes::run_handshake(&nats, declaration);
+            tokio::pin!(handshake);
+            let outcome = tokio::select! {
+                () = &mut stopping => {
+                    stop_mirrors.notify_waiters();
+                    render.shutdown().await;
+                    return Ok(());
+                }
+                outcome = &mut handshake => outcome,
+            };
+            if let Err(error) = outcome {
+                readiness_guard.set_not_ready(error.readiness_reason());
+                tracing::error!(
+                    %error,
+                    "scope declaration did not complete; the pod stays out of rotation rather \
+                     than serving with unconfirmed scopes"
+                );
+                stop_mirrors.notify_waiters();
+                render.shutdown().await;
+                return Err(EngineError::Scope(error));
+            }
+        }
 
         let after_pass = render.after_pass_signal();
         let render_handle = render.clone();

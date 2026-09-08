@@ -16,6 +16,8 @@ repository = "https://github.com/BotResources/br-service-engine"
 br-core-auth = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-auth", tag = "v1.3.0", version = "1.3.0" }
 br-core-integration = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-integration", tag = "v1.3.0", version = "1.3.0" }
 br-core-kernel = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-kernel", tag = "v1.3.0", version = "1.3.0" }
+br-core-scope = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-scope", tag = "v1.3.0", version = "1.3.0" }
+br-scope-declaration-contract = { git = "https://github.com/BotResources/br-rust-common", package = "br-scope-declaration-contract", tag = "v1.3.0", version = "1.3.0" }
 br-util-axum-readiness = { git = "https://github.com/BotResources/br-rust-common", package = "br-util-axum-readiness", tag = "v1.3.0", version = "1.3.0" }
 br-util-postgres = { git = "https://github.com/BotResources/br-rust-common", package = "br-util-postgres", tag = "v1.3.0", version = "1.3.0" }
 

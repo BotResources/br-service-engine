@@ -223,6 +223,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "br-scope-declaration-contract"
+version = "1.3.0"
+source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
+dependencies = [
+ "br-core-integration",
+]
+
+[[package]]
 name = "br-util-axum-readiness"
 version = "1.3.0"
 source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
@@ -312,6 +320,7 @@ dependencies = [
  "br-core-auth",
  "br-core-integration",
  "br-core-kernel",
+ "br-core-scope",
  "br-util-axum-readiness",
  "br-util-postgres",
  "chrono",
@@ -1795,6 +1804,8 @@ dependencies = [
  "async-nats",
  "br-core-auth",
  "br-core-integration",
+ "br-core-scope",
+ "br-scope-declaration-contract",
  "br-util-axum-readiness",
  "bytes",
  "chrono",

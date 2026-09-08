@@ -142,6 +142,34 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   as `cx.present`; both put the value into the bound bucket, and every pod hears
   it through its own watch. A one-value-per-key bucket makes last-write-wins and
   loss-tolerance hold by construction.
+### Added (0.1.0 rework, unit U10)
+
+- Scope declaration at boot with a readiness gate. `Engine::declare_scopes`
+  takes a `ScopeManifest` (the union of the slices' scope-key groups), validates
+  it into a `br_core_scope::ScopeDeclaration` eagerly (a malformed key, a
+  manifest that spans two services, or an empty manifest is a boot-time error,
+  not a wire failure) and stores it. After the mirrors converge, `Engine::run`
+  runs the scope-declaration handshake over the engine's own NATS connection and
+  holds readiness DOWN until Identity confirms: it subscribes to Identity's two
+  confirmation subjects, publishes the `service_scope.declare` command with a
+  correlation id, and awaits the correlated `accepted`/`rejected` reply. On
+  acceptance boot proceeds and the beat brings the pod UP; on rejection the pod
+  stays DOWN with the rejection reason in the readiness payload and the logs,
+  and `run` returns `EngineError::Scope` so a scope typo is a failed deploy,
+  never a silent deny; while Identity is unreachable the handshake re-publishes
+  and waits, readiness DOWN throughout. A scopeless service never calls
+  `declare_scopes` and skips the gate entirely. New public surface:
+  `ScopeManifest` and `ScopeError`; new `EngineError::Scope` variant. Scope
+  declaration is the one frontier the engine reaches across the service
+  boundary, so it takes the frozen wire from the `br-rust-common` frontier
+  crates `br-core-scope` (the declaration and confirmation DTOs) and
+  `br-scope-declaration-contract` (the subject coordinates); the engine renders
+  the subjects and drives the handshake itself over its own `async-nats`
+  connection, with no `br-util-nats-fabric` dependency.
+- Conformance scenario `s28_scope_declaration` against real NATS with a fake
+  Identity responder: an accepted declaration brings the pod UP, a rejected one
+  keeps it DOWN with the reason, and a service that declares nothing becomes
+  ready without ever publishing a declaration.
 
 ### Added
 

@@ -13,8 +13,6 @@ use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::{Budgets, ReactionMessage, ReactionRegistry, Subscription};
-#[cfg(feature = "test-support")]
-use crate::mirror::MirrorHandle;
 use crate::pipeline::Reaction;
 use crate::presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 use crate::mirror::{MirrorReady, Project};
@@ -30,6 +28,7 @@ use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
 use futures_util::future::BoxFuture;
 use std::fmt::Display;
+use br_core_scope::ScopeDeclaration;
 
 pub struct Engine<P: Principal> {
     config: EngineConfig,
@@ -45,6 +44,7 @@ pub struct Engine<P: Principal> {
     inbound_reactions: Mutex<ReactionRegistry>,
     presence: PresenceRegistry<P>,
     shutdown: Arc<tokio::sync::Notify>,
+    declared_scopes: Option<ScopeDeclaration>,
 }
 
 impl<P: Principal> Engine<P> {
@@ -91,6 +91,7 @@ impl<P: Principal> Engine<P> {
             inbound_reactions: Mutex::new(ReactionRegistry::new()),
             presence: PresenceRegistry::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
+            declared_scopes: None,
         })
     }
 
@@ -235,11 +236,11 @@ impl<P: Principal> Engine<P> {
 
     pub fn declare_scopes(
         &mut self,
-        _manifest: crate::scopes::ScopeManifest,
+        manifest: crate::scopes::ScopeManifest,
     ) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "declare_scopes",
-        })
+        let declaration = manifest.declaration()?;
+        self.declared_scopes = Some(declaration);
+        Ok(())
     }
 
     pub async fn erase(&self, _person: crate::erase::PersonId) -> Result<(), EngineError> {
