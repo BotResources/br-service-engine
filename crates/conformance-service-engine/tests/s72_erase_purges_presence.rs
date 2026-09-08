@@ -24,7 +24,7 @@ fn removed(delta: &Delta) -> TypingKey {
 }
 
 #[tokio::test]
-async fn s67_erase_purges_the_persons_presence_keys_after_commit() {
+async fn s72_erase_purges_the_persons_presence_keys_after_commit() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

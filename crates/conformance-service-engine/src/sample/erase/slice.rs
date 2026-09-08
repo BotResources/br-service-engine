@@ -5,7 +5,7 @@ use service_engine::error::EngineError;
 use service_engine::gate::Reason;
 use service_engine::impact::Dims;
 use service_engine::pipeline::{Mutation, MutationFault, MutationInput};
-use service_engine::{BlobRef, OneShot};
+use service_engine::{BlobRef, OneShot, UploadUrl};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -157,7 +157,7 @@ pub struct AttachNoteBlob {
 }
 
 impl MutationInput for AttachNoteBlob {
-    type Output = OneShot<String>;
+    type Output = OneShot<UploadUrl>;
     type Error = EraseFault;
     const NAME: &'static str = "attach_note_blob";
 }
@@ -165,7 +165,7 @@ impl MutationInput for AttachNoteBlob {
 pub fn attach_note_blob<'m>(
     cx: &'m mut Mutation<'m, SamplePrincipal>,
     input: AttachNoteBlob,
-) -> BoxFuture<'m, Result<OneShot<String>, EraseFault>> {
+) -> BoxFuture<'m, Result<OneShot<UploadUrl>, EraseFault>> {
     Box::pin(async move {
         let blob = cx.blob::<Attachment>(input.body.clone(), input.content_type)?;
         let note = EraseNote {
@@ -177,7 +177,7 @@ pub fn attach_note_blob<'m>(
         };
         cx.create(&note).await?;
         cx.impact::<EraseNoteNoun>(&note.id, Dims::ALL)?;
-        Ok(OneShot(blob.upload_url().into_string()))
+        Ok(OneShot(blob.upload_url()))
     })
 }
 

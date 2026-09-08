@@ -27,7 +27,7 @@ async fn person_erased_rows(pool: &PgPool) -> i64 {
 }
 
 #[tokio::test]
-async fn s66_a_slice_that_fails_its_erase_rolls_the_whole_gesture_back() {
+async fn s71_a_slice_that_fails_its_erase_rolls_the_whole_gesture_back() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

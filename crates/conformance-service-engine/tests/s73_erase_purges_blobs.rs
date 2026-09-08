@@ -1,13 +1,16 @@
 #[allow(dead_code)]
+mod blob_support;
+#[allow(dead_code)]
 mod engine_twin;
 
 use std::time::Duration;
 
+use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
 use conformance_service_engine::sample::erase::{AttachNoteBlob, boot_erase_blob_engine};
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
-use service_engine::{BlobPolicy, OneShot, PersonId};
+use service_engine::{BlobPolicy, OneShot, PersonId, UploadUrl};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -32,7 +35,7 @@ async fn blob_present(pool: &PgPool, id: Uuid) -> bool {
 }
 
 #[tokio::test]
-async fn s68_erase_purges_the_persons_blobs_from_storage_and_the_reference_table() {
+async fn s73_erase_purges_the_persons_blobs_from_storage_and_the_reference_table() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -67,7 +70,7 @@ async fn s68_erase_purges_the_persons_blobs_from_storage_and_the_reference_table
     await_ready(&readiness).await;
 
     let note = Uuid::now_v7();
-    let upload: OneShot<String> = executor
+    let upload: OneShot<UploadUrl> = executor
         .run::<AttachNoteBlob>(
             principal,
             AttachNoteBlob {
@@ -80,11 +83,8 @@ async fn s68_erase_purges_the_persons_blobs_from_storage_and_the_reference_table
         )
         .await
         .expect("attach a blob to the person's note");
-    http.put(upload.into_inner())
-        .body(b"personal-bytes".to_vec())
-        .send()
-        .await
-        .expect("upload the blob's bytes");
+    let status = post_upload(&http, upload.into_inner(), b"personal-bytes".to_vec()).await;
+    assert!(status.is_success(), "MinIO accepted the presigned upload");
 
     let reference = note_blob_ref(&pool, note)
         .await

@@ -59,7 +59,7 @@ async fn person_erased_rows(pool: &PgPool) -> i64 {
 }
 
 #[tokio::test]
-async fn s65_erase_removes_state_across_crud_soft_full_in_one_gesture_and_is_idempotent() {
+async fn s70_erase_removes_state_across_crud_soft_full_in_one_gesture_and_is_idempotent() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

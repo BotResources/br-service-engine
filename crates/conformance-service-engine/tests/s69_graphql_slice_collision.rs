@@ -5,7 +5,7 @@ use conformance_service_engine::sample::graphql::{
 use service_engine::EngineError;
 
 #[tokio::test]
-async fn s66_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud() {
+async fn s69_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -38,7 +38,7 @@ async fn s66_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud()
 }
 
 #[tokio::test]
-async fn s66_two_slices_claiming_the_same_type_fail_the_engine_boot_loud() {
+async fn s69_two_slices_claiming_the_same_type_fail_the_engine_boot_loud() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

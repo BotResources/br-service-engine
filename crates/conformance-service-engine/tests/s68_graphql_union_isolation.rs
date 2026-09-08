@@ -25,7 +25,7 @@ fn reset_typenames(reset: &serde_json::Value, field: &str) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn s65_two_projectors_are_two_typed_union_members_and_a_client_sees_only_its_own() {
+async fn s68_two_projectors_are_two_typed_union_members_and_a_client_sees_only_its_own() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
