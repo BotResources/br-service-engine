@@ -13,6 +13,7 @@ use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::mirror::MirrorHandle;
+use crate::presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 use crate::principal::{Principal, PrincipalResolver, RlsApplier};
 use crate::projector::Projector;
 use crate::registry::RenderRegistry;
@@ -35,6 +36,7 @@ pub struct Engine<P: Principal> {
     render: OnceLock<Arc<SessionRuntime<P>>>,
     beat: Beat,
     mirrors: MirrorSupervisor,
+    presence: PresenceRegistry<P>,
     shutdown: Arc<tokio::sync::Notify>,
 }
 
@@ -79,6 +81,7 @@ impl<P: Principal> Engine<P> {
             render: OnceLock::new(),
             beat,
             mirrors: MirrorSupervisor::new(),
+            presence: PresenceRegistry::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
         })
     }
@@ -148,13 +151,27 @@ impl<P: Principal> Engine<P> {
         })
     }
 
-    pub fn register_presence<Pr: crate::presence::Presence>(
+    pub fn register_presence<Pr: Presence>(
         &mut self,
-        _ttl: std::time::Duration,
+        ttl: std::time::Duration,
     ) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_presence",
+        let store = self.presence.register::<Pr>(ttl);
+        self.with_registry(|registry| {
+            registry.bind_noun::<Pr::Noun>();
+            registry.register_projector(crate::presence::PresenceProjector::<P, Pr>::new(store))
         })
+    }
+
+    pub fn presence_handle(&self) -> PresenceHandle<P> {
+        self.presence.handle()
+    }
+
+    pub async fn present<Pr: Presence>(
+        &self,
+        key: &PresenceKey<Pr>,
+        value: &Pr::Value,
+    ) -> Result<(), EngineError> {
+        self.presence.handle().present::<Pr>(key, value).await
     }
 
     pub fn register_blobs<B: crate::blobs::Blobs>(
