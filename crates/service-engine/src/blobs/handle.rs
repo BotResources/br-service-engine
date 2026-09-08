@@ -46,16 +46,12 @@ impl BlobHandle {
         })
     }
 
-    fn kind_of<B: Blobs>(&self) -> Result<&'static str, EngineError> {
-        if self
-            .kinds
+    fn policy_of<B: Blobs>(&self) -> Result<BlobPolicy, EngineError> {
+        self.kinds
             .iter()
-            .any(|(type_id, _, _)| *type_id == TypeId::of::<B>())
-        {
-            Ok(B::KIND)
-        } else {
-            Err(EngineError::BlobKindUnregistered { kind: B::KIND })
-        }
+            .find(|(type_id, _, _)| *type_id == TypeId::of::<B>())
+            .map(|(_, _, policy)| *policy)
+            .ok_or(EngineError::BlobKindUnregistered { kind: B::KIND })
     }
 
     pub(crate) fn stage<B: Blobs>(
@@ -65,20 +61,21 @@ impl BlobHandle {
         content_type: String,
         owner: Option<PersonId>,
     ) -> Result<Blob, EngineError> {
-        let kind = self.kind_of::<B>()?;
+        let policy = self.policy_of::<B>()?;
+        let kind = B::KIND;
         let store = self.store()?;
         let id = Uuid::now_v7();
         let object_key = format!("{}/{}/{}", store.service(), kind, id);
+        let upload_url = store.presign_upload(&object_key, policy.max_bytes)?;
         ops.push(BlobRowOp::Insert(ReferenceRow {
             id,
-            object_key: object_key.clone(),
+            object_key,
             kind: kind.to_string(),
             service: store.service().to_string(),
             content_type,
             file_name,
             owner: owner.map(|person| person.as_uuid()),
         }));
-        let upload_url = store.presign_upload(&object_key);
         Ok(Blob {
             reference: BlobRef(id),
             upload_url,

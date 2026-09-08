@@ -1,3 +1,5 @@
+use std::any::TypeId;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -5,7 +7,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::accumulator::{Accumulator, AccumulatorRuntime};
-use crate::blobs::{Blob, BlobHandle, BlobRef, Blobs};
+use crate::blobs::{Blob, BlobHandle, BlobRef, BlobRowOp, Blobs};
 use crate::erase::PersonId;
 use crate::error::EngineError;
 use crate::impact::{Dims, Impact};
@@ -24,6 +26,7 @@ pub struct Ops<'a> {
     pub(crate) offers: Arc<OfferStagers>,
     pub(crate) blobs: Option<&'a BlobHandle>,
     pub(crate) now: Timestamp,
+    blob_seen: HashMap<(TypeId, Vec<u8>), Vec<BlobRef>>,
 }
 
 impl<'a> Ops<'a> {
@@ -42,6 +45,7 @@ impl<'a> Ops<'a> {
             offers,
             blobs,
             now,
+            blob_seen: HashMap::new(),
         }
     }
 
@@ -57,7 +61,12 @@ impl<'a> Ops<'a> {
         &mut self,
         key: &<A::Store as Persistence>::Key,
     ) -> Result<Option<A>, EngineError> {
-        A::Store::load(self.conn, key).await
+        let loaded = A::Store::load(self.conn, key).await?;
+        if let Some(aggregate) = &loaded {
+            let reconcile_key = reconcile_key::<A>(aggregate)?;
+            self.blob_seen.insert(reconcile_key, aggregate.blob_refs());
+        }
+        Ok(loaded)
     }
 
     pub async fn save<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
@@ -65,7 +74,8 @@ impl<'a> Ops<'a> {
         self.note_terminal(&outcome);
         outcome?;
         self.offers
-            .stage_for(aggregate, &mut self.staged.offer_dirty)
+            .stage_for(aggregate, &mut self.staged.offer_dirty)?;
+        self.reconcile_blobs::<A>(aggregate)
     }
 
     pub async fn create<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
@@ -73,7 +83,40 @@ impl<'a> Ops<'a> {
         self.note_terminal(&outcome);
         outcome?;
         self.offers
-            .stage_for(aggregate, &mut self.staged.offer_dirty)
+            .stage_for(aggregate, &mut self.staged.offer_dirty)?;
+        self.reconcile_blobs::<A>(aggregate)
+    }
+
+    pub fn delete<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let reconcile_key = reconcile_key::<A>(aggregate)?;
+        let mut released = self.blob_seen.remove(&reconcile_key).unwrap_or_default();
+        for reference in aggregate.blob_refs() {
+            if !released.contains(&reference) {
+                released.push(reference);
+            }
+        }
+        for reference in released {
+            self.staged
+                .blob_ops
+                .push(BlobRowOp::Orphan(reference, self.now));
+        }
+        Ok(())
+    }
+
+    fn reconcile_blobs<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let reconcile_key = reconcile_key::<A>(aggregate)?;
+        let new_refs = aggregate.blob_refs();
+        if let Some(old_refs) = self.blob_seen.get(&reconcile_key) {
+            for reference in old_refs {
+                if !new_refs.contains(reference) {
+                    self.staged
+                        .blob_ops
+                        .push(BlobRowOp::Orphan(*reference, self.now));
+                }
+            }
+        }
+        self.blob_seen.insert(reconcile_key, new_refs);
+        Ok(())
     }
 
     fn note_terminal(&mut self, outcome: &Result<(), EngineError>) {
@@ -190,4 +233,12 @@ impl<'a> Ops<'a> {
             )
         })
     }
+}
+
+fn reconcile_key<A: Aggregate>(aggregate: &A) -> Result<(TypeId, Vec<u8>), EngineError> {
+    let key = serde_json::to_vec(&aggregate.key()).map_err(|source| EngineError::Encode {
+        what: "aggregate key for blob reconciliation",
+        source,
+    })?;
+    Ok((TypeId::of::<A>(), key))
 }

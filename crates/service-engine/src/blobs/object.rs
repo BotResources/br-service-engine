@@ -5,6 +5,7 @@ use reqwest::header::CONTENT_LENGTH;
 use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
 
 use crate::blobs::config::BlobConfig;
+use crate::blobs::post_policy::{PostPolicyInput, presign_post};
 use crate::blobs::{DownloadUrl, UploadUrl};
 use crate::error::EngineError;
 
@@ -12,6 +13,11 @@ pub(crate) struct ObjectStore {
     bucket: Bucket,
     credentials: Credentials,
     http: reqwest::Client,
+    endpoint: String,
+    bucket_name: String,
+    region: String,
+    access_key: String,
+    secret_key: String,
     upload_ttl: Duration,
     download_ttl: Duration,
 }
@@ -38,17 +44,32 @@ impl ObjectStore {
             bucket,
             credentials,
             http,
+            endpoint: config.endpoint.clone(),
+            bucket_name: config.bucket.clone(),
+            region: config.region.clone(),
+            access_key: config.access_key.clone(),
+            secret_key: config.secret_key.clone(),
             upload_ttl: config.upload_ttl,
             download_ttl: config.download_ttl,
         })
     }
 
-    pub(crate) fn presign_upload(&self, object_key: &str) -> UploadUrl {
-        let url = self
-            .bucket
-            .put_object(Some(&self.credentials), object_key)
-            .sign(self.upload_ttl);
-        UploadUrl::new(url.to_string())
+    pub(crate) fn presign_upload(
+        &self,
+        object_key: &str,
+        max_bytes: u64,
+    ) -> Result<UploadUrl, EngineError> {
+        presign_post(PostPolicyInput {
+            endpoint: &self.endpoint,
+            bucket: &self.bucket_name,
+            region: &self.region,
+            access_key: &self.access_key,
+            secret_key: &self.secret_key,
+            object_key,
+            max_bytes,
+            ttl: self.upload_ttl,
+            now: chrono::Utc::now(),
+        })
     }
 
     pub(crate) fn presign_download(&self, object_key: &str) -> DownloadUrl {

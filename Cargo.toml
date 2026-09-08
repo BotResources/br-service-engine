@@ -27,15 +27,18 @@ async-graphql = { version = "=7.0.19", features = ["uuid"] }
 async-graphql-axum = "=7.0.19"
 async-nats = "0.48"
 axum = { version = "0.8", features = ["ws"] }
+base64 = "0.23"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 croner = "=4.0.0"
 futures-util = "0.3"
+hmac = "0.13"
 metrics = "0.24"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 rusty-s3 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11"
 sqlx = { version = "0.8", features = [
     "postgres",
     "runtime-tokio",

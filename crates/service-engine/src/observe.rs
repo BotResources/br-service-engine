@@ -171,7 +171,6 @@ pub fn record_beat(round: &BeatRound) {
     }
     record_reaped("incomplete", round.blobs.reaped_incomplete);
     record_reaped("orphan", round.blobs.reaped_orphan);
-    record_reaped("oversize", round.blobs.reaped_oversize);
 }
 
 fn record_reaped(outcome: &'static str, count: u64) {
