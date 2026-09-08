@@ -140,6 +140,29 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   slots, scheduled boundaries, seal times) round-trips equal on nanosecond
   clocks; a sub-microsecond value is unrepresentable.
 
+### Added (0.1.0 rework, unit U8)
+
+- Mirror author surface. `Mirror::new(name).consume::<C>().keyed_by(f).project(p)`
+  builds a typed mirror over the engine's own KV watch and the retained
+  shadow/leader supervisor, generic over any `Consumed` published type crossing
+  the frontier (a `PREFIX` under `PUBLISHED_LANGUAGE` by default). `register_mirror`
+  now takes the builder and wires it to the engine's `Nats`, pool and impact
+  transport; the raw `MirrorHandle` entry is `register_mirror_handle`, kept behind
+  `test-support`. Each `consume::<C>()` keeps a per-pod typed `Shadow<C>` of the
+  offer; `keyed_by` names the join keys a `Change` touches; `project` receives a
+  `Projection` with typed `shadow::<C>()` access, the transaction connection and
+  `impact`/`impact_foreign`/`impact_resource`, and rewrites the `known_*` rows for
+  one key. The projection runs through the direct lane: the `known_*` write and
+  its impacts commit in one transaction, so a projected row is a write with
+  impacts that reaches every pod's sessions. Boot does a full read of every
+  consumed prefix and rebuilds the shadows before it reports converged, so a
+  pre-filled bucket is caught up before the pod is ready; readiness stays DOWN
+  until every consumption converges; a consumed prefix that reads empty holds
+  readiness DOWN, names the prefix and keeps the shadows and `known_*` exactly as
+  they are (never projecting to empty); a projection panic takes the same
+  restart-and-backoff path as an error. The directory roster is the first
+  instance, wired in the conformance sample.
+
 ### Deployment constraint
 
 - No transaction-mode pooler in front of an engine service: `LISTEN` is session
