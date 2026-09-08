@@ -1,14 +1,22 @@
 #[allow(dead_code)]
 mod engine_twin;
 
+use std::collections::BTreeSet;
+
 use conformance_service_engine::infra::{TestDb, TestNats};
-use conformance_service_engine::sample::GatedAssignmentProjector;
 use conformance_service_engine::sample::engine::engine_config;
+use conformance_service_engine::sample::gated::load_candidates;
+use conformance_service_engine::sample::principal::SamplePrincipal;
 use conformance_service_engine::sample::render::*;
+use conformance_service_engine::sample::{AssignmentVisibility, GatedAssignmentProjector};
 use engine_twin::{SOON, await_ready, spy_engine, stage};
 use service_engine::delta::Delta;
 use service_engine::impact::{Deps, Impact};
+use service_engine::population::Population;
 use service_engine::principal::Principal;
+use service_engine::projector::Projector;
+use service_engine::session::WindowParams;
+use service_engine::visibility::check_window_matches_visibility;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -65,6 +73,49 @@ async fn s29_engine_a_row_outside_the_visibility_is_filtered_from_the_snapshot()
         .expect("the engine task joins")
         .expect("run returns Ok");
     drop(nats);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s29_the_session_window_membership_is_derived_from_the_visibility_declaration() {
+    let db = TestDb::fresh().await;
+    let pool = db.app_pool().clone();
+
+    let home = Uuid::now_v7();
+    let foreign = Uuid::now_v7();
+    let principal = SamplePrincipal::new(Uuid::now_v7(), home);
+    let mine = assignment(&pool, home, "mine").await;
+    let theirs = assignment(&pool, foreign, "theirs").await;
+
+    let projector = GatedAssignmentProjector::membership();
+    let population = projector
+        .populate(&pool, &WindowParams::none(), &principal)
+        .await
+        .expect("the window populates");
+    let produced: BTreeSet<Uuid> = match population {
+        Population::Keys(keys) => keys,
+        Population::Ordered { keys, .. } => keys.into_iter().collect(),
+        Population::Query(query) => query.keys().clone(),
+    };
+
+    let candidates = load_candidates(&pool)
+        .await
+        .expect("the candidate rows load");
+    check_window_matches_visibility::<AssignmentVisibility, _, _>(
+        &produced, candidates, &principal,
+    )
+    .expect("the window the projector populated equals the visibility declaration");
+
+    assert_eq!(
+        produced,
+        BTreeSet::from([mine]),
+        "the window holds exactly the keys whose cohorts meet the principal's memberships"
+    );
+    assert!(
+        !produced.contains(&theirs),
+        "a foreign-tenant row is excluded by the window itself, not only by the render filter"
+    );
+
     db.cleanup().await;
 }
 

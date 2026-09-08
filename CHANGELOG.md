@@ -48,11 +48,16 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   surface; a blocked `Gate::require()` yields the `Reason` a mutation refuses with,
   which is the same code the affordance shows.
 - Visibility author layer (`visibility` module): the `Visibility` trait
-  (`cohorts(row)` / `memberships(principal)`) plus the derived `visible` predicate
-  (visible iff cohorts and memberships intersect). One declaration feeds the three
-  enforcement points over the existing cohort/window mechanism — the query filter,
-  the window membership, and the removal of a row from a live session when a
-  principal's facts change.
+  (`cohorts(row)` / `memberships(principal)`) with three derivations off the one
+  cohort-intersection rule — `visible(row, principal)` (the render/query filter and
+  the facts-change removal, threaded through the projector's `project`), and
+  `visible_keys` / `window`, which build a session window's key set from candidate
+  rows so `populate` derives its membership from the same declaration rather than a
+  second hand-authored query. `check_window_matches_visibility` lets the battery
+  prove a projector's populated window equals the declaration's visible set,
+  reporting a `WindowMismatch` on any drift. One declaration, three enforcement
+  points: the query filter, the window membership, and the removal of a row from a
+  live session when a principal's facts change.
 
 ### Added
 
