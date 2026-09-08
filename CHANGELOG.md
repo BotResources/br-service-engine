@@ -611,15 +611,22 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   generated `from_delta` mapping consumes; the free `subscribe` / `to_engine_delta`
   and the engine-owned `EngineDelta` / `ProjectedView` / `*Payload` types are
   removed in favour of the per-service typed union the macro emits.
-- SDL assembly: `SchemaSlices` / `SliceFragment` assemble the slices' root fields
-  and types and fail boot loud (`EngineError::DuplicateSchemaMember`) when two
-  slices claim the same root field or GraphQL type.
-- Conformance: `s59`–`s64` now drive the typed `Query` context, `run_with_listener`
-  boot and the per-projector typed union (`... on WidgetView { .. }` in place of
-  a `ProjectedView { projector view }` shape). Added `s65` (two projectors are two
-  typed union members; a client subscribing to one receives only its own member's
-  deltas) and `s66` (two slices claiming the same root field or type fail the boot
-  assembly loud).
+- SDL assembly, wired into boot: a slice declares its root fields and types as a
+  `SliceFragment` and registers it with `Engine::register_schema_slice`; the
+  engine assembles the registered fragments (`SchemaSlices::assemble`) at the
+  start of `run` — so through `run_with` too — and fails boot loud with
+  `EngineError::DuplicateSchemaMember`, naming both slices, when two claim the
+  same root field or GraphQL type, before the pod serves. `SchemaSlices` /
+  `SliceFragment` stay public for a service that wants to assemble ahead of boot.
+- Conformance: `s59`–`s65` now drive the typed `Query` context and boot the
+  sample through `Engine::run_with` binding `EngineConfig::http_addr`, over the
+  per-projector typed union (`... on WidgetView { .. }` in place of a
+  `ProjectedView { projector view }` shape). `s65` proves two projectors are two
+  typed union members and that a client subscribing to one receives only its own
+  member's deltas; `s66` boots a real two-slice engine (real Postgres and NATS)
+  whose slices claim the same root field (and, in a second scenario, the same
+  GraphQL type) and asserts the boot returns `EngineError::DuplicateSchemaMember`
+  instead of standing the pod up.
 
 ### Changed (0.1.0 rework, unit U1)
 

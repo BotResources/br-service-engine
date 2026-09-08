@@ -170,9 +170,13 @@ opaque JSON. The subscription is one typed union member per projector: the
 `subscription_union!` macro takes a service's `Projector => View` mapping once
 and emits the `Reset`/`Upsert`/`Remove` payloads over a typed view union (so a
 client subscribing to one projector's field receives only that member's deltas)
-with the contiguous revision and the causing event. Slices declare their root
-fields and types to `SchemaSlices`, which fails boot loud if two slices claim
-the same root field or type. The axum layer resolves the principal from the
+with the contiguous revision and the causing event. Each slice declares its
+root fields and types as a `SliceFragment` and registers it with
+`Engine::register_schema_slice`; the engine assembles the registered fragments
+at the start of `run` (so through `run_with` too) and fails boot loud with
+`EngineError::DuplicateSchemaMember`, naming both slices, if two claim the same
+root field or GraphQL type — the pod never serves an ambiguous schema. The axum
+layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
 kit does authZ only, never authN.
 
