@@ -176,6 +176,7 @@ pub trait Gated {
 }
 
 mod check;
+mod decode;
 
 pub use check::{GateMismatch, check_gates_match_affordances};
 

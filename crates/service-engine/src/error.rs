@@ -168,6 +168,21 @@ pub enum EngineError {
 
     #[error("the {capability} capability is a later unit of the 0.1.0 rework and has no body yet")]
     NotYet { capability: &'static str },
+
+    #[error("http server on {addr}: {source}")]
+    Http {
+        addr: std::net::SocketAddr,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("two slices contribute the same graphql {kind} `{member}`: {first} and {second}")]
+    DuplicateSchemaMember {
+        kind: &'static str,
+        member: String,
+        first: &'static str,
+        second: &'static str,
+    },
 }
 
 #[derive(Debug, Error)]
