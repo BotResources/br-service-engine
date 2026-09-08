@@ -13,9 +13,11 @@ use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::{Budgets, ReactionMessage, ReactionRegistry, Subscription};
+#[cfg(feature = "test-support")]
 use crate::mirror::MirrorHandle;
 use crate::pipeline::Reaction;
 use crate::presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
+use crate::mirror::{MirrorReady, Project};
 use crate::principal::{Principal, PrincipalResolver, RlsApplier};
 use crate::projector::Projector;
 use crate::registry::RenderRegistry;
@@ -131,8 +133,17 @@ impl<P: Principal> Engine<P> {
             .map_err(|error| EngineError::Service(Box::new(error)))
     }
 
-    pub fn register_mirror(&mut self, m: MirrorHandle) -> Result<(), EngineError> {
-        self.mirrors.register(m)
+    pub fn register_mirror<K, Pr>(&mut self, mirror: MirrorReady<K, Pr>) -> Result<(), EngineError>
+    where
+        K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
+        Pr: Project<K>,
+    {
+        let handle = mirror.build(
+            self.nats.clone(),
+            self.pg.clone(),
+            self.transport.clone() as Arc<dyn ImpactTransport>,
+        );
+        self.mirrors.register(handle)
     }
 
     pub fn register_reaction<M, H, E>(
@@ -317,6 +328,14 @@ impl<P: Principal> Engine<P> {
 
     pub fn register_relay<R: Relay>(&mut self, r: R) -> Result<(), EngineError> {
         self.beat.relays().register_erased(Arc::new(r))
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn register_mirror_handle(
+        &mut self,
+        m: crate::mirror::MirrorHandle,
+    ) -> Result<(), EngineError> {
+        self.mirrors.register(m)
     }
 
     pub fn transport(&self) -> &dyn ImpactTransport {

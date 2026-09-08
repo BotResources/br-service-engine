@@ -74,7 +74,7 @@ async fn s17_a_session_survives_no_longer_than_the_engine_when_a_worker_stops() 
         .register_projector(AssignmentProjector)
         .expect("register the projector");
     engine
-        .register_mirror(a_mirror_whose_supervisor_dies_after_it_converges())
+        .register_mirror_handle(a_mirror_whose_supervisor_dies_after_it_converges())
         .expect("register the mirror");
 
     let render = engine.render();

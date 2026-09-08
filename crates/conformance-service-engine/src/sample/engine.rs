@@ -10,7 +10,7 @@ use service_engine::nats::Nats;
 use crate::infra::TestDb;
 use crate::sample::assignment::{Assignment, AssignmentProjector};
 use crate::sample::cron::SampleCronJob;
-use crate::sample::mirror::directory_mirror_handle;
+use crate::sample::mirror::directory_mirror;
 use crate::sample::note::{Note, NoteProjector};
 use crate::sample::presence::Typing;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
@@ -92,7 +92,7 @@ pub async fn boot_sample_engine(
     let mut engine = Engine::boot(
         engine_config(channel, pod),
         db.app_pool().clone(),
-        nats.clone(),
+        nats,
         ReadinessHandle::ready(),
     )
     .await
@@ -122,13 +122,8 @@ pub async fn boot_sample_engine(
     engine
         .register_cron(SampleCronJob::new(SAMPLE_JOB, Schedule::EveryBeats(1), pod))
         .expect("register the sample cron job");
-    let transport = engine.transport_arc();
     engine
-        .register_mirror(directory_mirror_handle(
-            nats,
-            db.app_pool().clone(),
-            transport,
-        ))
+        .register_mirror(directory_mirror())
         .expect("register the directory mirror");
     engine
 }
