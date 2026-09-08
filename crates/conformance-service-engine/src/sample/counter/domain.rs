@@ -5,8 +5,6 @@ use uuid::Uuid;
 use crate::sample::counter::event::CounterEvent;
 use crate::sample::principal::SamplePrincipal;
 
-pub const COUNTER_CEILING: i64 = 100;
-
 pub const CLOSED: Reason = Reason::new("counter_closed");
 
 const BUMP: ActionName = ActionName::from_static("bump");

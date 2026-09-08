@@ -9,7 +9,7 @@ pub mod slice;
 pub mod soft;
 
 pub use crud::{CrudCounter, CrudCounterNoun, CrudCounterStore};
-pub use domain::{COUNTER_CEILING, CounterError, CounterState, CounterView, view_of};
+pub use domain::{CounterError, CounterState, CounterView, view_of};
 pub use event::{CounterEvent, EVENT_VERSION, upcast};
 pub use full::{FullCounter, FullCounterNoun, FullCounterStore, replay_from_scratch};
 pub use full_erase::erase_author;
