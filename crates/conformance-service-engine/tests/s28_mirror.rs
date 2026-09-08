@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use conformance_service_engine::TestDb;
@@ -7,8 +8,8 @@ use conformance_service_engine::sample::render::{
     upserted, window,
 };
 use conformance_service_engine::sample::{
-    KnownUserNoun, RosterUserView, RosterUsers, SampleDirectory, StagingTransport,
-    directory_mirror, known_users, publish_roster, retract_user,
+    KnownUserNoun, RecordingTransport, RosterUserView, RosterUsers, SampleDirectory,
+    StagingTransport, directory_mirror, known_users, publish_roster, retract_user, staged_impacts,
 };
 use service_engine::Nats;
 use service_engine::impact::{ForeignKey, Impact};
@@ -58,7 +59,8 @@ async fn s28_a_kv_put_lands_in_known_users_and_reaches_a_live_session() {
     let pool = db.app_pool().clone();
 
     let user = Uuid::now_v7();
-    let mirror = directory_mirror().build(fabric.clone(), pool.clone(), StagingTransport::silent());
+    let mirror =
+        directory_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
     let watch = tokio::spawn(mirror.watch());
 
     establish_email(&fabric, &pool, user, "before@example.test").await;
@@ -88,6 +90,11 @@ async fn s28_a_kv_put_lands_in_known_users_and_reaches_a_live_session() {
     )
     .await;
     await_email(&pool, user, "after@example.test").await;
+
+    assert!(
+        staged_touches(&staged_impacts(&pool).await, user),
+        "the mirror stages its own foreign impact for the projected user, observed not assumed"
+    );
 
     let report = engine
         .render(vec![Impact::foreign(
@@ -121,7 +128,8 @@ async fn s28_a_kv_retract_removes_the_known_row_and_the_session_view() {
     let pool = db.app_pool().clone();
 
     let user = Uuid::now_v7();
-    let mirror = directory_mirror().build(fabric.clone(), pool.clone(), StagingTransport::silent());
+    let mirror =
+        directory_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
     let watch = tokio::spawn(mirror.watch());
 
     establish_email(&fabric, &pool, user, "present@example.test").await;
@@ -146,6 +154,10 @@ async fn s28_a_kv_retract_removes_the_known_row_and_the_session_view() {
         known_users(&pool).await,
         0,
         "a retract on the bucket deletes the mirrored known_users row"
+    );
+    assert!(
+        staged_touches(&staged_impacts(&pool).await, user),
+        "the mirror stages its own foreign impact for the retracted user, observed not assumed"
     );
 
     let report = engine
@@ -202,6 +214,11 @@ async fn s28_an_empty_consumed_prefix_holds_readiness_down_and_keeps_known_star(
 
     drop(nats);
     db.cleanup().await;
+}
+
+fn staged_touches(staged: &[Impact], user: Uuid) -> bool {
+    let expected = Impact::foreign(ForeignKey::new("identity.user", &user.to_string()).unwrap());
+    staged.contains(&expected)
 }
 
 fn roster_registry()

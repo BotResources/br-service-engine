@@ -128,6 +128,14 @@ pub fn directory_mirror() -> MirrorReady<Uuid, impl Project<Uuid>> {
             id_of(&change.key).into_iter().collect::<Vec<Uuid>>()
         })
         .project(DirectoryProjection)
+        .reconcile_keys(|pool: PgPool| {
+            Box::pin(async move {
+                let ids: Vec<Uuid> = sqlx::query_scalar("SELECT user_id FROM known_users")
+                    .fetch_all(&pool)
+                    .await?;
+                Ok(ids)
+            }) as BoxFuture<'static, Result<Vec<Uuid>, EngineError>>
+        })
 }
 
 pub fn directory_mirror_handle(
