@@ -1,4 +1,6 @@
 pub mod assignment;
+pub mod blob;
+pub mod blob_view;
 pub mod cron;
 pub mod engine;
 pub mod gate;
@@ -47,6 +49,7 @@ pub const TABLES: &[&str] = &[
     "sample_backfill",
     "se_stub_effect",
     "sample_widget",
+    "sample_doc",
 ];
 
 pub use mirror::{
@@ -58,9 +61,14 @@ pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_ru
 
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
+pub use blob::{
+    AttachDoc, AttachOwnedDoc, Attachment, DetachDoc, DocRow, DocStore, attach_doc,
+    attach_owned_doc, detach_doc,
+};
+pub use blob_view::{Doc, DocProjector, DocView};
 pub use engine::{
-    SAMPLE_JOB, SAMPLE_RELAY, boot_presence_engine, boot_render_engine, boot_sample_engine,
-    engine_config,
+    SAMPLE_JOB, SAMPLE_RELAY, boot_blob_engine, boot_presence_engine, boot_render_engine,
+    boot_sample_engine, engine_config,
 };
 
 pub use assignment::{

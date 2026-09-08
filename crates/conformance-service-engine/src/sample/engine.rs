@@ -1,14 +1,18 @@
 use std::time::Duration;
 
 use br_util_axum_readiness::ReadinessHandle;
-use service_engine::Engine;
 use service_engine::config::EngineConfig;
 use service_engine::cron::Schedule;
 use service_engine::name::{ChannelName, PodId, RelayName};
 use service_engine::nats::Nats;
+use service_engine::{BlobConfig, BlobPolicy, Engine};
 
 use crate::infra::TestDb;
 use crate::sample::assignment::{Assignment, AssignmentProjector};
+use crate::sample::blob::{
+    AttachDoc, AttachOwnedDoc, Attachment, DetachDoc, attach_doc, attach_owned_doc, detach_doc,
+};
+use crate::sample::blob_view::DocProjector;
 use crate::sample::cron::SampleCronJob;
 use crate::sample::mirror::directory_mirror;
 use crate::sample::note::{Note, NoteProjector};
@@ -130,6 +134,46 @@ pub async fn boot_sample_engine(
     engine
         .register_mirror(directory_mirror())
         .expect("register the directory mirror");
+    engine
+}
+
+pub async fn boot_blob_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    blob: BlobConfig,
+    policy: BlobPolicy,
+    reaper_interval: Duration,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod)
+            .with_blob_storage(blob)
+            .with_blob_reaper_interval(reaper_interval),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the blob engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(DocProjector)
+        .expect("register the doc projector, which auto-binds the doc noun");
+    engine
+        .register_blobs::<Attachment>(policy)
+        .expect("register the attachment blob kind");
+    engine
+        .register_mutation::<AttachDoc, _>(attach_doc)
+        .expect("register the attach mutation");
+    engine
+        .register_mutation::<AttachOwnedDoc, _>(attach_owned_doc)
+        .expect("register the attach-owned mutation");
+    engine
+        .register_mutation::<DetachDoc, _>(detach_doc)
+        .expect("register the detach mutation");
     engine
 }
 
