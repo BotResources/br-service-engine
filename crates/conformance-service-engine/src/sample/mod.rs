@@ -63,7 +63,8 @@ pub use mirror::{
 pub use counter::{
     BumpCrud, BumpFull, BumpFullCmd, BumpSoft, CoarseCounterFault, CounterError, CounterEvent,
     CounterFault, CounterState, CounterView, CrudCounter, FullCounter, FullCounterProjector,
-    SoftCounter, bump_full_coords, erase_author, replay_from_scratch,
+    OpenCrud, OpenFull, OpenSoft, SoftCounter, bump_full_coords, erase_author, open_crud,
+    open_full, open_soft, replay_from_scratch,
 };
 
 pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs};
@@ -72,7 +73,7 @@ pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
 pub use engine::{
     SAMPLE_JOB, SAMPLE_RELAY, boot_persistence_engine, boot_presence_engine, boot_render_engine,
-    boot_sample_engine, engine_config,
+    boot_sample_engine, boot_serialization_engine, engine_config,
 };
 
 pub use assignment::{

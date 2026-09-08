@@ -76,7 +76,7 @@ pub(crate) async fn select_snapshot(
 ) -> Result<Option<CounterState>, EngineError> {
     let row = sqlx::query(
         "SELECT id, tenant, total, closed, last_author, version \
-         FROM sample_counter_full_snapshot WHERE id = $1",
+         FROM sample_counter_full_snapshot WHERE id = $1 FOR UPDATE",
     )
     .bind(key)
     .fetch_optional(conn)

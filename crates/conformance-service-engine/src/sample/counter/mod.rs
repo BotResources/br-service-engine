@@ -15,8 +15,9 @@ pub use full::{FullCounter, FullCounterNoun, FullCounterStore, replay_from_scrat
 pub use full_erase::erase_author;
 pub use full_view::{FullCounterFacts, FullCounterProjector};
 pub use handler::{
-    BumpCrud, BumpFull, BumpFullCmd, BumpSoft, CoarseCounterFault, CounterFault, bump_crud,
-    bump_full, bump_full_coords, bump_full_reaction, bump_soft,
+    BumpCrud, BumpFull, BumpFullCmd, BumpSoft, CoarseCounterFault, CounterFault, OpenCrud,
+    OpenFull, OpenSoft, bump_crud, bump_full, bump_full_coords, bump_full_reaction, bump_soft,
+    open_crud, open_full, open_soft,
 };
 pub use slice::CounterAggregate;
 pub use soft::{SoftCounter, SoftCounterNoun, SoftCounterStore};

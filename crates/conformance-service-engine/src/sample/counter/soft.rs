@@ -35,7 +35,8 @@ impl Persistence for SoftCounterStore {
     ) -> BoxFuture<'a, Result<Option<SoftCounter>, EngineError>> {
         Box::pin(async move {
             let row = sqlx::query(
-                "SELECT id, tenant, total, closed, version FROM sample_counter_soft WHERE id = $1",
+                "SELECT id, tenant, total, closed, version FROM sample_counter_soft \
+                 WHERE id = $1 FOR UPDATE",
             )
             .bind(key)
             .fetch_optional(conn)

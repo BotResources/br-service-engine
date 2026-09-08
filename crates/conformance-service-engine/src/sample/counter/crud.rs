@@ -35,7 +35,8 @@ impl Persistence for CrudCounterStore {
     ) -> BoxFuture<'a, Result<Option<CrudCounter>, EngineError>> {
         Box::pin(async move {
             let row = sqlx::query(
-                "SELECT id, tenant, total, closed FROM sample_counter_crud WHERE id = $1",
+                "SELECT id, tenant, total, closed FROM sample_counter_crud WHERE id = $1 \
+                 FOR UPDATE",
             )
             .bind(key)
             .fetch_optional(conn)

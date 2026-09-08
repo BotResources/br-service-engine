@@ -118,6 +118,63 @@ bump_input!(BumpCrud, bump_crud, CrudCounter, "bump_crud");
 bump_input!(BumpSoft, bump_soft, SoftCounter, "bump_soft");
 bump_input!(BumpFull, bump_full, FullCounter, "bump_full");
 
+async fn apply_open<A>(cx: &mut Ops<'_>, input: &Bump) -> Result<(), CounterFault>
+where
+    A: CounterAggregate,
+    <A as Aggregate>::Store: Persistence<Key = Uuid, Event = CounterEvent>,
+{
+    let mut aggregate = A::open(input.key, input.tenant);
+    aggregate
+        .state_mut()
+        .bump(input.amount, input.author.clone())?;
+    cx.create(&aggregate).await?;
+    cx.impact_caused::<A::Noun, _>(&input.key, "opened")?;
+    Ok(())
+}
+
+macro_rules! open_input {
+    ($name:ident, $handler:ident, $agg:ty, $lit:literal) => {
+        #[derive(Debug, Deserialize)]
+        pub struct $name {
+            pub key: Uuid,
+            pub tenant: Uuid,
+            pub amount: i64,
+            pub author: String,
+        }
+
+        impl MutationInput for $name {
+            type Output = ();
+            type Error = CounterFault;
+            const NAME: &'static str = $lit;
+        }
+
+        impl From<$name> for Bump {
+            fn from(input: $name) -> Bump {
+                Bump {
+                    key: input.key,
+                    tenant: input.tenant,
+                    amount: input.amount,
+                    author: input.author,
+                }
+            }
+        }
+
+        pub fn $handler<'m>(
+            cx: &'m mut Mutation<'m, SamplePrincipal>,
+            input: $name,
+        ) -> BoxFuture<'m, Result<(), CounterFault>> {
+            Box::pin(async move {
+                let input: Bump = input.into();
+                apply_open::<$agg>(cx, &input).await
+            })
+        }
+    };
+}
+
+open_input!(OpenCrud, open_crud, CrudCounter, "open_crud");
+open_input!(OpenSoft, open_soft, SoftCounter, "open_soft");
+open_input!(OpenFull, open_full, FullCounter, "open_full");
+
 #[derive(Debug, Deserialize)]
 pub struct BumpFullCmd {
     pub key: Uuid,
