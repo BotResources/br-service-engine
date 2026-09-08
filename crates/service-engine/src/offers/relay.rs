@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
@@ -32,20 +33,40 @@ pub(crate) struct OfferRelay<O: Offer> {
     name: RelayName,
     nats: Nats,
     bucket: OnceCell<KvBucket<O::Published>>,
-    reconciled: AtomicBool,
+    reconcile_period: Duration,
+    last_reconcile: Mutex<Option<Instant>>,
     _offer: PhantomData<fn() -> O>,
 }
 
 impl<O: Offer> OfferRelay<O> {
-    pub(crate) fn new(nats: Nats) -> Result<Self, RelayError> {
+    pub(crate) fn new(nats: Nats, reconcile_period: Duration) -> Result<Self, RelayError> {
         Ok(Self {
             name: RelayName::new(O::NAME)
                 .map_err(|error| RelayError::Publish(format!("offer name {}: {error}", O::NAME)))?,
             nats,
             bucket: OnceCell::new(),
-            reconciled: AtomicBool::new(false),
+            reconcile_period,
+            last_reconcile: Mutex::new(None),
             _offer: PhantomData,
         })
+    }
+
+    fn reconcile_due(&self) -> bool {
+        let guard = self
+            .last_reconcile
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match *guard {
+            None => true,
+            Some(at) => at.elapsed() >= self.reconcile_period,
+        }
+    }
+
+    fn mark_reconciled(&self) {
+        *self
+            .last_reconcile
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
     }
 
     async fn bucket(&self) -> Result<&KvBucket<O::Published>, RelayError> {
@@ -202,12 +223,10 @@ impl<O: Offer> Relay for OfferRelay<O> {
         claim: &'a Claim,
     ) -> BoxFuture<'a, Result<Drained, RelayError>> {
         Box::pin(async move {
-            let first = self
-                .reconciled
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok();
-            if first {
+            let due = self.reconcile_due();
+            if due {
                 self.reconcile(conn).await?;
+                self.mark_reconciled();
             }
             let batch = claim.batch().max(1);
             let markers = self.pending(conn, batch).await?;
@@ -219,7 +238,7 @@ impl<O: Offer> Relay for OfferRelay<O> {
                 let write = self.resolve(conn, marker).await?;
                 self.apply(conn, marker, write).await?;
             }
-            Ok(Drained::rows(rows, first || rows >= batch))
+            Ok(Drained::rows(rows, due || rows >= batch))
         })
     }
 }

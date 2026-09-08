@@ -116,8 +116,9 @@ impl<P: Principal> Engine<P> {
     }
 
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
-        let relay = crate::offers::OfferRelay::<O>::new(self.nats.clone())
-            .map_err(|error| EngineError::Service(Box::new(error)))?;
+        let relay =
+            crate::offers::OfferRelay::<O>::new(self.nats.clone(), self.config.offer_reconcile)
+                .map_err(|error| EngineError::Service(Box::new(error)))?;
         self.beat.relays().register_erased(Arc::new(relay))?;
         self.offers.register::<O>();
         Ok(())

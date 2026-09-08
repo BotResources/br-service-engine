@@ -14,6 +14,7 @@ pub const DEFAULT_CHUNK_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 pub const DEFAULT_MAX_BUFFERED_CHUNKS: usize = 10_000;
 pub const DEFAULT_FOLD_CACHE_CAPACITY: usize = 10_000;
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(30);
+pub const DEFAULT_OFFER_RECONCILE: Duration = Duration::from_secs(300);
 pub const DEFAULT_LISTENER_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub const DEFAULT_REPAIR_ATTEMPTS: u32 = 5;
 pub const DEFAULT_SESSION_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
@@ -36,6 +37,7 @@ pub struct EngineConfig {
     pub max_buffered_chunks: usize,
     pub fold_cache_capacity: usize,
     pub lease: Duration,
+    pub offer_reconcile: Duration,
     pub listener_probe_timeout: Duration,
     pub repair_attempts: u32,
     pub session_max_age: Duration,
@@ -62,6 +64,7 @@ impl EngineConfig {
             max_buffered_chunks: DEFAULT_MAX_BUFFERED_CHUNKS,
             fold_cache_capacity: DEFAULT_FOLD_CACHE_CAPACITY,
             lease: DEFAULT_LEASE,
+            offer_reconcile: DEFAULT_OFFER_RECONCILE,
             listener_probe_timeout: DEFAULT_LISTENER_PROBE_TIMEOUT,
             repair_attempts: DEFAULT_REPAIR_ATTEMPTS,
             session_max_age: DEFAULT_SESSION_MAX_AGE,
@@ -134,6 +137,11 @@ impl EngineConfig {
 
     pub fn with_lease(mut self, lease: Duration) -> Self {
         self.lease = lease;
+        self
+    }
+
+    pub fn with_offer_reconcile(mut self, offer_reconcile: Duration) -> Self {
+        self.offer_reconcile = offer_reconcile;
         self
     }
 

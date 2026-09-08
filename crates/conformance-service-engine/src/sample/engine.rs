@@ -181,8 +181,20 @@ pub async fn boot_offer_engine(
     channel: &str,
     pod: &str,
 ) -> Engine<SamplePrincipal> {
+    boot_offer_engine_reconciling(db, nats, channel, pod, Duration::from_secs(300)).await
+}
+
+pub async fn boot_offer_engine_reconciling(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    reconcile: Duration,
+) -> Engine<SamplePrincipal> {
     let mut engine = Engine::boot(
-        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
+        engine_config(channel, pod)
+            .with_lock_timeout(Duration::from_millis(300))
+            .with_offer_reconcile(reconcile),
         db.app_pool().clone(),
         nats,
         ReadinessHandle::ready(),

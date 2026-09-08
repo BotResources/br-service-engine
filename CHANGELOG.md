@@ -242,10 +242,14 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   watermark (`service_engine.kv_relay_watermark`, monotone by the staged
   sequence) and a bucket-revision compare-and-swap that skips the put when the
   bucket value already equals `publish(row)`. On its first drain after
-  boot it reconciles the bucket against the store — re-putting a row whose
-  published value differs from (or is missing from) the bucket, retracting
-  orphans under its prefix — so a rebuilt or drifted bucket is repaired. The
-  `PUBLISHED_LANGUAGE` bucket must exist; a missing
+  boot, and then every `EngineConfig::with_offer_reconcile` period (default
+  five minutes), it reconciles the bucket against the store — re-putting a row
+  whose published value differs from (or is missing from) the bucket, retracting
+  orphans under its prefix — so a rebuilt or drifted bucket is repaired, and a
+  stable leader that never restarts still repairs out-of-band drift on its next
+  periodic pass. The reconcile timer advances only under leadership, so a pod
+  reconciles on the first drain after it acquires the lease and periodically
+  thereafter. The `PUBLISHED_LANGUAGE` bucket must exist; a missing
   bucket surfaces as a failing relay (readiness DOWN). The offer version lives
   in the key, so a breaking change is a second `register_offer` on the same
   noun.
@@ -265,12 +269,16 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   scenarios.
 - The app-role grant now includes `USAGE, SELECT` on the engine schema's
   sequences (for `offer_dirty_seq`).
+- `EngineConfig::offer_reconcile` (`with_offer_reconcile`, default five minutes,
+  validated non-zero) sets how often the leader re-reconciles an offer bucket
+  against the store.
 - Conformance: `s41_offer` (a mutation's dirty key commits in the same tx and
   the leader publishes it; a rolled-back mutation leaves no dirty key and
   nothing offered; a noun that stops being offerable is retracted; boot
-  reconcile repairs a drifted bucket) and `s42_mirror_leader` (two pods, exactly
-  one projects into `known_*`, and the standby takes over after the leader
-  stops).
+  reconcile repairs a drifted bucket), `s43_offer_periodic` (a stable leader that
+  never restarts repairs out-of-band bucket drift on its periodic reconcile), and
+  `s42_mirror_leader` (two pods, exactly one projects into `known_*`, and the
+  standby takes over after the leader stops).
 
 ### Added (0.1.0 rework, unit U10)
 

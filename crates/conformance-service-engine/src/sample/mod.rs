@@ -60,8 +60,8 @@ pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_ru
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
 pub use engine::{
-    SAMPLE_JOB, SAMPLE_RELAY, boot_offer_engine, boot_presence_engine, boot_render_engine,
-    boot_sample_engine, engine_config,
+    SAMPLE_JOB, SAMPLE_RELAY, boot_offer_engine, boot_offer_engine_reconciling,
+    boot_presence_engine, boot_render_engine, boot_sample_engine, engine_config,
 };
 
 pub use assignment::{

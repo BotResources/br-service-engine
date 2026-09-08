@@ -45,7 +45,7 @@ fills its part by adding module files and one method body.
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD shipped, soft-EDA / full-EDA behind the same trait | U3 (CRUD) / U4 |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
-| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark and boot reconcile | U7 (done) |
+| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile | U7 (done) |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection | U8 (done) / U7 (leader gate) |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
@@ -82,8 +82,10 @@ the same transaction as the write (`service_engine.offer_dirty`), the pod that
 holds the offer's leader lease drains those keys — re-reading the row, then
 putting or retracting the published value on the `PUBLISHED_LANGUAGE` bucket
 under a per-key watermark and a revision compare-and-swap — and reconciles the
-bucket against the store on its first drain (re-putting stale keys, retracting
-orphans); the version lives in the offer's key for a breaking change (register a
+bucket against the store on its first drain after boot and then every
+`EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
+orphans), so a stable leader that never restarts still repairs out-of-band
+drift; the version lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` (U8) projects a consumed KV offer into
 `known_*` through the direct lane, and its projection is now leader-gated (U7):
 only the pod holding the mirror lease projects, standby pods keep their shadows
