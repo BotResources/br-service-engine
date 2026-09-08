@@ -10,7 +10,7 @@ use crate::error::EngineError;
 use crate::nats::Nats;
 use crate::transport::ImpactTransport;
 
-use super::builder::Consumption;
+use super::builder::{Consumption, ReconcileKeysFn};
 use super::change::{Change, ChangeOp};
 use super::handle::MirrorRun;
 use super::projection::{Project, Projection};
@@ -25,6 +25,7 @@ pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
     consumptions: Arc<Vec<Consumption>>,
     keyed_by: KeyedByFn<K>,
     project: Arc<Pr>,
+    reconcile_keys: Option<ReconcileKeysFn<K>>,
     shadows: Arc<Mutex<Shadows>>,
 }
 
@@ -40,6 +41,7 @@ where
         consumptions: Arc<Vec<Consumption>>,
         keyed_by: KeyedByFn<K>,
         project: Arc<Pr>,
+        reconcile_keys: Option<ReconcileKeysFn<K>>,
     ) -> Self {
         Self {
             nats,
@@ -48,6 +50,7 @@ where
             consumptions,
             keyed_by,
             project,
+            reconcile_keys,
             shadows: Arc::new(Mutex::new(Shadows::new())),
         }
     }
@@ -79,7 +82,12 @@ where
                 apply(&mut fresh);
             }
         }
-        let touched = self.join_keys(&fresh, &changes);
+        let mut touched = self.join_keys(&fresh, &changes);
+        if let Some(reconcile_keys) = self.reconcile_keys.as_ref() {
+            let existing = reconcile_keys(self.pool.clone()).await?;
+            touched.extend(existing);
+            touched = dedup(touched);
+        }
         self.project_all(&fresh, touched).await?;
         *self.shadows.lock().await = fresh;
         Ok(())

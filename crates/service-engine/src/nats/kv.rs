@@ -39,28 +39,55 @@ impl KvWatch {
         loop {
             let entry = match self.inner.next().await {
                 Some(Ok(entry)) => entry,
-                Some(Err(error)) => {
-                    return Some(Err(NatsError::Kv {
-                        key: "watch".to_string(),
-                        detail: error.to_string(),
-                    }));
-                }
+                Some(Err(error)) => return Some(Err(watch_error(&error))),
                 None => return None,
             };
-            let key = match KvKey::new(entry.key.clone()) {
-                Ok(key) => key,
-                Err(_) => continue,
-            };
-            let revision = Revision(entry.revision);
-            return Some(match entry.operation {
-                Operation::Delete | Operation::Purge => Ok(KvEvent::Delete { key, revision }),
-                Operation::Put => decode::<V>(&key, &entry.value).map(|value| KvEvent::Put {
-                    key,
-                    value,
-                    revision,
-                }),
-            });
+            if let Some(event) = entry_to_event::<V>(entry) {
+                return Some(event);
+            }
         }
+    }
+
+    pub async fn next_under<V: DeserializeOwned>(
+        &mut self,
+        prefix: &KvPrefix,
+    ) -> Option<Result<KvEvent<V>, NatsError>> {
+        use futures_util::StreamExt;
+        loop {
+            let entry = match self.inner.next().await {
+                Some(Ok(entry)) => entry,
+                Some(Err(error)) => return Some(Err(watch_error(&error))),
+                None => return None,
+            };
+            if !prefix.matches(&entry.key) {
+                continue;
+            }
+            if let Some(event) = entry_to_event::<V>(entry) {
+                return Some(event);
+            }
+        }
+    }
+}
+
+fn entry_to_event<V: DeserializeOwned>(
+    entry: async_nats::jetstream::kv::Entry,
+) -> Option<Result<KvEvent<V>, NatsError>> {
+    let key = KvKey::new(entry.key.clone()).ok()?;
+    let revision = Revision(entry.revision);
+    Some(match entry.operation {
+        Operation::Delete | Operation::Purge => Ok(KvEvent::Delete { key, revision }),
+        Operation::Put => decode::<V>(&key, &entry.value).map(|value| KvEvent::Put {
+            key,
+            value,
+            revision,
+        }),
+    })
+}
+
+fn watch_error(detail: &dyn std::fmt::Display) -> NatsError {
+    NatsError::Kv {
+        key: "watch".to_string(),
+        detail: detail.to_string(),
     }
 }
 

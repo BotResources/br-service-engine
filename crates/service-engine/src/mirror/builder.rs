@@ -19,6 +19,9 @@ use super::shadow::Shadows;
 
 pub(super) type Applier = Box<dyn FnOnce(&mut Shadows) + Send + 'static>;
 
+pub(super) type ReconcileKeysFn<K> =
+    Arc<dyn Fn(PgPool) -> BoxFuture<'static, Result<Vec<K>, EngineError>> + Send + Sync>;
+
 pub(super) struct Update {
     pub(super) change: Change,
     pub(super) apply: Applier,
@@ -69,20 +72,18 @@ impl Consumption {
         let open_watch: OpenWatchFn = Arc::new(|nats: Nats| {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
+                let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
                 let watch = bucket.watch_all().await.map_err(service)?;
-                let stream = futures_util::stream::unfold(watch, |mut watch| async move {
-                    loop {
-                        match watch.next::<C>().await {
-                            None => return None,
-                            Some(Err(error)) => return Some((Err(service(error)), watch)),
-                            Some(Ok(event)) => {
-                                if let Some(update) = into_update::<C>(event) {
-                                    return Some((Ok(update), watch));
-                                }
-                            }
+                let stream = futures_util::stream::unfold(
+                    (watch, prefix),
+                    |(mut watch, prefix)| async move {
+                        match watch.next_under::<C>(&prefix).await {
+                            None => None,
+                            Some(Err(error)) => Some((Err(service(error)), (watch, prefix))),
+                            Some(Ok(event)) => Some((Ok(into_update::<C>(event)), (watch, prefix))),
                         }
-                    }
-                })
+                    },
+                )
                 .boxed();
                 Ok(stream)
             })
@@ -99,14 +100,11 @@ impl Consumption {
     }
 }
 
-fn into_update<C: Consumed>(event: KvEvent<C>) -> Option<Update> {
+fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
     let (key, op, value) = match event {
         KvEvent::Put { key, value, .. } => (key, ChangeOp::Put, Some(value)),
         KvEvent::Delete { key, .. } => (key, ChangeOp::Delete, None),
     };
-    if !key.as_str().starts_with(C::PREFIX) {
-        return None;
-    }
     let change = Change {
         prefix: C::PREFIX,
         key: key.clone(),
@@ -116,7 +114,7 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Option<Update> {
         Some(value) => Box::new(move |shadows: &mut Shadows| shadows.put::<C>(key, value)),
         None => Box::new(move |shadows: &mut Shadows| shadows.remove::<C>(&key)),
     };
-    Some(Update { change, apply })
+    Update { change, apply }
 }
 
 pub struct Mirror {
@@ -168,6 +166,7 @@ where
             consumptions: self.consumptions,
             keyed_by: self.keyed_by,
             project: Arc::new(project),
+            reconcile_keys: None,
         }
     }
 }
@@ -177,6 +176,7 @@ pub struct MirrorReady<K, Pr: Project<K>> {
     consumptions: Vec<Consumption>,
     keyed_by: KeyedByFn<K>,
     project: Arc<Pr>,
+    reconcile_keys: Option<ReconcileKeysFn<K>>,
 }
 
 impl<K, Pr: Project<K>> MirrorReady<K, Pr>
@@ -185,6 +185,14 @@ where
 {
     pub fn name(&self) -> &MirrorName {
         &self.name
+    }
+
+    pub fn reconcile_keys<F>(mut self, reconcile_keys: F) -> Self
+    where
+        F: Fn(PgPool) -> BoxFuture<'static, Result<Vec<K>, EngineError>> + Send + Sync + 'static,
+    {
+        self.reconcile_keys = Some(Arc::new(reconcile_keys));
+        self
     }
 
     pub fn build(
@@ -200,6 +208,7 @@ where
             Arc::new(self.consumptions),
             self.keyed_by,
             self.project,
+            self.reconcile_keys,
         ));
         let name = self.name.clone();
         let reconcile = {

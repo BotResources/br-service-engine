@@ -145,7 +145,12 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 - Mirror author surface. `Mirror::new(name).consume::<C>().keyed_by(f).project(p)`
   builds a typed mirror over the engine's own KV watch and the retained
   shadow/leader supervisor, generic over any `Consumed` published type crossing
-  the frontier (a `PREFIX` under `PUBLISHED_LANGUAGE` by default). `register_mirror`
+  the frontier (a `PREFIX` under `PUBLISHED_LANGUAGE` by default). Each
+  consumption watches the shared bucket and drops every key outside its `PREFIX`
+  **before** decoding the value as `C` (`KvWatch::next_under`), so a foreign
+  published type in the one `PUBLISHED_LANGUAGE` bucket — identity publishes
+  users, groups and service accounts side by side — is skipped, never a decode
+  error that would flap the mirror. `register_mirror`
   now takes the builder and wires it to the engine's `Nats`, pool and impact
   transport; the raw `MirrorHandle` entry is `register_mirror_handle`, kept behind
   `test-support`. Each `consume::<C>()` keeps a per-pod typed `Shadow<C>` of the
@@ -156,7 +161,13 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   its impacts commit in one transaction, so a projected row is a write with
   impacts that reaches every pod's sessions. Boot does a full read of every
   consumed prefix and rebuilds the shadows before it reports converged, so a
-  pre-filled bucket is caught up before the pod is ready; readiness stays DOWN
+  pre-filled bucket is caught up before the pod is ready. The rebuild is
+  faithful, not upsert-only: an optional `reconcile_keys` hook names the join
+  keys the `known_*` store currently holds, and reconcile projects the union of
+  those and the keys the bucket offers, so a key retracted while the pod was
+  down (a Recreate deploy) is projected once more against the now-absent shadow
+  and its `known_*` row and impact are retired — the `known_*` tables are a pure
+  function of the offers on every boot. Readiness stays DOWN
   until every consumption converges; a consumed prefix that reads empty holds
   readiness DOWN, names the prefix and keeps the shadows and `known_*` exactly as
   they are (never projecting to empty); a projection panic takes the same
