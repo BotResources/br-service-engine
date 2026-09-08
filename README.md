@@ -42,7 +42,7 @@ fills its part by adding module files and one method body.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish | U1 |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 (done) |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 (done) |
-| `persistence` | `Persistence` trait + `Aggregate`; CRUD shipped, soft-EDA / full-EDA behind the same trait | U3 (CRUD) / U4 |
+| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
 | `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
@@ -73,6 +73,27 @@ scheduled reaction the beat fires on the database clock; dead-lettering stages
 an impact on the ops view. The engine starts the inbound loop at boot, after
 the scope handshake, so a booted engine with registered reactions consumes with
 no test-support seam.
+All three persistence styles (U4) fill the same `Persistence` trait behind the
+one-arg `cx.save` / `cx.create`, so one mutation handler runs unchanged over
+CRUD, soft EDA (the state row plus an appended fact per change) and full EDA (an
+event log plus a synchronous snapshot that is the locked state row). The
+command's events reach `save` through the default `Aggregate::pending_events`
+(`&[]` for CRUD), never through the pipeline. A style writes the state row (or
+snapshot) and its events (or facts) in the one transaction the pipeline opened
+and never opens its own, so a foreign-key, unique or check-constraint failure on
+either table rolls the state row and its events back together. Full EDA hydrates
+on `load` by replaying the events above the snapshot and running the aggregate's
+hydration check as the second barrier, and owns the log's two gestures —
+upcasting an older event version at read time, and erasure, which rewrites a
+person's events in place and re-snapshots from the rewritten log in the same
+transaction. On the engine's own authority, an integrity (SQLSTATE class 23) or
+data (class 22) violation raised inside a handler's `cx.save` / `cx.create` is
+classified terminal whatever the handler's `Disposition` says, so a coarse
+`Retry` cannot nak a constraint violation forever; a raw `cx.connection()` write
+stays the handler's to classify. The render-side `Projector::load` and the
+write-side `Persistence` read one committed store — for full EDA the snapshot is
+the state row the projector reads — so a `fetch`, a session `Upsert` and a
+write-side `load` return the same committed truth.
 `register_presence` (U6) is filled: it binds the `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other

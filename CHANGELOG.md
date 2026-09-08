@@ -105,12 +105,15 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   same transaction as the effect, so a redelivery after a crash-before-commit is
   a claimed no-op and a stale producer sequence is a dropped no-op.
 - The real `Dispatch` implementation (`DirectPipeline`) for the U2 inbound loop:
-  it looks up the reaction's handler, runs the pipeline, and classifies its own
-  save/commit errors with `sqlx_is_terminal` (integrity/data violations
-  terminal, everything else retryable). The engine now **starts the inbound
-  loop at boot**, after the scope handshake, so a booted engine with registered
-  reactions consumes over the real pipeline with no `test-support` seam; the
-  loop is stopped and joined on shutdown.
+  it looks up the reaction's handler, runs the pipeline, and classifies the
+  errors it raises on its own (transaction begin, the idempotency claim, the
+  sequence guard, `flush`/commit) with `sqlx_is_terminal` (integrity/data
+  violations terminal, everything else retryable). A violation raised inside the
+  handler's `cx.save` / `cx.create` and propagated as the handler's own error is
+  classified by the engine in U4, ahead of the handler's `Disposition`. The
+  engine now **starts the inbound loop at boot**, after the scope handshake, so
+  a booted engine with registered reactions consumes over the real pipeline with
+  no `test-support` seam; the loop is stopped and joined on shutdown.
 - Handler contexts `Reaction`, `Mutation<P>` and `Bulk<P>` over a shared `Ops`
   core. The shared `Ops` methods are `cx.load` / `cx.save` / `cx.create`
   through the `Persistence` trait, `cx.impact` / `cx.impact_caused` /
@@ -168,6 +171,56 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   relay; `schedule_at` firing on the DB clock; dead-lettering staging an
   ops-view impact; and a bulk `impact_all` resetting a fixed `Keys` window on
   the session (`s40`), which a per-key impact would have missed.
+
+### Added (0.1.0 rework, unit U4 — soft-EDA and full-EDA persistence styles)
+
+- Soft-EDA and full-EDA fill the `Persistence` trait behind the same one-arg
+  `cx.save` / `cx.create` the CRUD style established, so one mutation handler
+  runs unchanged over all three styles and the pipeline never learns which one.
+  The command's returned events reach `save` through a new default
+  `Aggregate::pending_events` method (`&[]` for CRUD, which persists no events):
+  `cx.save(&agg)` passes `agg.pending_events()` into `Persistence::save`, so the
+  one-arg call is unchanged and the log styles get their events without the
+  pipeline threading them.
+- Both log styles write the state row (or snapshot) and the events (or facts) in
+  the **one transaction the pipeline opened** — a style never opens its own
+  transaction. Soft EDA writes the state row then appends one fact per event;
+  full EDA appends one event per change then writes the snapshot row, which is
+  also the locked state row. A foreign key, unique or check constraint on either
+  table rejects the write and its events together: the transaction rolls both
+  back, so no state can exist without its event and no crash can land between
+  them.
+- Full-EDA hydration on `load`: read the snapshot, replay the events above its
+  version, then run the aggregate's hydration check as the second barrier, so a
+  malformed log fails to load with a typed `EngineError::Service` rather than
+  hydrating an illegal state. The full-EDA kit also owns the log's two gestures —
+  **upcasting** an older event version to the current shape at read time, and
+  **erasure**, which rewrites a person's events in place, anonymising the
+  personal fields, and re-snapshots the aggregate from the rewritten log in the
+  same transaction (append-only except for erasure; no tombstone, no key table).
+- Engine authority over poison, completed for the handler path: an integrity
+  (SQLSTATE class 23) or data (class 22) violation raised inside a handler's
+  `cx.save` / `cx.create` is classified **terminal by the engine whatever the
+  handler's `Disposition` says**, so a coarse `Store(_) => Retry` can no longer
+  nak a constraint violation forever. The pipeline records the violation as it
+  passes back through `cx.save` / `cx.create` and, when the handler then fails,
+  routes the delivery straight to the dead-letter table on its first delivery
+  rather than by the handler's disposition. A raw `cx.connection()` write is not
+  on this path and stays the handler's to classify.
+- The render-side `Projector::load` and the write-side `Persistence` read one
+  committed store: a full-EDA slice's snapshot **is** the state row the projector
+  reads, written synchronously in the effect transaction, so a `fetch` or a
+  session `Upsert` and a write-side `load` return the same committed truth, with
+  no asynchronous projection between them.
+- Conformance scenarios `s41`–`s46` against real infra, over a `counter` sample
+  slice built once and persisted in all three styles: one bump handler unchanged
+  across CRUD, soft and full EDA (`s41`); a failing constraint rolling back the
+  state row and its events together in soft and full EDA (`s42`); full-EDA replay
+  from a lagging snapshot equal to replay from scratch, and the hydration barrier
+  refusing a malformed log (`s43`); upcasting a v1 event and an erasure that
+  leaves the log readable (`s44`); a class-23 violation in `cx.save` dead-lettered
+  on the first delivery under a coarse Retry disposition (`s45`); and the render
+  side and the write side reading the same committed full-EDA snapshot (`s46`).
 
 ### Added (0.1.0 rework, unit U5)
 
