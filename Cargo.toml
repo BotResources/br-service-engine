@@ -14,18 +14,14 @@ repository = "https://github.com/BotResources/br-service-engine"
 
 [workspace.dependencies]
 br-core-auth = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-auth", tag = "v1.3.0", version = "1.3.0" }
-br-core-directory = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-directory", tag = "v1.3.0", version = "1.3.0" }
 br-core-integration = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-integration", tag = "v1.3.0", version = "1.3.0" }
 br-core-kernel = { git = "https://github.com/BotResources/br-rust-common", package = "br-core-kernel", tag = "v1.3.0", version = "1.3.0" }
 br-util-axum-readiness = { git = "https://github.com/BotResources/br-rust-common", package = "br-util-axum-readiness", tag = "v1.3.0", version = "1.3.0" }
-br-util-directory = { git = "https://github.com/BotResources/br-rust-common", package = "br-util-directory", tag = "v1.3.0", version = "1.3.0" }
-br-util-nats-fabric = { git = "https://github.com/BotResources/br-rust-common", package = "br-util-nats-fabric", tag = "v1.3.0", version = "1.3.0" }
 br-util-postgres = { git = "https://github.com/BotResources/br-rust-common", package = "br-util-postgres", tag = "v1.3.0", version = "1.3.0" }
 
 service-engine = { path = "crates/service-engine", version = "0.1.0" }
 
 async-nats = "0.48"
-async-trait = "0.1"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 croner = "=4.0.0"
