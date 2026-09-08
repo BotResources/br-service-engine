@@ -94,7 +94,6 @@ async fn s41_a_rolled_back_mutation_leaves_no_dirty_key_and_nothing_offered() {
         0,
         "the dirty offer key is committed with the write, so a rollback leaves none behind"
     );
-    // Give the beat several ticks; nothing was committed, so nothing can ever be offered.
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!(
         published_widget(&fabric, id).await.is_none(),
