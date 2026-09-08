@@ -218,6 +218,52 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   as `cx.present`; both put the value into the bound bucket, and every pod hears
   it through its own watch. A one-value-per-key bucket makes last-write-wins and
   loss-tolerance hold by construction.
+
+### Added (0.1.0 rework, unit U7 — offer author surface + leader-gated mirror)
+
+- The `Offer` author trait: a `Row` (the aggregate the service owns), a
+  `Published` value, a `NAME` (the offer's relay/watermark identifier and its
+  version discriminator), a `PREFIX` (the bucket-key prefix the reconcile sweep
+  scans), `key(row)` (the versioned `PUBLISHED_LANGUAGE` key) and
+  `publish(row) -> Option<Published>` (the published value, or `None` to
+  retract). `Engine::register_offer::<O>()` replaces the `NotYet` stub: it
+  registers a leader-discipline offer relay and records a staging closure keyed
+  by the aggregate type.
+- A saved noun that carries an offer stages the offer's dirty key **in the same
+  transaction as the write**. `Ops::save` / `Ops::create` add a row to the new
+  `service_engine.offer_dirty` table via `Staged::flush`, so the dirty key
+  commits with the state and a rolled-back mutation leaves none behind. The
+  dirty key carries the aggregate key (to re-read) and a monotonic
+  `offer_dirty_seq` sequence value (the coalescing guard and the publish
+  version).
+- The pod that holds the offer's leader lease (a `Discipline::Leader` relay on
+  the beat) drains the dirty keys: it re-reads the row, calls `publish`, and
+  puts or retracts the key on the `PUBLISHED_LANGUAGE` bucket under a per-key
+  watermark (`service_engine.kv_relay_watermark`, monotone by the staged
+  sequence) and a bucket-revision compare-and-swap. On its first drain after
+  boot it reconciles the bucket against the store — re-putting every current
+  offerable row, retracting orphans under its prefix — so a rebuilt or drifted
+  bucket is repaired. The `PUBLISHED_LANGUAGE` bucket must exist; a missing
+  bucket surfaces as a failing relay (readiness DOWN). The offer version lives
+  in the key, so a breaking change is a second `register_offer` on the same
+  noun.
+- The mirror projection into `known_*` is now leader-gated, as the intent
+  requires: `Engine::register_mirror` builds the mirror with a `MirrorLeader`
+  (`build_led`), so only the pod holding the mirror's lease
+  (`leader_slot` name `mirror:{name}`, a renewable fenced lease taken under the
+  mirror's advisory lock) projects; standby pods keep their shadows current from
+  the KV watch and take over within one lease when the leader stops, without
+  missing a change. The lower-level `MirrorReady::build` stays ungated for the
+  battery's direct-drive scenarios.
+- The app-role grant now includes `USAGE, SELECT` on the engine schema's
+  sequences (for `offer_dirty_seq`).
+- Conformance: `s41_offer` (a mutation's dirty key commits in the same tx and
+  the leader publishes it; a rolled-back mutation leaves no dirty key and
+  nothing offered; a noun that stops being offerable is retracted; boot
+  reconcile repairs a drifted bucket) and `s42_mirror_leader` (two pods, exactly
+  one projects into `known_*`, and the standby takes over after the leader
+  stops).
+
 ### Added (0.1.0 rework, unit U10)
 
 - Scope declaration at boot with a readiness gate. `Engine::declare_scopes`
