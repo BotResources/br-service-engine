@@ -649,12 +649,12 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `BlobStore::purge_references` back the post-commit purges.
 - `conformance-service-engine`: the `erase` sample module (three personal slices
   — CRUD `sample_erase_note` with an offer, soft `sample_erase_memo`, full
-  `sample_erase_ledger` — plus a `FailingEraser`) and scenarios `s65`–`s68`:
+  `sample_erase_ledger` — plus a `FailingEraser`) and scenarios `s70`–`s73`:
   erase removes state across the three styles in one transaction and is
-  idempotent (`s65`, also proving the live session's `Remove`, the offer retract,
+  idempotent (`s70`, also proving the live session's `Remove`, the offer retract,
   the stream purge and `PersonErased` staged exactly once), a failing slice rolls
-  the whole gesture back (`s66`), the person's presence keys are purged (`s67`),
-  and the person's blobs leave storage and the reference table (`s68`).
+  the whole gesture back (`s71`), the person's presence keys are purged (`s72`),
+  and the person's blobs leave storage and the reference table (`s73`).
 
 ### Changed (0.1.0 rework, unit U11)
 
@@ -663,6 +663,7 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   probe) and `housekeeping/ready/verdict.rs` (the pure readiness `verdict` and
   its reason constants, with the readiness tests), each under the file-size
   limit.
+
 ### Changed (0.1.0 rework, unit U12b — GraphQL kit aligned to the intent's authoring ergonomics)
 
 - Boot ergonomics: `Engine::run_with(app)` and `Engine::run_with_listener(listener, app)`
@@ -699,15 +700,55 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `EngineError::DuplicateSchemaMember`, naming both slices, when two claim the
   same root field or GraphQL type, before the pod serves. `SchemaSlices` /
   `SliceFragment` stay public for a service that wants to assemble ahead of boot.
-- Conformance: `s59`–`s65` now drive the typed `Query` context and boot the
+- Conformance: `s59`–`s64` now drive the typed `Query` context and boot the
   sample through `Engine::run_with` binding `EngineConfig::http_addr`, over the
   per-projector typed union (`... on WidgetView { .. }` in place of a
-  `ProjectedView { projector view }` shape). `s65` proves two projectors are two
+  `ProjectedView { projector view }` shape). `s68` proves two projectors are two
   typed union members and that a client subscribing to one receives only its own
-  member's deltas; `s66` boots a real two-slice engine (real Postgres and NATS)
+  member's deltas; `s69` boots a real two-slice engine (real Postgres and NATS)
   whose slices claim the same root field (and, in a second scenario, the same
   GraphQL type) and asserts the boot returns `EngineError::DuplicateSchemaMember`
   instead of standing the pod up.
+
+### Changed (0.1.0 rework, wave-3 integration)
+
+- Query-time RLS: `Query::fetch` / `fetch_window` (and their `_json` variants)
+  no longer hard-code the render's RLS flag to `false`; a service with a
+  registered `RlsApplier` now runs typed query-time fetch under the same RLS the
+  subscription render applies, so a key a principal may not see answers as absent
+  with RLS actually engaged in the DB session — not only when `populate`/`project`
+  happen to filter it. New real-infra scenario `s74` boots a service whose
+  RLS-backed projector populates permissively and projects with no tenant filter,
+  so the forbidden row is hidden only by the query-time RLS session context.
+- Schema-derived boot gate: the slice-assembly gate now derives the composed
+  schema's root fields from the built async-graphql SDL
+  (`SchemaSlices::verify_root_fields`) and fails boot with the new
+  `EngineError::UndeclaredSchemaMember` when the schema exposes a root field no
+  slice fragment declared, so an under-declared fragment can no longer leave a
+  real root field outside the declared-collision gate. A service feeds the SDL
+  with `Engine::set_schema_sdl(schema.sdl())` before `run`. New scenario `s75`
+  proves an undeclared root field fails the boot loud. (GraphQL object *types*
+  keep the declared-vs-declared gate: the engine injects many payload, union and
+  scalar types no slice owns, so the schema's type set is not a slice-only set.)
+- `PresenceHandle::present` returns the precise `EngineError::PresenceNotRegistered`
+  (naming the presence type) instead of the placeholder `EngineError::NotYet`;
+  the `NotYet` variant is removed entirely, so no engine gesture returns it.
+- `engine/run.rs` is split by capability: the HTTP-server lifecycle wrappers
+  `run_with` / `run_with_listener` move to `engine/serve.rs`, keeping each file
+  under the size limit.
+- The type-erasure (dyn-compat) wrappers move out of `erase` into their own
+  `dyn_compat` module (`ErasedProjector`/`ProjectorAdapter`/`erase_projector`,
+  `ErasedAccumulator`/`AccumulatorAdapter`/`erase_accumulator`, `ErasedPopulation`
+  /`ErasedInverse`/`ErasedLoadScope`/`ErasedWindowQuery`, `ErasedState`,
+  `ErasedFacts`), so `erase` means person-erasure only.
+- README: the blobs section now states that a blob reference dropped by raw SQL —
+  bypassing `cx.delete`, a `load`+`save` or `cx.release_blob` — is never observed
+  by the pipeline diff and so is never reaped.
+- Conformance scenario numbers made unique and contiguous after the parallel
+  wave-3 merges: blob `s65`–`s67`, GraphQL `s68`–`s69`, erase `s70`–`s73`,
+  query-RLS `s74`, schema-derived gate `s75`. The `UploadUrl` the erase sample's
+  blob mutation returns is the U9b presigned-POST `{ url, fields }` on the
+  synchronous channel, uploaded via the shared `post_upload` helper.
 
 ### Changed (0.1.0 rework, unit U1)
 

@@ -49,8 +49,9 @@ fills its part by adding module files and one method body.
 | `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection | U8 (done) / U7 (leader gate) |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
-| `erase` | `Erasable` and `engine.erase(person)` | U11 |
-| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context, per-projector typed subscription union, per-slice SDL assembly checked at boot | U12 / U12b |
+| `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) | U11 |
+| `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) | U1 |
+| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context, per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot | U12 / U12b |
 
 Every author-facing surface of the 0.1.0 rework is now filled; no `register_*`
 method or engine gesture returns `EngineError::NotYet`.
@@ -145,7 +146,11 @@ references (default empty), and the pipeline diffs them between `load` and `save
 — a dropped or repointed reference, and a `cx.delete`'d aggregate, release the
 old blob in the **same transaction** as the write, with no slice-table scanning
 and no reference counting. `cx.release_blob(ref)` stays as an explicit escape
-hatch. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
+hatch. Because release is driven entirely by the `load`/`save` diff, a reference
+a slice drops with **raw SQL** — bypassing `cx.delete`, a `load`+`save`, or
+`cx.release_blob` — is never observed by the pipeline, so its object is **never
+reaped**; a slice that writes its own SQL against a blob-referencing table owns
+releasing the blob. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
 **not** reached by `purge_person_blobs`; a personal file that must be erasable
 with its owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type,
 person)`. `Engine::purge_person_blobs` is the erase hook U11 calls to drop a
@@ -179,8 +184,15 @@ root fields and types as a `SliceFragment` and registers it with
 `Engine::register_schema_slice`; the engine assembles the registered fragments
 at the start of `run` (so through `run_with` too) and fails boot loud with
 `EngineError::DuplicateSchemaMember`, naming both slices, if two claim the same
-root field or GraphQL type — the pod never serves an ambiguous schema. The axum
-layer resolves the principal from the
+root field or GraphQL type — the pod never serves an ambiguous schema. The gate
+does not trust the declarations blindly: when the service feeds the composed
+schema's SDL with `Engine::set_schema_sdl(schema.sdl())` before `run`, the engine
+derives the actual root fields from the async-graphql schema and fails boot with
+`EngineError::UndeclaredSchemaMember` if the schema exposes a root field no slice
+declared, so an under-declared fragment cannot leave a real root field outside
+the collision gate. (Object *types* keep the declared gate only: the engine
+injects payload, union and scalar types no slice owns, so the schema's type set
+is not slice-only.) The axum layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
 kit does authZ only, never authN.
 
