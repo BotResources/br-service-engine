@@ -52,8 +52,8 @@ fills its part by adding module files and one method body.
 | `erase` | `Erasable` and `engine.erase(person)` | U11 |
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
-The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then — today only `erase` (U11).
+Every author-facing surface of the 0.1.0 rework is now filled; no `register_*`
+method or engine gesture returns `EngineError::NotYet`.
 `register_reaction` (U2) is live: it records a reaction and
 derives its inbound subscription, and the engine-owned inbound loop (durable
 consumer, ack-after-durable, `Disposition` routing, poison budget with the
@@ -164,6 +164,32 @@ mutation response. Query resolvers read rendered views through `fetch` /
 revision and the causing event, and the axum layer resolves the principal from
 the trusted `X-Passport` header (`PassportPrincipal`) before the executor runs —
 the kit does authZ only, never authN.
+
+`register_erasable` and `Engine::erase` / `Engine::eraser` (U11) are filled. A
+slice that holds personal data implements `Erasable::erase(cx, person)`, using
+the `Erase` context — the same `Ops` the write pipeline gives a handler — to
+delete or anonymize its rows (CRUD deletes, soft EDA also scrubs the person's
+value out of the appended fact log, full EDA rewrites the person's events in
+place and re-snapshots), stage a Remove impact per touched key
+(`cx.impact`/`cx.impact_caused`) and dirty the offers of the rows it erases
+(`cx.dirty_offer`, so the leader retracts them). It returns an `Erased` manifest
+naming what to purge after the commit: accumulated-lane stream keys
+(`purge_stream`), presence keys (`purge_presence`) and un-owned blob references
+the person's rows released (`purge_blob`). `engine.erase(person)` runs **every**
+registered slice's `erase` in **one** direct-lane transaction, records the
+durable erasure fact in `service_engine.person_erasure`, and — on the first
+erasure only — stages the `PersonErased` integration event
+(`integration.evt.{service}.person.erased.v1`) through the outbox in that same
+transaction; a failing slice rolls the whole gesture back. After the commit it
+purges the manifest's stream subjects, presence keys and released blobs, and
+calls `purge_person_blobs` for the person's owned blobs. It is idempotent:
+because each slice's `erase` is data-driven, a second call finds nothing, the
+erasure fact conflicts (no second `PersonErased`), and the outcome is the same.
+Other services react to `PersonErased` by erasing their own rows; `known_*`
+mirrors and shadows are left untouched and follow the producer's offer retract.
+Because it is a runtime gesture, `Engine::run` consumes the engine — capture
+`engine.eraser()` before `run` to erase while the pod is serving, exactly as
+`mutation_executor` and `blob_reader` are captured.
 
 ## Conformance battery
 

@@ -582,6 +582,53 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   unauthenticated and a malformed-passport request rejected before the pipeline;
   and two slices' SDL fragments composing into one valid schema.
 
+### Added (0.1.0 rework, unit U11 — erase a person)
+
+- The `Erasable` author trait (`erase(cx, person) -> Result<Erased, Error>`), the
+  `Erase` handler context (an `Ops` wrapper carrying the `PersonId`, so a slice's
+  erase uses the same `connection`/`impact`/`impact_caused`/`dirty_offer` surface
+  as the write pipeline), the `Erased` post-commit purge manifest
+  (`purge_stream` / `purge_presence` / `purge_blob`, and a `rows` count), and
+  `Engine::register_erasable`.
+- `Engine::eraser()` returns a cloneable `Eraser<P>` handle (captured before
+  `run` consumes the engine, like `mutation_executor` and `blob_reader`) and
+  `Engine::erase(person)` delegates to it. The gesture opens **one** direct-lane
+  transaction under `lock_timeout`, records the durable erasure fact in the new
+  `service_engine.person_erasure` table (insert-or-ignore, so the first erase is
+  `fresh`), runs every registered slice's `erase` over all three persistence
+  styles (full EDA reuses the slice's own event-rewrite/re-snapshot), stages the
+  `PersonErased` integration event through the outbox in that same transaction on
+  the fresh erase only, and commits — a failing slice rolls the whole gesture
+  back. After the commit it purges the manifest's accumulated-lane stream rows
+  (`service_engine.accumulator_chunk` / `accumulator_seal`), the presence keys
+  (KV retract) and the released blob references, and calls `purge_person_blobs`
+  for the person's owned blobs. Idempotent: a second call finds nothing to erase,
+  does not re-stage `PersonErased`, and returns the same outcome. This replaces
+  the last `EngineError::NotYet`; no engine gesture returns it any more.
+- `PersonErased` is emitted as `integration.evt.{service}.person.erased.v1` with
+  a `{ person_id }` payload and a deterministic event id, so the receiver's claim
+  deduplicates a redelivery. Other services erase their own rows on the event;
+  `known_*` mirrors and shadows follow the producer's offer retract, never the
+  event.
+- `PresenceHandle::purge`, `BlobReader::purge_references` and
+  `BlobStore::purge_references` back the post-commit purges.
+- `conformance-service-engine`: the `erase` sample module (three personal slices
+  — CRUD `sample_erase_note` with an offer, soft `sample_erase_memo`, full
+  `sample_erase_ledger` — plus a `FailingEraser`) and scenarios `s65`–`s68`:
+  erase removes state across the three styles in one transaction and is
+  idempotent (`s65`, also proving the live session's `Remove`, the offer retract,
+  the stream purge and `PersonErased` staged exactly once), a failing slice rolls
+  the whole gesture back (`s66`), the person's presence keys are purged (`s67`),
+  and the person's blobs leave storage and the reference table (`s68`).
+
+### Changed (0.1.0 rework, unit U11)
+
+- `housekeeping/ready.rs` (317 lines) is split by capability into
+  `housekeeping/ready/mod.rs` (the `ReadinessAssembly` builder and its NATS
+  probe) and `housekeeping/ready/verdict.rs` (the pure readiness `verdict` and
+  its reason constants, with the readiness tests), each under the file-size
+  limit.
+
 ### Changed (0.1.0 rework, unit U1)
 
 - The engine owns its NATS layer. Its internal loops (stream/bucket bind, KV
