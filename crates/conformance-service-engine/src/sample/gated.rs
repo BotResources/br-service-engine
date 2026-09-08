@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde::Serialize;
+use service_engine::CohortKey;
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gate, Gated, Reason};
 use service_engine::impact::{Deps, Dims, ForeignKey, Impact};
@@ -12,7 +13,6 @@ use service_engine::projector::{LoadScope, Projector};
 use service_engine::session::WindowParams;
 use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
-use service_engine::{CohortKey, KeyBytes};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -191,7 +191,9 @@ impl Projector for GatedAssignmentProjector {
             let sql = "SELECT id, tenant_id, title, closed FROM sample_assignment \
                        WHERE id = ANY($1)";
             let rows = match scope {
-                LoadScope::Bulk { pg, keys, .. } => sqlx::query(sql).bind(keys).fetch_all(pg).await?,
+                LoadScope::Bulk { pg, keys, .. } => {
+                    sqlx::query(sql).bind(keys).fetch_all(pg).await?
+                }
                 LoadScope::PerPrincipal { conn, keys, .. } => {
                     sqlx::query(sql).bind(keys).fetch_all(&mut *conn).await?
                 }
@@ -233,8 +235,4 @@ impl Projector for GatedAssignmentProjector {
             affordances: row.affordances(principal),
         })
     }
-}
-
-pub fn gated_key(id: Uuid) -> KeyBytes {
-    KeyBytes::encode(&id).expect("a gated assignment key encodes")
 }

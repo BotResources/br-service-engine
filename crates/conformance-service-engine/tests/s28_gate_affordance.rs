@@ -4,11 +4,11 @@ mod engine_twin;
 use std::collections::BTreeMap;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
+use conformance_service_engine::sample::GatedAssignmentProjector;
 use conformance_service_engine::sample::assignment::AssignmentRow;
 use conformance_service_engine::sample::engine::engine_config;
 use conformance_service_engine::sample::principal::SamplePrincipal;
 use conformance_service_engine::sample::render::*;
-use conformance_service_engine::sample::GatedAssignmentProjector;
 use engine_twin::{SOON, await_ready, spy_engine, stage};
 use serde::Deserialize;
 use service_engine::gate::{ActionName, Gated, check_gates_match_affordances};
@@ -77,7 +77,10 @@ fn s28_a_blocked_affordance_and_the_rejected_mutation_carry_the_same_reason_code
         .close(&principal)
         .expect_err("closing an already closed assignment is refused");
 
-    assert_eq!(shown.reason().expect("the shown gate is blocked").code(), "already_closed");
+    assert_eq!(
+        shown.reason().expect("the shown gate is blocked").code(),
+        "already_closed"
+    );
     assert_eq!(refused.code(), "already_closed");
     assert_eq!(shown.reason().map(|r| r.code()), Some(refused.code()));
 }
@@ -122,7 +125,10 @@ async fn s28_engine_an_affordance_flip_on_a_state_change_reaches_the_session_as_
     assert_eq!(assignment_ids(opening), vec![subject]);
     let opened: GatedViewDto = opening[0].view.decode().expect("the opening view decodes");
     assert!(!opened.closed);
-    assert!(opened.affordances["close"].allowed, "an open assignment can be closed");
+    assert!(
+        opened.affordances["close"].allowed,
+        "an open assignment can be closed"
+    );
     assert!(!opened.affordances["reopen"].allowed);
     assert_eq!(
         opened.affordances["reopen"].reason.as_deref(),
@@ -145,7 +151,10 @@ async fn s28_engine_an_affordance_flip_on_a_state_change_reaches_the_session_as_
         .await
         .expect("closing the assignment flips its affordances and reaches the session");
     assert_eq!(delta.revision().get(), 2);
-    let flipped: GatedViewDto = upserted(&delta).view.decode().expect("the flipped view decodes");
+    let flipped: GatedViewDto = upserted(&delta)
+        .view
+        .decode()
+        .expect("the flipped view decodes");
     assert!(flipped.closed);
     assert!(
         !flipped.affordances["close"].allowed,

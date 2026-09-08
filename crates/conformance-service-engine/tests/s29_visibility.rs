@@ -2,9 +2,9 @@
 mod engine_twin;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
+use conformance_service_engine::sample::GatedAssignmentProjector;
 use conformance_service_engine::sample::engine::engine_config;
 use conformance_service_engine::sample::render::*;
-use conformance_service_engine::sample::GatedAssignmentProjector;
 use engine_twin::{SOON, await_ready, spy_engine, stage};
 use service_engine::delta::Delta;
 use service_engine::impact::{Deps, Impact};
@@ -111,7 +111,10 @@ async fn s29_engine_losing_the_membership_removes_the_row_from_the_live_session(
     stage(
         &pool,
         transport.as_ref(),
-        &[Impact::principal_facts(principal.id(), Deps::bit(0).unwrap())],
+        &[Impact::principal_facts(
+            principal.id(),
+            Deps::bit(0).unwrap(),
+        )],
     )
     .await;
 

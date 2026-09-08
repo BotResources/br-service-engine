@@ -55,7 +55,7 @@ pub use assignment::{
 };
 pub use gate::Gate;
 pub use gated::{
-    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, gated_key, reasons,
+    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, reasons,
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
