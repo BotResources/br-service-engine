@@ -176,9 +176,4 @@ impl EngineConfig {
         self.impacts_per_commit = impacts_per_commit;
         self
     }
-
-    pub fn with_service(mut self, service: impl Into<String>) -> Self {
-        self.service = Some(service.into());
-        self
-    }
 }
