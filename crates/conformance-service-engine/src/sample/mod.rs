@@ -38,6 +38,7 @@ pub const TABLES: &[&str] = &[
     "sample_staged_impact",
     "sample_cron_run",
     "sample_backfill",
+    "se_stub_effect",
 ];
 
 pub use mirror::{
