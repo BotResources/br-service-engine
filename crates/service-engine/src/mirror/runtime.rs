@@ -3,16 +3,19 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use tokio::sync::RwLock;
 
 use crate::error::EngineError;
+use crate::housekeeping::leader::try_advisory_xact_lock;
+use crate::impact::Impact;
 use crate::nats::Nats;
 use crate::transport::ImpactTransport;
 
 use super::builder::{Consumption, ReconcileKeysFn};
 use super::change::{Change, ChangeOp};
 use super::handle::MirrorRun;
+use super::leader::{MirrorGate, hold_lease};
 use super::projection::{Project, Projection};
 use super::shadow::Shadows;
 
@@ -26,6 +29,7 @@ pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
     keyed_by: KeyedByFn<K>,
     project: Arc<Pr>,
     reconcile_keys: Option<ReconcileKeysFn<K>>,
+    leader: Option<MirrorGate>,
     shadows: Arc<RwLock<Shadows>>,
 }
 
@@ -34,6 +38,7 @@ where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     Pr: Project<K>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         nats: Nats,
         pool: PgPool,
@@ -42,6 +47,7 @@ where
         keyed_by: KeyedByFn<K>,
         project: Arc<Pr>,
         reconcile_keys: Option<ReconcileKeysFn<K>>,
+        leader: Option<MirrorGate>,
     ) -> Self {
         Self {
             nats,
@@ -51,6 +57,7 @@ where
             keyed_by,
             project,
             reconcile_keys,
+            leader,
             shadows: Arc::new(RwLock::new(Shadows::new())),
         }
     }
@@ -125,18 +132,40 @@ where
             return Ok(());
         }
         let mut tx = self.pool.begin().await?;
+        if let Some(gate) = &self.leader {
+            if !try_advisory_xact_lock(&mut tx, gate.advisory_key).await? {
+                let _ = tx.rollback().await;
+                return Ok(());
+            }
+            if !hold_lease(&mut tx, &gate.slot_name, gate.pod.as_str(), gate.lease).await? {
+                let _ = tx.rollback().await;
+                return Ok(());
+            }
+        }
         let mut impacts = Vec::new();
+        self.project_into(&mut tx, shadows, keys, &mut impacts)
+            .await?;
+        if !impacts.is_empty() {
+            self.transport.stage_in(&mut tx, &impacts).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn project_into(
+        &self,
+        conn: &mut PgConnection,
+        shadows: &Shadows,
+        keys: Vec<K>,
+        impacts: &mut Vec<Impact>,
+    ) -> Result<(), EngineError> {
         for key in keys {
-            let cx = Projection::new(&mut tx, shadows, &mut impacts);
+            let cx = Projection::new(conn, shadows, impacts);
             self.project
                 .project(cx, key)
                 .await
                 .map_err(|error| EngineError::Service(Box::new(error)))?;
         }
-        if !impacts.is_empty() {
-            self.transport.stage_in(&mut tx, &impacts).await?;
-        }
-        tx.commit().await?;
         Ok(())
     }
 }
