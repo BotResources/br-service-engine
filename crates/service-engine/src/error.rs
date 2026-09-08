@@ -139,6 +139,9 @@ pub enum EngineError {
     #[error(transparent)]
     Transport(#[from] TransportError),
 
+    #[error(transparent)]
+    Nats(#[from] crate::nats::NatsError),
+
     #[error("database")]
     Db(#[from] sqlx::Error),
 

@@ -12,7 +12,9 @@ use crate::config::EngineConfig;
 use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
+use crate::inbound::{Budgets, ReactionMessage, ReactionRegistry, Subscription};
 use crate::mirror::MirrorHandle;
+use crate::pipeline::Reaction;
 use crate::principal::{Principal, PrincipalResolver, RlsApplier};
 use crate::projector::Projector;
 use crate::registry::RenderRegistry;
@@ -23,6 +25,8 @@ use crate::session::{AttachRequest, SessionStream};
 use crate::transport::probe::ListenerProbe;
 use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
+use futures_util::future::BoxFuture;
+use std::fmt::Display;
 
 pub struct Engine<P: Principal> {
     config: EngineConfig,
@@ -35,6 +39,7 @@ pub struct Engine<P: Principal> {
     render: OnceLock<Arc<SessionRuntime<P>>>,
     beat: Beat,
     mirrors: MirrorSupervisor,
+    inbound_reactions: Mutex<ReactionRegistry>,
     shutdown: Arc<tokio::sync::Notify>,
 }
 
@@ -79,6 +84,7 @@ impl<P: Principal> Engine<P> {
             render: OnceLock::new(),
             beat,
             mirrors: MirrorSupervisor::new(),
+            inbound_reactions: Mutex::new(ReactionRegistry::new()),
             shutdown: Arc::new(tokio::sync::Notify::new()),
         })
     }
@@ -126,14 +132,47 @@ impl<P: Principal> Engine<P> {
         self.mirrors.register(m)
     }
 
-    pub fn register_reaction<M, H>(
+    pub fn register_reaction<M, H, E>(
         &mut self,
-        _durable: &str,
-        _handler: H,
-    ) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_reaction",
-        })
+        durable: &str,
+        handler: H,
+    ) -> Result<(), EngineError>
+    where
+        M: ReactionMessage,
+        E: crate::inbound::ReactionError + Display + Send + 'static,
+        H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.register_reaction_with_budgets::<M, H, E>(durable, handler, Budgets::default())
+    }
+
+    pub fn register_reaction_with_budgets<M, H, E>(
+        &mut self,
+        durable: &str,
+        handler: H,
+        budgets: Budgets,
+    ) -> Result<(), EngineError>
+    where
+        M: ReactionMessage,
+        E: crate::inbound::ReactionError + Display + Send + 'static,
+        H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.inbound_reactions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .register::<M, H, E>(durable, handler, budgets)
+    }
+
+    pub fn inbound_subscriptions(&self) -> Vec<Subscription> {
+        self.inbound_reactions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .subscriptions()
     }
 
     pub fn register_mutation<M, H>(&mut self, _handler: H) -> Result<(), EngineError> {

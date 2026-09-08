@@ -8,7 +8,7 @@ pub use kv::{KvBucket, KvEvent, KvWatch, Revision};
 
 use async_nats::jetstream::Context;
 use async_nats::jetstream::stream::Stream;
-use br_core_integration::{EventCoords, IntegrationEvent};
+use br_core_integration::{CommandCoords, EventCoords, IntegrationEvent};
 use serde::Serialize;
 
 pub fn event_subject(coords: &EventCoords) -> String {
@@ -17,6 +17,16 @@ pub fn event_subject(coords: &EventCoords) -> String {
         coords.producer.as_str(),
         coords.aggregate.as_str(),
         coords.fact.as_str(),
+        coords.version
+    )
+}
+
+pub fn command_subject(coords: &CommandCoords) -> String {
+    format!(
+        "integration.cmd.{}.{}.{}.v{}",
+        coords.receiver.as_str(),
+        coords.aggregate.as_str(),
+        coords.verb.as_str(),
         coords.version
     )
 }
