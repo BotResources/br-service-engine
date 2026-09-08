@@ -323,6 +323,7 @@ dependencies = [
  "br-core-scope",
  "br-util-axum-readiness",
  "br-util-postgres",
+ "bytes",
  "chrono",
  "futures-util",
  "metrics",

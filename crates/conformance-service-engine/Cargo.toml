@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 async-nats = { workspace = true }
 br-core-auth = { workspace = true }
+bytes = { workspace = true }
 br-core-integration = { workspace = true }
 br-core-kernel = { workspace = true }
 br-core-scope = { workspace = true }

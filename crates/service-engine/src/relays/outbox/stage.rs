@@ -34,6 +34,16 @@ impl OutboxRecord {
     ) -> Result<Self, serde_json::Error> {
         Ok(Self::stage(id, destination, serde_json::to_value(event)?))
     }
+
+    pub fn stage_to(id: Uuid, subject: String, payload: serde_json::Value) -> Self {
+        Self {
+            id,
+            subject,
+            payload,
+            status: OutboxStatus::Pending,
+            attempts: 0,
+        }
+    }
 }
 
 pub async fn stage<'e, E>(executor: E, record: &OutboxRecord) -> Result<(), sqlx::Error>

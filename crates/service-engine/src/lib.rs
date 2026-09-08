@@ -111,8 +111,11 @@ pub use nats::{
     RelayHealth, RelayHealthReceiver,
 };
 pub use offer::Offer;
-pub use persistence::{Persistence, PersistenceStyle};
-pub use pipeline::{Bulk, Mutation, OneShot, Reaction};
+pub use persistence::{Aggregate, Persistence, PersistenceStyle};
+pub use pipeline::{
+    Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
+    MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, Reaction,
+};
 pub use population::{Interest, Inverse, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};

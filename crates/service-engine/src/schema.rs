@@ -16,6 +16,7 @@ pub const TABLE_KV_RELAY_WATERMARK: &str = "service_engine.kv_relay_watermark";
 pub const TABLE_MESSAGE_CLAIM: &str = "service_engine.message_claim";
 pub const TABLE_SEQUENCE_GUARD: &str = "service_engine.sequence_guard";
 pub const TABLE_DEAD_LETTER: &str = "service_engine.dead_letter";
+pub const TABLE_SCHEDULED_MESSAGE: &str = "service_engine.scheduled_message";
 
 pub const TABLES: &[&str] = &[
     TABLE_SCHEDULED_IMPACT,
@@ -26,6 +27,7 @@ pub const TABLES: &[&str] = &[
     TABLE_MESSAGE_CLAIM,
     TABLE_SEQUENCE_GUARD,
     TABLE_DEAD_LETTER,
+    TABLE_SCHEDULED_MESSAGE,
 ];
 
 const MAX_ROLE_NAME_LEN: usize = 63;
@@ -97,7 +99,7 @@ mod tests {
 
     #[test]
     fn every_engine_table_lives_in_the_engines_own_schema() {
-        assert_eq!(TABLES.len(), 8);
+        assert_eq!(TABLES.len(), 9);
         for table in TABLES {
             assert!(table.starts_with(&format!("{SCHEMA}.")));
         }

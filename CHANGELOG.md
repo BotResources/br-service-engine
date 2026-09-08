@@ -93,6 +93,70 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   gesture, and the sequence guard rejecting a stale producer sequence. The
   scenarios poll for the committed DB state under a bounded timeout rather than
   sleeping a fixed delay.
+### Added (0.1.0 rework, unit U3 — direct write pipeline + handler contexts)
+
+- The one direct write pipeline for a GraphQL mutation and a NATS command
+  alike: load, gate (the affordance function in deny mode, so the affordance and
+  the validation are one method), domain command, `save`, stage impacts, stage
+  outbox rows, commit, respond. The transaction runs under `SET LOCAL
+  lock_timeout` below the consumer's `ack_wait`; a lock timeout (SQLSTATE class
+  55) is retryable and `nak`s. For a NATS message the idempotency claim on the
+  message id and the per-(producer, key) sequence guard are inserted inside the
+  same transaction as the effect, so a redelivery after a crash-before-commit is
+  a claimed no-op and a stale producer sequence is a dropped no-op.
+- The real `Dispatch` implementation (`DirectPipeline`) for the U2 inbound loop:
+  it looks up the reaction's handler, runs the pipeline, and classifies its own
+  save/commit errors with `sqlx_is_terminal` (integrity/data violations
+  terminal, everything else retryable). The engine now **starts the inbound
+  loop at boot**, after the scope handshake, so a booted engine with registered
+  reactions consumes over the real pipeline with no `test-support` seam; the
+  loop is stopped and joined on shutdown.
+- Handler contexts `Reaction`, `Mutation<P>` and `Bulk<P>` over a shared `Ops`
+  core: `cx.load` / `cx.save` / `cx.create` through the `Persistence` trait,
+  `cx.impact` / `cx.impact_caused` / `cx.impact_at` (a scheduled impact on the
+  DB clock) / `cx.impact_all` (bulk, one coarse refresh per noun), `cx.command`
+  / `cx.emit` (outbox rows), `cx.present` (delegates to U6's presence handle,
+  flushed after commit), `cx.seal` (delegates to the accumulator seal),
+  `cx.schedule_at` (a scheduled reaction), `cx.now`, and `cx.blob` (a typed
+  `NotYet` until U9). Impacts, outbox rows, scheduled impacts and scheduled
+  reactions are staged inside the effect transaction; an ordinary transaction
+  that dirties more than `impacts_per_commit` keys is refused and named the bulk
+  path.
+- `register_mutation` / `register_bulk` are live, keyed by `MutationInput::NAME`;
+  `Engine::mutation_executor()` hands out a cloneable `MutationExecutor` that
+  runs a registered mutation or bulk for a resolved principal and returns
+  `M::Output` (`()` or a `OneShot`) on the synchronous channel, or a
+  `MutationError` carrying the gate's `Reason` code. A `OneShot` value is typed
+  so it can only reach the caller, never a view, impact, offer or outbox row.
+  `register_reaction` keeps the shape U2 established.
+- The `Persistence` trait gains `type Key` / `type Event` and
+  `load` / `save` / `create`, plus an `Aggregate` trait naming a `Store`, so
+  `cx.load::<A>` / `cx.save(&a)` / `cx.create(&a)` resolve statically with no
+  registry. The CRUD style ships (the row is the truth). The pipeline calls
+  `load` / `save` and never learns the style; soft-EDA and full-EDA fill the
+  same trait in U4. The state row is written in the same transaction as any
+  impact, outbox row or claim.
+- The engine `service_engine.scheduled_message` table and a beat-paced firing
+  loop: a scheduled reaction staged with the write transaction is claimed
+  `FOR UPDATE SKIP LOCKED` on the database clock, republished onto its
+  coordinate subject, and deleted; a redelivery is deduped by the receiver's
+  claim on the stable logical message id.
+- Dead-lettering now stages an impact on the ops noun
+  (`service_engine_dead_letter`) inside the same transaction as the dead-letter
+  row, so an ops view of dead letters updates like any other change.
+- `engine/mod.rs` is split by capability into `engine/{mod,register,mutate,run}`
+  so no file exceeds the size limit, and the wave-1 minor is fixed: the presence
+  watch task is now stopped and joined on the scope-handshake early returns.
+- Conformance scenarios `s33`–`s39` against real infra: a mutation gate deny
+  (typed error with the affordance's reason) and allow (commit → impact →
+  session `Upsert` with the flipped affordance) through one pipeline; a booted
+  engine consuming a NATS command through the pipeline exactly once via the
+  claim; a `OneShot` secret returned only on the synchronous channel; a row
+  lock timeout retried (never dead-lettered) and committed once the lock frees;
+  an emitted event staged in the write transaction and published by the leader
+  relay; `schedule_at` firing on the DB clock; and dead-lettering staging an
+  ops-view impact.
+
 ### Added (0.1.0 rework, unit U5)
 
 - Gate/affordance author layer (`gate` module): `Gate`/`Reason` (a `Reason` is a

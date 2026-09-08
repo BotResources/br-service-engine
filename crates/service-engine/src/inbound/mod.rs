@@ -16,7 +16,9 @@ pub use budget::{
     Budgets, DEFAULT_BACKOFF_BASE, DEFAULT_BACKOFF_MAX, DEFAULT_DELIVERY_BUDGET,
     DEFAULT_PARKING_BUDGET, Route, route,
 };
-pub use deadletter::{DeadLetter, DeadLetterSource, DeadLetters, DiscardOutcome, RetryOutcome};
+pub use deadletter::{
+    DEAD_LETTER_NOUN, DeadLetter, DeadLetterSource, DeadLetters, DiscardOutcome, RetryOutcome,
+};
 pub use dispatch::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
 pub use disposition::{Disposition, ReactionError, sqlx_is_terminal};
 pub use guard::{Claimed, Ordering, advance_sequence, claim};

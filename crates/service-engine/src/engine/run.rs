@@ -1,42 +1,24 @@
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use tokio::sync::Notify;
 
 use crate::engine::Engine;
+use crate::engine::loops::{RenderGc, RenderRepairs, join_presence, run_scheduled_messages};
 use crate::error::{EngineError, TransportError};
-use crate::housekeeping::beat::RepairRetry;
-use crate::housekeeping::gc::SessionGc;
 use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
 use crate::impact::TransportEvent;
+use crate::inbound::{DeadLetters, InboundConfig, InboundLoop};
+use crate::pipeline::DirectPipeline;
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
-use crate::runtime::SessionRuntime;
-use crate::time::Timestamp;
 use crate::transport::ImpactTransport;
 
 enum Boot {
     Converged,
     ShuttingDown,
     MirrorStopped,
-}
-
-struct RenderGc<P: Principal>(Arc<SessionRuntime<P>>);
-
-impl<P: Principal> SessionGc for RenderGc<P> {
-    fn collect<'a>(&'a self, _now: Timestamp) -> BoxFuture<'a, Result<usize, EngineError>> {
-        Box::pin(async move { Ok(self.0.gc().await) })
-    }
-}
-
-struct RenderRepairs<P: Principal>(Arc<SessionRuntime<P>>);
-
-impl<P: Principal> RepairRetry for RenderRepairs<P> {
-    fn retry<'a>(&'a self) -> BoxFuture<'a, Result<usize, EngineError>> {
-        Box::pin(async move { self.0.retry_repairs().await })
-    }
 }
 
 impl<P: Principal> Engine<P> {
@@ -51,6 +33,7 @@ impl<P: Principal> Engine<P> {
             accumulators,
             mut beat,
             mirrors,
+            inbound_reactions,
             presence,
             shutdown,
             declared_scopes,
@@ -73,6 +56,8 @@ impl<P: Principal> Engine<P> {
         let stop_beat = Arc::new(Notify::new());
         let stop_flush = Arc::new(Notify::new());
         let stop_mirrors = Arc::new(Notify::new());
+        let stop_presence = Arc::new(Notify::new());
+        let stop_sched = Arc::new(Notify::new());
 
         let stopping = shutdown.notified();
         tokio::pin!(stopping);
@@ -81,11 +66,7 @@ impl<P: Principal> Engine<P> {
         let mut mirror_tasks = mirrors.start(stop_mirrors.clone());
         let boot = tokio::select! {
             converged = mirror_tasks.converged() => {
-                if converged {
-                    Boot::Converged
-                } else {
-                    Boot::MirrorStopped
-                }
+                if converged { Boot::Converged } else { Boot::MirrorStopped }
             }
             () = &mut stopping => Boot::ShuttingDown,
         };
@@ -104,7 +85,6 @@ impl<P: Principal> Engine<P> {
             }
         }
 
-        let stop_presence = Arc::new(Notify::new());
         let mut presence_task = None;
         let events: BoxStream<'static, Result<TransportEvent, TransportError>> = if presence
             .is_empty()
@@ -139,6 +119,7 @@ impl<P: Principal> Engine<P> {
             )));
             futures_util::stream::select(transport.listen(), stream).boxed()
         };
+
         if let Some(declaration) = declared_scopes {
             readiness_guard.set_not_ready(crate::scopes::REASON_SCOPES_PENDING);
             let handshake = crate::scopes::run_handshake(&nats, declaration);
@@ -146,6 +127,8 @@ impl<P: Principal> Engine<P> {
             let outcome = tokio::select! {
                 () = &mut stopping => {
                     stop_mirrors.notify_waiters();
+                    stop_presence.notify_waiters();
+                    join_presence(presence_task.take()).await;
                     render.shutdown().await;
                     return Ok(());
                 }
@@ -159,10 +142,58 @@ impl<P: Principal> Engine<P> {
                      than serving with unconfirmed scopes"
                 );
                 stop_mirrors.notify_waiters();
+                stop_presence.notify_waiters();
+                join_presence(presence_task.take()).await;
                 render.shutdown().await;
                 return Err(EngineError::Scope(error));
             }
         }
+
+        let reactions = Arc::new(
+            inbound_reactions
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        let subscriptions = reactions.subscriptions();
+        let inbound = if subscriptions.is_empty() {
+            None
+        } else {
+            let pipeline = Arc::new(DirectPipeline::new(
+                pg.clone(),
+                transport.clone() as Arc<dyn ImpactTransport>,
+                accumulators.clone(),
+                reactions.clone(),
+                config.lock_timeout,
+                config.impacts_per_commit,
+            ));
+            match InboundLoop::start(
+                nats.clone(),
+                subscriptions,
+                pipeline,
+                DeadLetters::new(pg.clone())
+                    .with_transport(transport.clone() as Arc<dyn ImpactTransport>),
+                InboundConfig::default(),
+            )
+            .await
+            {
+                Ok(loop_handle) => Some(loop_handle),
+                Err(error) => {
+                    readiness_guard.set_not_ready(crate::nats::REASON_NO_STREAM);
+                    stop_mirrors.notify_waiters();
+                    stop_presence.notify_waiters();
+                    join_presence(presence_task.take()).await;
+                    render.shutdown().await;
+                    return Err(error);
+                }
+            }
+        };
+
+        let sched_task = tokio::spawn(run_scheduled_messages(
+            pg.clone(),
+            nats.clone(),
+            config.beat,
+            stop_sched.clone(),
+        ));
 
         let after_pass = render.after_pass_signal();
         let render_handle = render.clone();
@@ -184,10 +215,14 @@ impl<P: Principal> Engine<P> {
         stop_flush.notify_one();
         stop_mirrors.notify_waiters();
         stop_presence.notify_waiters();
-        render_handle.shutdown().await;
-        if let Some(task) = presence_task.take() {
-            let _ = task.await;
+        stop_sched.notify_waiters();
+        if let Some(inbound) = inbound {
+            inbound.stop();
+            inbound.join().await;
         }
+        let _ = sched_task.await;
+        render_handle.shutdown().await;
+        join_presence(presence_task.take()).await;
 
         let outcome = match stopped {
             None => {

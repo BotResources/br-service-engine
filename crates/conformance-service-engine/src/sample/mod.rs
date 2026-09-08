@@ -6,8 +6,11 @@ pub mod gated;
 pub mod mirror;
 pub mod note;
 pub mod outbox;
+pub mod pipeline;
+pub mod pipeline_support;
 pub mod presence;
 pub mod principal;
+pub mod reactions;
 pub mod relays;
 pub mod render;
 pub mod roster;
@@ -15,6 +18,7 @@ pub mod spy;
 pub mod stream;
 pub mod titles;
 pub mod transport;
+pub mod widget;
 
 use sqlx::PgPool;
 use sqlx::migrate::{MigrateError, Migrator};
@@ -42,6 +46,7 @@ pub const TABLES: &[&str] = &[
     "sample_cron_run",
     "sample_backfill",
     "se_stub_effect",
+    "sample_widget",
 ];
 
 pub use mirror::{
@@ -61,12 +66,19 @@ pub use engine::{
 pub use assignment::{
     Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentView,
 };
+pub use engine::boot_pipeline_engine;
 pub use gate::Gate;
 pub use gated::{
     AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, reasons,
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
+pub use pipeline::{
+    CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, SampleFault,
+    SampleReactionFault, ScheduleCreate, WidgetCreated, close_widget, create_widget,
+    create_widget_coords, import_widgets, lock_widget, lock_widget_coords, mint_secret,
+    schedule_create,
+};
 pub use presence::{
     Typing, TypingKey, TypingValue, TypingView, typing_key, typing_value, typing_window,
 };
@@ -83,3 +95,4 @@ pub use titles::{MiskeyedProjector, TitleFacts, TitleProjector, TitleView};
 pub use transport::{
     RecordingTransport, SAMPLE_CHANNEL, StagingGate, StagingTransport, staged_impacts,
 };
+pub use widget::{Widget, WidgetFacts, WidgetProjector, WidgetRow, WidgetStore, WidgetView};

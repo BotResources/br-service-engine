@@ -12,10 +12,15 @@ use crate::sample::assignment::{Assignment, AssignmentProjector};
 use crate::sample::cron::SampleCronJob;
 use crate::sample::mirror::directory_mirror;
 use crate::sample::note::{Note, NoteProjector};
+use crate::sample::pipeline::{
+    CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, ScheduleCreate, close_widget,
+    create_widget, import_widgets, lock_widget, mint_secret, schedule_create,
+};
 use crate::sample::presence::Typing;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::relays::RowClaimSampleRelay;
 use crate::sample::stream::NoteBody;
+use crate::sample::widget::{Widget, WidgetProjector};
 
 pub const SAMPLE_RELAY: RelayName = RelayName::from_static("sample_rows");
 pub const SAMPLE_JOB: &str = "sample_heartbeat";
@@ -125,5 +130,47 @@ pub async fn boot_sample_engine(
     engine
         .register_mirror(directory_mirror())
         .expect("register the directory mirror");
+    engine
+}
+
+pub async fn boot_pipeline_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the pipeline engine boots under the low-privilege app role");
+    engine.bind_noun::<Widget>().expect("bind the widget noun");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(WidgetProjector)
+        .expect("register the widget projector");
+    engine
+        .register_mutation::<CloseWidget, _>(close_widget)
+        .expect("register the close mutation");
+    engine
+        .register_mutation::<MintSecret, _>(mint_secret)
+        .expect("register the mint mutation");
+    engine
+        .register_mutation::<ScheduleCreate, _>(schedule_create)
+        .expect("register the schedule mutation");
+    engine
+        .register_bulk::<ImportWidgets, _>(import_widgets)
+        .expect("register the import bulk");
+    engine
+        .register_reaction::<CreateWidget, _, _>("sample-create-widget", create_widget)
+        .expect("register the create-widget reaction");
+    engine
+        .register_reaction::<LockWidget, _, _>("sample-lock-widget", lock_widget)
+        .expect("register the lock-widget reaction");
     engine
 }

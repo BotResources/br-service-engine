@@ -40,9 +40,9 @@ fills its part by adding module files and one method body.
 |---|---|---|
 | `engine` | `Engine::boot` and the `register_*` / `declare_scopes` / `erase` surface | U1 (skeleton) |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish | U1 |
-| `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 |
-| `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 |
-| `persistence` | `Persistence` trait; CRUD, soft-EDA, full-EDA styles behind `load`/`save` | U4 |
+| `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 (done) |
+| `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 (done) |
+| `persistence` | `Persistence` trait + `Aggregate`; CRUD shipped, soft-EDA / full-EDA behind the same trait | U3 (CRUD) / U4 |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
 | `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
@@ -53,11 +53,26 @@ fills its part by adding module files and one method body.
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then. `register_reaction` (U2) is live: it records a reaction and derives
-its inbound subscription, and the engine-owned inbound loop (durable consumer,
-ack-after-durable, `Disposition` routing, poison budget with the
+until then — today only `register_offer` (U7), `register_blobs` (U9) and
+`erase` (U11). `register_reaction` (U2) is live: it records a reaction and
+derives its inbound subscription, and the engine-owned inbound loop (durable
+consumer, ack-after-durable, `Disposition` routing, poison budget with the
 `service_engine.dead_letter` table and its retry/discard gestures, the
 per-(producer, key) sequence guard beside the idempotency claim) runs over it.
+`register_mutation` and `register_bulk` (U3) are live: a GraphQL mutation and a
+NATS command run **one** direct write pipeline — load, gate (the affordance
+function in deny mode), domain command, `save` through the `Persistence` trait,
+stage impacts (`cx.impact_caused` / `cx.impact_at` / `cx.impact_all`), stage
+outbox rows (`cx.emit` / `cx.command`), commit, respond — under `lock_timeout`
+below the consumer's `ack_wait` (a lock timeout is retryable, `nak`), with the
+idempotency claim and the per-(producer, key) sequence guard in the effect
+transaction. The synchronous channel answers `{ success }`, a typed
+`MutationError` carrying the gate's `Reason` code, or a typed `OneShot` secret
+(which never enters a view, impact, offer or event). `cx.schedule_at` stages a
+scheduled reaction the beat fires on the database clock; dead-lettering stages
+an impact on the ops view. The engine starts the inbound loop at boot, after
+the scope handshake, so a booted engine with registered reactions consumes with
+no test-support seam.
 `register_presence` (U6) is filled: it binds the `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other

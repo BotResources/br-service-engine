@@ -13,6 +13,7 @@ pub mod relay;
 #[allow(dead_code, unused_imports)]
 mod relay;
 pub mod scheduled;
+pub mod scheduled_message;
 
 pub use backoff::Backoff;
 pub use beat::{Beat, BeatRound};

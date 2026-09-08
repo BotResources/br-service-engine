@@ -1,13 +1,21 @@
+use std::sync::Arc;
+
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::impact::{Dims, Impact};
 use crate::inbound::message::{
     HEADER_MESSAGE_ID, HEADER_PRODUCER, HEADER_SEQ, HEADER_SEQ_KEY, Incoming,
 };
+use crate::name::NounName;
 use crate::nats::{Nats, NatsError};
 use crate::schema::TABLE_DEAD_LETTER;
+use crate::transport::ImpactTransport;
+use crate::wire::KeyBytes;
+
+pub const DEAD_LETTER_NOUN: NounName = NounName::from_static("service_engine_dead_letter");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeadLetterSource {
@@ -58,11 +66,20 @@ pub enum DiscardOutcome {
 #[derive(Clone)]
 pub struct DeadLetters {
     pool: PgPool,
+    transport: Option<Arc<dyn ImpactTransport>>,
 }
 
 impl DeadLetters {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            transport: None,
+        }
+    }
+
+    pub fn with_transport(mut self, transport: Arc<dyn ImpactTransport>) -> Self {
+        self.transport = Some(transport);
+        self
     }
 
     pub async fn record(
@@ -79,15 +96,18 @@ impl DeadLetters {
             ),
             None => (None, None, None),
         };
+        let id = Uuid::now_v7();
         let sql = format!(
             "INSERT INTO {TABLE_DEAD_LETTER} \
                (id, source, reaction, subject, message_id, payload, producer, seq_key, seq, error, delivered) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              ON CONFLICT (reaction, message_id) DO UPDATE \
-               SET delivered = EXCLUDED.delivered, error = EXCLUDED.error, last_seen = now()"
+               SET delivered = EXCLUDED.delivered, error = EXCLUDED.error, last_seen = now() \
+             RETURNING id"
         );
-        sqlx::query(&sql)
-            .bind(Uuid::now_v7())
+        let mut tx = self.pool.begin().await?;
+        let row_id: Uuid = sqlx::query_scalar(&sql)
+            .bind(id)
             .bind(source.as_str())
             .bind(&msg.reaction)
             .bind(&msg.subject)
@@ -98,8 +118,26 @@ impl DeadLetters {
             .bind(seq)
             .bind(error)
             .bind(msg.delivered as i32)
-            .execute(&self.pool)
+            .fetch_one(&mut *tx)
             .await?;
+        if let Some(transport) = &self.transport {
+            let key = KeyBytes::encode(&row_id).map_err(|error| {
+                sqlx::Error::Protocol(format!("encoding the ops-view impact key: {error}"))
+            })?;
+            let impact = Impact::ResourceChanged {
+                noun: DEAD_LETTER_NOUN,
+                key,
+                dims: Dims::ALL,
+                cause: None,
+            };
+            transport
+                .stage_in(&mut tx, std::slice::from_ref(&impact))
+                .await
+                .map_err(|error| {
+                    sqlx::Error::Protocol(format!("staging the ops-view impact: {error}"))
+                })?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 

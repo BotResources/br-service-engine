@@ -1,3 +1,6 @@
+mod loops;
+mod mutate;
+mod register;
 mod run;
 
 use std::sync::{Arc, Mutex, OnceLock};
@@ -12,23 +15,17 @@ use crate::config::EngineConfig;
 use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
-use crate::inbound::{Budgets, ReactionMessage, ReactionRegistry, Subscription};
-use crate::mirror::{MirrorReady, Project};
-use crate::pipeline::Reaction;
-use crate::presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
-use crate::principal::{Principal, PrincipalResolver, RlsApplier};
-use crate::projector::Projector;
+use crate::inbound::ReactionRegistry;
+use crate::pipeline::MutationRegistry;
+use crate::presence::PresenceRegistry;
+use crate::principal::Principal;
 use crate::registry::RenderRegistry;
-#[cfg(feature = "test-support")]
-use crate::relay::Relay;
 use crate::runtime::SessionRuntime;
 use crate::session::{AttachRequest, SessionStream};
 use crate::transport::probe::ListenerProbe;
 use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
 use br_core_scope::ScopeDeclaration;
-use futures_util::future::BoxFuture;
-use std::fmt::Display;
 
 pub struct Engine<P: Principal> {
     config: EngineConfig,
@@ -42,6 +39,7 @@ pub struct Engine<P: Principal> {
     beat: Beat,
     mirrors: MirrorSupervisor,
     inbound_reactions: Mutex<ReactionRegistry>,
+    mutations: MutationRegistry<P>,
     presence: PresenceRegistry<P>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
@@ -90,163 +88,10 @@ impl<P: Principal> Engine<P> {
             beat,
             mirrors: MirrorSupervisor::new(),
             inbound_reactions: Mutex::new(ReactionRegistry::new()),
+            mutations: MutationRegistry::new(),
             presence: PresenceRegistry::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
-        })
-    }
-
-    pub fn register_rls<R: RlsApplier<P>>(&mut self, r: R) -> Result<(), EngineError> {
-        self.with_registry(|registry| {
-            registry.register_rls(r);
-            Ok(())
-        })
-    }
-
-    pub fn register_principal_resolver<R: PrincipalResolver<P>>(
-        &mut self,
-        r: R,
-    ) -> Result<(), EngineError> {
-        self.with_registry(|registry| {
-            registry.register_principal_resolver(r);
-            Ok(())
-        })
-    }
-
-    pub fn register_projector<Pr: Projector<Principal = P>>(
-        &mut self,
-        p: Pr,
-    ) -> Result<(), EngineError> {
-        self.with_registry(|registry| registry.register_projector(p))
-    }
-
-    pub fn register_accumulator<A: Accumulator>(&mut self, a: A) -> Result<(), EngineError> {
-        self.with_registry(|registry| {
-            registry.bind_noun::<A::Noun>();
-            Ok(())
-        })?;
-        self.accumulators.register(a)
-    }
-
-    pub fn register_cron<J: crate::cron::CronJob>(&mut self, j: J) -> Result<(), EngineError> {
-        self.beat
-            .cron()
-            .register_erased(Arc::new(j))
-            .map_err(|error| EngineError::Service(Box::new(error)))
-    }
-
-    pub fn register_mirror<K, Pr>(&mut self, mirror: MirrorReady<K, Pr>) -> Result<(), EngineError>
-    where
-        K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
-        Pr: Project<K>,
-    {
-        let handle = mirror.build(
-            self.nats.clone(),
-            self.pg.clone(),
-            self.transport.clone() as Arc<dyn ImpactTransport>,
-        );
-        self.mirrors.register(handle)
-    }
-
-    pub fn register_reaction<M, H, E>(
-        &mut self,
-        durable: &str,
-        handler: H,
-    ) -> Result<(), EngineError>
-    where
-        M: ReactionMessage,
-        E: crate::inbound::ReactionError + Display + Send + 'static,
-        H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.register_reaction_with_budgets::<M, H, E>(durable, handler, Budgets::default())
-    }
-
-    pub fn register_reaction_with_budgets<M, H, E>(
-        &mut self,
-        durable: &str,
-        handler: H,
-        budgets: Budgets,
-    ) -> Result<(), EngineError>
-    where
-        M: ReactionMessage,
-        E: crate::inbound::ReactionError + Display + Send + 'static,
-        H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.inbound_reactions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .register::<M, H, E>(durable, handler, budgets)
-    }
-
-    pub fn inbound_subscriptions(&self) -> Vec<Subscription> {
-        self.inbound_reactions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .subscriptions()
-    }
-
-    pub fn register_mutation<M, H>(&mut self, _handler: H) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_mutation",
-        })
-    }
-
-    pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_offer",
-        })
-    }
-
-    pub fn register_presence<Pr: Presence>(
-        &mut self,
-        ttl: std::time::Duration,
-    ) -> Result<(), EngineError> {
-        let store = self.presence.register::<Pr>(ttl);
-        self.with_registry(|registry| {
-            registry.bind_noun::<Pr::Noun>();
-            registry.register_projector(crate::presence::PresenceProjector::<P, Pr>::new(store))
-        })
-    }
-
-    pub fn presence_handle(&self) -> PresenceHandle<P> {
-        self.presence.handle()
-    }
-
-    pub async fn present<Pr: Presence>(
-        &self,
-        key: &PresenceKey<Pr>,
-        value: &Pr::Value,
-    ) -> Result<(), EngineError> {
-        self.presence.handle().present::<Pr>(key, value).await
-    }
-
-    pub fn register_blobs<B: crate::blobs::Blobs>(
-        &mut self,
-        _policy: crate::blobs::BlobPolicy,
-    ) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_blobs",
-        })
-    }
-
-    pub fn declare_scopes(
-        &mut self,
-        manifest: crate::scopes::ScopeManifest,
-    ) -> Result<(), EngineError> {
-        let declaration = manifest.declaration()?;
-        self.declared_scopes = Some(declaration);
-        Ok(())
-    }
-
-    pub async fn erase(&self, _person: crate::erase::PersonId) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "erase",
         })
     }
 
@@ -302,7 +147,7 @@ impl<P: Principal> Engine<P> {
         &self.nats
     }
 
-    fn with_registry(
+    pub(crate) fn with_registry(
         &mut self,
         f: impl FnOnce(&mut RenderRegistry<P>) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
@@ -328,7 +173,7 @@ impl<P: Principal> Engine<P> {
         })
     }
 
-    pub fn register_relay<R: Relay>(&mut self, r: R) -> Result<(), EngineError> {
+    pub fn register_relay<R: crate::relay::Relay>(&mut self, r: R) -> Result<(), EngineError> {
         self.beat.relays().register_erased(Arc::new(r))
     }
 
