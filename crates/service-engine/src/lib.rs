@@ -95,7 +95,10 @@ pub use housekeeping::relay::{RelayRound, RelayRuntime};
 pub use housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
 pub use impact::{Deps, Dims, ForeignKey, Impact, TransportEvent};
 pub use inbound::{Disposition, ReactionError};
-pub use mirror::MirrorHandle;
+pub use mirror::{
+    Change, ChangeOp, Consumed, Mirror, MirrorHandle, MirrorKeyed, MirrorReady, Project,
+    Projection, Shadow, Shadows,
+};
 pub use name::{
     AccumulatorName, ChannelName, ForeignId, JobName, MirrorName, Namespace, NounName, PodId,
     ProjectorName, RelayName,
