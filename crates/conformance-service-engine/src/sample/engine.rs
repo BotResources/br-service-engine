@@ -12,6 +12,7 @@ use crate::sample::assignment::{Assignment, AssignmentProjector};
 use crate::sample::cron::SampleCronJob;
 use crate::sample::mirror::directory_mirror_handle;
 use crate::sample::note::{Note, NoteProjector};
+use crate::sample::presence::Typing;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::relays::RowClaimSampleRelay;
 use crate::sample::stream::NoteBody;
@@ -55,6 +56,30 @@ pub async fn boot_render_engine(
     engine
         .register_projector(AssignmentProjector)
         .expect("register the assignment projector");
+    engine
+}
+
+pub async fn boot_presence_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    service: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_service(service),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the presence engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_presence::<Typing>(Duration::from_secs(30))
+        .expect("register the typing presence lane");
     engine
 }
 

@@ -96,6 +96,19 @@ impl TestNats {
         .expect("declare the PUBLISHED_LANGUAGE bucket");
     }
 
+    pub async fn provision_presence(&self, service: &str, max_age: Duration) {
+        let js = self.jetstream().await;
+        js.create_key_value(async_nats::jetstream::kv::Config {
+            bucket: format!("EPHEMERAL_{service}"),
+            history: 1,
+            max_age,
+            limit_markers: Some(Duration::from_secs(300)),
+            ..Default::default()
+        })
+        .await
+        .unwrap_or_else(|e| panic!("declare the EPHEMERAL_{service} presence bucket: {e}"));
+    }
+
     async fn jetstream(&self) -> async_nats::jetstream::Context {
         let client = async_nats::connect(&self.url())
             .await

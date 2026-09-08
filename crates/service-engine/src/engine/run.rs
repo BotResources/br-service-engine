@@ -1,13 +1,17 @@
 use std::sync::Arc;
 
+use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
+use futures_util::stream::BoxStream;
 use tokio::sync::Notify;
 
 use crate::engine::Engine;
-use crate::error::EngineError;
+use crate::error::{EngineError, TransportError};
 use crate::housekeeping::beat::RepairRetry;
 use crate::housekeeping::gc::SessionGc;
 use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
+use crate::impact::TransportEvent;
+use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
 use crate::runtime::SessionRuntime;
 use crate::time::Timestamp;
@@ -41,11 +45,13 @@ impl<P: Principal> Engine<P> {
         let Engine {
             config,
             pg,
+            nats,
             transport,
             readiness,
             accumulators,
             mut beat,
             mirrors,
+            presence,
             shutdown,
             ..
         } = self;
@@ -96,9 +102,45 @@ impl<P: Principal> Engine<P> {
             }
         }
 
+        let stop_presence = Arc::new(Notify::new());
+        let mut presence_task = None;
+        let events: BoxStream<'static, Result<TransportEvent, TransportError>> = if presence
+            .is_empty()
+        {
+            transport.listen()
+        } else {
+            let Some(bucket_name) = config.ephemeral_bucket() else {
+                readiness_guard.set_not_ready(REASON_PRESENCE_BUCKET);
+                render.shutdown().await;
+                return Err(EngineError::Config(
+                    "a presence lane is registered but no service is configured, so the \
+                     EPHEMERAL_{service} bucket has no name; call EngineConfig::with_service"
+                        .into(),
+                ));
+            };
+            let lanes = presence.lanes();
+            let bucket = match crate::presence::bind_and_seed(&nats, &bucket_name, &lanes).await {
+                Ok(bucket) => bucket,
+                Err(error) => {
+                    readiness_guard.set_not_ready(REASON_PRESENCE_BUCKET);
+                    render.shutdown().await;
+                    return Err(error);
+                }
+            };
+            let _ = presence.bucket_slot().set(bucket.clone());
+            let (sender, stream) = crate::presence::presence_channel();
+            presence_task = Some(tokio::spawn(crate::presence::run_watch(
+                bucket,
+                lanes,
+                sender,
+                stop_presence.clone(),
+            )));
+            futures_util::stream::select(transport.listen(), stream).boxed()
+        };
+
         let after_pass = render.after_pass_signal();
         let render_handle = render.clone();
-        let mut render_task = tokio::spawn(render.run(transport.listen(), stop_render.clone()));
+        let mut render_task = tokio::spawn(render.run(events, stop_render.clone()));
         let mut beat_task = tokio::spawn(beat.run(pg.clone(), stop_beat.clone(), after_pass));
         let mut flush_task =
             tokio::spawn(accumulators.clone().run(config.window, stop_flush.clone()));
@@ -115,7 +157,11 @@ impl<P: Principal> Engine<P> {
         stop_beat.notify_waiters();
         stop_flush.notify_one();
         stop_mirrors.notify_waiters();
+        stop_presence.notify_waiters();
         render_handle.shutdown().await;
+        if let Some(task) = presence_task.take() {
+            let _ = task.await;
+        }
 
         let outcome = match stopped {
             None => {

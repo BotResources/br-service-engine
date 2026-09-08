@@ -44,6 +44,8 @@ pub enum NatsError {
     NoStream { name: String },
     #[error("kv bucket {name} is absent; gitops declares buckets, the engine only binds them")]
     NoBucket { name: String },
+    #[error("kv bucket {name} is not usable for presence: {detail}")]
+    EphemeralNotConfigured { name: String, detail: &'static str },
     #[error("kv operation on {key} failed: {detail}")]
     Kv { key: String, detail: String },
     #[error("a postgres read backing a nats operation failed: {detail}")]
@@ -164,6 +166,30 @@ impl Nats {
 
     pub async fn published_language<V>(&self) -> Result<KvBucket<V>, NatsError> {
         self.bind_kv(KV_PUBLISHED_LANGUAGE).await
+    }
+
+    pub async fn bind_ephemeral<V>(&self, name: &str) -> Result<KvBucket<V>, NatsError> {
+        let bucket = self.bind_kv::<V>(name).await?;
+        if bucket.max_age().await?.is_zero() {
+            return Err(NatsError::EphemeralNotConfigured {
+                name: name.to_string(),
+                detail: "no TTL: max_age is zero, so a presence key would never expire",
+            });
+        }
+        let backing = self.bind_stream(&format!("KV_{name}")).await?;
+        if backing
+            .cached_info()
+            .config
+            .subject_delete_marker_ttl
+            .is_none()
+        {
+            return Err(NatsError::EphemeralNotConfigured {
+                name: name.to_string(),
+                detail: "no delete markers: an expired key would raise no watch event, so a \
+                         presence Remove could never fire",
+            });
+        }
+        Ok(bucket)
     }
 
     pub async fn ping(&self) -> Result<(), NatsError> {

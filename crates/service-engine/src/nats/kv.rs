@@ -69,12 +69,32 @@ pub struct KvBucket<V> {
     _value: PhantomData<V>,
 }
 
+impl<V> Clone for KvBucket<V> {
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            _value: PhantomData,
+        }
+    }
+}
+
 impl<V> KvBucket<V> {
     pub(crate) fn bind(store: Store) -> Self {
         Self {
             store,
             _value: PhantomData,
         }
+    }
+
+    pub async fn max_age(&self) -> Result<std::time::Duration, NatsError> {
+        self.store
+            .status()
+            .await
+            .map(|status| status.max_age())
+            .map_err(|error| NatsError::Kv {
+                key: "status".to_string(),
+                detail: error.to_string(),
+            })
     }
 
     pub async fn retract(&self, key: &KvKey) -> Result<(), NatsError> {
@@ -175,6 +195,31 @@ where
             if !prefix.matches(&raw) {
                 continue;
             }
+            let Ok(key) = KvKey::new(raw) else { continue };
+            if let Some((value, _)) = self.get_with_revision(&key).await? {
+                out.push((key, value));
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn all(&self) -> Result<Vec<(KvKey, V)>, NatsError> {
+        use futures_util::StreamExt;
+        let mut keys = self
+            .store
+            .keys()
+            .await
+            .map_err(|e| NatsError::Kv {
+                key: "keys".to_string(),
+                detail: e.to_string(),
+            })?
+            .boxed();
+        let mut out = Vec::new();
+        while let Some(next) = keys.next().await {
+            let raw = next.map_err(|e| NatsError::Kv {
+                key: "keys".to_string(),
+                detail: e.to_string(),
+            })?;
             let Ok(key) = KvKey::new(raw) else { continue };
             if let Some((value, _)) = self.get_with_revision(&key).await? {
                 out.push((key, value));

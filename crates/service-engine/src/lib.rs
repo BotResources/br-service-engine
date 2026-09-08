@@ -110,7 +110,7 @@ pub use offer::Offer;
 pub use persistence::{Persistence, PersistenceStyle};
 pub use pipeline::{Bulk, Mutation, OneShot, Reaction};
 pub use population::{Interest, Inverse, Population, WindowQuery};
-pub use presence::Presence;
+pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope, Projector};
 #[cfg(feature = "test-support")]

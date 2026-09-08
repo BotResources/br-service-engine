@@ -33,6 +33,7 @@ pub struct EngineConfig {
     pub repair_attempts: u32,
     pub channel: ChannelName,
     pub pod_id: PodId,
+    pub service: Option<String>,
 }
 
 impl EngineConfig {
@@ -52,7 +53,19 @@ impl EngineConfig {
             repair_attempts: DEFAULT_REPAIR_ATTEMPTS,
             channel,
             pod_id,
+            service: None,
         }
+    }
+
+    pub fn with_service(mut self, service: impl Into<String>) -> Self {
+        self.service = Some(service.into());
+        self
+    }
+
+    pub fn ephemeral_bucket(&self) -> Option<String> {
+        self.service
+            .as_ref()
+            .map(|service| format!("EPHEMERAL_{service}"))
     }
 
     pub fn with_window(mut self, window: Duration) -> Self {
