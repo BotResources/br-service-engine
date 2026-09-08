@@ -66,6 +66,11 @@ impl TestNats {
         format!("nats://127.0.0.1:{}", self.port)
     }
 
+    pub fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
     pub async fn nats(&self) -> Nats {
         Nats::connect(&self.url())
             .await
