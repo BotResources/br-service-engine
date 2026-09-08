@@ -22,6 +22,8 @@ chrono = { workspace = true }
 croner = { workspace = true }
 futures-util = { workspace = true }
 metrics = { workspace = true }
+reqwest = { workspace = true }
+rusty-s3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["chrono", "json", "macros", "migrate", "uuid"] }

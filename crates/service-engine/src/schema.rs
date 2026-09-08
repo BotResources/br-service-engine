@@ -17,6 +17,7 @@ pub const TABLE_MESSAGE_CLAIM: &str = "service_engine.message_claim";
 pub const TABLE_SEQUENCE_GUARD: &str = "service_engine.sequence_guard";
 pub const TABLE_DEAD_LETTER: &str = "service_engine.dead_letter";
 pub const TABLE_SCHEDULED_MESSAGE: &str = "service_engine.scheduled_message";
+pub const TABLE_BLOB: &str = "service_engine.blob";
 
 pub const TABLES: &[&str] = &[
     TABLE_SCHEDULED_IMPACT,
@@ -28,6 +29,7 @@ pub const TABLES: &[&str] = &[
     TABLE_SEQUENCE_GUARD,
     TABLE_DEAD_LETTER,
     TABLE_SCHEDULED_MESSAGE,
+    TABLE_BLOB,
 ];
 
 const MAX_ROLE_NAME_LEN: usize = 63;
@@ -99,7 +101,7 @@ mod tests {
 
     #[test]
     fn every_engine_table_lives_in_the_engines_own_schema() {
-        assert_eq!(TABLES.len(), 9);
+        assert_eq!(TABLES.len(), 10);
         for table in TABLES {
             assert!(table.starts_with(&format!("{SCHEMA}.")));
         }

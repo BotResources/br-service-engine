@@ -1,0 +1,134 @@
+use std::time::Duration;
+
+use reqwest::StatusCode;
+use rusty_s3::{Bucket, Credentials, S3Action, UrlStyle};
+
+use crate::blobs::config::BlobConfig;
+use crate::blobs::{DownloadUrl, UploadUrl};
+use crate::error::EngineError;
+
+pub(crate) struct ObjectStore {
+    bucket: Bucket,
+    credentials: Credentials,
+    http: reqwest::Client,
+    upload_ttl: Duration,
+    download_ttl: Duration,
+}
+
+impl ObjectStore {
+    pub(crate) fn from_config(config: &BlobConfig) -> Result<Self, EngineError> {
+        config.validate()?;
+        let endpoint = config
+            .endpoint
+            .parse()
+            .map_err(|error| EngineError::Config(format!("object storage endpoint: {error}")))?;
+        let bucket = Bucket::new(
+            endpoint,
+            UrlStyle::Path,
+            config.bucket.clone(),
+            config.region.clone(),
+        )
+        .map_err(|error| EngineError::Config(format!("object storage bucket: {error}")))?;
+        let credentials = Credentials::new(&config.access_key, &config.secret_key);
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(|error| EngineError::Blob(error.to_string()))?;
+        Ok(Self {
+            bucket,
+            credentials,
+            http,
+            upload_ttl: config.upload_ttl,
+            download_ttl: config.download_ttl,
+        })
+    }
+
+    pub(crate) fn presign_upload(&self, object_key: &str) -> UploadUrl {
+        let url = self
+            .bucket
+            .put_object(Some(&self.credentials), object_key)
+            .sign(self.upload_ttl);
+        UploadUrl::new(url.to_string())
+    }
+
+    pub(crate) fn presign_download(&self, object_key: &str) -> DownloadUrl {
+        let url = self
+            .bucket
+            .get_object(Some(&self.credentials), object_key)
+            .sign(self.download_ttl);
+        DownloadUrl::new(url.to_string())
+    }
+
+    pub(crate) async fn ensure_bucket(&self) -> Result<(), EngineError> {
+        let url = self
+            .bucket
+            .head_bucket(Some(&self.credentials))
+            .sign(Duration::from_secs(60));
+        let status = self
+            .http
+            .head(url)
+            .send()
+            .await
+            .map_err(|error| EngineError::Blob(error.to_string()))?
+            .status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(EngineError::BlobBucketAbsent {
+                bucket: self.bucket.name().to_string(),
+                status: status.as_u16(),
+            })
+        }
+    }
+
+    pub(crate) async fn object_exists(&self, object_key: &str) -> Result<bool, EngineError> {
+        let url = self
+            .bucket
+            .head_object(Some(&self.credentials), object_key)
+            .sign(Duration::from_secs(60));
+        let status = self
+            .http
+            .head(url)
+            .send()
+            .await
+            .map_err(|error| EngineError::Blob(error.to_string()))?
+            .status();
+        if status == StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        if status.is_success() {
+            return Ok(true);
+        }
+        Err(EngineError::Blob(format!(
+            "HEAD of object {object_key} answered {status}"
+        )))
+    }
+
+    pub(crate) async fn delete_object(&self, object_key: &str) -> Result<(), EngineError> {
+        let url = self
+            .bucket
+            .delete_object(Some(&self.credentials), object_key)
+            .sign(Duration::from_secs(60));
+        let status = self
+            .http
+            .delete(url)
+            .send()
+            .await
+            .map_err(|error| EngineError::Blob(error.to_string()))?
+            .status();
+        if status.is_success() || status == StatusCode::NOT_FOUND {
+            Ok(())
+        } else {
+            Err(EngineError::Blob(format!(
+                "DELETE of object {object_key} answered {status}"
+            )))
+        }
+    }
+}
+
+impl std::fmt::Debug for ObjectStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectStore")
+            .field("bucket", &self.bucket.name())
+            .finish_non_exhaustive()
+    }
+}

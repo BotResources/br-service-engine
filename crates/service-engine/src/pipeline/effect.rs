@@ -5,6 +5,7 @@ use futures_util::future::BoxFuture;
 use sqlx::PgPool;
 
 use crate::accumulator::AccumulatorRuntime;
+use crate::blobs::BlobHandle;
 use crate::pipeline::context::{Bulk, Mutation};
 use crate::pipeline::dispatch::{begin_scoped, flush_and_commit};
 use crate::pipeline::mutation::MutationInput;
@@ -21,6 +22,7 @@ pub(crate) struct MutationServices<P: Principal> {
     pub(crate) transport: Arc<dyn ImpactTransport>,
     pub(crate) accumulators: Arc<AccumulatorRuntime>,
     pub(crate) presence: PresenceHandle<P>,
+    pub(crate) blobs: Option<BlobHandle>,
     pub(crate) lock_timeout: Duration,
     pub(crate) impacts_per_commit: usize,
 }
@@ -32,6 +34,7 @@ impl<P: Principal> Clone for MutationServices<P> {
             transport: self.transport.clone(),
             accumulators: self.accumulators.clone(),
             presence: self.presence.clone(),
+            blobs: self.blobs.clone(),
             lock_timeout: self.lock_timeout,
             impacts_per_commit: self.impacts_per_commit,
         }
@@ -59,6 +62,7 @@ where
             &mut tx,
             &mut staged,
             services.accumulators.as_ref(),
+            services.blobs.as_ref(),
             time::now(),
         );
         let mut cx = Mutation::new(ops, &principal, &services.presence, &mut presence_puts);
@@ -116,6 +120,7 @@ where
             &mut tx,
             &mut staged,
             services.accumulators.as_ref(),
+            services.blobs.as_ref(),
             time::now(),
         );
         let mut cx = Bulk::new(ops, &principal);

@@ -37,6 +37,7 @@ impl<P: Principal> Engine<P> {
             self.transport.clone() as Arc<dyn ImpactTransport>,
             self.accumulators.clone(),
             self.presence.handle(),
+            self.blobs.maybe_handle(),
             self.config.lock_timeout,
             self.config.impacts_per_commit,
         )

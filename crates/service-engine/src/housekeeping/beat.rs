@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use tokio::sync::Notify;
 
 use crate::accumulator::AccumulatorRuntime;
+use crate::blobs::BlobReaper;
 use crate::chain::describe;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
@@ -41,6 +42,7 @@ pub struct Beat {
     transport: Option<Arc<PgListenNotify>>,
     readiness: Option<ReadinessAssembly>,
     repairs: Option<Arc<dyn RepairRetry>>,
+    blob_reaper: Option<BlobReaper>,
 }
 
 impl Beat {
@@ -58,7 +60,13 @@ impl Beat {
             transport: None,
             readiness: None,
             repairs: None,
+            blob_reaper: None,
         })
+    }
+
+    pub(crate) fn with_blob_reaper(mut self, reaper: BlobReaper) -> Self {
+        self.blob_reaper = Some(reaper);
+        self
     }
 
     pub fn with_transport(mut self, transport: Arc<PgListenNotify>) -> Self {
@@ -141,6 +149,9 @@ impl Beat {
         let cron = self.cron.beat(pg).await;
         let scheduled = self.fire_boundaries().await;
         let gc = self.gc.sweep(pg, self.cron.slot_retention()).await;
+        if let Some(reaper) = &mut self.blob_reaper {
+            reaper.sweep(pg).await;
+        }
         if let Some(readiness) = &self.readiness {
             readiness.refresh();
         }

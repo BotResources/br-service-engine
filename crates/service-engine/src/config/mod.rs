@@ -2,6 +2,7 @@ mod validate;
 
 use std::time::Duration;
 
+use crate::blobs::BlobConfig;
 use crate::name::{ChannelName, PodId};
 
 pub const DEFAULT_WINDOW: Duration = Duration::from_millis(100);
@@ -22,6 +23,7 @@ pub const DEFAULT_LISTENER_QUEUE_THRESHOLD: f64 = 0.5;
 pub const DEFAULT_NATS_GRACE: Duration = Duration::from_secs(10);
 pub const DEFAULT_WINDOW_CAPACITY: usize = 10_000;
 pub const DEFAULT_IMPACTS_PER_COMMIT: usize = 1_000;
+pub const DEFAULT_BLOB_REAPER_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -44,9 +46,11 @@ pub struct EngineConfig {
     pub nats_grace: Duration,
     pub window_capacity: usize,
     pub impacts_per_commit: usize,
+    pub blob_reaper_interval: Duration,
     pub channel: ChannelName,
     pub pod_id: PodId,
     pub service: Option<String>,
+    pub blob: Option<BlobConfig>,
 }
 
 impl EngineConfig {
@@ -70,15 +74,26 @@ impl EngineConfig {
             nats_grace: DEFAULT_NATS_GRACE,
             window_capacity: DEFAULT_WINDOW_CAPACITY,
             impacts_per_commit: DEFAULT_IMPACTS_PER_COMMIT,
+            blob_reaper_interval: DEFAULT_BLOB_REAPER_INTERVAL,
             channel,
             pod_id,
             service: None,
+            blob: None,
         }
     }
 
     pub fn with_service(mut self, service: impl Into<String>) -> Self {
         self.service = Some(service.into());
         self
+    }
+
+    pub fn with_blob_storage(mut self, blob: BlobConfig) -> Self {
+        self.blob = Some(blob);
+        self
+    }
+
+    pub fn blob_service(&self) -> &str {
+        self.service.as_deref().unwrap_or("blob")
     }
 
     pub fn ephemeral_bucket(&self) -> Option<String> {
@@ -174,6 +189,11 @@ impl EngineConfig {
 
     pub fn with_impacts_per_commit(mut self, impacts_per_commit: usize) -> Self {
         self.impacts_per_commit = impacts_per_commit;
+        self
+    }
+
+    pub fn with_blob_reaper_interval(mut self, interval: Duration) -> Self {
+        self.blob_reaper_interval = interval;
         self
     }
 }

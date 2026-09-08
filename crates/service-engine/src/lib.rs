@@ -72,12 +72,14 @@ pub use accumulator::{
     Accumulated, Accumulator, AccumulatorRuntime, ChunkReader, ChunkSeq, Durable, FlushOutcome,
     SealMarker, Swept,
 };
-pub use blobs::{BlobPolicy, Blobs};
+pub use blobs::{
+    Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
+};
 pub use cohort::CohortKey;
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use delta::{Delta, ErasedView, Revision};
-pub use engine::Engine;
+pub use engine::{BlobReader, Engine};
 pub use erase::{Erasable, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
 pub use gate::{

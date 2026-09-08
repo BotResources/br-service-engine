@@ -1,7 +1,10 @@
+mod blobs;
 mod loops;
 mod mutate;
 mod register;
 mod run;
+
+pub use blobs::BlobReader;
 
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -10,6 +13,7 @@ use br_util_axum_readiness::ReadinessHandle;
 use sqlx::{PgConnection, PgPool};
 
 use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, Durable};
+use crate::blobs::BlobRegistry;
 use crate::boot::establish_transport_with_probe;
 use crate::config::EngineConfig;
 use crate::error::{AttachError, EngineError};
@@ -41,6 +45,7 @@ pub struct Engine<P: Principal> {
     inbound_reactions: Mutex<ReactionRegistry>,
     mutations: MutationRegistry<P>,
     presence: PresenceRegistry<P>,
+    blobs: BlobRegistry,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
 }
@@ -90,6 +95,7 @@ impl<P: Principal> Engine<P> {
             inbound_reactions: Mutex::new(ReactionRegistry::new()),
             mutations: MutationRegistry::new(),
             presence: PresenceRegistry::new(),
+            blobs: BlobRegistry::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
         })
