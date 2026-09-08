@@ -89,7 +89,13 @@ async fn s28_a_kv_put_lands_in_known_users_and_reaches_a_live_session() {
         &SampleDirectory::with_users(&[(user, "after@example.test")]),
     )
     .await;
-    await_email(&pool, user, "after@example.test").await;
+    await_state(
+        &pool,
+        user,
+        Some("after@example.test"),
+        "the watch never projected the KV put into known_users",
+    )
+    .await;
 
     assert!(
         staged_touches(&staged_impacts(&pool).await, user),
@@ -149,7 +155,13 @@ async fn s28_a_kv_retract_removes_the_known_row_and_the_session_view() {
     );
 
     retract_user(&fabric, user).await;
-    await_absent(&pool, user).await;
+    await_state(
+        &pool,
+        user,
+        None,
+        "the watch never removed the retracted key from known_users",
+    )
+    .await;
     assert_eq!(
         known_users(&pool).await,
         0,
@@ -267,36 +279,13 @@ async fn establish_email(fabric: &Nats, pool: &PgPool, user: Uuid, email: &str) 
     }
 }
 
-async fn await_email(pool: &PgPool, user: Uuid, email: &str) {
+async fn await_state(pool: &PgPool, user: Uuid, want: Option<&str>, note: &str) {
     let deadline = tokio::time::Instant::now() + OBSERVED_WITHIN;
     loop {
-        if current_email(pool, user).await.as_deref() == Some(email) {
+        if current_email(pool, user).await.as_deref() == want {
             return;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the watch never projected the KV put into known_users"
-        );
-        tokio::time::sleep(POLL).await;
-    }
-}
-
-async fn await_absent(pool: &PgPool, user: Uuid) {
-    let deadline = tokio::time::Instant::now() + OBSERVED_WITHIN;
-    loop {
-        let present: Option<Uuid> =
-            sqlx::query_scalar("SELECT user_id FROM known_users WHERE user_id = $1")
-                .bind(user)
-                .fetch_optional(pool)
-                .await
-                .expect("read the mirrored row");
-        if present.is_none() {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the watch never removed the retracted key from known_users"
-        );
+        assert!(tokio::time::Instant::now() < deadline, "{note}");
         tokio::time::sleep(POLL).await;
     }
 }
