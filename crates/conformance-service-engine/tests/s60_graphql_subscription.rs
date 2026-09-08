@@ -11,8 +11,8 @@ use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
 
 const SUBSCRIPTION: &str = "subscription { widgets { __typename \
-    ... on ResetPayload { revision views { projector view } } \
-    ... on UpsertPayload { revision view { projector view } } \
+    ... on ResetPayload { revision views { __typename ... on WidgetView { id closed affordances } } } \
+    ... on UpsertPayload { revision view { __typename ... on WidgetView { id closed affordances } } } \
     ... on RemovePayload { revision projector } } }";
 
 #[tokio::test]
@@ -45,7 +45,12 @@ async fn s60_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_m
         serde_json::json!(1),
         "a session's first revision is 1: {reset}"
     );
-    let view = &delta["views"][0]["view"];
+    let view = &delta["views"][0];
+    assert_eq!(
+        view["__typename"],
+        serde_json::json!("WidgetView"),
+        "the opening view is the widget slice's typed union member: {reset}"
+    );
     assert_eq!(
         view["closed"],
         serde_json::json!(false),
@@ -81,7 +86,12 @@ async fn s60_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_m
         serde_json::json!(2),
         "the next delta advances the revision by one: {upsert}"
     );
-    let view = &delta["view"]["view"];
+    let view = &delta["view"];
+    assert_eq!(
+        view["__typename"],
+        serde_json::json!("WidgetView"),
+        "the upserted view is the widget slice's typed union member: {upsert}"
+    );
     assert_eq!(
         view["closed"],
         serde_json::json!(true),

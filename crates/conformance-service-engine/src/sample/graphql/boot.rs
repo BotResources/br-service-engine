@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use service_engine::config::EngineConfig;
+use service_engine::graphql::{SchemaSlices, SliceFragment};
 use service_engine::name::{ChannelName, PodId};
 use service_engine::nats::Nats;
 use service_engine::{Engine, engine_schema};
@@ -17,12 +18,22 @@ use crate::sample::pipeline::{CloseWidget, MintSecret, close_widget, mint_secret
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
 use crate::sample::widget::WidgetProjector;
 
+const WIDGET_SLICE: SliceFragment = SliceFragment {
+    slice: "widget",
+    root_fields: &["widget", "closeWidget", "mintSecret", "widgets"],
+    types: &["WidgetView"],
+};
+
+const ASSIGNMENT_SLICE: SliceFragment = SliceFragment {
+    slice: "assignment",
+    root_fields: &["assignment", "assignments"],
+    types: &["AssignmentView"],
+};
+
 pub struct GraphqlService {
     pub base_url: String,
-    server_stop: Arc<Notify>,
     engine_stop: Arc<Notify>,
-    server: JoinHandle<std::io::Result<()>>,
-    engine: JoinHandle<Result<(), service_engine::EngineError>>,
+    handle: JoinHandle<Result<(), service_engine::EngineError>>,
 }
 
 impl GraphqlService {
@@ -36,10 +47,19 @@ impl GraphqlService {
 
     pub async fn shutdown(self) {
         self.engine_stop.notify_one();
-        self.server_stop.notify_waiters();
-        let _ = self.engine.await;
-        let _ = self.server.await;
+        let _ = self.handle.await;
     }
+}
+
+fn assemble_slices() -> SchemaSlices {
+    let mut slices = SchemaSlices::new();
+    slices
+        .add(WIDGET_SLICE)
+        .expect("the widget slice owns its root fields and types");
+    slices
+        .add(ASSIGNMENT_SLICE)
+        .expect("the assignment slice composes without colliding with the widget slice");
+    slices
 }
 
 pub async fn boot_graphql_service(
@@ -81,6 +101,8 @@ pub async fn boot_graphql_service(
         .register_mutation::<MintSecret, _>(mint_secret)
         .expect("register the mint mutation");
 
+    let _slices = assemble_slices();
+
     let readiness = engine.readiness();
     let engine_stop = engine.shutdown_handle();
     let state = Arc::new(engine.graphql_state());
@@ -96,9 +118,7 @@ pub async fn boot_graphql_service(
         .await
         .expect("bind a loopback port for the graphql server");
     let addr = listener.local_addr().expect("the bound address is known");
-    let server_stop = Arc::new(Notify::new());
-    let server = tokio::spawn(service_engine::serve(listener, app, server_stop.clone()));
-    let engine = tokio::spawn(engine.run());
+    let handle = tokio::spawn(engine.run_with_listener(listener, app));
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     while readiness.snapshot() != Readiness::Ready {
@@ -111,9 +131,7 @@ pub async fn boot_graphql_service(
 
     GraphqlService {
         base_url: format!("http://{addr}"),
-        server_stop,
         engine_stop,
-        server,
-        engine,
+        handle,
     }
 }

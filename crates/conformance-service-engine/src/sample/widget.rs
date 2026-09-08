@@ -138,7 +138,7 @@ pub struct WidgetFacts {
     pub rows: BTreeMap<Uuid, WidgetRow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct WidgetView {
     pub id: Uuid,
     pub label: String,
@@ -146,6 +146,7 @@ pub struct WidgetView {
     pub affordances: Affordances,
 }
 
+#[derive(Default)]
 pub struct WidgetProjector;
 
 impl WidgetProjector {

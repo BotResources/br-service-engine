@@ -45,7 +45,7 @@ pub struct AssignmentRow {
     pub closed: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct AssignmentView {
     pub id: Uuid,
     pub title: String,
@@ -53,6 +53,7 @@ pub struct AssignmentView {
     pub can_close: bool,
 }
 
+#[derive(Default)]
 pub struct AssignmentProjector;
 
 impl AssignmentProjector {

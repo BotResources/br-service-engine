@@ -27,7 +27,23 @@ fn s64_two_slices_sdl_fragments_compose_into_one_valid_schema() {
         "the subscription fragment composes too:\n{sdl}"
     );
     assert!(
+        sdl.contains("assignments"),
+        "a second slice contributes its own subscription field:\n{sdl}"
+    );
+    assert!(
         sdl.contains("union EngineDelta"),
         "the engine's Reset/Upsert/Remove wire is one union in the schema:\n{sdl}"
+    );
+    assert!(
+        sdl.contains("union ProjectedView"),
+        "the delta's view is a typed union, one member per projector:\n{sdl}"
+    );
+    assert!(
+        sdl.contains("WidgetView") && sdl.contains("AssignmentView"),
+        "each projector contributes its own typed union member, not a projector-name string:\n{sdl}"
+    );
+    assert!(
+        !sdl.contains("type ProjectedView"),
+        "the projector is no longer a stringly-typed object carrying opaque json:\n{sdl}"
     );
 }

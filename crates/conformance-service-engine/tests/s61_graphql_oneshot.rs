@@ -10,8 +10,8 @@ use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
 
 const SUBSCRIPTION: &str = "subscription { widgets { __typename \
-    ... on ResetPayload { revision views { projector view } } \
-    ... on UpsertPayload { revision view { projector view } } } }";
+    ... on ResetPayload { revision views { __typename ... on WidgetView { id label } } } \
+    ... on UpsertPayload { revision view { __typename ... on WidgetView { id label } } } } }";
 
 #[tokio::test]
 async fn s61_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_subscription() {
@@ -60,10 +60,10 @@ async fn s61_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_su
         .and_then(|views| {
             views
                 .iter()
-                .find(|entry| entry["view"]["id"] == serde_json::json!(widget.to_string()))
+                .find(|entry| entry["id"] == serde_json::json!(widget.to_string()))
         })
         .expect("the minted widget is in the view");
-    assert_eq!(view["view"]["label"], serde_json::json!("vault"));
+    assert_eq!(view["label"], serde_json::json!("vault"));
 
     let outbox: i64 = sqlx::query_scalar("SELECT count(*) FROM integration_outbox")
         .fetch_one(&pool)
