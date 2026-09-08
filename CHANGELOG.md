@@ -772,9 +772,9 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `transport` / `transport_arc` / `accumulators` / `render` accessors) are
   gated behind the `test-support` feature — the sanctioned battery-only seam,
   with no semver promise — and are private in a normal service build.
-- The register-methods a later rework unit fills return the typed
-  `EngineError::NotYet` until then; the module map in the README names the unit
-  for each.
+- The register-methods later rework units filled were laid out here as typed
+  placeholders; every one is now implemented (see the later subsections) and
+  the placeholder variant no longer exists.
 
 ### Changed (0.1.0 rework, unit U15)
 
