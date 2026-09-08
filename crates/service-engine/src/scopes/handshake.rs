@@ -1,27 +1,19 @@
 use std::time::Duration;
 
 use async_nats::Subscriber;
-use br_core_integration::{
-    Actor, CommandCoords, EventMetadata, IntegrationCommand, IntegrationEvent, ServiceAccountId,
-};
+use br_core_integration::{EventMetadata, IntegrationCommand, IntegrationEvent};
 use br_core_scope::{DeclareServiceScopes, ScopeDeclaration, ServiceKey, ServiceScopesRejected};
-use br_scope_declaration_contract::{
-    VERSION, accepted_event_coords, command_type, declare_command_coords, rejected_event_coords,
-};
-use chrono::Utc;
 use futures_util::StreamExt;
 use futures_util::stream::SelectAll;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::nats::{INTEGRATION_EVT, Nats, event_subject};
+use crate::nats::{INTEGRATION_EVT, Nats};
 
 use super::ScopeError;
+use super::wire::{ConfirmationSubjects, build_command, command_subject};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
-
-const DECLARING_SERVICE_NAMESPACE: Uuid =
-    Uuid::from_u128(0x6f3a_1c8e_4b27_4d59_9e10_a3f2_77c5_8d41);
 
 pub(crate) async fn run_handshake(
     nats: &Nats,
@@ -29,7 +21,7 @@ pub(crate) async fn run_handshake(
 ) -> Result<(), ScopeError> {
     let service = declaration.manifest().key.clone();
     let subjects = ConfirmationSubjects::render();
-    let command_subject = render_command_subject(&declare_command_coords().expect(CONTRACT));
+    let command_subject = command_subject();
     let correlation_id = Uuid::now_v7();
     let command = build_command(&service, correlation_id, declaration);
 
@@ -61,20 +53,6 @@ pub(crate) async fn run_handshake(
                 "no scope-declaration confirmation yet; re-publishing (identity may be down, \
                  readiness stays DOWN)"
             ),
-        }
-    }
-}
-
-struct ConfirmationSubjects {
-    accepted: String,
-    rejected: String,
-}
-
-impl ConfirmationSubjects {
-    fn render() -> Self {
-        Self {
-            accepted: event_subject(&accepted_event_coords().expect(CONTRACT)),
-            rejected: event_subject(&rejected_event_coords().expect(CONTRACT)),
         }
     }
 }
@@ -201,38 +179,6 @@ fn decode_rejection(
     }
 }
 
-fn build_command(
-    service: &ServiceKey,
-    correlation_id: Uuid,
-    declaration: ScopeDeclaration,
-) -> IntegrationCommand<DeclareServiceScopes> {
-    IntegrationCommand::new(
-        Uuid::now_v7(),
-        command_type(),
-        VERSION,
-        Utc::now(),
-        EventMetadata::new(declaring_actor(service), correlation_id),
-        DeclareServiceScopes::new(declaration),
-    )
-}
-
-fn declaring_actor(service: &ServiceKey) -> Actor {
-    let id = Uuid::new_v5(&DECLARING_SERVICE_NAMESPACE, service.as_str().as_bytes());
-    Actor::Service(ServiceAccountId::from(id))
-}
-
-fn render_command_subject(coords: &CommandCoords) -> String {
-    format!(
-        "integration.cmd.{}.{}.{}.v{}",
-        coords.receiver.as_str(),
-        coords.aggregate.as_str(),
-        coords.verb.as_str(),
-        coords.version
-    )
-}
-
-const CONTRACT: &str = "the frozen scope-declaration contract renders valid coordinates";
-
 fn no_stream(name: &str) -> crate::error::BoxedError {
     format!("stream {name} is absent; gitops declares it, the engine only binds it").into()
 }
@@ -240,58 +186,20 @@ fn no_stream(name: &str) -> crate::error::BoxedError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_confirmation_subjects_are_the_two_frozen_event_subjects() {
-        let subjects = ConfirmationSubjects::render();
-        assert_eq!(
-            subjects.accepted,
-            "integration.evt.identity.service_scope.accepted.v1"
-        );
-        assert_eq!(
-            subjects.rejected,
-            "integration.evt.identity.service_scope.rejected.v1"
-        );
-    }
-
-    #[test]
-    fn the_declare_command_renders_the_frozen_command_subject() {
-        let subject = render_command_subject(&declare_command_coords().unwrap());
-        assert_eq!(subject, "integration.cmd.identity.service_scope.declare.v1");
-    }
-
-    #[test]
-    fn the_declaring_actor_is_a_deterministic_v5_service_identity() {
-        let service = ServiceKey::new("project").unwrap();
-        let actor = declaring_actor(&service);
-        assert!(actor.is_service());
-        assert_eq!(actor, declaring_actor(&service));
-        assert_ne!(actor, declaring_actor(&ServiceKey::new("billing").unwrap()));
-    }
-
-    #[test]
-    fn the_command_carries_the_correlation_id_and_the_frozen_type() {
-        let service = ServiceKey::new("project").unwrap();
-        let correlation_id = Uuid::now_v7();
-        let declaration = crate::scopes::ScopeManifest::of(&[&["project:read"]])
-            .declaration()
-            .unwrap();
-        let command = build_command(&service, correlation_id, declaration);
-        assert_eq!(command.command_type, "service_scope.declare");
-        assert_eq!(command.version, 1);
-        assert_eq!(command.metadata.correlation_id, correlation_id);
-    }
+    use br_core_integration::{Actor, ServiceAccountId};
+    use br_scope_declaration_contract::VERSION;
+    use chrono::Utc;
 
     #[test]
     fn a_probe_reads_the_correlation_id_of_a_confirmation_envelope() {
         let correlation_id = Uuid::now_v7();
-        let service = ServiceKey::new("project").unwrap();
+        let actor = Actor::Service(ServiceAccountId::from(Uuid::now_v7()));
         let event = IntegrationEvent::new(
             Uuid::now_v7(),
             "service_scope.accepted",
             VERSION,
             Utc::now(),
-            EventMetadata::new(declaring_actor(&service), correlation_id),
+            EventMetadata::new(actor, correlation_id),
             serde_json::json!({ "service": "project" }),
         );
         let bytes = serde_json::to_vec(&event).unwrap();
