@@ -87,10 +87,10 @@ pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,
 };
 pub use graphql::{
-    AuthReject, CODE_EXTENSION, DeltaKind, EngineDelta, GraphqlState, MutationAck, PASSPORT_HEADER,
-    PassportPrincipal, PrincipalRejected, ProjectedView, RemovePayload, ResetPayload,
-    UpsertPayload, ack, ack_bulk, app, attach, engine_schema, execute, execute_bulk, fetch,
-    fetch_json, fetch_window, fetch_window_json, mutation_error, serve, subscribe, to_engine_delta,
+    AuthReject, CODE_EXTENSION, GraphqlState, JsonScalar, MutationAck, PASSPORT_HEADER,
+    PassportPrincipal, PrincipalRejected, Query, SchemaSlices, SliceFragment, ack, ack_bulk, app,
+    attach, cause_json, engine_schema, execute, execute_bulk, key_json, mutation_error, serve,
+    typed_view,
 };
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};

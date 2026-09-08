@@ -18,6 +18,7 @@ use crate::boot::establish_transport_with_probe;
 use crate::config::EngineConfig;
 use crate::erase::ErasedErasable;
 use crate::error::{AttachError, EngineError};
+use crate::graphql::SliceFragment;
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::ReactionRegistry;
@@ -50,6 +51,7 @@ pub struct Engine<P: Principal> {
     presence: PresenceRegistry<P>,
     blobs: BlobRegistry,
     erasables: Vec<Arc<dyn ErasedErasable>>,
+    schema_slices: Vec<SliceFragment>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
 }
@@ -102,6 +104,7 @@ impl<P: Principal> Engine<P> {
             presence: PresenceRegistry::new(),
             blobs: BlobRegistry::new(),
             erasables: Vec::new(),
+            schema_slices: Vec::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
         })

@@ -1,13 +1,20 @@
-use async_graphql::{Context, Json, MergedObject, Object, Result, Subscription};
-use futures_util::Stream;
+use async_graphql::{Context, Error, Json, MergedObject, Object, Result, Subscription};
+use futures_util::{Stream, StreamExt};
 use service_engine::session::{WindowParams, WindowSpec};
-use service_engine::{EngineDelta, MutationAck};
+use service_engine::{MutationAck, Query};
 use uuid::Uuid;
 
-use crate::sample::assignment::AssignmentProjector;
+use crate::sample::assignment::{AssignmentProjector, AssignmentView};
 use crate::sample::pipeline::{CloseWidget, MintSecret};
 use crate::sample::principal::SamplePrincipal;
-use crate::sample::widget::WidgetProjector;
+use crate::sample::widget::{WidgetProjector, WidgetView};
+
+service_engine::subscription_union! {
+    view = ProjectedView;
+    delta = EngineDelta { reset = ResetPayload, upsert = UpsertPayload, remove = RemovePayload };
+    Widget => WidgetProjector => WidgetView,
+    Assignment => AssignmentProjector => AssignmentView,
+}
 
 #[derive(Default)]
 pub struct WidgetQueries;
@@ -15,13 +22,15 @@ pub struct WidgetQueries;
 #[Object]
 impl WidgetQueries {
     async fn widget(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<Json<serde_json::Value>>> {
-        service_engine::fetch_json::<SamplePrincipal, WidgetProjector>(
-            ctx,
-            &WidgetProjector,
-            &id,
-            false,
-        )
-        .await
+        let view = Query::<SamplePrincipal>::new(ctx)?
+            .fetch::<WidgetProjector>(&id)
+            .await?;
+        match view {
+            Some(view) => Ok(Some(Json(
+                serde_json::to_value(view).map_err(|e| Error::new(e.to_string()))?,
+            ))),
+            None => Ok(None),
+        }
     }
 }
 
@@ -30,18 +39,10 @@ pub struct AssignmentQueries;
 
 #[Object]
 impl AssignmentQueries {
-    async fn assignment(
-        &self,
-        ctx: &Context<'_>,
-        id: Uuid,
-    ) -> Result<Option<Json<serde_json::Value>>> {
-        service_engine::fetch_json::<SamplePrincipal, AssignmentProjector>(
-            ctx,
-            &AssignmentProjector,
-            &id,
-            false,
-        )
-        .await
+    async fn assignment(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<AssignmentView>> {
+        Query::<SamplePrincipal>::new(ctx)?
+            .fetch::<AssignmentProjector>(&id)
+            .await
     }
 }
 
@@ -79,7 +80,7 @@ pub struct SubscriptionRoot;
 #[Subscription]
 impl SubscriptionRoot {
     async fn widgets(&self, ctx: &Context<'_>) -> Result<impl Stream<Item = Result<EngineDelta>>> {
-        service_engine::subscribe::<SamplePrincipal>(
+        let stream = service_engine::attach::<SamplePrincipal>(
             ctx,
             vec![WindowSpec::new(
                 WidgetProjector::NAME,
@@ -87,6 +88,23 @@ impl SubscriptionRoot {
                 false,
             )],
         )
-        .await
+        .await?;
+        Ok(stream.map(|delta| EngineDelta::from_delta(&delta)))
+    }
+
+    async fn assignments(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<impl Stream<Item = Result<EngineDelta>>> {
+        let stream = service_engine::attach::<SamplePrincipal>(
+            ctx,
+            vec![WindowSpec::new(
+                AssignmentProjector::NAME,
+                WindowParams::none(),
+                false,
+            )],
+        )
+        .await?;
+        Ok(stream.map(|delta| EngineDelta::from_delta(&delta)))
     }
 }

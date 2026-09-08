@@ -663,6 +663,51 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   probe) and `housekeeping/ready/verdict.rs` (the pure readiness `verdict` and
   its reason constants, with the readiness tests), each under the file-size
   limit.
+### Changed (0.1.0 rework, unit U12b — GraphQL kit aligned to the intent's authoring ergonomics)
+
+- Boot ergonomics: `Engine::run_with(app)` and `Engine::run_with_listener(listener, app)`
+  own both the engine run loop and the HTTP server lifecycle in one call and shut
+  both down gracefully on the engine's shutdown signal; `run_with` binds the new
+  `EngineConfig::http_addr` (default `0.0.0.0:8080`, set with `with_http_addr`),
+  `run_with_listener` takes a pre-bound listener. `Engine::run` and `serve` stay
+  for callers that drive the two lifecycles themselves.
+- Query surface: a typed `Query<'_, P>` context, built from the async-graphql
+  `Context` with `Query::new`, replaces the free `fetch` / `fetch_json` /
+  `fetch_window` / `fetch_window_json` functions as the authoring surface.
+  `cx.fetch::<Projector>(key)` and `cx.fetch_window::<Projector>(params)` return
+  the projector's typed `View` (with `fetch_json` variants kept as the untyped
+  escape hatch), reusing the same `populate` visibility and batched render as a
+  subscription frame. The `Projector::View` no longer needs a hand-written
+  `DeserializeOwned` shim to be fetched typed: `Affordances`, `Gate`, `Reason`
+  and `ActionName` now `Deserialize` (a bounded interner keeps `Reason` /
+  `ActionName` as `&'static str`), so a view carrying affordances round-trips
+  through the rendered store, and `Affordances` is an async-graphql scalar so an
+  affordance-carrying view is a valid GraphQL output type.
+- Subscription surface: the `subscription_union!` macro takes a service's
+  `Projector => View` mapping once and emits a typed subscription: a `Union` of
+  one member per projector (each the projector's own `View` type, not a
+  projector-name string over opaque JSON) inside the `Reset` / `Upsert` /
+  `Remove` payloads and the top `EngineDelta` union, with the contiguous revision
+  and the causing event as `cause`. `attach` stays as the engine primitive the
+  generated `from_delta` mapping consumes; the free `subscribe` / `to_engine_delta`
+  and the engine-owned `EngineDelta` / `ProjectedView` / `*Payload` types are
+  removed in favour of the per-service typed union the macro emits.
+- SDL assembly, wired into boot: a slice declares its root fields and types as a
+  `SliceFragment` and registers it with `Engine::register_schema_slice`; the
+  engine assembles the registered fragments (`SchemaSlices::assemble`) at the
+  start of `run` — so through `run_with` too — and fails boot loud with
+  `EngineError::DuplicateSchemaMember`, naming both slices, when two claim the
+  same root field or GraphQL type, before the pod serves. `SchemaSlices` /
+  `SliceFragment` stay public for a service that wants to assemble ahead of boot.
+- Conformance: `s59`–`s65` now drive the typed `Query` context and boot the
+  sample through `Engine::run_with` binding `EngineConfig::http_addr`, over the
+  per-projector typed union (`... on WidgetView { .. }` in place of a
+  `ProjectedView { projector view }` shape). `s65` proves two projectors are two
+  typed union members and that a client subscribing to one receives only its own
+  member's deltas; `s66` boots a real two-slice engine (real Postgres and NATS)
+  whose slices claim the same root field (and, in a second scenario, the same
+  GraphQL type) and asserts the boot returns `EngineError::DuplicateSchemaMember`
+  instead of standing the pod up.
 
 ### Changed (0.1.0 rework, unit U1)
 
