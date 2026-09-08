@@ -1,6 +1,7 @@
+mod validate;
+
 use std::time::Duration;
 
-use crate::error::EngineError;
 use crate::name::{ChannelName, PodId};
 
 pub const DEFAULT_WINDOW: Duration = Duration::from_millis(100);
@@ -15,6 +16,12 @@ pub const DEFAULT_FOLD_CACHE_CAPACITY: usize = 10_000;
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(30);
 pub const DEFAULT_LISTENER_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub const DEFAULT_REPAIR_ATTEMPTS: u32 = 5;
+pub const DEFAULT_SESSION_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
+pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DEFAULT_LISTENER_QUEUE_THRESHOLD: f64 = 0.5;
+pub const DEFAULT_NATS_GRACE: Duration = Duration::from_secs(10);
+pub const DEFAULT_WINDOW_CAPACITY: usize = 10_000;
+pub const DEFAULT_IMPACTS_PER_COMMIT: usize = 1_000;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -31,6 +38,12 @@ pub struct EngineConfig {
     pub lease: Duration,
     pub listener_probe_timeout: Duration,
     pub repair_attempts: u32,
+    pub session_max_age: Duration,
+    pub lock_timeout: Duration,
+    pub listener_queue_threshold: f64,
+    pub nats_grace: Duration,
+    pub window_capacity: usize,
+    pub impacts_per_commit: usize,
     pub channel: ChannelName,
     pub pod_id: PodId,
     pub service: Option<String>,
@@ -51,6 +64,12 @@ impl EngineConfig {
             lease: DEFAULT_LEASE,
             listener_probe_timeout: DEFAULT_LISTENER_PROBE_TIMEOUT,
             repair_attempts: DEFAULT_REPAIR_ATTEMPTS,
+            session_max_age: DEFAULT_SESSION_MAX_AGE,
+            lock_timeout: DEFAULT_LOCK_TIMEOUT,
+            listener_queue_threshold: DEFAULT_LISTENER_QUEUE_THRESHOLD,
+            nats_grace: DEFAULT_NATS_GRACE,
+            window_capacity: DEFAULT_WINDOW_CAPACITY,
+            impacts_per_commit: DEFAULT_IMPACTS_PER_COMMIT,
             channel,
             pod_id,
             service: None,
@@ -128,108 +147,38 @@ impl EngineConfig {
         self
     }
 
-    pub fn validate(&self) -> Result<(), EngineError> {
-        for (label, value) in [
-            ("window", self.window),
-            ("beat", self.beat),
-            ("session_ttl", self.session_ttl),
-            ("chunk_retention", self.chunk_retention),
-            ("lease", self.lease),
-            ("listener_probe_timeout", self.listener_probe_timeout),
-        ] {
-            if value.is_zero() {
-                return Err(EngineError::Config(format!("{label} must be non-zero")));
-            }
-        }
-        if self.session_buffer == 0 {
-            return Err(EngineError::Config(
-                "session_buffer must be non-zero".into(),
-            ));
-        }
-        if self.max_buffered_chunks == 0 {
-            return Err(EngineError::Config(
-                "max_buffered_chunks must be non-zero".into(),
-            ));
-        }
-        if self.fold_cache_capacity == 0 {
-            return Err(EngineError::Config(
-                "fold_cache_capacity must be non-zero".into(),
-            ));
-        }
-        if self.reset_threshold == 0 {
-            return Err(EngineError::Config(
-                "reset_threshold must be non-zero".into(),
-            ));
-        }
-        if self.max_held_impacts == 0 {
-            return Err(EngineError::Config(
-                "max_held_impacts must be non-zero".into(),
-            ));
-        }
-        if self.repair_attempts == 0 {
-            return Err(EngineError::Config(
-                "repair_attempts must be non-zero, or a faulted session is ended before its first \
-                 repair pass runs"
-                    .into(),
-            ));
-        }
-        if self.lease <= self.beat {
-            return Err(EngineError::Config(
-                "lease must outlast beat, otherwise a lease expires before its holder can renew it"
-                    .into(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config() -> EngineConfig {
-        EngineConfig::new(
-            ChannelName::new("service_engine_impact").unwrap(),
-            PodId::new("svc-sample-0").unwrap(),
-        )
+    pub fn with_session_max_age(mut self, session_max_age: Duration) -> Self {
+        self.session_max_age = session_max_age;
+        self
     }
 
-    #[test]
-    fn a_fresh_config_carries_the_documented_defaults() {
-        let c = config();
-        assert_eq!(c.window, Duration::from_millis(100));
-        assert_eq!(c.beat, Duration::from_secs(1));
-        assert_eq!(c.session_ttl, Duration::from_secs(30));
-        assert_eq!(c.session_buffer, 256);
-        assert_eq!(c.reset_threshold, 200);
-        assert_eq!(c.max_held_impacts, 1_024);
-        assert_eq!(c.chunk_retention, Duration::from_secs(86_400));
-        assert_eq!(c.max_buffered_chunks, 10_000);
-        assert_eq!(c.fold_cache_capacity, 10_000);
-        assert_eq!(c.lease, Duration::from_secs(30));
-        assert_eq!(c.listener_probe_timeout, Duration::from_secs(2));
-        assert_eq!(c.repair_attempts, 5);
-        c.validate().unwrap();
+    pub fn with_lock_timeout(mut self, lock_timeout: Duration) -> Self {
+        self.lock_timeout = lock_timeout;
+        self
     }
 
-    #[test]
-    fn a_zero_duration_or_zero_bound_is_refused() {
-        assert!(config().with_window(Duration::ZERO).validate().is_err());
-        assert!(config().with_session_buffer(0).validate().is_err());
-        assert!(config().with_reset_threshold(0).validate().is_err());
-        assert!(config().with_max_held_impacts(0).validate().is_err());
-        assert!(config().with_max_buffered_chunks(0).validate().is_err());
-        assert!(config().with_fold_cache_capacity(0).validate().is_err());
-        assert!(config().with_repair_attempts(0).validate().is_err());
+    pub fn with_listener_queue_threshold(mut self, listener_queue_threshold: f64) -> Self {
+        self.listener_queue_threshold = listener_queue_threshold;
+        self
     }
 
-    #[test]
-    fn a_lease_that_does_not_outlast_the_beat_is_refused() {
-        assert!(
-            config()
-                .with_lease(Duration::from_secs(1))
-                .validate()
-                .is_err()
-        );
+    pub fn with_nats_grace(mut self, nats_grace: Duration) -> Self {
+        self.nats_grace = nats_grace;
+        self
+    }
+
+    pub fn with_window_capacity(mut self, window_capacity: usize) -> Self {
+        self.window_capacity = window_capacity;
+        self
+    }
+
+    pub fn with_impacts_per_commit(mut self, impacts_per_commit: usize) -> Self {
+        self.impacts_per_commit = impacts_per_commit;
+        self
+    }
+
+    pub fn with_service(mut self, service: impl Into<String>) -> Self {
+        self.service = Some(service.into());
+        self
     }
 }

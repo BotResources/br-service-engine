@@ -146,7 +146,7 @@ impl<P: Principal> SessionRuntime<P> {
         drop(table);
         self.counters.absorb_repair(&cost);
         self.counters.resets.fetch_add(1, Ordering::Relaxed);
-        crate::observe::record_resets(1);
+        crate::observe::record_resets(1, crate::observe::REASON_REPAIR);
         Ok(())
     }
 
@@ -203,7 +203,7 @@ impl<P: Principal> SessionRuntime<P> {
         self.counters
             .resets
             .fetch_add(reset as u64, Ordering::Relaxed);
-        crate::observe::record_resets(reset);
+        crate::observe::record_resets(reset, crate::observe::REASON_RECONNECT);
         Ok(reset)
     }
 

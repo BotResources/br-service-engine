@@ -60,7 +60,8 @@ impl<P: Principal> Engine<P> {
         let readiness_guard = readiness.clone();
         let assembly = ReadinessAssembly::new(readiness, mirrors.health())
             .with_relays(beat.relays().health())
-            .with_listener(transport.listener_health());
+            .with_listener(transport.listener_health())
+            .with_nats(nats, config.nats_grace);
         beat = beat
             .with_transport(transport.clone())
             .with_accumulators(accumulators.clone())

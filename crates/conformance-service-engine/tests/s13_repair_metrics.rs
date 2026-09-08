@@ -46,12 +46,12 @@ async fn s13_a_reconnect_reset_and_a_beat_repair_both_reach_the_resets_metric() 
         .expect("the session attaches");
     next_delta(&mut stream, SOON).await.expect("a Reset");
 
-    let before_reconnect = probe.total(RESETS_TOTAL);
+    let before_reconnect = probe.total_by_name(RESETS_TOTAL);
     render
         .resnapshot_all()
         .await
         .expect("a clean reconnect re-snapshots every live session");
-    let after_reconnect = probe.total(RESETS_TOTAL);
+    let after_reconnect = probe.total_by_name(RESETS_TOTAL);
     assert!(
         after_reconnect > before_reconnect,
         "a reconnect Reset must reach service_engine_resets_total, not only the internal counter \
@@ -63,7 +63,7 @@ async fn s13_a_reconnect_reset_and_a_beat_repair_both_reach_the_resets_metric() 
         .resnapshot_all()
         .await
         .expect("resnapshot_all returns Ok while a per-session resnapshot fails");
-    let before_beat = probe.total(RESETS_TOTAL);
+    let before_beat = probe.total_by_name(RESETS_TOTAL);
     switch.store(false, Ordering::Relaxed);
 
     let repaired = render.retry_repairs().await.expect("the beat repair runs");
@@ -71,7 +71,7 @@ async fn s13_a_reconnect_reset_and_a_beat_repair_both_reach_the_resets_metric() 
         repaired >= 1,
         "the pending session was repaired by the beat"
     );
-    let after_beat = probe.total(RESETS_TOTAL);
+    let after_beat = probe.total_by_name(RESETS_TOTAL);
     assert!(
         after_beat > before_beat,
         "a beat-driven repair Reset must reach service_engine_resets_total, not bypass it \

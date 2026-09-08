@@ -53,9 +53,40 @@ impl MetricProbe {
             .unwrap_or(&0)
     }
 
-    pub fn labelled_total(&self, name: &str, label_key: &str, label_value: &str) -> u64 {
-        self.total(&format!("{name}{{{label_key}={label_value}}}"))
+    pub fn total_by_name(&self, name: &str) -> u64 {
+        self.totals
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|(slot, _)| slot_name(slot) == name)
+            .map(|(_, value)| *value)
+            .sum()
     }
+
+    pub fn labelled_total(&self, name: &str, label_key: &str, label_value: &str) -> u64 {
+        let pair = format!("{label_key}={label_value}");
+        self.totals
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|(slot, _)| slot_name(slot) == name && slot_has_label(slot, &pair))
+            .map(|(_, value)| *value)
+            .sum()
+    }
+}
+
+fn slot_name(slot: &str) -> &str {
+    slot.split_once('{').map_or(slot, |(name, _)| name)
+}
+
+fn slot_has_label(slot: &str, pair: &str) -> bool {
+    let Some((_, labels)) = slot.split_once('{') else {
+        return false;
+    };
+    labels
+        .trim_end_matches('}')
+        .split(',')
+        .any(|label| label == pair)
 }
 
 impl Recorder for MetricProbe {

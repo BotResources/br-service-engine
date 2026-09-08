@@ -94,6 +94,12 @@ impl<P: Principal> SessionRuntime<P> {
         let started = Instant::now();
         let mut table = self.table.lock().await;
         table.reap_dropped(&self.dropped);
+        {
+            let aged = table.reap_aged(self.config.session_max_age);
+            if aged > 0 {
+                crate::observe::record_sessions_ended(aged, crate::observe::REASON_MAX_AGE);
+            }
+        }
         if !table
             .iter()
             .any(|session| session.is_live() && session.repair_pending)
