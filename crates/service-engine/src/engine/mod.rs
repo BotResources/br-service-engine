@@ -136,6 +136,61 @@ impl<P: Principal> Engine<P> {
         self.mirrors.register(m)
     }
 
+    pub fn register_reaction<M, H>(
+        &mut self,
+        _durable: &str,
+        _handler: H,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "register_reaction",
+        })
+    }
+
+    pub fn register_mutation<M, H>(&mut self, _handler: H) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "register_mutation",
+        })
+    }
+
+    pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "register_offer",
+        })
+    }
+
+    pub fn register_presence<Pr: crate::presence::Presence>(
+        &mut self,
+        _ttl: std::time::Duration,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "register_presence",
+        })
+    }
+
+    pub fn register_blobs<B: crate::blobs::Blobs>(
+        &mut self,
+        _policy: crate::blobs::BlobPolicy,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "register_blobs",
+        })
+    }
+
+    pub fn declare_scopes(
+        &mut self,
+        _manifest: crate::scopes::ScopeManifest,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "declare_scopes",
+        })
+    }
+
+    pub async fn erase(&self, _person: crate::erase::PersonId) -> Result<(), EngineError> {
+        Err(EngineError::NotYet {
+            capability: "erase",
+        })
+    }
+
     pub fn readiness(&self) -> ReadinessHandle {
         self.readiness.clone()
     }

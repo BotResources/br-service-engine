@@ -28,6 +28,33 @@ engine minor pins one exact `br-rust-common` tag.
 |---|---|
 | 0.1.0 | `v1.3.0` |
 
+## Module map
+
+The 0.1.0 rework lands in units. The multi-pod delivery core (`transport`,
+`render`, `session`, `cohort`, `population`, `accumulator`, `housekeeping`,
+`relays`, `mirror`, `principal`, `projector`) is implemented and battery-backed.
+The author-facing surface is laid out one module per remaining unit, so each
+fills its part by adding module files and one method body.
+
+| Module | Responsibility | Unit |
+|---|---|---|
+| `engine` | `Engine::boot` and the `register_*` / `declare_scopes` / `erase` surface | U1 (skeleton) |
+| `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish | U1 |
+| `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 |
+| `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 |
+| `persistence` | `Persistence` trait; CRUD, soft-EDA, full-EDA styles behind `load`/`save` | U4 |
+| `gate`, `visibility` | `Gate` / `Reason` (affordance == mutation check); `Visibility` cohorts | U5 |
+| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 |
+| `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 |
+| `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
+| `scopes` | `declare_scopes` handshake gating readiness | U10 |
+| `erase` | `Erasable` and `engine.erase(person)` | U11 |
+| `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
+
+The `register_*` methods that a later unit fills return `EngineError::NotYet`
+until then.
+
 ## Conformance battery
 
 The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`

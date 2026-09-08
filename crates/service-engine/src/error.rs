@@ -147,6 +147,9 @@ pub enum EngineError {
 
     #[error("service")]
     Service(#[source] BoxedError),
+
+    #[error("the {capability} capability is a later unit of the 0.1.0 rework and has no body yet")]
+    NotYet { capability: &'static str },
 }
 
 #[derive(Debug, Error)]

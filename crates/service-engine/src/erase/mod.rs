@@ -1,4 +1,5 @@
 mod accumulator;
+mod person;
 mod projector;
 
 use std::any::Any;
@@ -8,5 +9,7 @@ pub use projector::{
     ErasedInverse, ErasedLoadScope, ErasedPopulation, ErasedProjector, ErasedWindowQuery,
     ProjectorAdapter, erase_projector,
 };
+
+pub use person::{Erasable, PersonId};
 
 pub type ErasedFacts = Box<dyn Any + Send + Sync>;
