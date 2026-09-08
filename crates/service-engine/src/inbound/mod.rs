@@ -31,4 +31,4 @@ pub use subscription::{
 };
 
 #[cfg(feature = "test-support")]
-pub use stub::{EffectWriter, StubDispatch, StubPayload, StubVerdict};
+pub use stub::{DispatchCounters, EffectWriter, StubDispatch, StubPayload, StubVerdict};

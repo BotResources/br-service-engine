@@ -14,7 +14,8 @@ use service_engine::pipeline::Reaction;
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
-pub const SETTLE: Duration = Duration::from_millis(400);
+pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 pub fn sample_command_coords() -> CommandCoords {
     CommandCoords {
@@ -126,8 +127,55 @@ pub async fn dead_letter_rows(pool: &PgPool) -> i64 {
         .expect("count the dead-letter rows")
 }
 
-pub async fn settle() {
-    tokio::time::sleep(SETTLE).await;
+pub async fn wait_for_effect_rows(pool: &PgPool, expected: i64) -> i64 {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let n = effect_rows(pool).await;
+        if n >= expected || tokio::time::Instant::now() >= deadline {
+            return n;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+pub async fn wait_for_effect_present(pool: &PgPool, message_id: Uuid) -> i64 {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let n = effect_present(pool, message_id).await;
+        if n >= 1 || tokio::time::Instant::now() >= deadline {
+            return n;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+pub async fn wait_for_dead_letter_rows(pool: &PgPool, expected: i64) -> i64 {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let n = dead_letter_rows(pool).await;
+        if n >= expected || tokio::time::Instant::now() >= deadline {
+            return n;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+pub async fn wait_for_sequence_guard(pool: &PgPool, producer: &str, seq_key: &str) -> Option<i64> {
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let last: Option<i64> = sqlx::query_scalar(
+            "SELECT last_seq FROM service_engine.sequence_guard WHERE producer = $1 AND seq_key = $2",
+        )
+        .bind(producer)
+        .bind(seq_key)
+        .fetch_optional(pool)
+        .await
+        .expect("read the sequence guard");
+        if last.is_some() || tokio::time::Instant::now() >= deadline {
+            return last;
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]

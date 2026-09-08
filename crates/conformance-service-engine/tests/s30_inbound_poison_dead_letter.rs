@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use conformance_service_engine::inbound_support::{
-    dead_letter_rows, effect_rows, publish, sample_subscription, settle, start_loop,
-    stub_with_effect,
+    dead_letter_rows, effect_rows, publish, sample_subscription, start_loop, stub_with_effect,
+    wait_for_dead_letter_rows,
 };
 use conformance_service_engine::infra::{TestDb, TestNats};
 use service_engine::inbound::{
@@ -33,17 +33,16 @@ async fn s30_a_terminal_message_dead_letters_and_discard_removes_it() {
         None,
     )
     .await;
-    settle().await;
 
+    assert_eq!(
+        wait_for_dead_letter_rows(db.app_pool(), 1).await,
+        1,
+        "a poison message lands in the dead-letter table instead of blocking the consumer"
+    );
     assert_eq!(
         effect_rows(db.app_pool()).await,
         0,
         "a poison message never commits an effect"
-    );
-    assert_eq!(
-        dead_letter_rows(db.app_pool()).await,
-        1,
-        "a poison message lands in the dead-letter table instead of blocking the consumer"
     );
 
     let dead_letters = DeadLetters::new(db.app_pool().clone());

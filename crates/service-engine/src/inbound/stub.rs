@@ -49,12 +49,29 @@ pub type EffectWriter = dyn for<'c> Fn(&'c mut PgConnection, &'c Incoming) -> Bo
     + Send
     + Sync;
 
+#[derive(Clone, Default)]
+pub struct DispatchCounters {
+    invocations: Arc<AtomicUsize>,
+    noops: Arc<AtomicUsize>,
+}
+
+impl DispatchCounters {
+    pub fn invocations(&self) -> usize {
+        self.invocations.load(AtomicOrdering::SeqCst)
+    }
+
+    pub fn noops(&self) -> usize {
+        self.noops.load(AtomicOrdering::SeqCst)
+    }
+}
+
 #[derive(Clone)]
 pub struct StubDispatch {
     pool: PgPool,
     crash_remaining: Arc<AtomicUsize>,
     release: Arc<AtomicBool>,
     effect: Option<Arc<EffectWriter>>,
+    counters: DispatchCounters,
 }
 
 impl StubDispatch {
@@ -64,11 +81,21 @@ impl StubDispatch {
             crash_remaining: Arc::new(AtomicUsize::new(0)),
             release: Arc::new(AtomicBool::new(false)),
             effect: None,
+            counters: DispatchCounters::default(),
         }
     }
 
     pub fn with_effect(mut self, effect: Arc<EffectWriter>) -> Self {
         self.effect = Some(effect);
+        self
+    }
+
+    pub fn counters(&self) -> DispatchCounters {
+        self.counters.clone()
+    }
+
+    pub fn with_counters(mut self, counters: DispatchCounters) -> Self {
+        self.counters = counters;
         self
     }
 
@@ -82,6 +109,17 @@ impl StubDispatch {
     }
 
     async fn apply(&self, msg: &Incoming) -> DispatchOutcome {
+        self.counters
+            .invocations
+            .fetch_add(1, AtomicOrdering::SeqCst);
+        let outcome = self.apply_inner(msg).await;
+        if matches!(outcome, DispatchOutcome::Applied(Applied::NoOp(_))) {
+            self.counters.noops.fetch_add(1, AtomicOrdering::SeqCst);
+        }
+        outcome
+    }
+
+    async fn apply_inner(&self, msg: &Incoming) -> DispatchOutcome {
         let payload: StubPayload = match serde_json::from_slice(&msg.payload) {
             Ok(payload) => payload,
             Err(error) => {

@@ -3,7 +3,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use conformance_service_engine::inbound_support::{
-    dead_letter_rows, effect_present, effect_writer, publish, sample_command_coords,
+    effect_present, effect_writer, publish, sample_command_coords, wait_for_dead_letter_rows,
+    wait_for_effect_present,
 };
 use conformance_service_engine::infra::{TestDb, TestNats};
 use service_engine::inbound::{
@@ -63,22 +64,21 @@ async fn s31_an_early_message_parks_then_lands_on_release_while_a_stuck_one_dead
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     gate.store(true, Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     assert_eq!(
-        effect_present(db.app_pool(), early).await,
+        wait_for_effect_present(db.app_pool(), early).await,
         1,
         "an early message parks and lands once its aggregate is released"
+    );
+    assert_eq!(
+        wait_for_dead_letter_rows(db.app_pool(), 1).await,
+        1,
+        "a message parked past its parking budget dead-letters"
     );
     assert_eq!(
         effect_present(db.app_pool(), stuck).await,
         0,
         "a message that never releases never commits an effect"
-    );
-    assert_eq!(
-        dead_letter_rows(db.app_pool()).await,
-        1,
-        "a message parked past its parking budget dead-letters"
     );
 
     let dead_letters = DeadLetters::new(db.app_pool().clone());
