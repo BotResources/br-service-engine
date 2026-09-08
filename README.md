@@ -45,16 +45,16 @@ fills its part by adding module files and one method body.
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
-| `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 (done) |
+| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile | U7 (done) |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection | U8 (done) / U7 (leader gate) |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` | U11 |
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then — today only `register_offer` (U7), `register_blobs` (U9) and
-`erase` (U11). `register_reaction` (U2) is live: it records a reaction and
+until then — today only `register_blobs` (U9) and `erase` (U11).
+`register_reaction` (U2) is live: it records a reaction and
 derives its inbound subscription, and the engine-owned inbound loop (durable
 consumer, ack-after-durable, `Disposition` routing, poison budget with the
 `service_engine.dead_letter` table and its retry/discard gestures, the
@@ -102,10 +102,21 @@ write-side `load` return the same committed truth.
 `register_presence` (U6) is filled: it binds the `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other
-lane; name the bucket with `EngineConfig::with_service`. `register_mirror` (U8)
-projects a consumed KV offer into `known_*` through the direct lane, and
-`declare_scopes` (U10) runs the boot scope-declaration handshake that gates
-readiness until Identity confirms.
+lane; name the bucket with `EngineConfig::with_service`. `register_offer` (U7)
+is filled: a saved noun that carries an offer stages the offer's dirty key in
+the same transaction as the write (`service_engine.offer_dirty`), the pod that
+holds the offer's leader lease drains those keys — re-reading the row, then
+putting or retracting the published value on the `PUBLISHED_LANGUAGE` bucket
+under a per-key watermark and a revision compare-and-swap — and reconciles the
+bucket against the store on its first drain after boot and then every
+`EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
+orphans), so a stable leader that never restarts still repairs out-of-band
+drift; the version lives in the offer's key for a breaking change (register a
+second `Offer`). `register_mirror` (U8) projects a consumed KV offer into
+`known_*` through the direct lane, and its projection is now leader-gated (U7):
+only the pod holding the mirror lease projects, standby pods keep their shadows
+current and take over on lease loss. `declare_scopes` (U10) runs the boot
+scope-declaration handshake that gates readiness until Identity confirms.
 
 The `graphql` module (U12) is the async-graphql surface kit. A service composes
 its slices' root objects into one schema with `engine_schema`, mounts it with

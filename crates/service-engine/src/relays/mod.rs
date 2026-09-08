@@ -1,5 +1,5 @@
 pub mod kv;
-mod kv_watermark;
+pub(crate) mod kv_watermark;
 pub mod outbox;
 
 pub use kv::{KvChange, KvDrainRelay, KvSource, KvWrite, Versioned};

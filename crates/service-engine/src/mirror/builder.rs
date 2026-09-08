@@ -13,6 +13,7 @@ use crate::transport::ImpactTransport;
 use super::change::{Change, ChangeOp};
 use super::consumed::Consumed;
 use super::handle::MirrorHandle;
+use super::leader::{MirrorGate, MirrorLeader};
 use super::projection::Project;
 use super::runtime::MirrorRuntime;
 use super::shadow::Shadows;
@@ -39,11 +40,13 @@ type OpenWatchFn = Arc<
         > + Send
         + Sync,
 >;
+type SnapshotFn = Arc<dyn Fn(&Shadows) -> Vec<Change> + Send + Sync>;
 
 pub(super) struct Consumption {
     pub(super) prefix: &'static str,
     pub(super) load: LoadFn,
     pub(super) open_watch: OpenWatchFn,
+    pub(super) snapshot: SnapshotFn,
 }
 
 fn service<E: std::error::Error + Send + Sync + 'static>(error: E) -> EngineError {
@@ -92,10 +95,22 @@ impl Consumption {
                     Result<BoxStream<'static, Result<Update, EngineError>>, EngineError>,
                 >
         });
+        let snapshot: SnapshotFn = Arc::new(|shadows: &Shadows| {
+            shadows
+                .shadow::<C>()
+                .iter()
+                .map(|(key, _)| Change {
+                    prefix: C::PREFIX,
+                    key: key.clone(),
+                    op: ChangeOp::Put,
+                })
+                .collect()
+        });
         Self {
             prefix: C::PREFIX,
             load,
             open_watch,
+            snapshot,
         }
     }
 }
@@ -201,6 +216,27 @@ where
         pool: PgPool,
         transport: Arc<dyn ImpactTransport>,
     ) -> MirrorHandle {
+        self.build_with(nats, pool, transport, None)
+    }
+
+    pub fn build_led(
+        self,
+        nats: Nats,
+        pool: PgPool,
+        transport: Arc<dyn ImpactTransport>,
+        leader: MirrorLeader,
+    ) -> MirrorHandle {
+        let gate = MirrorGate::new(&self.name, leader);
+        self.build_with(nats, pool, transport, Some(gate))
+    }
+
+    fn build_with(
+        self,
+        nats: Nats,
+        pool: PgPool,
+        transport: Arc<dyn ImpactTransport>,
+        leader: Option<MirrorGate>,
+    ) -> MirrorHandle {
         let runtime = Arc::new(MirrorRuntime::new(
             nats,
             pool,
@@ -209,6 +245,7 @@ where
             self.keyed_by,
             self.project,
             self.reconcile_keys,
+            leader,
         ));
         let name = self.name.clone();
         let reconcile = {

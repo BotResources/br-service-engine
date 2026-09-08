@@ -8,6 +8,7 @@ use sqlx::PgPool;
 
 use crate::accumulator::AccumulatorRuntime;
 use crate::error::EngineError;
+use crate::offers::OfferStagers;
 use crate::pipeline::MutationError;
 use crate::pipeline::context::{Bulk, Mutation};
 use crate::pipeline::effect::{MutationServices, run_bulk, run_mutation};
@@ -107,6 +108,7 @@ impl<P: Principal> MutationRegistry<P> {
         pool: PgPool,
         transport: Arc<dyn ImpactTransport>,
         accumulators: Arc<AccumulatorRuntime>,
+        offers: Arc<OfferStagers>,
         presence: PresenceHandle<P>,
         lock_timeout: Duration,
         impacts_per_commit: usize,
@@ -116,6 +118,7 @@ impl<P: Principal> MutationRegistry<P> {
                 pool,
                 transport,
                 accumulators,
+                offers,
                 presence,
                 lock_timeout,
                 impacts_per_commit,

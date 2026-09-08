@@ -11,6 +11,7 @@ use crate::inbound::sqlx_is_terminal;
 use crate::inbound::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
 use crate::inbound::{Claimed, Ordering, advance_sequence, claim};
 use crate::inbound::{ReactionInvoker, ReactionRegistry};
+use crate::offers::OfferStagers;
 use crate::pipeline::context::Reaction;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::staged::Staged;
@@ -21,16 +22,19 @@ pub(crate) struct DirectPipeline {
     pool: PgPool,
     transport: Arc<dyn ImpactTransport>,
     accumulators: Arc<AccumulatorRuntime>,
+    offers: Arc<OfferStagers>,
     reactions: Arc<ReactionRegistry>,
     lock_timeout: Duration,
     impacts_per_commit: usize,
 }
 
 impl DirectPipeline {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         pool: PgPool,
         transport: Arc<dyn ImpactTransport>,
         accumulators: Arc<AccumulatorRuntime>,
+        offers: Arc<OfferStagers>,
         reactions: Arc<ReactionRegistry>,
         lock_timeout: Duration,
         impacts_per_commit: usize,
@@ -39,6 +43,7 @@ impl DirectPipeline {
             pool,
             transport,
             accumulators,
+            offers,
             reactions,
             lock_timeout,
             impacts_per_commit,
@@ -86,6 +91,7 @@ impl DirectPipeline {
                 &mut tx,
                 &mut staged,
                 self.accumulators.as_ref(),
+                self.offers.clone(),
                 time::now(),
             );
             let mut cx = Reaction::new(ops);
