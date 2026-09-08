@@ -5,6 +5,7 @@ pub mod gate;
 pub mod mirror;
 pub mod note;
 pub mod outbox;
+pub mod presence;
 pub mod principal;
 pub mod relays;
 pub mod render;
@@ -47,7 +48,10 @@ pub use mirror::{
 
 pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs};
 
-pub use engine::{SAMPLE_JOB, SAMPLE_RELAY, boot_render_engine, boot_sample_engine, engine_config};
+pub use engine::{
+    SAMPLE_JOB, SAMPLE_RELAY, boot_presence_engine, boot_render_engine, boot_sample_engine,
+    engine_config,
+};
 
 pub use assignment::{
     Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentView,
@@ -55,6 +59,9 @@ pub use assignment::{
 pub use gate::Gate;
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
+pub use presence::{
+    Typing, TypingKey, TypingValue, TypingView, typing_key, typing_value, typing_window,
+};
 pub use principal::{
     FailingPrincipalResolver, SamplePrincipal, SamplePrincipalResolver, SampleRls,
 };
