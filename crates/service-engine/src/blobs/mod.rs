@@ -1,6 +1,8 @@
+mod boot;
 mod config;
 mod handle;
 mod object;
+mod post_policy;
 mod reaper;
 mod registry;
 mod store;
@@ -10,6 +12,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) use boot::{BoundBlobs, bind};
 pub use config::BlobConfig;
 pub use handle::Blob;
 pub(crate) use handle::BlobHandle;
@@ -39,19 +42,26 @@ impl BlobRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UploadUrl(String);
+pub struct UploadUrl {
+    url: String,
+    fields: Vec<(String, String)>,
+}
 
 impl UploadUrl {
-    pub(crate) fn new(url: String) -> Self {
-        Self(url)
+    pub(crate) fn new(url: String, fields: Vec<(String, String)>) -> Self {
+        Self { url, fields }
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn url(&self) -> &str {
+        &self.url
     }
 
-    pub fn into_string(self) -> String {
-        self.0
+    pub fn fields(&self) -> &[(String, String)] {
+        &self.fields
+    }
+
+    pub fn into_parts(self) -> (String, Vec<(String, String)>) {
+        (self.url, self.fields)
     }
 }
 

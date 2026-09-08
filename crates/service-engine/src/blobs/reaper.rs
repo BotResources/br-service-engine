@@ -20,7 +20,6 @@ pub struct ReaperRound {
     pub promoted: u64,
     pub reaped_incomplete: u64,
     pub reaped_orphan: u64,
-    pub reaped_oversize: u64,
     pub failures: usize,
 }
 
@@ -82,50 +81,34 @@ impl BlobReaper {
     ) -> Result<(), EngineError> {
         let cutoff = chrono::Utc::now()
             - chrono::Duration::from_std(policy.orphan_after).unwrap_or(chrono::Duration::zero());
-        self.reap_incomplete(pg, store, kind, policy, cutoff, round)
+        self.promote_and_reap_incomplete(pg, store, kind, cutoff, round)
             .await?;
         self.reap_orphans(pg, store, kind, cutoff, round).await
     }
 
-    async fn reap_incomplete(
+    async fn promote_and_reap_incomplete(
         &self,
         pg: &PgPool,
         store: &BlobStore,
         kind: &str,
-        policy: &BlobPolicy,
         cutoff: chrono::DateTime<chrono::Utc>,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
         let mut tx = pg.begin().await?;
         let rows = sqlx::query(&format!(
-            "SELECT id, object_key FROM {TABLE_BLOB} \
-             WHERE kind = $1 AND state = 'pending' AND created_at < $2 \
-             FOR UPDATE SKIP LOCKED LIMIT $3"
+            "SELECT id, object_key, created_at FROM {TABLE_BLOB} \
+             WHERE kind = $1 AND state = 'pending' \
+             FOR UPDATE SKIP LOCKED LIMIT $2"
         ))
         .bind(kind)
-        .bind(cutoff)
         .bind(BATCH)
         .fetch_all(&mut *tx)
         .await?;
         for row in &rows {
             let id: Uuid = row.get("id");
             let object_key: String = row.get("object_key");
+            let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
             match store.object().head_size(&object_key).await? {
-                None => {
-                    sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
-                        .bind(id)
-                        .execute(&mut *tx)
-                        .await?;
-                    round.reaped_incomplete += 1;
-                }
-                Some(size) if policy.max_bytes > 0 && size > policy.max_bytes => {
-                    store.object().delete_object(&object_key).await?;
-                    sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
-                        .bind(id)
-                        .execute(&mut *tx)
-                        .await?;
-                    round.reaped_oversize += 1;
-                }
                 Some(size) => {
                     sqlx::query(&format!(
                         "UPDATE {TABLE_BLOB} \
@@ -137,6 +120,14 @@ impl BlobReaper {
                     .await?;
                     round.promoted += 1;
                 }
+                None if created_at < cutoff => {
+                    sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?;
+                    round.reaped_incomplete += 1;
+                }
+                None => {}
             }
         }
         tx.commit().await?;

@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
+use crate::blobs::BlobRef;
 use crate::error::EngineError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,5 +47,9 @@ pub trait Aggregate: Send + Sync + Sized + 'static {
 
     fn pending_events(&self) -> &[<Self::Store as Persistence>::Event] {
         &[]
+    }
+
+    fn blob_refs(&self) -> Vec<BlobRef> {
+        Vec::new()
     }
 }

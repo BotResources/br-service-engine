@@ -124,31 +124,35 @@ fail-loud, never created — configured with `EngineConfig::with_blob_storage`).
 (`service_engine.blob`: reference, object key, kind, content type, file name,
 owner, size and state) inside the pipeline transaction, so it commits with the
 referencing aggregate and a rollback leaves no row; it returns a typed
-`UploadUrl`, and `Engine::download_url` a `DownloadUrl`, both S3 SigV4 presigned
-and short-lived. The bytes flow client-to-storage directly, so `size` is unknown
-at commit and is recorded when the reaper sees the completed upload and promotes
-the row. `UploadUrl`/`DownloadUrl` are not `Serialize`, so — like `OneShot` — a
-URL is structurally unable to enter a view, an impact, an offer, an outbox row or
-a chunk; only the opaque reference travels. The beat runs a reaper that, per
-`BlobPolicy`, promotes a completed upload (recording its size), deletes an
-abandoned upload (a `pending` row past `orphan_after` whose object never landed)
-or one whose object exceeds `max_bytes`, and deletes an orphan (a reference
-released via `cx.release_blob` past `orphan_after`). `max_bytes` is a
-**best-effort** cap, not a hard limit: an S3 presigned PUT cannot bound the size
-at upload, so the reaper is the only lever, and it acts *after* the fact — an
-over-cap object is promoted first and reaped on a later sweep, and reaping an
-object whose reference an aggregate already committed leaves a live `BlobRef`
-that then 404s on download. A slice that needs a hard cap must enforce it out of
-band (a bucket policy or an ingress limit), not rely on `max_bytes`. Orphan
-reaping is signal-driven: a slice releases the reference when it drops the owning
-row; the engine does not reference-count slice-owned tables.
-`cx.blob::<Kind>(name, content_type)` records no owner, so its row is **not**
-reached by `purge_person_blobs`; a personal file that must be erasable with its
-owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type, person)`.
-`Engine::purge_person_blobs` is the erase hook U11 calls to drop a person's blobs
-from storage and the reference table. Presigning uses the sans-IO `rusty-s3`
-crate for SigV4 and `reqwest` (rustls) as the thin HTTP client for the engine's
-own bucket HEAD/DELETE — no cloud SDK.
+`UploadUrl` — an S3 SigV4 **presigned POST** carrying a policy whose
+`content-length-range` is `[0, max_bytes]`, so an object over the cap is refused
+by object storage at upload and can never land — and `Engine::download_url` a
+`DownloadUrl`, an S3 SigV4 presigned GET, both short-lived. The bytes flow
+client-to-storage directly, so `size` is unknown at commit and is recorded from
+the object's head when the reaper first sees the upload has completed (promoting
+the row to `uploaded`), independent of the orphan window. A reference whose
+object has not landed yet (`pending`) resolves to **no** download URL. `UploadUrl`
+carries the POST endpoint and its signed form fields (no raw URL string) and
+`DownloadUrl` is not `Serialize`, so — like `OneShot` — neither can enter a view,
+an impact, an offer, an outbox row or a chunk; only the opaque reference travels.
+The beat runs a reaper whose scope is exactly the intent's two categories: it
+deletes an **incomplete upload** (a `pending` row past `orphan_after` whose object
+never landed) and an **unreferenced** blob (a reference released past
+`orphan_after`, whose object it also deletes from storage); it does not police
+size, because the POST policy already did, at upload. Orphan detection happens at
+the **aggregate boundary**: `Aggregate::blob_refs` exposes a row's live
+references (default empty), and the pipeline diffs them between `load` and `save`
+— a dropped or repointed reference, and a `cx.delete`'d aggregate, release the
+old blob in the **same transaction** as the write, with no slice-table scanning
+and no reference counting. `cx.release_blob(ref)` stays as an explicit escape
+hatch. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
+**not** reached by `purge_person_blobs`; a personal file that must be erasable
+with its owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type,
+person)`. `Engine::purge_person_blobs` is the erase hook U11 calls to drop a
+person's blobs from storage and the reference table. Presigning uses the sans-IO
+`rusty-s3` crate for the GET, an in-engine SigV4 POST-policy signer (`hmac` +
+`sha2` + `base64`) for the upload, and `reqwest` (rustls) as the thin HTTP client
+for the engine's own bucket HEAD/DELETE — no cloud SDK.
 
 The `graphql` module (U12) is the async-graphql surface kit. A service composes
 its slices' root objects into one schema with `engine_schema`, mounts it with

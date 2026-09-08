@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
-use conformance_service_engine::sample::blob::{AttachDoc, DetachDoc};
+use conformance_service_engine::sample::blob::{AttachDoc, RepointDoc};
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
@@ -15,13 +15,12 @@ use service_engine::{BlobPolicy, OneShot, UploadUrl};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-async fn blob_present(pool: &PgPool, id: Uuid) -> bool {
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM service_engine.blob WHERE id = $1")
+async fn state_of(pool: &PgPool, id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT state FROM service_engine.blob WHERE id = $1")
         .bind(id)
-        .fetch_one(pool)
+        .fetch_optional(pool)
         .await
-        .expect("count blob references");
-    n > 0
+        .expect("read the blob reference state")
 }
 
 async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
@@ -29,7 +28,7 @@ async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
         .bind(doc)
         .fetch_one(pool)
         .await
-        .expect("read the blob reference")
+        .expect("read the doc's blob reference")
 }
 
 async fn wait_until<F>(mut check: F)
@@ -50,12 +49,12 @@ where
 }
 
 #[tokio::test]
-async fn s55_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_bound() {
+async fn s65_repointing_a_row_releases_the_old_blob_in_the_same_transaction() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let minio = TestMinio::spawn().await;
-    let bucket = format!("se-s55-{}", Uuid::now_v7().simple());
+    let bucket = format!("se-s59-{}", Uuid::now_v7().simple());
     minio.create_bucket(&bucket).await;
     let pool = db.app_pool().clone();
 
@@ -63,16 +62,16 @@ async fn s55_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_bound
     let principal = member(&pool, Uuid::now_v7(), tenant).await;
     let policy = BlobPolicy {
         max_bytes: 1 << 20,
-        orphan_after: Duration::from_millis(400),
+        orphan_after: Duration::from_millis(300),
     };
     let engine = boot_blob_engine(
         &db,
         nats.nats().await,
-        "se_s55",
-        "pod-s55",
+        "se_s59",
+        "pod-s59",
         minio.config(&bucket),
         policy,
-        Duration::from_millis(150),
+        Duration::from_millis(100),
     )
     .await;
     let readiness = engine.readiness();
@@ -82,55 +81,54 @@ async fn s55_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_bound
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
-    let abandoned = Uuid::now_v7();
-    executor
+    let doc = Uuid::now_v7();
+    let first: OneShot<UploadUrl> = executor
         .run::<AttachDoc>(
             principal.clone(),
             AttachDoc {
-                id: abandoned,
+                id: doc,
                 tenant,
-                name: "never-uploaded.bin".to_string(),
+                name: "first.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
                 fail: false,
             },
         )
         .await
-        .expect("attach the abandoned upload");
-    let abandoned_ref = reference_of(&pool, abandoned).await;
+        .expect("attach the first blob");
+    let old_ref = reference_of(&pool, doc).await;
+    let status = post_upload(&http, first.into_inner(), b"first-bytes".to_vec()).await;
+    assert!(status.is_success(), "the first object lands");
+    let old_key = format!("blob/attachment/{old_ref}");
+    assert!(minio.object_exists(&bucket, &old_key).await);
 
-    let orphan = Uuid::now_v7();
-    let upload: OneShot<UploadUrl> = executor
-        .run::<AttachDoc>(
-            principal.clone(),
-            AttachDoc {
-                id: orphan,
-                tenant,
-                name: "orphan.bin".to_string(),
+    let second: OneShot<UploadUrl> = executor
+        .run::<RepointDoc>(
+            principal,
+            RepointDoc {
+                id: doc,
+                name: "second.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
-                fail: false,
             },
         )
         .await
-        .expect("attach the soon-to-be orphan");
-    let orphan_ref = reference_of(&pool, orphan).await;
-    let status = post_upload(&http, upload.into_inner(), b"orphan-bytes".to_vec()).await;
-    assert!(status.is_success());
-    let orphan_key = format!("blob/attachment/{orphan_ref}");
-    assert!(
-        minio.object_exists(&bucket, &orphan_key).await,
-        "the orphan's object is present before it is released",
-    );
-    executor
-        .run::<DetachDoc>(principal, DetachDoc { id: orphan })
-        .await
-        .expect("detach releases the blob, marking it an orphan");
+        .expect("repoint the doc at a fresh blob");
 
-    wait_until(async || !blob_present(&pool, abandoned_ref).await).await;
-    wait_until(async || !blob_present(&pool, orphan_ref).await).await;
-    assert!(
-        !minio.object_exists(&bucket, &orphan_key).await,
-        "the orphan's object is deleted from storage by the reaper",
+    let new_ref = reference_of(&pool, doc).await;
+    assert_ne!(new_ref, old_ref, "the row points at the new reference");
+    assert_eq!(
+        state_of(&pool, old_ref).await.as_deref(),
+        Some("orphaned"),
+        "the dropped reference is released in the same transaction as the repoint",
     );
+    let status = post_upload(&http, second.into_inner(), b"second-bytes".to_vec()).await;
+    assert!(status.is_success(), "the second object lands");
+
+    wait_until(async || state_of(&pool, old_ref).await.is_none()).await;
+    assert!(
+        !minio.object_exists(&bucket, &old_key).await,
+        "the reaper deletes the released object from storage",
+    );
+    wait_until(async || state_of(&pool, new_ref).await.as_deref() == Some("uploaded")).await;
 
     shutdown.notify_one();
     running.await.expect("join").expect("run returns Ok");

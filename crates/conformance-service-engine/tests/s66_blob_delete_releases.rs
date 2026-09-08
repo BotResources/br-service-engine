@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
-use conformance_service_engine::sample::blob::{AttachDoc, DetachDoc};
+use conformance_service_engine::sample::blob::{AttachDoc, DeleteDoc};
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
@@ -15,12 +15,20 @@ use service_engine::{BlobPolicy, OneShot, UploadUrl};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-async fn blob_present(pool: &PgPool, id: Uuid) -> bool {
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM service_engine.blob WHERE id = $1")
+async fn state_of(pool: &PgPool, id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT state FROM service_engine.blob WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .expect("read the blob reference state")
+}
+
+async fn doc_exists(pool: &PgPool, id: Uuid) -> bool {
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM sample_doc WHERE id = $1")
         .bind(id)
         .fetch_one(pool)
         .await
-        .expect("count blob references");
+        .expect("count docs");
     n > 0
 }
 
@@ -29,7 +37,7 @@ async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
         .bind(doc)
         .fetch_one(pool)
         .await
-        .expect("read the blob reference")
+        .expect("read the doc's blob reference")
 }
 
 async fn wait_until<F>(mut check: F)
@@ -50,12 +58,12 @@ where
 }
 
 #[tokio::test]
-async fn s55_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_bound() {
+async fn s66_deleting_the_aggregate_releases_its_blobs() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let minio = TestMinio::spawn().await;
-    let bucket = format!("se-s55-{}", Uuid::now_v7().simple());
+    let bucket = format!("se-s60-{}", Uuid::now_v7().simple());
     minio.create_bucket(&bucket).await;
     let pool = db.app_pool().clone();
 
@@ -63,16 +71,16 @@ async fn s55_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_bound
     let principal = member(&pool, Uuid::now_v7(), tenant).await;
     let policy = BlobPolicy {
         max_bytes: 1 << 20,
-        orphan_after: Duration::from_millis(400),
+        orphan_after: Duration::from_millis(300),
     };
     let engine = boot_blob_engine(
         &db,
         nats.nats().await,
-        "se_s55",
-        "pod-s55",
+        "se_s60",
+        "pod-s60",
         minio.config(&bucket),
         policy,
-        Duration::from_millis(150),
+        Duration::from_millis(100),
     )
     .await;
     let readiness = engine.readiness();
@@ -82,54 +90,42 @@ async fn s55_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_bound
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
-    let abandoned = Uuid::now_v7();
-    executor
-        .run::<AttachDoc>(
-            principal.clone(),
-            AttachDoc {
-                id: abandoned,
-                tenant,
-                name: "never-uploaded.bin".to_string(),
-                content_type: "application/octet-stream".to_string(),
-                fail: false,
-            },
-        )
-        .await
-        .expect("attach the abandoned upload");
-    let abandoned_ref = reference_of(&pool, abandoned).await;
-
-    let orphan = Uuid::now_v7();
+    let doc = Uuid::now_v7();
     let upload: OneShot<UploadUrl> = executor
         .run::<AttachDoc>(
             principal.clone(),
             AttachDoc {
-                id: orphan,
+                id: doc,
                 tenant,
-                name: "orphan.bin".to_string(),
+                name: "doomed.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
                 fail: false,
             },
         )
         .await
-        .expect("attach the soon-to-be orphan");
-    let orphan_ref = reference_of(&pool, orphan).await;
-    let status = post_upload(&http, upload.into_inner(), b"orphan-bytes".to_vec()).await;
-    assert!(status.is_success());
-    let orphan_key = format!("blob/attachment/{orphan_ref}");
-    assert!(
-        minio.object_exists(&bucket, &orphan_key).await,
-        "the orphan's object is present before it is released",
-    );
-    executor
-        .run::<DetachDoc>(principal, DetachDoc { id: orphan })
-        .await
-        .expect("detach releases the blob, marking it an orphan");
+        .expect("attach a blob to the doc");
+    let reference = reference_of(&pool, doc).await;
+    let status = post_upload(&http, upload.into_inner(), b"doomed-bytes".to_vec()).await;
+    assert!(status.is_success(), "the object lands before deletion");
+    let object_key = format!("blob/attachment/{reference}");
+    assert!(minio.object_exists(&bucket, &object_key).await);
 
-    wait_until(async || !blob_present(&pool, abandoned_ref).await).await;
-    wait_until(async || !blob_present(&pool, orphan_ref).await).await;
+    executor
+        .run::<DeleteDoc>(principal, DeleteDoc { id: doc })
+        .await
+        .expect("delete the aggregate");
+
+    assert!(!doc_exists(&pool, doc).await, "the aggregate row is gone");
+    assert_eq!(
+        state_of(&pool, reference).await.as_deref(),
+        Some("orphaned"),
+        "deleting the aggregate releases its blob in the same transaction",
+    );
+
+    wait_until(async || state_of(&pool, reference).await.is_none()).await;
     assert!(
-        !minio.object_exists(&bucket, &orphan_key).await,
-        "the orphan's object is deleted from storage by the reaper",
+        !minio.object_exists(&bucket, &object_key).await,
+        "the reaper deletes the released object from storage",
     );
 
     shutdown.notify_one();

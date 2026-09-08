@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use tokio::sync::Notify;
 
-use crate::blobs::{BlobReaper, BlobRegistry, REASON_BLOB_BUCKET, REASON_BLOB_UNCONFIGURED};
+use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
 use crate::engine::loops::{RenderGc, RenderRepairs, join_presence, run_scheduled_messages};
 use crate::error::{EngineError, TransportError};
@@ -124,35 +124,21 @@ impl<P: Principal> Engine<P> {
             futures_util::stream::select(transport.listen(), stream).boxed()
         };
 
-        let blob_handle = if blobs.is_empty() {
-            None
-        } else {
-            let store = match BlobRegistry::build_store(config.blob.as_ref(), config.blob_service())
-            {
-                Ok(store) => store,
-                Err(error) => {
-                    readiness_guard.set_not_ready(REASON_BLOB_UNCONFIGURED);
-                    stop_mirrors.notify_waiters();
-                    stop_presence.notify_waiters();
-                    join_presence(presence_task.take()).await;
-                    render.shutdown().await;
-                    return Err(error);
+        let blob_handle = match crate::blobs::bind(&blobs, &config).await {
+            Ok(BoundBlobs { handle, reaper }) => {
+                if let Some(reaper) = reaper {
+                    beat = beat.with_blob_reaper(reaper);
                 }
-            };
-            if let Err(error) = store.object().ensure_bucket().await {
-                readiness_guard.set_not_ready(REASON_BLOB_BUCKET);
+                handle
+            }
+            Err((error, reason)) => {
+                readiness_guard.set_not_ready(reason);
                 stop_mirrors.notify_waiters();
                 stop_presence.notify_waiters();
                 join_presence(presence_task.take()).await;
                 render.shutdown().await;
                 return Err(error);
             }
-            let _ = blobs.store_slot().set(store);
-            beat = beat.with_blob_reaper(
-                BlobReaper::new(blobs.store_slot(), blobs.policies())
-                    .with_interval(config.blob_reaper_interval),
-            );
-            blobs.maybe_handle()
         };
 
         if let Some(declaration) = declared_scopes {

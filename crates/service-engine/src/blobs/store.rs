@@ -88,8 +88,12 @@ impl BlobStore {
         &self.object
     }
 
-    pub(crate) fn presign_upload(&self, object_key: &str) -> UploadUrl {
-        self.object.presign_upload(object_key)
+    pub(crate) fn presign_upload(
+        &self,
+        object_key: &str,
+        max_bytes: u64,
+    ) -> Result<UploadUrl, EngineError> {
+        self.object.presign_upload(object_key, max_bytes)
     }
 
     pub(crate) async fn download_url(
@@ -97,13 +101,23 @@ impl BlobStore {
         pool: &PgPool,
         reference: BlobRef,
     ) -> Result<Option<DownloadUrl>, EngineError> {
-        let key: Option<String> = sqlx::query_scalar(&format!(
-            "SELECT object_key FROM {TABLE_BLOB} WHERE id = $1 AND state <> 'orphaned'"
+        let row: Option<(String, String)> = sqlx::query_as(&format!(
+            "SELECT object_key, state FROM {TABLE_BLOB} WHERE id = $1"
         ))
         .bind(reference.as_uuid())
         .fetch_optional(pool)
         .await?;
-        Ok(key.map(|key| self.object.presign_download(&key)))
+        let Some((object_key, state)) = row else {
+            return Ok(None);
+        };
+        match state.as_str() {
+            "uploaded" => Ok(Some(self.object.presign_download(&object_key))),
+            "pending" => match self.object.head_size(&object_key).await? {
+                Some(_) => Ok(Some(self.object.presign_download(&object_key))),
+                None => Ok(None),
+            },
+            _ => Ok(None),
+        }
     }
 
     pub(crate) async fn purge_person(
