@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_graphql::{Context, Error, Json};
 use serde::de::DeserializeOwned;
 
-use crate::erase::{ErasedPopulation, ErasedProjector};
+use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
 use crate::graphql::state::GraphqlState;
 use crate::principal::Principal;
@@ -30,7 +30,7 @@ impl<'a, P: Principal> Query<'a, P> {
         Pr: Projector<Principal = P> + Default,
         Pr::View: DeserializeOwned,
     {
-        match self.fetch_bytes::<Pr>(key, false).await? {
+        match self.fetch_bytes::<Pr>(key).await? {
             Some(bytes) => Ok(Some(bytes.decode::<Pr::View>().map_err(Error::from)?)),
             None => Ok(None),
         }
@@ -41,7 +41,7 @@ impl<'a, P: Principal> Query<'a, P> {
         Pr: Projector<Principal = P> + Default,
         Pr::View: DeserializeOwned,
     {
-        self.fetch_window_bytes::<Pr>(params, false)
+        self.fetch_window_bytes::<Pr>(params)
             .await?
             .iter()
             .map(|bytes| bytes.decode::<Pr::View>().map_err(Error::from))
@@ -55,7 +55,7 @@ impl<'a, P: Principal> Query<'a, P> {
     where
         Pr: Projector<Principal = P> + Default,
     {
-        match self.fetch_bytes::<Pr>(key, false).await? {
+        match self.fetch_bytes::<Pr>(key).await? {
             Some(bytes) => Ok(Some(Json(view_value(&bytes)?))),
             None => Ok(None),
         }
@@ -68,14 +68,14 @@ impl<'a, P: Principal> Query<'a, P> {
     where
         Pr: Projector<Principal = P> + Default,
     {
-        self.fetch_window_bytes::<Pr>(params, false)
+        self.fetch_window_bytes::<Pr>(params)
             .await?
             .iter()
             .map(|bytes| view_value(bytes).map(Json).map_err(Error::from))
             .collect()
     }
 
-    async fn fetch_bytes<Pr>(&self, key: &Pr::Key, rls: bool) -> Result<Option<ViewBytes>, Error>
+    async fn fetch_bytes<Pr>(&self, key: &Pr::Key) -> Result<Option<ViewBytes>, Error>
     where
         Pr: Projector<Principal = P> + Default,
     {
@@ -89,16 +89,16 @@ impl<'a, P: Principal> Query<'a, P> {
             return Ok(None);
         }
         let mut rendered = self
-            .render(&erased, rls, std::slice::from_ref(&key_bytes))
+            .render(
+                &erased,
+                self.rls_engaged(),
+                std::slice::from_ref(&key_bytes),
+            )
             .await?;
         Ok(rendered.remove(&key_bytes).flatten())
     }
 
-    async fn fetch_window_bytes<Pr>(
-        &self,
-        params: WindowParams,
-        rls: bool,
-    ) -> Result<Vec<ViewBytes>, Error>
+    async fn fetch_window_bytes<Pr>(&self, params: WindowParams) -> Result<Vec<ViewBytes>, Error>
     where
         Pr: Projector<Principal = P> + Default,
     {
@@ -108,11 +108,15 @@ impl<'a, P: Principal> Query<'a, P> {
             .populate(self.state.pg(), &params, self.principal)
             .await?;
         let keys = member_keys(&population);
-        let rendered = self.render(&erased, rls, &keys).await?;
+        let rendered = self.render(&erased, self.rls_engaged(), &keys).await?;
         Ok(keys
             .iter()
             .filter_map(|key| rendered.get(key).cloned().flatten())
             .collect())
+    }
+
+    fn rls_engaged(&self) -> bool {
+        self.state.runtime().registry().rls().is_some()
     }
 
     fn erased<Pr>(&self, projector: &Pr) -> Result<Arc<dyn ErasedProjector<P>>, Error>

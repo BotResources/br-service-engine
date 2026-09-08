@@ -13,9 +13,10 @@ use tokio::task::JoinHandle;
 
 use crate::infra::TestDb;
 use crate::sample::assignment::AssignmentProjector;
+use crate::sample::graphql::rls::{RlsAssignmentProjector, RlsQueryRoot};
 use crate::sample::graphql::roots::{MutationRoot, QueryRoot, SubscriptionRoot};
 use crate::sample::pipeline::{CloseWidget, MintSecret, close_widget, mint_secret};
-use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
+use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::widget::WidgetProjector;
 
 const WIDGET_SLICE: SliceFragment = SliceFragment {
@@ -27,6 +28,12 @@ const WIDGET_SLICE: SliceFragment = SliceFragment {
 const ASSIGNMENT_SLICE: SliceFragment = SliceFragment {
     slice: "assignment",
     root_fields: &["assignment", "assignments"],
+    types: &["AssignmentView"],
+};
+
+const RLS_ASSIGNMENT_SLICE: SliceFragment = SliceFragment {
+    slice: "rls_assignment",
+    root_fields: &["rlsAssignment"],
     types: &["AssignmentView"],
 };
 
@@ -126,6 +133,7 @@ pub async fn boot_graphql_service(
         SubscriptionRoot,
         state.clone(),
     );
+    engine.set_schema_sdl(schema.sdl());
     let app = service_engine::app(schema, state, readiness.clone());
 
     let handle = tokio::spawn(engine.run_with(app));
@@ -144,6 +152,117 @@ pub async fn boot_graphql_service(
         engine_stop,
         handle,
     }
+}
+
+pub async fn boot_rls_query_service(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> GraphqlService {
+    let addr = free_loopback_addr().await;
+    let config = EngineConfig::new(
+        ChannelName::new(channel).expect("a valid notify channel"),
+        PodId::new(pod).expect("a valid pod id"),
+    )
+    .with_window(Duration::from_millis(30))
+    .with_beat(Duration::from_millis(80))
+    .with_lease(Duration::from_secs(5))
+    .with_lock_timeout(Duration::from_millis(300))
+    .with_http_addr(addr);
+
+    let mut engine = Engine::<SamplePrincipal>::boot(
+        config,
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the rls-query engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_rls(SampleRls)
+        .expect("register the RLS applier so query-time fetch runs under RLS");
+    engine
+        .register_projector(RlsAssignmentProjector)
+        .expect("register the RLS-backed assignment projector");
+    engine
+        .register_schema_slice(RLS_ASSIGNMENT_SLICE)
+        .expect("the rls-assignment slice owns its root field and type");
+
+    let readiness = engine.readiness();
+    let engine_stop = engine.shutdown_handle();
+    let state = Arc::new(engine.graphql_state());
+    let schema = engine_schema(
+        RlsQueryRoot,
+        async_graphql::EmptyMutation,
+        async_graphql::EmptySubscription,
+        state.clone(),
+    );
+    engine.set_schema_sdl(schema.sdl());
+    let app = service_engine::app(schema, state, readiness.clone());
+
+    let handle = tokio::spawn(engine.run_with(app));
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+    while readiness.snapshot() != Readiness::Ready {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the rls-query engine never reached readiness UP"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    GraphqlService {
+        base_url: format!("http://{addr}"),
+        engine_stop,
+        handle,
+    }
+}
+
+pub async fn boot_undeclared_root_field(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> Result<(), service_engine::EngineError> {
+    let config = EngineConfig::new(
+        ChannelName::new(channel).expect("a valid notify channel"),
+        PodId::new(pod).expect("a valid pod id"),
+    )
+    .with_window(Duration::from_millis(30))
+    .with_beat(Duration::from_millis(80))
+    .with_lease(Duration::from_secs(5))
+    .with_lock_timeout(Duration::from_millis(300));
+
+    let mut engine = Engine::<SamplePrincipal>::boot(
+        config,
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await?;
+    engine.register_principal_resolver(SamplePrincipalResolver)?;
+    engine.register_projector(WidgetProjector)?;
+    engine.register_projector(AssignmentProjector)?;
+    engine.register_schema_slice(WIDGET_SLICE)?;
+
+    let readiness = engine.readiness();
+    let state = Arc::new(engine.graphql_state());
+    let schema = engine_schema(
+        QueryRoot::default(),
+        MutationRoot,
+        SubscriptionRoot,
+        state.clone(),
+    );
+    engine.set_schema_sdl(schema.sdl());
+    let app = service_engine::app(schema, state, readiness);
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a loopback port for the undeclared-root-field boot");
+    engine.run_with_listener(listener, app).await
 }
 
 pub async fn boot_colliding_slices(
