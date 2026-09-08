@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use service_engine::config::EngineConfig;
-use service_engine::graphql::{SchemaSlices, SliceFragment};
+use service_engine::graphql::SliceFragment;
 use service_engine::name::{ChannelName, PodId};
 use service_engine::nats::Nats;
 use service_engine::{Engine, engine_schema};
@@ -30,6 +30,18 @@ const ASSIGNMENT_SLICE: SliceFragment = SliceFragment {
     types: &["AssignmentView"],
 };
 
+pub const ROOT_FIELD_COLLISION: SliceFragment = SliceFragment {
+    slice: "shadow",
+    root_fields: &["widget"],
+    types: &["ShadowView"],
+};
+
+pub const TYPE_COLLISION: SliceFragment = SliceFragment {
+    slice: "shadow",
+    root_fields: &["shadow"],
+    types: &["WidgetView"],
+};
+
 pub struct GraphqlService {
     pub base_url: String,
     engine_stop: Arc<Notify>,
@@ -51,15 +63,11 @@ impl GraphqlService {
     }
 }
 
-fn assemble_slices() -> SchemaSlices {
-    let mut slices = SchemaSlices::new();
-    slices
-        .add(WIDGET_SLICE)
-        .expect("the widget slice owns its root fields and types");
-    slices
-        .add(ASSIGNMENT_SLICE)
-        .expect("the assignment slice composes without colliding with the widget slice");
-    slices
+async fn free_loopback_addr() -> std::net::SocketAddr {
+    let probe = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a loopback port to discover a free address");
+    probe.local_addr().expect("the probed address is known")
 }
 
 pub async fn boot_graphql_service(
@@ -68,6 +76,7 @@ pub async fn boot_graphql_service(
     channel: &str,
     pod: &str,
 ) -> GraphqlService {
+    let addr = free_loopback_addr().await;
     let config = EngineConfig::new(
         ChannelName::new(channel).expect("a valid notify channel"),
         PodId::new(pod).expect("a valid pod id"),
@@ -75,7 +84,8 @@ pub async fn boot_graphql_service(
     .with_window(Duration::from_millis(30))
     .with_beat(Duration::from_millis(80))
     .with_lease(Duration::from_secs(5))
-    .with_lock_timeout(Duration::from_millis(300));
+    .with_lock_timeout(Duration::from_millis(300))
+    .with_http_addr(addr);
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,
@@ -100,8 +110,12 @@ pub async fn boot_graphql_service(
     engine
         .register_mutation::<MintSecret, _>(mint_secret)
         .expect("register the mint mutation");
-
-    let _slices = assemble_slices();
+    engine
+        .register_schema_slice(WIDGET_SLICE)
+        .expect("the widget slice owns its root fields and types");
+    engine
+        .register_schema_slice(ASSIGNMENT_SLICE)
+        .expect("the assignment slice composes without colliding with the widget slice");
 
     let readiness = engine.readiness();
     let engine_stop = engine.shutdown_handle();
@@ -114,11 +128,7 @@ pub async fn boot_graphql_service(
     );
     let app = service_engine::app(schema, state, readiness.clone());
 
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind a loopback port for the graphql server");
-    let addr = listener.local_addr().expect("the bound address is known");
-    let handle = tokio::spawn(engine.run_with_listener(listener, app));
+    let handle = tokio::spawn(engine.run_with(app));
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     while readiness.snapshot() != Readiness::Ready {
@@ -134,4 +144,47 @@ pub async fn boot_graphql_service(
         engine_stop,
         handle,
     }
+}
+
+pub async fn boot_colliding_slices(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    colliding: SliceFragment,
+) -> Result<(), service_engine::EngineError> {
+    let config = EngineConfig::new(
+        ChannelName::new(channel).expect("a valid notify channel"),
+        PodId::new(pod).expect("a valid pod id"),
+    )
+    .with_window(Duration::from_millis(30))
+    .with_beat(Duration::from_millis(80))
+    .with_lease(Duration::from_secs(5))
+    .with_lock_timeout(Duration::from_millis(300));
+
+    let mut engine = Engine::<SamplePrincipal>::boot(
+        config,
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await?;
+    engine.register_principal_resolver(SamplePrincipalResolver)?;
+    engine.register_projector(WidgetProjector)?;
+    engine.register_schema_slice(WIDGET_SLICE)?;
+    engine.register_schema_slice(colliding)?;
+
+    let readiness = engine.readiness();
+    let state = Arc::new(engine.graphql_state());
+    let schema = engine_schema(
+        QueryRoot::default(),
+        MutationRoot,
+        SubscriptionRoot,
+        state.clone(),
+    );
+    let app = service_engine::app(schema, state, readiness);
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a loopback port for the colliding-slice boot");
+    engine.run_with_listener(listener, app).await
 }
