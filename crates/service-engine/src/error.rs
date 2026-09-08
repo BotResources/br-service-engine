@@ -166,8 +166,8 @@ pub enum EngineError {
     #[error("blob kind {kind} is used but was never registered with register_blobs")]
     BlobKindUnregistered { kind: &'static str },
 
-    #[error("the {capability} capability is a later unit of the 0.1.0 rework and has no body yet")]
-    NotYet { capability: &'static str },
+    #[error("presence type `{presence}` is used but was never registered with register_presence")]
+    PresenceNotRegistered { presence: String },
 
     #[error("http server on {addr}: {source}")]
     Http {
@@ -183,6 +183,11 @@ pub enum EngineError {
         first: &'static str,
         second: &'static str,
     },
+
+    #[error(
+        "the composed schema exposes the graphql root field `{member}` that no slice fragment declared"
+    )]
+    UndeclaredSchemaMember { member: String },
 }
 
 #[derive(Debug, Error)]

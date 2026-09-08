@@ -176,8 +176,8 @@ impl<P: Principal> PresenceHandle<P> {
             .iter()
             .find(|(type_id, _)| *type_id == TypeId::of::<Pr>())
             .map(|(_, lane)| lane)
-            .ok_or(EngineError::NotYet {
-                capability: "register_presence",
+            .ok_or_else(|| EngineError::PresenceNotRegistered {
+                presence: Pr::NAME.as_str().to_string(),
             })?;
         let lane = lane
             .as_any()

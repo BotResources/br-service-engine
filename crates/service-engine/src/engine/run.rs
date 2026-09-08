@@ -23,31 +23,11 @@ enum Boot {
 }
 
 impl<P: Principal> Engine<P> {
-    pub async fn run_with(self, app: axum::Router) -> Result<(), EngineError> {
-        let addr = self.config.http_addr;
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .map_err(|source| EngineError::Http { addr, source })?;
-        self.run_with_listener(listener, app).await
-    }
-
-    pub async fn run_with_listener(
-        self,
-        listener: tokio::net::TcpListener,
-        app: axum::Router,
-    ) -> Result<(), EngineError> {
-        let server_stop = Arc::new(Notify::new());
-        let server = tokio::spawn(crate::graphql::serve(listener, app, server_stop.clone()));
-        let outcome = self.run().await;
-        server_stop.notify_one();
-        if let Ok(Err(error)) = server.await {
-            tracing::error!(%error, "the engine's http server ended with an error");
-        }
-        outcome
-    }
-
     pub async fn run(self) -> Result<(), EngineError> {
-        crate::graphql::SchemaSlices::assemble(&self.schema_slices)?;
+        let slices = crate::graphql::SchemaSlices::assemble(&self.schema_slices)?;
+        if let Some(sdl) = &self.schema_sdl {
+            slices.verify_root_fields(sdl)?;
+        }
         let render = self.render_runtime();
         let Engine {
             config,

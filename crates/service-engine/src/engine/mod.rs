@@ -3,6 +3,7 @@ mod loops;
 mod mutate;
 mod register;
 mod run;
+mod serve;
 
 pub use blobs::BlobReader;
 
@@ -52,6 +53,7 @@ pub struct Engine<P: Principal> {
     blobs: BlobRegistry,
     erasables: Vec<Arc<dyn ErasedErasable>>,
     schema_slices: Vec<SliceFragment>,
+    schema_sdl: Option<String>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
 }
@@ -105,6 +107,7 @@ impl<P: Principal> Engine<P> {
             blobs: BlobRegistry::new(),
             erasables: Vec::new(),
             schema_slices: Vec::new(),
+            schema_sdl: None,
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
         })
@@ -116,6 +119,10 @@ impl<P: Principal> Engine<P> {
 
     pub fn shutdown_handle(&self) -> Arc<tokio::sync::Notify> {
         self.shutdown.clone()
+    }
+
+    pub fn set_schema_sdl(&mut self, sdl: String) {
+        self.schema_sdl = Some(sdl);
     }
 
     pub(crate) fn render_runtime(&self) -> Arc<SessionRuntime<P>> {
