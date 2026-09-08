@@ -197,7 +197,7 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   cluster, sustained resets, dead letters present) ship as a `PrometheusRule`
   in `observability/service-engine-alerts.yaml`.
 
-### Added
+### Added (0.1.0 rework, unit U1 — delivery core)
 
 - Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,
   `register_rls`, `register_principal_resolver`), `SessionRuntime`
@@ -280,10 +280,11 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   one), and readiness gated on mirror convergence.
 - Observability: `service_engine_*` metrics through the `metrics` facade.
 - Postgres schema in the reserved migration range, applied by `schema::migrate`
-  (`ignore_missing`) with `grant_engine_access`. The engine owns five tables:
+  (`ignore_missing`) with `grant_engine_access`. The delivery core owns
   `scheduled_impact`, `leader_slot`, `accumulator_chunk`, `accumulator_seal`,
   and `kv_relay_watermark` (the per-key KV publish watermark that survives
-  restarts). Scheduled boundaries are claimed against the database clock
+  restarts); the inbound loop adds `message_claim`, `sequence_guard` and
+  `dead_letter` (unit U2, documented above). Scheduled boundaries are claimed against the database clock
   (`now()` in the claiming statement), never the pod clock, so a skewed pod
   never fires a boundary early or late.
 - `conformance-service-engine`: the named scenarios `s01`–`s25` plus

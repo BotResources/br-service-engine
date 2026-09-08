@@ -43,28 +43,28 @@ fills its part by adding module files and one method body.
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 |
 | `persistence` | `Persistence` trait; CRUD, soft-EDA, full-EDA styles behind `load`/`save` | U4 |
-| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 |
-| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 |
-| `gate`, `visibility` | `Gate` / `Reason` (affordance == mutation check); `Visibility` cohorts | U5 |
-| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `present` | U6 (done) |
+| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
+| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
 | `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 (done) |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` | U11 |
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then. `register_reaction` is live: it records a reaction and derives its
-inbound subscription, and the engine-owned inbound loop (durable consumer,
+until then. `register_reaction` (U2) is live: it records a reaction and derives
+its inbound subscription, and the engine-owned inbound loop (durable consumer,
 ack-after-durable, `Disposition` routing, poison budget with the
 `service_engine.dead_letter` table and its retry/discard gestures, the
 per-(producer, key) sequence guard beside the idempotency claim) runs over it.
-until then. `register_presence` (U6) is filled: it binds the
-`EPHEMERAL_{service}` bucket at boot (bind-only, fail-loud), every pod watches
-it, and put/expiry reach sessions as `Upsert`/`Remove` through the same
-session/render machinery as every other lane. Name the bucket with
-`EngineConfig::with_service`.
+`register_presence` (U6) is filled: it binds the `EPHEMERAL_{service}` bucket at
+boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
+as `Upsert`/`Remove` through the same session/render machinery as every other
+lane; name the bucket with `EngineConfig::with_service`. `register_mirror` (U8)
+projects a consumed KV offer into `known_*` through the direct lane, and
+`declare_scopes` (U10) runs the boot scope-declaration handshake that gates
+readiness until Identity confirms.
 
 ## Conformance battery
 
