@@ -11,17 +11,19 @@ use crate::schema::TABLE_LEADER_SLOT;
 pub struct MirrorLeader {
     pod: PodId,
     lease: Duration,
+    beat: Duration,
 }
 
 impl MirrorLeader {
-    pub fn new(pod: PodId, lease: Duration) -> Self {
-        Self { pod, lease }
+    pub fn new(pod: PodId, lease: Duration, beat: Duration) -> Self {
+        Self { pod, lease, beat }
     }
 }
 
 pub(super) struct MirrorGate {
     pub(super) pod: PodId,
     pub(super) lease: Duration,
+    pub(super) beat: Duration,
     pub(super) slot_name: String,
     pub(super) advisory_key: i64,
 }
@@ -31,6 +33,7 @@ impl MirrorGate {
         Self {
             pod: leader.pod,
             lease: leader.lease,
+            beat: leader.beat,
             slot_name: format!("mirror:{}", name.as_str()),
             advisory_key: advisory::lock_id(
                 advisory::LEADER_SLOT,

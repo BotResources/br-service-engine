@@ -40,11 +40,13 @@ type OpenWatchFn = Arc<
         > + Send
         + Sync,
 >;
+type SnapshotFn = Arc<dyn Fn(&Shadows) -> Vec<Change> + Send + Sync>;
 
 pub(super) struct Consumption {
     pub(super) prefix: &'static str,
     pub(super) load: LoadFn,
     pub(super) open_watch: OpenWatchFn,
+    pub(super) snapshot: SnapshotFn,
 }
 
 fn service<E: std::error::Error + Send + Sync + 'static>(error: E) -> EngineError {
@@ -93,10 +95,22 @@ impl Consumption {
                     Result<BoxStream<'static, Result<Update, EngineError>>, EngineError>,
                 >
         });
+        let snapshot: SnapshotFn = Arc::new(|shadows: &Shadows| {
+            shadows
+                .shadow::<C>()
+                .iter()
+                .map(|(key, _)| Change {
+                    prefix: C::PREFIX,
+                    key: key.clone(),
+                    op: ChangeOp::Put,
+                })
+                .collect()
+        });
         Self {
             prefix: C::PREFIX,
             load,
             open_watch,
+            snapshot,
         }
     }
 }

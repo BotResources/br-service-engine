@@ -13,6 +13,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 const LEASE: Duration = Duration::from_secs(1);
+const BEAT: Duration = Duration::from_millis(200);
 const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
 
@@ -37,13 +38,13 @@ async fn s42_exactly_one_pod_projects_and_the_standby_takes_over_when_the_leader
         fabric.clone(),
         pool.clone(),
         transport_a.clone() as Arc<dyn ImpactTransport>,
-        MirrorLeader::new(PodId::new("pod-a").unwrap(), LEASE),
+        MirrorLeader::new(PodId::new("pod-a").unwrap(), LEASE, BEAT),
     );
     let mirror_b = directory_mirror().build_led(
         fabric.clone(),
         pool.clone(),
         transport_b.clone() as Arc<dyn ImpactTransport>,
-        MirrorLeader::new(PodId::new("pod-b").unwrap(), LEASE),
+        MirrorLeader::new(PodId::new("pod-b").unwrap(), LEASE, BEAT),
     );
 
     mirror_a
@@ -75,15 +76,14 @@ async fn s42_exactly_one_pod_projects_and_the_standby_takes_over_when_the_leader
     )
     .await;
     await_known(&pool, 2, "the live leader never projected the second user").await;
-    let b_after_second = transport_b.staged().len();
     assert_eq!(
-        b_after_second, 0,
+        transport_b.staged().len(),
+        0,
         "while pod A is alive and holds the lease, pod B still projects nothing"
     );
 
     watch_a.abort();
-    tokio::time::sleep(LEASE + Duration::from_millis(750)).await;
-
+    tokio::time::sleep(POLL).await;
     let third = Uuid::now_v7();
     publish_roster(
         &fabric,
@@ -94,15 +94,25 @@ async fn s42_exactly_one_pod_projects_and_the_standby_takes_over_when_the_leader
         ]),
     )
     .await;
+
+    tokio::time::sleep(POLL).await;
+    assert_eq!(
+        known_users(&pool).await,
+        2,
+        "the third user is published while pod A's lease has not yet expired, so pod B has taken \
+         the change into its shadow but must not project it while it is only the standby"
+    );
+
     await_known(
         &pool,
         3,
-        "the standby never took over after the leader stopped",
+        "pod B never took over and projected the change published inside the failover window",
     )
     .await;
     assert!(
         !transport_b.staged().is_empty(),
-        "pod B took the expired lease and projected the change the stopped leader would have"
+        "pod B took the expired lease and projected the change the stopped leader would have, \
+         from its already-current shadow and without a reload"
     );
 
     watch_b.abort();

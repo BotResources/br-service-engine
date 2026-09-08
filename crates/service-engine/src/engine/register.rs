@@ -63,7 +63,11 @@ impl<P: Principal> Engine<P> {
             self.nats.clone(),
             self.pg.clone(),
             self.transport.clone() as Arc<dyn ImpactTransport>,
-            crate::mirror::MirrorLeader::new(self.config.pod_id.clone(), self.config.lease),
+            crate::mirror::MirrorLeader::new(
+                self.config.pod_id.clone(),
+                self.config.lease,
+                self.config.beat,
+            ),
         );
         self.mirrors.register(handle)
     }
