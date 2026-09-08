@@ -1,4 +1,5 @@
 pub mod assignment;
+pub mod counter;
 pub mod cron;
 pub mod engine;
 pub mod gate;
@@ -47,6 +48,11 @@ pub const TABLES: &[&str] = &[
     "sample_backfill",
     "se_stub_effect",
     "sample_widget",
+    "sample_counter_crud",
+    "sample_counter_soft",
+    "sample_counter_soft_fact",
+    "sample_counter_full_event",
+    "sample_counter_full_snapshot",
 ];
 
 pub use mirror::{
@@ -54,13 +60,19 @@ pub use mirror::{
     directory_mirror_handle, known_users, publish_roster, retract_user,
 };
 
+pub use counter::{
+    BumpCrud, BumpFull, BumpFullCmd, BumpSoft, CoarseCounterFault, CounterError, CounterEvent,
+    CounterFault, CounterState, CounterView, CrudCounter, FullCounter, FullCounterProjector,
+    SoftCounter, bump_full_coords, erase_author, replay_from_scratch,
+};
+
 pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs};
 
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
 pub use engine::{
-    SAMPLE_JOB, SAMPLE_RELAY, boot_presence_engine, boot_render_engine, boot_sample_engine,
-    engine_config,
+    SAMPLE_JOB, SAMPLE_RELAY, boot_persistence_engine, boot_presence_engine, boot_render_engine,
+    boot_sample_engine, engine_config,
 };
 
 pub use assignment::{
