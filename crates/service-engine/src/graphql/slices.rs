@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::error::EngineError;
 
+#[derive(Clone, Copy)]
 pub struct SliceFragment {
     pub slice: &'static str,
     pub root_fields: &'static [&'static str],
@@ -31,6 +32,14 @@ pub struct SchemaSlices {
 impl SchemaSlices {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn assemble(fragments: &[SliceFragment]) -> Result<Self, EngineError> {
+        let mut slices = Self::new();
+        for fragment in fragments {
+            slices.add(*fragment)?;
+        }
+        Ok(slices)
     }
 
     pub fn add(&mut self, fragment: SliceFragment) -> Result<(), EngineError> {

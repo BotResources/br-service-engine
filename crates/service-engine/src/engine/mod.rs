@@ -17,6 +17,7 @@ use crate::blobs::BlobRegistry;
 use crate::boot::establish_transport_with_probe;
 use crate::config::EngineConfig;
 use crate::error::{AttachError, EngineError};
+use crate::graphql::SliceFragment;
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::ReactionRegistry;
@@ -48,6 +49,7 @@ pub struct Engine<P: Principal> {
     offers: OfferStagers,
     presence: PresenceRegistry<P>,
     blobs: BlobRegistry,
+    schema_slices: Vec<SliceFragment>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
 }
@@ -99,6 +101,7 @@ impl<P: Principal> Engine<P> {
             offers: OfferStagers::default(),
             presence: PresenceRegistry::new(),
             blobs: BlobRegistry::new(),
+            schema_slices: Vec::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
         })

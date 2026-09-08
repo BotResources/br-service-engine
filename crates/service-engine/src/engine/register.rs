@@ -6,6 +6,7 @@ use futures_util::future::BoxFuture;
 use crate::accumulator::Accumulator;
 use crate::engine::Engine;
 use crate::error::EngineError;
+use crate::graphql::SliceFragment;
 use crate::inbound::{Budgets, ReactionMessage, Subscription};
 use crate::mirror::{MirrorReady, Project};
 use crate::pipeline::Reaction;
@@ -15,6 +16,11 @@ use crate::projector::Projector;
 use crate::transport::ImpactTransport;
 
 impl<P: Principal> Engine<P> {
+    pub fn register_schema_slice(&mut self, fragment: SliceFragment) -> Result<(), EngineError> {
+        self.schema_slices.push(fragment);
+        Ok(())
+    }
+
     pub fn register_rls<R: RlsApplier<P>>(&mut self, r: R) -> Result<(), EngineError> {
         self.with_registry(|registry| {
             registry.register_rls(r);
