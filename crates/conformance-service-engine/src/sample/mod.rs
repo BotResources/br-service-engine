@@ -4,6 +4,7 @@ pub mod blob_view;
 pub mod counter;
 pub mod cron;
 pub mod engine;
+pub mod erase;
 pub mod gate;
 pub mod gated;
 pub mod graphql;
@@ -58,6 +59,11 @@ pub const TABLES: &[&str] = &[
     "sample_counter_full_event",
     "sample_counter_full_snapshot",
     "sample_doc",
+    "sample_erase_note",
+    "sample_erase_memo",
+    "sample_erase_memo_fact",
+    "sample_erase_ledger_event",
+    "sample_erase_ledger_snapshot",
 ];
 
 pub use mirror::{
