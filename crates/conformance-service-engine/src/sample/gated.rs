@@ -111,23 +111,33 @@ impl GatedAssignmentProjector {
         }
     }
 
-    async fn tenant_keys(
-        pg: &PgPool,
-        principal: &SamplePrincipal,
-    ) -> Result<Vec<Uuid>, EngineError> {
-        let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1")
-            .bind(principal.tenant())
-            .fetch_all(pg)
-            .await?;
-        Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
-    }
-
     async fn all_keys(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
         let rows = sqlx::query("SELECT id FROM sample_assignment")
             .fetch_all(pg)
             .await?;
         Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
     }
+}
+
+pub async fn load_candidates(pg: &PgPool) -> Result<Vec<(Uuid, AssignmentRow)>, EngineError> {
+    let rows = sqlx::query("SELECT id, tenant_id, title, closed FROM sample_assignment")
+        .fetch_all(pg)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let id: Uuid = row.get("id");
+            (
+                id,
+                AssignmentRow {
+                    id,
+                    tenant_id: row.get("tenant_id"),
+                    title: row.get("title"),
+                    closed: row.get("closed"),
+                },
+            )
+        })
+        .collect())
 }
 
 fn membership_dep() -> Deps {
@@ -158,15 +168,16 @@ impl Projector for GatedAssignmentProjector {
         Box::pin(async move {
             match self.mode {
                 Mode::Keys => {
-                    let keys = Self::tenant_keys(pg, principal).await?;
-                    Ok(Population::Keys(keys.into_iter().collect::<BTreeSet<_>>()))
+                    let candidates = load_candidates(pg).await?;
+                    Ok(AssignmentVisibility::window(candidates, principal))
                 }
                 Mode::All => {
                     let keys = Self::all_keys(pg).await?;
                     Ok(Population::Keys(keys.into_iter().collect::<BTreeSet<_>>()))
                 }
                 Mode::Membership => {
-                    let keys = Self::tenant_keys(pg, principal).await?;
+                    let candidates = load_candidates(pg).await?;
+                    let keys = AssignmentVisibility::visible_keys(candidates, principal);
                     let interest = Interest::new()
                         .on_noun(Assignment::NAME, Dims::EMPTY)
                         .on_deps(membership_dep());

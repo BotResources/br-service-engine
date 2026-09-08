@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::cohort::CohortKey;
+use crate::population::Population;
 
 pub type Cohorts = Vec<CohortKey>;
 
@@ -17,121 +18,74 @@ pub trait Visibility: Send + Sync + 'static {
             .into_iter()
             .any(|cohort| memberships.contains(&cohort))
     }
+
+    fn visible_keys<K, I>(candidates: I, principal: &Self::Principal) -> BTreeSet<K>
+    where
+        K: Ord,
+        I: IntoIterator<Item = (K, Self::Row)>,
+    {
+        let memberships: BTreeSet<CohortKey> = Self::memberships(principal).into_iter().collect();
+        candidates
+            .into_iter()
+            .filter(|(_, row)| {
+                Self::cohorts(row)
+                    .into_iter()
+                    .any(|cohort| memberships.contains(&cohort))
+            })
+            .map(|(key, _)| key)
+            .collect()
+    }
+
+    fn window<K, I>(candidates: I, principal: &Self::Principal) -> Population<K>
+    where
+        K: Ord,
+        I: IntoIterator<Item = (K, Self::Row)>,
+    {
+        Population::Keys(Self::visible_keys(candidates, principal))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowMismatch<K> {
+    pub only_in_window: Vec<K>,
+    pub only_in_declaration: Vec<K>,
+}
+
+impl<K: std::fmt::Debug> std::fmt::Display for WindowMismatch<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the session window and the visibility declaration diverge: \
+             only in the window {:?}, only in the declaration {:?}",
+            self.only_in_window, self.only_in_declaration
+        )
+    }
+}
+
+impl<K: std::fmt::Debug> std::error::Error for WindowMismatch<K> {}
+
+pub fn check_window_matches_visibility<V, K, I>(
+    window: &BTreeSet<K>,
+    candidates: I,
+    principal: &V::Principal,
+) -> Result<(), WindowMismatch<K>>
+where
+    V: Visibility,
+    K: Ord + Clone,
+    I: IntoIterator<Item = (K, V::Row)>,
+{
+    let declared = V::visible_keys::<K, _>(candidates, principal);
+    let only_in_window: Vec<K> = window.difference(&declared).cloned().collect();
+    let only_in_declaration: Vec<K> = declared.difference(window).cloned().collect();
+    if only_in_window.is_empty() && only_in_declaration.is_empty() {
+        Ok(())
+    } else {
+        Err(WindowMismatch {
+            only_in_window,
+            only_in_declaration,
+        })
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use uuid::Uuid;
-
-    struct Project {
-        org: Uuid,
-        id: Uuid,
-        public: bool,
-    }
-
-    struct Viewer {
-        orgs: Vec<Uuid>,
-        projects: Vec<Uuid>,
-    }
-
-    fn org(id: Uuid) -> CohortKey {
-        CohortKey::of(&[("org", id)])
-    }
-
-    fn member(id: Uuid) -> CohortKey {
-        CohortKey::of(&[("member", id)])
-    }
-
-    fn public() -> CohortKey {
-        CohortKey::of::<&str>(&["public"])
-    }
-
-    struct ProjectVisibility;
-
-    impl Visibility for ProjectVisibility {
-        type Row = Project;
-        type Principal = Viewer;
-
-        fn cohorts(row: &Project) -> Cohorts {
-            let mut cohorts = vec![org(row.org), member(row.id)];
-            if row.public {
-                cohorts.push(public());
-            }
-            cohorts
-        }
-
-        fn memberships(viewer: &Viewer) -> Cohorts {
-            viewer
-                .orgs
-                .iter()
-                .map(|id| org(*id))
-                .chain(viewer.projects.iter().map(|id| member(*id)))
-                .chain([public()])
-                .collect()
-        }
-    }
-
-    #[test]
-    fn a_row_is_visible_when_one_of_its_cohorts_meets_a_membership() {
-        let home = Uuid::now_v7();
-        let project = Project {
-            org: home,
-            id: Uuid::now_v7(),
-            public: false,
-        };
-        let insider = Viewer {
-            orgs: vec![home],
-            projects: vec![],
-        };
-        assert!(ProjectVisibility::visible(&project, &insider));
-    }
-
-    #[test]
-    fn a_row_is_invisible_when_no_cohort_meets_any_membership() {
-        let project = Project {
-            org: Uuid::now_v7(),
-            id: Uuid::now_v7(),
-            public: false,
-        };
-        let outsider = Viewer {
-            orgs: vec![Uuid::now_v7()],
-            projects: vec![Uuid::now_v7()],
-        };
-        assert!(!ProjectVisibility::visible(&project, &outsider));
-    }
-
-    #[test]
-    fn a_public_cohort_makes_a_row_visible_to_everyone() {
-        let project = Project {
-            org: Uuid::now_v7(),
-            id: Uuid::now_v7(),
-            public: true,
-        };
-        let stranger = Viewer {
-            orgs: vec![],
-            projects: vec![],
-        };
-        assert!(ProjectVisibility::visible(&project, &stranger));
-    }
-
-    #[test]
-    fn losing_the_only_membership_that_matched_turns_a_row_invisible() {
-        let home = Uuid::now_v7();
-        let project = Project {
-            org: home,
-            id: Uuid::now_v7(),
-            public: false,
-        };
-        let before = Viewer {
-            orgs: vec![home],
-            projects: vec![],
-        };
-        let after = Viewer {
-            orgs: vec![Uuid::now_v7()],
-            projects: vec![],
-        };
-        assert!(ProjectVisibility::visible(&project, &before));
-        assert!(!ProjectVisibility::visible(&project, &after));
-    }
-}
+mod tests;

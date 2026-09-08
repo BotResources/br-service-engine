@@ -131,5 +131,5 @@ pub use time::Timestamp;
 pub use transport::{
     ImpactTransport, ListenerProbe, NOTIFY_PAYLOAD_LIMIT, PendingImpacts, PgListenNotify,
 };
-pub use visibility::{Cohorts, Visibility};
+pub use visibility::{Cohorts, Visibility, WindowMismatch, check_window_matches_visibility};
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};
