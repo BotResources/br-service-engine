@@ -44,7 +44,7 @@ fills its part by adding module files and one method body.
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 |
 | `persistence` | `Persistence` trait; CRUD, soft-EDA, full-EDA styles behind `load`/`save` | U4 |
 | `gate`, `visibility` | `Gate` / `Reason` (affordance == mutation check); `Visibility` cohorts | U5 |
-| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 |
+| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `present` | U6 (done) |
 | `offer` | `Offer` trait, `register_offer`, versioned watermark and reconcile | U7 |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*` | U8 |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
@@ -53,7 +53,11 @@ fills its part by adding module files and one method body.
 | `graphql` | async-graphql kit; delta (`Reset`/`Upsert`/`Remove`) to subscription union | U12 |
 
 The `register_*` methods that a later unit fills return `EngineError::NotYet`
-until then.
+until then. `register_presence` (U6) is filled: it binds the
+`EPHEMERAL_{service}` bucket at boot (bind-only, fail-loud), every pod watches
+it, and put/expiry reach sessions as `Upsert`/`Remove` through the same
+session/render machinery as every other lane. Name the bucket with
+`EngineConfig::with_service`.
 
 ## Conformance battery
 

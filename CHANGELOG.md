@@ -36,6 +36,34 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `EngineError::NotYet` until then; the module map in the README names the unit
   for each.
 
+### Added (0.1.0 rework, unit U6 — presence lane)
+
+- The presence lane (lane B). `register_presence::<Pr>(ttl)` binds one
+  `EPHEMERAL_{service}` KV bucket at boot — bind-only, never provisioned — and
+  fails loud (readiness DOWN, `run` returns `Err`) when the bucket is absent, has
+  no TTL (`max_age` is zero), or has no delete markers on expiry (without them an
+  expired key raises no watch event, so a presence `Remove` could never fire).
+  The bucket name comes from `EngineConfig::with_service`; each lane's declared
+  `ttl` must be at least the bucket's `max_age`, or boot fails loud.
+- The `Presence` author trait: a `Noun` (its key type and impact noun), a
+  `Value`, a `View`, a `NAME`, and the pure functions `kv_key` / `parse_kv_key`
+  (typed key ↔ KV key), `view` (value → view) and `in_window` (which keys a
+  session's window covers). Presence values are principal-independent, so every
+  session of a presence projector shares one render.
+- Delivery over the existing session/render machinery. Every pod watches the
+  bucket, folds the latest value per key into an in-process presence view (no
+  transaction, no store write), and injects a local `(projector, key)` impact so
+  the render pass delivers an `Upsert` on a put and a `Remove` on a TTL-expiry or
+  clear, through the same `Reset`/`Upsert`/`Remove` wire and contiguous revision
+  as every other lane. A session that attaches after the pod is ready finds the
+  current presence in its `Reset` (the bucket is fully read into the store at
+  boot). Two pods watching one bucket each deliver to their own sessions.
+- The write side is `Engine::present::<Pr>(key, value)` and a cloneable
+  `PresenceHandle<P>` (`Engine::presence_handle`) the direct-lane pipeline calls
+  as `cx.present`; both put the value into the bound bucket, and every pod hears
+  it through its own watch. A one-value-per-key bucket makes last-write-wins and
+  loss-tolerance hold by construction.
+
 ### Added
 
 - Registry and render core: `RenderRegistry` (`bind_noun`, `register_projector`,
