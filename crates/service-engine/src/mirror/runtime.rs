@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use sqlx::PgPool;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use crate::error::EngineError;
 use crate::nats::Nats;
@@ -26,7 +26,7 @@ pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
     keyed_by: KeyedByFn<K>,
     project: Arc<Pr>,
     reconcile_keys: Option<ReconcileKeysFn<K>>,
-    shadows: Arc<Mutex<Shadows>>,
+    shadows: Arc<RwLock<Shadows>>,
 }
 
 impl<K, Pr> MirrorRuntime<K, Pr>
@@ -51,7 +51,7 @@ where
             keyed_by,
             project,
             reconcile_keys,
-            shadows: Arc::new(Mutex::new(Shadows::new())),
+            shadows: Arc::new(RwLock::new(Shadows::new())),
         }
     }
 
@@ -89,7 +89,7 @@ where
             touched = dedup(touched);
         }
         self.project_all(&fresh, touched).await?;
-        *self.shadows.lock().await = fresh;
+        *self.shadows.write().await = fresh;
         Ok(())
     }
 
@@ -101,11 +101,13 @@ where
         let mut merged = futures_util::stream::select_all(streams);
         while let Some(item) = merged.next().await {
             let update = item?;
-            let mut shadows = self.shadows.lock().await;
-            (update.apply)(&mut shadows);
-            let touched = dedup((self.keyed_by)(&shadows, &update.change));
+            let touched = {
+                let mut shadows = self.shadows.write().await;
+                (update.apply)(&mut shadows);
+                dedup((self.keyed_by)(&shadows, &update.change))
+            };
+            let shadows = self.shadows.read().await;
             self.project_all(&shadows, touched).await?;
-            drop(shadows);
         }
         Ok(())
     }
