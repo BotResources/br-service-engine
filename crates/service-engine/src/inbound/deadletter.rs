@@ -142,8 +142,7 @@ impl DeadLetters {
             .bind(id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| NatsError::Kv {
-                key: "dead_letter".to_string(),
+            .map_err(|e| NatsError::Store {
                 detail: e.to_string(),
             })?;
         let Some(row) = row else {
@@ -156,8 +155,7 @@ impl DeadLetters {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| NatsError::Kv {
-                key: "dead_letter".to_string(),
+            .map_err(|e| NatsError::Store {
                 detail: e.to_string(),
             })?;
         Ok(RetryOutcome::Republished)

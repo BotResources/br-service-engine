@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use tokio::sync::Notify;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::error::EngineError;
@@ -9,9 +7,10 @@ use crate::inbound::deadletter::DeadLetters;
 use crate::inbound::dispatch::Dispatch;
 use crate::inbound::subscription::{InboundConfig, Subscription};
 use crate::nats::Nats;
+use std::sync::Arc;
 
 pub struct InboundLoop {
-    cancel: Arc<Notify>,
+    cancel: watch::Sender<bool>,
     tasks: Vec<JoinHandle<Result<(), EngineError>>>,
 }
 
@@ -23,7 +22,7 @@ impl InboundLoop {
         dead_letters: DeadLetters,
         config: InboundConfig,
     ) -> Result<Self, EngineError> {
-        let cancel = Arc::new(Notify::new());
+        let (cancel, _) = watch::channel(false);
         let mut tasks = Vec::with_capacity(subscriptions.len());
         for subscription in subscriptions {
             let consumer = InboundConsumer::new(
@@ -34,14 +33,14 @@ impl InboundLoop {
                 config.clone(),
             );
             let opened = consumer.open().await?;
-            let cancel = cancel.clone();
-            tasks.push(tokio::spawn(consumer.serve(opened, cancel)));
+            let stop = cancel.subscribe();
+            tasks.push(tokio::spawn(consumer.serve(opened, stop)));
         }
         Ok(Self { cancel, tasks })
     }
 
     pub fn stop(&self) {
-        self.cancel.notify_waiters();
+        let _ = self.cancel.send(true);
     }
 
     pub async fn join(self) {

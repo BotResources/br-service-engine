@@ -27,8 +27,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_disposition_is_a_plain_copy_choice() {
-        assert_eq!(Disposition::Retry, Disposition::Retry);
-        assert_ne!(Disposition::Retry, Disposition::Terminal);
+    fn a_non_database_error_is_not_classified_terminal() {
+        assert!(!sqlx_is_terminal(&sqlx::Error::RowNotFound));
+        assert!(!sqlx_is_terminal(&sqlx::Error::PoolClosed));
+        assert!(!sqlx_is_terminal(&sqlx::Error::Protocol(
+            "seq overflow".into()
+        )));
     }
 }

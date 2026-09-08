@@ -5,7 +5,7 @@ use async_nats::jetstream::consumer::pull::Config as PullConfig;
 use async_nats::jetstream::consumer::{AckPolicy, Consumer, DeliverPolicy, ReplayPolicy};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use tokio::sync::Notify;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::error::EngineError;
@@ -71,7 +71,7 @@ impl InboundConsumer {
     pub async fn serve(
         self,
         consumer: Consumer<PullConfig>,
-        cancel: Arc<Notify>,
+        mut cancel: watch::Receiver<bool>,
     ) -> Result<(), EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
@@ -82,7 +82,7 @@ impl InboundConsumer {
         loop {
             let message = tokio::select! {
                 biased;
-                () = cancel.notified() => return Ok(()),
+                _ = cancel.changed() => return Ok(()),
                 next = messages.next() => next,
             };
             let message = match message {

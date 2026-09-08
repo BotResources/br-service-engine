@@ -46,6 +46,8 @@ pub enum NatsError {
     NoBucket { name: String },
     #[error("kv operation on {key} failed: {detail}")]
     Kv { key: String, detail: String },
+    #[error("a postgres read backing a nats operation failed: {detail}")]
+    Store { detail: String },
     #[error("kv key {key} was written at another revision than the {expected} expected")]
     RevisionConflict { key: String, expected: u64 },
     #[error("publish to {subject} failed ({kind}): {detail}")]
