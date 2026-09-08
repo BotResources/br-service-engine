@@ -5,6 +5,7 @@ pub mod gate;
 pub mod gated;
 pub mod mirror;
 pub mod note;
+pub mod offer;
 pub mod outbox;
 pub mod pipeline;
 pub mod pipeline_support;
@@ -59,8 +60,8 @@ pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_ru
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 
 pub use engine::{
-    SAMPLE_JOB, SAMPLE_RELAY, boot_presence_engine, boot_render_engine, boot_sample_engine,
-    engine_config,
+    SAMPLE_JOB, SAMPLE_RELAY, boot_offer_engine, boot_presence_engine, boot_render_engine,
+    boot_sample_engine, engine_config,
 };
 
 pub use assignment::{
@@ -72,6 +73,10 @@ pub use gated::{
     AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, reasons,
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
+pub use offer::{
+    MintThenReject, PublishedWidget, WidgetOffer, mint_then_reject, offer_dirty_keys,
+    published_widget, seed_bucket, widget_key,
+};
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use pipeline::{
     CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, SampleFault,

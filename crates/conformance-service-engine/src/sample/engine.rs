@@ -12,6 +12,7 @@ use crate::sample::assignment::{Assignment, AssignmentProjector};
 use crate::sample::cron::SampleCronJob;
 use crate::sample::mirror::directory_mirror;
 use crate::sample::note::{Note, NoteProjector};
+use crate::sample::offer::{MintThenReject, WidgetOffer, mint_then_reject};
 use crate::sample::pipeline::{
     CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, ScheduleCreate, close_widget,
     create_widget, import_widgets, lock_widget, mint_secret, schedule_create,
@@ -171,5 +172,40 @@ pub async fn boot_pipeline_engine(
     engine
         .register_reaction::<LockWidget, _, _>("sample-lock-widget", lock_widget)
         .expect("register the lock-widget reaction");
+    engine
+}
+
+pub async fn boot_offer_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the offer engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(WidgetProjector)
+        .expect("register the widget projector, which auto-binds the widget noun");
+    engine
+        .register_mutation::<MintSecret, _>(mint_secret)
+        .expect("register the mint mutation");
+    engine
+        .register_mutation::<CloseWidget, _>(close_widget)
+        .expect("register the close mutation");
+    engine
+        .register_mutation::<MintThenReject, _>(mint_then_reject)
+        .expect("register the mint-then-reject mutation");
+    engine
+        .register_offer::<WidgetOffer>()
+        .expect("register the widget offer");
     engine
 }
