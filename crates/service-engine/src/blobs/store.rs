@@ -130,6 +130,32 @@ impl BlobStore {
         }
         Ok(purged)
     }
+
+    pub(crate) async fn purge_references(
+        &self,
+        pool: &PgPool,
+        references: &[BlobRef],
+    ) -> Result<u64, EngineError> {
+        let mut purged = 0;
+        for reference in references {
+            let object_key: Option<String> = sqlx::query_scalar(&format!(
+                "SELECT object_key FROM {TABLE_BLOB} WHERE id = $1"
+            ))
+            .bind(reference.as_uuid())
+            .fetch_optional(pool)
+            .await?;
+            let Some(object_key) = object_key else {
+                continue;
+            };
+            self.object.delete_object(&object_key).await?;
+            sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
+                .bind(reference.as_uuid())
+                .execute(pool)
+                .await?;
+            purged += 1;
+        }
+        Ok(purged)
+    }
 }
 
 impl std::fmt::Debug for BlobStore {

@@ -81,7 +81,7 @@ pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use delta::{Delta, ErasedView, Revision};
 pub use engine::{BlobReader, Engine};
-pub use erase::{Erasable, PersonId};
+pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
 pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,

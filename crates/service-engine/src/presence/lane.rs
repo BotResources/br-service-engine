@@ -190,4 +190,20 @@ impl<P: Principal> PresenceHandle<P> {
         })?;
         lane.present(bucket, key, value).await
     }
+
+    pub async fn purge(&self, keys: &[KvKey]) -> Result<(), EngineError> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let Some(bucket) = self.bucket.get() else {
+            return Ok(());
+        };
+        for key in keys {
+            bucket
+                .retract(key)
+                .await
+                .map_err(|error| EngineError::Service(Box::new(error)))?;
+        }
+        Ok(())
+    }
 }

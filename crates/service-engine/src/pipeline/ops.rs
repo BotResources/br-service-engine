@@ -76,6 +76,11 @@ impl<'a> Ops<'a> {
             .stage_for(aggregate, &mut self.staged.offer_dirty)
     }
 
+    pub fn dirty_offer<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        self.offers
+            .stage_for(aggregate, &mut self.staged.offer_dirty)
+    }
+
     fn note_terminal(&mut self, outcome: &Result<(), EngineError>) {
         if self.staged.terminal_violation.is_some() {
             return;

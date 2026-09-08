@@ -32,6 +32,13 @@ impl BlobReader {
             None => Ok(0),
         }
     }
+
+    pub async fn purge_references(&self, references: &[BlobRef]) -> Result<u64, EngineError> {
+        match self.store.get() {
+            Some(store) => store.purge_references(&self.pg, references).await,
+            None => Ok(0),
+        }
+    }
 }
 
 impl std::fmt::Debug for BlobReader {

@@ -163,9 +163,33 @@ impl<P: Principal> Engine<P> {
         Ok(())
     }
 
-    pub async fn erase(&self, _person: crate::erase::PersonId) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "erase",
-        })
+    pub fn register_erasable<E: crate::erase::Erasable>(
+        &mut self,
+        erasable: E,
+    ) -> Result<(), EngineError> {
+        self.erasables
+            .push(Arc::new(crate::erase::ErasableAdapter::new(erasable)));
+        Ok(())
+    }
+
+    pub fn eraser(&self) -> crate::erase::Eraser<P> {
+        crate::erase::Eraser::new(
+            self.pg.clone(),
+            self.transport.clone() as Arc<dyn ImpactTransport>,
+            self.accumulators.clone(),
+            Arc::new(self.offers.clone()),
+            self.presence.handle(),
+            self.blob_reader(),
+            Arc::new(self.erasables.clone()),
+            self.config.service.clone(),
+            self.config.lock_timeout,
+        )
+    }
+
+    pub async fn erase(
+        &self,
+        person: crate::erase::PersonId,
+    ) -> Result<crate::erase::EraseOutcome, EngineError> {
+        self.eraser().erase(person).await
     }
 }

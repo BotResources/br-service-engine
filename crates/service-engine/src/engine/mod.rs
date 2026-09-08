@@ -16,6 +16,7 @@ use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, Durable};
 use crate::blobs::BlobRegistry;
 use crate::boot::establish_transport_with_probe;
 use crate::config::EngineConfig;
+use crate::erase::ErasedErasable;
 use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
@@ -48,6 +49,7 @@ pub struct Engine<P: Principal> {
     offers: OfferStagers,
     presence: PresenceRegistry<P>,
     blobs: BlobRegistry,
+    erasables: Vec<Arc<dyn ErasedErasable>>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
 }
@@ -99,6 +101,7 @@ impl<P: Principal> Engine<P> {
             offers: OfferStagers::default(),
             presence: PresenceRegistry::new(),
             blobs: BlobRegistry::new(),
+            erasables: Vec::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
         })
