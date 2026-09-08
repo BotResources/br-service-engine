@@ -5,7 +5,7 @@ use sqlx::PgPool;
 
 use crate::accumulator::ChunkReader;
 use crate::cohort::CohortKey;
-use crate::erase::{ErasedLoadScope, ErasedProjector};
+use crate::dyn_compat::{ErasedLoadScope, ErasedProjector};
 use crate::error::EngineError;
 use crate::principal::{Principal, RlsApplier};
 use crate::wire::{KeyBytes, ViewBytes};

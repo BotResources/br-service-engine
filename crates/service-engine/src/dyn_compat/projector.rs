@@ -6,7 +6,7 @@ use sqlx::{PgConnection, PgPool};
 
 use crate::accumulator::ChunkReader;
 use crate::cohort::CohortKey;
-use crate::erase::ErasedFacts;
+use crate::dyn_compat::ErasedFacts;
 use crate::error::EngineError;
 use crate::impact::{ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};

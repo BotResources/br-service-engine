@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::cohort::CohortKey;
-use crate::erase::ErasedPopulation;
+use crate::dyn_compat::ErasedPopulation;
 use crate::error::EngineError;
 use crate::name::ProjectorName;
 use crate::principal::Principal;

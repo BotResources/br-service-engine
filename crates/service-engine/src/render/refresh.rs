@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::erase::ErasedPopulation;
+use crate::dyn_compat::ErasedPopulation;
 use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::principal::{Principal, PrincipalId};

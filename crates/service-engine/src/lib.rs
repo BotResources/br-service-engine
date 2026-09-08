@@ -11,6 +11,7 @@ pub mod cohort;
 pub mod config;
 pub mod cron;
 pub mod delta;
+pub mod dyn_compat;
 pub mod engine;
 pub mod erase;
 pub mod error;

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::erase::ErasedInverse;
+use crate::dyn_compat::ErasedInverse;
 use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::name::ProjectorName;

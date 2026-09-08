@@ -17,7 +17,7 @@ use futures_util::future::BoxFuture;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::erase::ErasedAccumulator;
+use crate::dyn_compat::ErasedAccumulator;
 use crate::error::EngineError;
 use crate::name::{AccumulatorName, NounName};
 use crate::wire::Noun;
@@ -169,7 +169,7 @@ pub(crate) fn enroll<A: Accumulator>(
     let entry = Registered {
         name,
         noun: <A::Noun as Noun>::NAME,
-        erased: crate::erase::erase_accumulator(accumulator),
+        erased: crate::dyn_compat::erase_accumulator(accumulator),
     };
     held.insert(TypeId::of::<A>(), entry);
     Ok(())

@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use service_engine::accumulator::{Accumulator, AccumulatorRuntime, ChunkReader, ChunkSeq};
 use service_engine::cohort::CohortKey;
 use service_engine::delta::ErasedView;
-use service_engine::erase::{ErasedLoadScope, ErasedPopulation, ErasedProjector, erase_projector};
+use service_engine::dyn_compat::{
+    ErasedLoadScope, ErasedPopulation, ErasedProjector, erase_projector,
+};
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
 use service_engine::name::{AccumulatorName, NounName, ProjectorName};

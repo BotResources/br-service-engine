@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::cohort::CohortKey;
-use crate::erase::ErasedPopulation;
+use crate::dyn_compat::ErasedPopulation;
 use crate::error::{AttachError, EngineError};
 use crate::principal::Principal;
 use crate::render::group::{Rendered, Renderer};

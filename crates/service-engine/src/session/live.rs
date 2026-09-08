@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::delta::{Delta, ErasedView, Revision};
-use crate::erase::{ErasedPopulation, ErasedWindowQuery};
+use crate::dyn_compat::{ErasedPopulation, ErasedWindowQuery};
 use crate::impact::Impact;
 use crate::name::ProjectorName;
 use crate::principal::Principal;

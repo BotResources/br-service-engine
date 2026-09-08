@@ -4,7 +4,7 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize, Serializer};
 use service_engine::ChunkSeq;
 use service_engine::cohort::CohortKey;
-use service_engine::erase::{
+use service_engine::dyn_compat::{
     ErasedAccumulator, ErasedInverse, ErasedLoadScope, ErasedPopulation, erase_accumulator,
     erase_projector,
 };

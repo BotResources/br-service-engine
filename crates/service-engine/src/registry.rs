@@ -2,7 +2,7 @@ use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::erase::{ErasedProjector, erase_projector};
+use crate::dyn_compat::{ErasedProjector, erase_projector};
 use crate::error::EngineError;
 use crate::name::{NounName, ProjectorName};
 use crate::principal::{Principal, PrincipalResolver, RlsApplier};

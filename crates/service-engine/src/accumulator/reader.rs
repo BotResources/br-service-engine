@@ -7,7 +7,7 @@ use sqlx::{PgPool, Row};
 use crate::accumulator::single_flight::KeyedGate;
 use crate::accumulator::{Accumulated, Accumulator, ChunkSeq, Registered, Registry, lookup};
 use crate::config::DEFAULT_FOLD_CACHE_CAPACITY;
-use crate::erase::ErasedState;
+use crate::dyn_compat::ErasedState;
 use crate::error::EngineError;
 use crate::name::AccumulatorName;
 use crate::wire::{KeyBytes, Noun, encode_key};

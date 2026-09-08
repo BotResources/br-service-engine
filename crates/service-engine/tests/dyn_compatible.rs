@@ -5,7 +5,7 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use service_engine::accumulator::{Accumulator, ChunkSeq};
-use service_engine::erase::{
+use service_engine::dyn_compat::{
     ErasedAccumulator, ErasedProjector, erase_accumulator, erase_projector,
 };
 use service_engine::error::{CronError, EngineError, RelayError, TransportError};
