@@ -5,8 +5,9 @@ use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::inbound::Source;
 use crate::name::NounName;
+use crate::offers::OfferDirty;
 use crate::relays::outbox::{OutboxRecord, stage as stage_outbox};
-use crate::schema::TABLE_SCHEDULED_MESSAGE;
+use crate::schema::{TABLE_OFFER_DIRTY, TABLE_SCHEDULED_MESSAGE};
 use crate::time::Timestamp;
 use crate::transport::ImpactTransport;
 use crate::wire::KeyBytes;
@@ -25,6 +26,7 @@ pub(crate) struct Staged {
     pub scheduled_impacts: Vec<(NounName, KeyBytes, Timestamp)>,
     pub outbox: Vec<OutboxRecord>,
     pub scheduled_messages: Vec<ScheduledMessage>,
+    pub offer_dirty: Vec<OfferDirty>,
 }
 
 impl Staged {
@@ -51,8 +53,26 @@ impl Staged {
         for message in &self.scheduled_messages {
             insert_scheduled_message(conn, message).await?;
         }
+        for dirty in &self.offer_dirty {
+            stage_offer_dirty(conn, dirty).await?;
+        }
         Ok(())
     }
+}
+
+async fn stage_offer_dirty(conn: &mut PgConnection, dirty: &OfferDirty) -> Result<(), EngineError> {
+    sqlx::query(&format!(
+        "INSERT INTO {TABLE_OFFER_DIRTY} (offer, kv_key, agg_key, seq) \
+           VALUES ($1, $2, $3, nextval('service_engine.offer_dirty_seq')) \
+         ON CONFLICT (offer, kv_key) DO UPDATE \
+           SET agg_key = EXCLUDED.agg_key, seq = nextval('service_engine.offer_dirty_seq')"
+    ))
+    .bind(dirty.offer)
+    .bind(dirty.kv_key.as_str())
+    .bind(dirty.agg_key.as_slice().to_vec())
+    .execute(conn)
+    .await?;
+    Ok(())
 }
 
 async fn insert_scheduled_message(

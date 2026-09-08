@@ -16,6 +16,7 @@ use crate::error::{AttachError, EngineError};
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::ReactionRegistry;
+use crate::offers::OfferStagers;
 use crate::pipeline::MutationRegistry;
 use crate::presence::PresenceRegistry;
 use crate::principal::Principal;
@@ -40,6 +41,7 @@ pub struct Engine<P: Principal> {
     mirrors: MirrorSupervisor,
     inbound_reactions: Mutex<ReactionRegistry>,
     mutations: MutationRegistry<P>,
+    offers: OfferStagers,
     presence: PresenceRegistry<P>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
@@ -89,6 +91,7 @@ impl<P: Principal> Engine<P> {
             mirrors: MirrorSupervisor::new(),
             inbound_reactions: Mutex::new(ReactionRegistry::new()),
             mutations: MutationRegistry::new(),
+            offers: OfferStagers::default(),
             presence: PresenceRegistry::new(),
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,

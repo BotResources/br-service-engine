@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::Serialize;
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -6,6 +8,7 @@ use crate::accumulator::{Accumulator, AccumulatorRuntime};
 use crate::error::EngineError;
 use crate::impact::{Dims, Impact};
 use crate::inbound::ReactionMessage;
+use crate::offers::OfferStagers;
 use crate::persistence::{Aggregate, Persistence};
 use crate::pipeline::outbound::{OutboundCommand, OutboundEvent, command_record, event_record};
 use crate::pipeline::staged::{ScheduledMessage, Staged};
@@ -16,6 +19,7 @@ pub struct Ops<'a> {
     pub(crate) conn: &'a mut PgConnection,
     pub(crate) staged: &'a mut Staged,
     pub(crate) accumulators: &'a AccumulatorRuntime,
+    pub(crate) offers: Arc<OfferStagers>,
     pub(crate) now: Timestamp,
 }
 
@@ -24,12 +28,14 @@ impl<'a> Ops<'a> {
         conn: &'a mut PgConnection,
         staged: &'a mut Staged,
         accumulators: &'a AccumulatorRuntime,
+        offers: Arc<OfferStagers>,
         now: Timestamp,
     ) -> Self {
         Self {
             conn,
             staged,
             accumulators,
+            offers,
             now,
         }
     }
@@ -50,11 +56,15 @@ impl<'a> Ops<'a> {
     }
 
     pub async fn save<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
-        A::Store::save(self.conn, aggregate, &[]).await
+        A::Store::save(self.conn, aggregate, &[]).await?;
+        self.offers
+            .stage_for(aggregate, &mut self.staged.offer_dirty)
     }
 
     pub async fn create<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
-        A::Store::create(self.conn, aggregate, &[]).await
+        A::Store::create(self.conn, aggregate, &[]).await?;
+        self.offers
+            .stage_for(aggregate, &mut self.staged.offer_dirty)
     }
 
     pub fn impact<N: Noun>(&mut self, key: &N::Key, dims: Dims) -> Result<(), EngineError> {

@@ -59,10 +59,11 @@ impl<P: Principal> Engine<P> {
         K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
         Pr: Project<K>,
     {
-        let handle = mirror.build(
+        let handle = mirror.build_led(
             self.nats.clone(),
             self.pg.clone(),
             self.transport.clone() as Arc<dyn ImpactTransport>,
+            crate::mirror::MirrorLeader::new(self.config.pod_id.clone(), self.config.lease),
         );
         self.mirrors.register(handle)
     }
@@ -111,9 +112,11 @@ impl<P: Principal> Engine<P> {
     }
 
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
-        Err(EngineError::NotYet {
-            capability: "register_offer",
-        })
+        let relay = crate::offers::OfferRelay::<O>::new(self.nats.clone())
+            .map_err(|error| EngineError::Service(Box::new(error)))?;
+        self.beat.relays().register_erased(Arc::new(relay))?;
+        self.offers.register::<O>();
+        Ok(())
     }
 
     pub fn register_presence<Pr: Presence>(

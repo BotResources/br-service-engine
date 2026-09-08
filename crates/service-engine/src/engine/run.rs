@@ -34,11 +34,13 @@ impl<P: Principal> Engine<P> {
             mut beat,
             mirrors,
             inbound_reactions,
+            offers,
             presence,
             shutdown,
             declared_scopes,
             ..
         } = self;
+        let offers = Arc::new(offers);
 
         let readiness_guard = readiness.clone();
         let assembly = ReadinessAssembly::new(readiness, mirrors.health())
@@ -162,6 +164,7 @@ impl<P: Principal> Engine<P> {
                 pg.clone(),
                 transport.clone() as Arc<dyn ImpactTransport>,
                 accumulators.clone(),
+                offers.clone(),
                 reactions.clone(),
                 config.lock_timeout,
                 config.impacts_per_commit,
