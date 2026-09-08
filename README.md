@@ -81,7 +81,12 @@ command's events reach `save` through the default `Aggregate::pending_events`
 (`&[]` for CRUD), never through the pipeline. A style writes the state row (or
 snapshot) and its events (or facts) in the one transaction the pipeline opened
 and never opens its own, so a foreign-key, unique or check-constraint failure on
-either table rolls the state row and its events back together. Full EDA hydrates
+either table rolls the state row and its events back together. The reference
+stores take the row (or snapshot) lock at `load` with `SELECT … FOR UPDATE`, so
+concurrent commands on one key serialize in every style — the engine cannot
+inject that lock into author-owned load SQL, so the sample locks it and slices
+copied from it inherit it, while the render-side `Projector::load` stays
+lock-free. Full EDA hydrates
 on `load` by replaying the events above the snapshot and running the aggregate's
 hydration check as the second barrier, and owns the log's two gestures —
 upcasting an older event version at read time, and erasure, which rewrites a

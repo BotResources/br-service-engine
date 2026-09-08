@@ -190,6 +190,14 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   table rejects the write and its events together: the transaction rolls both
   back, so no state can exist without its event and no crash can land between
   them.
+- The reference stores take the row (or snapshot) lock at `load` with
+  `SELECT … FOR UPDATE`, so concurrent commands on one aggregate key **serialize
+  in every style**: the read-modify-write cannot lose an update, and two log-style
+  commands never race to the same event sequence. Locking the row in `load` is an
+  author responsibility — the engine cannot inject it into author-owned load SQL
+  — so the `counter` sample locks it and the slices copied from it inherit the
+  guarantee. The render side stays lock-free: `Projector::load` reads with its own
+  plain `SELECT`.
 - Full-EDA hydration on `load`: read the snapshot, replay the events above its
   version, then run the aggregate's hydration check as the second barrier, so a
   malformed log fails to load with a typed `EngineError::Service` rather than
@@ -219,8 +227,12 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   from a lagging snapshot equal to replay from scratch, and the hydration barrier
   refusing a malformed log (`s43`); upcasting a v1 event and an erasure that
   leaves the log readable (`s44`); a class-23 violation in `cx.save` dead-lettered
-  on the first delivery under a coarse Retry disposition (`s45`); and the render
-  side and the write side reading the same committed full-EDA snapshot (`s46`).
+  on the first delivery under a coarse Retry disposition (`s45`); the render
+  side and the write side reading the same committed full-EDA snapshot (`s46`);
+  concurrent commands on one key serialising without a lost update in all three
+  styles, exercising the `cx.create` open path and the `cx.save` bump path
+  (`s47`); and a unique constraint rejecting a concurrent duplicate `cx.create`
+  and rolling its appended events back with it (`s48`).
 
 ### Added (0.1.0 rework, unit U5)
 
