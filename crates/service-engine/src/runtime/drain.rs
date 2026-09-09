@@ -60,7 +60,7 @@ pub(super) async fn drain_listener(
         }
     }
     if owe_marker {
-        let _ = sink.send(Ok(TransportEvent::Reconnected)).await;
+        let _ = sink.try_send(Ok(TransportEvent::Reconnected));
     }
 }
 
@@ -144,6 +144,25 @@ mod tests {
             reconnects, 0,
             "a channel that never overflows signals no loss"
         );
+    }
+
+    #[tokio::test]
+    async fn the_stop_signal_ends_the_drain_while_a_marker_is_owed_on_a_full_channel() {
+        let (sink, _receiver) = mpsc::channel::<Item>(1);
+        let source = futures_util::stream::iter(burst(2))
+            .chain(futures_util::stream::pending())
+            .boxed();
+        let stop = Arc::new(Notify::new());
+
+        let drained = tokio::spawn(drain_listener(source, sink, stop.clone()));
+
+        tokio::task::yield_now().await;
+        stop.notify_one();
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), drained)
+            .await
+            .expect("the drain must not block on the owed marker when the channel stays full")
+            .expect("the drain task joins cleanly");
     }
 
     #[tokio::test]
