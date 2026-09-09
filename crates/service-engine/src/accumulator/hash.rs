@@ -47,7 +47,7 @@ impl SealHash {
             )));
         }
         let mut bytes = [0u8; 32];
-        for (index, pair) in raw.as_bytes().chunks_exact(2).enumerate() {
+        for (index, pair) in raw.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let hex = std::str::from_utf8(pair)
                 .map_err(|_| EngineError::SealHashFormat("non-utf8 hex".into()))?;
             bytes[index] = u8::from_str_radix(hex, 16)

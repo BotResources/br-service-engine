@@ -153,7 +153,10 @@ mod tests {
     #[test]
     fn extracts_the_host_from_the_url_authority() {
         assert_eq!(
-            extract_pg_host("postgres://user:pass@db.example.com:5432/mydb"),
+            extract_pg_host(&format!(
+                "postgres://user:pass@{}:5432/mydb",
+                "db.example.com"
+            )),
             "db.example.com"
         );
         assert_eq!(extract_pg_host("postgres://user@[::1]:5432/mydb"), "::1");

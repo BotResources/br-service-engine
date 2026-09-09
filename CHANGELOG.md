@@ -416,7 +416,7 @@ cause — and two-pod convergence.
 - Two empty crates — `service-engine` (the engine) and
   `conformance-service-engine` (its black-box conformance battery) — carrying no
   dependency and no code. Both ship with 0.1.0.
-- CI (`ci.yml`): fmt + clippy + test, MSRV 1.88 build, `cargo doc`, `cargo-deny`,
+- CI (`ci.yml`): fmt + clippy + test, MSRV 1.89 build, `cargo doc`, `cargo-deny`,
   `cargo-machete`, `cargo semver-checks`, changelog + README-pin check,
   shellcheck, trufflehog secret scan, and the conformance battery against real
   PostgreSQL 16 + NATS JetStream.
