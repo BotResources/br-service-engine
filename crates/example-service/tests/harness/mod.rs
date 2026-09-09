@@ -48,7 +48,35 @@ impl World {
         .await
     }
 
+    pub async fn start_bounded(
+        pod: &str,
+        session_ttl: Duration,
+        session_max_age: Duration,
+    ) -> World {
+        World::start_tweaked(
+            pod,
+            WorldOptions {
+                blobs: false,
+                declare_scopes: false,
+            },
+            move |config| {
+                config
+                    .with_session_ttl(session_ttl)
+                    .with_session_max_age(session_max_age)
+            },
+        )
+        .await
+    }
+
     pub async fn start_with(pod: &str, options: WorldOptions) -> World {
+        World::start_tweaked(pod, options, |config| config).await
+    }
+
+    async fn start_tweaked(
+        pod: &str,
+        options: WorldOptions,
+        tweak: impl FnOnce(EngineConfig) -> EngineConfig,
+    ) -> World {
         let db = TestDb::fresh().await;
         let nats_server = TestNats::spawn().await;
         nats_server.provision(example_contract::SERVICE).await;
@@ -82,7 +110,7 @@ impl World {
         };
 
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let mut config = base_config(pod, addr);
+        let mut config = tweak(base_config(pod, addr));
         if let Some(blob_config) = blob_config {
             config = config.with_blob_storage(blob_config);
         }

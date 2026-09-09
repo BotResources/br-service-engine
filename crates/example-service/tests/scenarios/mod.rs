@@ -7,4 +7,5 @@ mod lifecycle;
 mod multipod;
 mod presence;
 mod reply;
+mod session_lifetime;
 mod subscriptions;
