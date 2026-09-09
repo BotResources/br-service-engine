@@ -54,6 +54,18 @@ async fn snapshot_version(pool: &sqlx::PgPool, id: Uuid) -> i64 {
     .expect("read the ledger snapshot version")
 }
 
+async fn snapshot_last_author(pool: &sqlx::PgPool, id: Uuid) -> Option<Uuid> {
+    let raw: Option<String> = sqlx::query_scalar(
+        "SELECT state ->> 'last_author' FROM service_engine.event_snapshot \
+         WHERE noun = 'ledger' AND key = $1",
+    )
+    .bind(key_text(id))
+    .fetch_one(pool)
+    .await
+    .expect("read the ledger snapshot state");
+    raw.and_then(|value| Uuid::parse_str(&value).ok())
+}
+
 async fn event_count(pool: &sqlx::PgPool, id: Uuid) -> i64 {
     sqlx::query_scalar(
         "SELECT count(*) FROM service_engine.event_log WHERE noun = 'ledger' AND key = $1",
@@ -202,6 +214,75 @@ async fn full_eda_erasure_leaves_the_log_readable() {
         total(&world, &pass, l).await,
         7,
         "the rewritten log still hydrates and totals correctly",
+    );
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
+async fn full_eda_erasure_scrubs_a_crossed_snapshot_boundary() {
+    let world = World::start("pod-ledger-erase-snapshot").await;
+    let org = Uuid::now_v7();
+    let other = Uuid::now_v7();
+    let person = Uuid::now_v7();
+    let other_pass = passport(other, org, &[], false);
+    let person_pass = passport(person, org, &[], false);
+    let l = Uuid::now_v7();
+
+    for _ in 0..7 {
+        record(&world, &other_pass, l, 1).await;
+    }
+    record(&world, &person_pass, l, 1).await;
+
+    assert_eq!(
+        snapshot_version(&world.db.app, l).await,
+        8,
+        "the eighth fact crosses the window and rewrites the snapshot with the person folded in"
+    );
+    assert_eq!(
+        snapshot_last_author(&world.db.app, l).await,
+        Some(person),
+        "the lagging snapshot has folded the person into its state before erasure"
+    );
+
+    world
+        .service
+        .erase(PersonId(person))
+        .await
+        .expect("erase the author");
+
+    let residual: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.event_log \
+         WHERE noun = 'ledger' AND payload ->> 'author' = $1",
+    )
+    .bind(person.to_string())
+    .fetch_one(&world.db.app)
+    .await
+    .unwrap();
+    assert_eq!(residual, 0, "no event on the log still carries the person");
+
+    assert_eq!(
+        snapshot_last_author(&world.db.app, l).await,
+        Some(Uuid::nil()),
+        "the re-snapshot rebuilt from the whole rewritten log, so the snapshot row keeps no residual person past a crossed boundary"
+    );
+
+    let view = world
+        .gql(
+            &other_pass,
+            "query($id:UUID!){ledger(id:$id){total lastAuthor}}",
+            serde_json::json!({ "id": l }),
+        )
+        .await;
+    let ledger = &ok(&view)["ledger"];
+    assert_eq!(
+        ledger["total"], 8,
+        "the rewritten log still hydrates and totals correctly"
+    );
+    assert_eq!(
+        ledger["lastAuthor"],
+        Uuid::nil().to_string(),
+        "the read side exposes no residual person after erasure"
     );
 
     world.cleanup().await;

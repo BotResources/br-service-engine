@@ -29,6 +29,8 @@ pub trait EventSourced: Send + Sync + Sized + 'static {
     fn to_snapshot(&self) -> Self::Snapshot;
     fn from_snapshot(snapshot: Self::Snapshot) -> Self;
 
+    fn genesis(&self) -> Self;
+
     fn apply(&mut self, event: &Self::Event);
     fn check_hydrated(&self) -> Result<(), EngineError>;
 

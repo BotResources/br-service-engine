@@ -110,6 +110,31 @@ pub(crate) async fn load_aggregate<T: EventSourced>(
     Ok(Some(aggregate))
 }
 
+pub(crate) async fn resnapshot_from_log<T: EventSourced>(
+    conn: &mut PgConnection,
+    key_text: &str,
+) -> Result<(), EngineError> {
+    let Some((_, state)) = select_snapshot(conn, T::NOUN.as_str(), key_text).await? else {
+        return Ok(());
+    };
+    let snapshot: T::Snapshot =
+        serde_json::from_value(state).map_err(|source| EngineError::Decode {
+            what: "full-eda snapshot",
+            source,
+        })?;
+    let mut aggregate = T::from_snapshot(snapshot).genesis();
+    aggregate.set_version(0);
+    for (seq, event_version, payload) in
+        select_events_after(conn, T::NOUN.as_str(), key_text, 0).await?
+    {
+        let event = T::upcast(event_version, &payload)?;
+        aggregate.apply(&event);
+        aggregate.set_version(seq);
+    }
+    aggregate.check_hydrated()?;
+    upsert_snapshot::<T>(conn, key_text, &aggregate).await
+}
+
 pub(crate) async fn append_events<T: EventSourced>(
     conn: &mut PgConnection,
     key_text: &str,

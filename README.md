@@ -43,7 +43,7 @@ battery-backed.
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` to take the row lock (default no-op; the reference stores implement it as `SELECT … FOR UPDATE`); log-style events reach `save` via `Aggregate::pending_events` |
-| `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, re-snapshot in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
+| `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
@@ -86,7 +86,13 @@ is the locked state row). The command's events reach `save` through the default
 `Aggregate::pending_events` (`&[]` for CRUD), never through the pipeline. A style
 writes the state row (or the events and snapshot) in the one transaction the
 pipeline opened and never opens its own, so a foreign-key, unique or
-check-constraint failure rolls the state and its events back together. Both
+check-constraint failure rolls the state and its events back together. Those
+domain constraints live on a CRUD or soft-EDA slice's own state table; the
+full-EDA kit's generic `event_snapshot` (jsonb, keyed by noun) carries only the
+structural `(noun, key)` primary key and the log the `(noun, key, seq)` one, so a
+full-EDA slice enforces uniqueness and integrity in the aggregate's write-time
+gate and its hydration barrier, not in a declared FK/unique/check on the state.
+Both
 reads are non-locking — `load` is a plain read and `read_many` defaults to it —
 so the render side takes no row lock, whatever the author writes. The write
 pipeline takes the row lock itself: before `load` it calls the store's
@@ -102,7 +108,7 @@ read.
 
 Full EDA does not hand-roll that log. The `full_eda` kit owns it: a slice
 declares an `EventSourced` aggregate (its `NOUN`, `EVENT_VERSION`, the
-`SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `apply`,
+`SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`,
 `check_hydrated`, `upcast`) and sets `type Store = FullEda<Self>`; the kit does
 the rest over the engine's generic `event_log` and `event_snapshot` tables
 (keyed by noun, shipped in the reserved migration range). `save` appends the
@@ -113,9 +119,13 @@ version, runs the aggregate's hydration check as the second barrier, and so
 returns the same state whether the snapshot is fresh or lagging. The kit owns the
 log's two gestures — upcasting an older event version at read time through the
 aggregate's `upcast`, and `full_eda::erase`, which rewrites a person's events in
-place (through a redactor the slice supplies) and re-snapshots the touched
-aggregates from the rewritten log in the same transaction, leaving the log
-readable. On the engine's own authority, an integrity (SQLSTATE class 23) or
+place (through a redactor the slice supplies) and re-snapshots each touched
+aggregate by replaying the whole rewritten log from genesis in the same
+transaction — not from the lagging snapshot, so a person folded into a snapshot
+past a crossed cadence boundary leaves no residue behind — leaving the log
+readable. The rebuild uses the aggregate's `genesis` (its create-time identity
+with every event-folded field at zero), which is also the replay-from-scratch
+seam. On the engine's own authority, an integrity (SQLSTATE class 23) or
 data (class 22) violation raised inside a handler's `cx.save` / `cx.create` is
 classified terminal whatever the handler's `Disposition` says, so a coarse
 `Retry` cannot nak a constraint violation forever; a raw `cx.connection()` write

@@ -60,6 +60,16 @@ impl EventSourced for LedgerAggregate {
         ))
     }
 
+    fn genesis(&self) -> Self {
+        LedgerAggregate(LedgerState::from_snapshot(
+            self.0.id,
+            self.0.org_id,
+            0,
+            None,
+            0,
+        ))
+    }
+
     fn apply(&mut self, event: &LedgerEvent) {
         self.0.apply(event);
     }

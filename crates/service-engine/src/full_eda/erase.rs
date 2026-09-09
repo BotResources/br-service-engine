@@ -6,7 +6,7 @@ use crate::erase::PersonId;
 use crate::error::EngineError;
 use crate::full_eda::EventSourced;
 use crate::full_eda::decode_key_text;
-use crate::full_eda::store::{load_aggregate, upsert_snapshot};
+use crate::full_eda::store::resnapshot_from_log;
 use crate::schema::TABLE_EVENT_LOG;
 
 pub async fn erase<T, R>(
@@ -55,9 +55,7 @@ where
 
     let mut out = Vec::with_capacity(touched.len());
     for key_text in &touched {
-        if let Some(aggregate) = load_aggregate::<T>(conn, key_text).await? {
-            upsert_snapshot::<T>(conn, key_text, &aggregate).await?;
-        }
+        resnapshot_from_log::<T>(conn, key_text).await?;
         out.push(decode_key_text::<T::Key>(key_text)?);
     }
     Ok(out)

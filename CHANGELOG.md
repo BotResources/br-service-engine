@@ -114,10 +114,15 @@ registry, and the pipeline never learns the style. The command's events reach
 `save` through the default `Aggregate::pending_events` (`&[]` for CRUD). A style
 writes the state row (or snapshot) and its events (or facts) in the one
 transaction the pipeline opened, so a foreign-key, unique or check-constraint
-failure rolls the state row and its events back together. Full EDA is not
+failure rolls the state row and its events back together — those domain
+constraints live on a CRUD or soft-EDA slice's own state table; the full-EDA
+kit's generic jsonb `event_snapshot` (keyed by noun) carries only the structural
+`(noun, key)` primary key, so a full-EDA slice enforces uniqueness and integrity
+in the aggregate's write-time gate and hydration barrier, not in a declared
+FK/unique/check. Full EDA is not
 hand-rolled per slice: the `full_eda` kit ships the log. A slice declares an
 `EventSourced` aggregate (`NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence,
-`to_snapshot`/`from_snapshot`, `apply`, `check_hydrated`, `upcast`) and sets
+`to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and sets
 `type Store = FullEda<Self>`; the kit owns the engine's generic `event_log` and
 `event_snapshot` tables (keyed by noun, in the reserved migration range), the
 append with per-key seq arithmetic, the snapshot cadence (rewritten only when a
@@ -125,8 +130,9 @@ append with per-key seq arithmetic, the snapshot cadence (rewritten only when a
 from the snapshot with the aggregate's hydration check as the second barrier, and
 the log's two gestures — upcasting an older event version at read time, and
 `full_eda::erase` (rewrite the person's events in place through a slice-supplied
-redactor and re-snapshot the touched aggregates from the rewritten log in the
-same transaction). `full_eda::keys` lists a noun's keys for a window populate.
+redactor, then re-snapshot each touched aggregate by replaying the whole
+rewritten log from `genesis` in the same transaction, so a person folded into a
+snapshot past a crossed cadence boundary leaves no residue). `full_eda::keys` lists a noun's keys for a window populate.
 `load`
 and `read_many` are both non-locking; the write pipeline takes the row lock
 itself by calling `Persistence::lock` (default no-op; the reference stores run
