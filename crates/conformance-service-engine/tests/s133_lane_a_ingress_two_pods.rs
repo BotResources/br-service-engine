@@ -18,16 +18,14 @@ use uuid::Uuid;
 const CHANNEL: &str = "se_s133_ingress";
 const SERVICE: &str = "s133ingress";
 
-async fn boot_pod(
-    db: &TestDb,
-    nats: Nats,
-    pod: &str,
-) -> (
+type Pod = (
     Arc<AccumulatorRuntime>,
     ReadinessHandle,
     Arc<tokio::sync::Notify>,
     tokio::task::JoinHandle<Result<(), service_engine::error::EngineError>>,
-) {
+);
+
+async fn boot_pod(db: &TestDb, nats: Nats, pod: &str) -> Pod {
     let mut engine = Engine::<SamplePrincipal>::boot(
         engine_config(CHANNEL, pod).with_service(SERVICE),
         db.app_pool().clone(),
