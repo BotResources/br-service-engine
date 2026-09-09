@@ -58,4 +58,4 @@ spec:
               service_engine_dead_letters on {{ $labels.service }} for source {{ $labels.source }}
               is above zero. A poison message, a failing scheduled row, a failing cron tick or a
               non-converging mirror key has been parked for a human to retry or discard from the
-              ops view. The dead-letter counter is emitted by the inbound loop (rework unit U2).
+              ops view. The dead-letter counter is emitted by the engine's inbound loop.
