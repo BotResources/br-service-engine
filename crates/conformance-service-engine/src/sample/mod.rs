@@ -22,6 +22,7 @@ pub mod relays;
 pub mod render;
 pub mod roster;
 pub mod spy;
+pub mod staffing;
 pub mod stream;
 pub mod titles;
 pub mod transport;
@@ -82,6 +83,11 @@ pub use counter::{
 pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs};
 
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
+
+pub use staffing::{
+    SamplePublishedGroup, known_group_name, known_members, publish_group, retract_user_membership,
+    staffing_mirror,
+};
 
 pub use blob::{
     AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, DocRow, DocStore, RepointDoc,

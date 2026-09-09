@@ -48,7 +48,7 @@ battery-backed.
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `replace`/`replace_one`/`remove`, leader-gated projection, per-bucket watermark + watch-from-revision, periodic reconcile, run-time empty-prefix guard |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
@@ -160,10 +160,21 @@ bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
 drift; the version lives in the offer's key for a breaking change (register a
-second `Offer`). `register_mirror` projects a consumed KV offer into
-`known_*` through the direct lane, and its projection is leader-gated:
-only the pod holding the mirror lease projects, standby pods keep their shadows
-current and take over on lease loss. Scopes are assembled from the slices: each
+second `Offer`). `register_mirror` projects one or more consumed KV offers into
+`known_*` through the direct lane, joined by a `keyed_by` function and written
+with the `Projection` helpers (`replace_one`, `replace`, `remove`, over the
+`Known` / `KnownScope` traits) so the projector carries no SQL of its own; its
+projection is leader-gated: only the pod holding the mirror lease projects,
+standby pods keep their shadows current and take over on lease loss. The mirror
+persists a per-bucket watermark — the bucket revision it has projected up to,
+which the leader advances as it projects — so a standby reports converged only
+once its shadows are loaded **and** the watermark has reached the revision its
+boot read reached, and the watch resumes from that revision (not from now), so a
+put or retract that lands between the boot read and the watch is not lost. A
+periodic reconcile on `EngineConfig::with_mirror_reconcile` repairs drift, and a
+consumed prefix that reads empty — at boot or during a run, including a change
+that would empty it — holds readiness DOWN with the prefix's name and never
+erases `known_*`. Scopes are assembled from the slices: each
 slice contributes its keys with `engine.contribute_scopes(&[..])`, and
 `declare_contributed_scopes` unions them into one `ScopeManifest` and runs
 the boot scope-declaration handshake that gates readiness until Identity confirms
