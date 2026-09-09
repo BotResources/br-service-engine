@@ -120,6 +120,7 @@ impl DeadLetters {
             .bind(msg.delivered as i32)
             .fetch_one(&mut *tx)
             .await?;
+        let mut committed_impacts = 0usize;
         if let Some(transport) = &self.transport {
             let key = KeyBytes::encode(&row_id).map_err(|error| {
                 sqlx::Error::Protocol(format!("encoding the ops-view impact key: {error}"))
@@ -136,8 +137,10 @@ impl DeadLetters {
                 .map_err(|error| {
                     sqlx::Error::Protocol(format!("staging the ops-view impact: {error}"))
                 })?;
+            committed_impacts = 1;
         }
         tx.commit().await?;
+        crate::observe::record_impacts_committed(committed_impacts);
         Ok(())
     }
 

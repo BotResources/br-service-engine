@@ -214,10 +214,12 @@ where
         let mut impacts = Vec::new();
         self.project_into(&mut tx, shadows, keys, &mut impacts)
             .await?;
+        let committed_impacts = impacts.len();
         if !impacts.is_empty() {
             self.transport.stage_in(&mut tx, &impacts).await?;
         }
         tx.commit().await?;
+        crate::observe::record_impacts_committed(committed_impacts);
         Ok(())
     }
 
