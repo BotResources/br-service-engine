@@ -38,17 +38,17 @@ fills its part by adding module files and one method body.
 
 | Module | Responsibility | Unit |
 |---|---|---|
-| `engine` | `Engine::boot` and the `register_*` / `declare_scopes` / `erase` surface | U1 (skeleton) |
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface | U1 (skeleton) |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish | U1 |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 (done) |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 (done) |
-| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create` plus `read_many` (the lock-free batched render read from the same committed store); log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) / U13b (`read_many`) |
+| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create` plus `read_many` (the lock-free batched render read from the same committed store — it defaults to `load`, so a store author writes only `load`/`save`, and overrides it with one batched query for the "every read answers in one query" rule); log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) / U13b (`read_many`) |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile | U7 (done) |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection | U8 (done) / U7 (leader gate) |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
-| `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
+| `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) | U11 |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) | U1 |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many` and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch | U13b |
@@ -119,8 +119,11 @@ drift; the version lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` (U8) projects a consumed KV offer into
 `known_*` through the direct lane, and its projection is now leader-gated (U7):
 only the pod holding the mirror lease projects, standby pods keep their shadows
-current and take over on lease loss. `declare_scopes` (U10) runs the boot
-scope-declaration handshake that gates readiness until Identity confirms.
+current and take over on lease loss. Scopes are assembled from the slices: each
+slice contributes its keys with `engine.contribute_scopes(&[..])`, and
+`declare_contributed_scopes` (U10) unions them into one `ScopeManifest` and runs
+the boot scope-declaration handshake that gates readiness until Identity confirms
+(`declare_scopes` remains for a service that assembles the manifest itself).
 `register_blobs` (U9) is filled: it records a `BlobPolicy` per blob kind and, at
 boot, binds the service's S3-compatible object-storage bucket (bind-only,
 fail-loud, never created — configured with `EngineConfig::with_blob_storage`).
@@ -257,7 +260,8 @@ the engine, the example and the battery.
 The example **is** the documentation. `crates/example-service` is a complete,
 bootable reference service built only on this crate's public authoring surface —
 no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
-`kernel/` (principal, scopes, error base), one folder per slice under `slices/`
+`kernel/` (the principal and its generic fact bag, the error base — and no scope
+registry, since scopes belong to the slices), one folder per slice under `slices/`
 (each owning its aggregate, store, view, handlers, offer/mirror and SDL
 fragment + its committed `schema.graphql`), a `slices/mod.rs` that lists the
 slices once through the `compose_service!` macro, a `register.rs` and a
@@ -268,13 +272,17 @@ slices once through the `compose_service!` macro, a `register.rs` and a
 function — so `register.rs` calls the generated `slices::register(engine)` and
 `graphql.rs` mounts the generated roots, and neither is touched when a slice
 comes or goes. Removing a slice deletes its folder and its one line in the
-`compose_service!` block; adding one is the reverse. (Each slice is also a cargo
-feature — default = all — which is the mechanism the `removability` CI job uses to
-compile a slice out; a slice that also contributes a kernel fact or scope, such
-as `board` and `card`, additionally carries that feature-gated line in the
-kernel, which is where the intent places the principal and the scopes.) The
-`removability` CI job proves every configuration compiles — the kernel with every
-slice removed, then each slice removed in turn. `crates/example-contract` holds what crosses the service
+`compose_service!` block; adding one is the reverse. This holds even for a slice
+that contributes scopes or a principal fact: the slice declares its scope key and
+registers its principal-fact loader from its **own** `register`
+(`engine.contribute_scopes(&[..])`, `engine.register_principal_fact(..)`), and the
+engine assembles the `ScopeManifest` and fills the principal's facts from the
+registered slices — so `board` (which owns `BOARD_ARCHIVE` and the
+`BoardMemberships` fact) and `card` (which owns `CARD_ADVANCE`) carry no line in
+the kernel, and the kernel names no slice. (Each slice is also a cargo feature —
+default = all — which is the mechanism the `removability` CI job uses to compile a
+slice out.) The `removability` CI job proves every configuration compiles — the
+kernel with every slice removed, then each slice removed in turn. `crates/example-contract` holds what crosses the service
 frontier (published types + integration coordinates), and `crates/example-twin`
 is the separate producer/runner that closes a real cross-service cycle over NATS,
 so the reference service itself never holds a NATS client. The slices between
