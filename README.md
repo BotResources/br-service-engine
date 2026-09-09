@@ -320,11 +320,19 @@ whichever mode it lives:
   (`bb02`); a subscriber gets a `Reset` then an `Upsert` with a contiguous
   revision, and a reconnect gets a fresh `Reset` rendered from committed state
   (`bb03`); the twin binary drives a full command→commit→event cycle back over
-  NATS (`bb04`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  NATS (`bb04`); and a streamed reply is sealed against its hash in the running
+  binary — the reply-finished command over NATS makes the binary's reaction
+  replay the chunks, verify the hash, commit the record and deliver it, read back
+  over GraphQL (`bb05`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
-  and built on demand otherwise, so the mode is self-sufficient locally. Seal and
-  accumulator behaviour stay proven in-crate (`s14`, `s25`) and by the reference
-  service's reply e2e.
+  and built on demand otherwise, so the mode is self-sufficient locally. The
+  accumulated lane stores its chunks in Postgres (`service_engine.accumulator_chunk`)
+  and the 0.1.0 engine exposes no NATS/GraphQL chunk-ingress, so `bb05` seeds the
+  chunks through Postgres — the flush path's own table shape, a listed black-box
+  channel — and everything the seal *is* (replay, hash verification, the
+  transactional final write, the impact and delivery) runs in the spawned binary.
+  The accumulator's own internals stay proven in-crate (`s14`, `s25`) and by the
+  reference service's reply e2e.
 
 ```bash
 # both modes (in-crate sXX + black-box bbXX), one crate
@@ -340,7 +348,8 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb01_readiness_and_two_pods \
     --test bb02_mutation_gate_and_affordance \
     --test bb03_subscription_reset_and_reconnect \
-    --test bb04_cross_service_cycle_twin_binary
+    --test bb04_cross_service_cycle_twin_binary \
+    --test bb05_seal_streamed_reply
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -348,9 +357,12 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
 ```
 
 CI runs both: the `conformance-service-engine (real infra)` job runs the whole
-crate (both modes), and a dedicated `conformance-service-engine black-box (real
-binary)` job builds the two example binaries and runs only the black-box
-scenarios against them on real PostgreSQL, a spawned NATS and MinIO.
+crate (both modes) on real PostgreSQL, a spawned NATS and MinIO (the in-crate
+blob scenarios need it), and a dedicated `conformance-service-engine black-box
+(real binary)` job builds the two example binaries and runs only the black-box
+scenarios against them on real PostgreSQL and a spawned NATS — no MinIO, since
+the example binary boots without S3 (blobs are registered only when configured)
+and no black-box scenario exercises a blob.
 
 ## Deployment constraint
 
