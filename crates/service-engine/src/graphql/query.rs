@@ -155,7 +155,7 @@ impl<'a, P: Principal> Query<'a, P> {
         let mut rendered = self
             .render(
                 &erased,
-                self.rls_engaged(),
+                erased.renders_under_rls(),
                 std::slice::from_ref(&key_bytes),
             )
             .await?;
@@ -172,15 +172,13 @@ impl<'a, P: Principal> Query<'a, P> {
             .populate(self.state.pg(), &params, self.principal)
             .await?;
         let keys = member_keys(&population);
-        let rendered = self.render(&erased, self.rls_engaged(), &keys).await?;
+        let rendered = self
+            .render(&erased, erased.renders_under_rls(), &keys)
+            .await?;
         Ok(keys
             .iter()
             .filter_map(|key| rendered.get(key).cloned().flatten())
             .collect())
-    }
-
-    fn rls_engaged(&self) -> bool {
-        self.state.runtime().registry().rls().is_some()
     }
 
     fn erased<Pr>(&self, projector: &Pr) -> Result<Arc<dyn ErasedProjector<P>>, Error>

@@ -9,4 +9,5 @@ mod presence;
 mod reply;
 mod reply_ingress;
 mod session_lifetime;
+mod rls_regime;
 mod subscriptions;

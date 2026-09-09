@@ -78,7 +78,6 @@ pub(crate) fn members_of(population: &ErasedPopulation) -> BTreeSet<KeyBytes> {
 pub(crate) struct WindowState {
     pub(crate) projector: ProjectorName,
     pub(crate) params: WindowParams,
-    pub(crate) rls: bool,
     pub(crate) members: BTreeSet<KeyBytes>,
     pub(crate) shape: WindowShape,
 }

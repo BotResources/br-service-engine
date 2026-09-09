@@ -30,10 +30,18 @@ impl<P: Principal> SessionRuntime<P> {
             return Err(AttachError::MissingPrincipalResolver);
         }
         for spec in &request.windows {
-            if self.registry.projector(&spec.projector).is_none() {
+            let Some(projector) = self.registry.projector(&spec.projector) else {
                 return Err(AttachError::UnknownProjector(spec.projector.clone()));
+            };
+            let declared = projector.renders_under_rls();
+            if spec.rls != declared {
+                return Err(AttachError::RlsRegimeMismatch {
+                    projector: spec.projector.clone(),
+                    declared,
+                    requested: spec.rls,
+                });
             }
-            if spec.rls && self.registry.rls().is_none() {
+            if declared && self.registry.rls().is_none() {
                 return Err(AttachError::MissingRlsApplier {
                     projector: spec.projector.clone(),
                 });
@@ -47,7 +55,6 @@ impl<P: Principal> SessionRuntime<P> {
             .map(|spec| WindowState {
                 projector: spec.projector.clone(),
                 params: spec.params.clone(),
-                rls: spec.rls,
                 members: BTreeSet::new(),
                 shape: WindowShape::Fixed,
             })
@@ -240,14 +247,15 @@ impl<P: Principal> SessionRuntime<P> {
             }
             let members = members_of(&population);
             let shape = WindowShape::of(&population);
-            let cohort = if spec.rls {
+            let under_rls = projector.renders_under_rls();
+            let cohort = if under_rls {
                 CohortKey::principal(principal.id())
             } else {
                 projector.cohort(principal)
             };
             let keys: Vec<KeyBytes> = members.iter().cloned().collect();
             let (views, cost) = renderer
-                .render(projector, spec.rls, cohort, principal, &keys)
+                .render(projector, under_rls, cohort, principal, &keys)
                 .await
                 .map_err(refuse)?;
             self.counters.populates.fetch_add(1, Ordering::Relaxed);

@@ -15,6 +15,12 @@ service_engine::subscription_union! {
     Board => service_engine::view::ViewProjector<BoardsView> => BoardView,
 }
 
+service_engine::subscription_union! {
+    view = OrgBoardViewUnion;
+    delta = OrgBoardDelta { reset = OrgBoardReset, upsert = OrgBoardUpsert, remove = OrgBoardRemove };
+    OrgBoard => service_engine::view::ViewProjector<OrgBoardsRls> => BoardView,
+}
+
 pub const FRAGMENT: SliceFragment = SliceFragment {
     slice: "board",
     root_fields: &[
@@ -22,6 +28,7 @@ pub const FRAGMENT: SliceFragment = SliceFragment {
         "boards",
         "orgBoards",
         "boardDeltas",
+        "orgBoardDeltas",
         "createBoard",
         "archiveBoard",
         "mintBoardInvite",
@@ -126,5 +133,17 @@ impl BoardSubscription {
         )
         .await?;
         Ok(stream.map(|delta| BoardDelta::from_delta(&delta)))
+    }
+
+    async fn org_board_deltas(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<impl Stream<Item = Result<OrgBoardDelta>>> {
+        let stream = service_engine::attach::<AppPrincipal>(
+            ctx,
+            vec![WindowSpec::view::<OrgBoardsRls>(&(), true)?],
+        )
+        .await?;
+        Ok(stream.map(|delta| OrgBoardDelta::from_delta(&delta)))
     }
 }

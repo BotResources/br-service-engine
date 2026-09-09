@@ -61,6 +61,10 @@ pub trait Projector: Send + Sync + 'static {
 
     fn nouns(&self) -> &'static [NounName];
 
+    fn renders_under_rls(&self) -> bool {
+        false
+    }
+
     fn populate<'a>(
         &'a self,
         pg: &'a PgPool,

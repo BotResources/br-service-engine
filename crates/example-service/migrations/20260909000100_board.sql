@@ -8,16 +8,6 @@ CREATE TABLE board (
 
 CREATE INDEX board_org_idx ON board (org_id);
 
-ALTER TABLE board ENABLE ROW LEVEL SECURITY;
-ALTER TABLE board FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY board_org ON board
-    USING (
-        nullif(current_setting('app.current_org_id', true), '') IS NULL
-        OR org_id = nullif(current_setting('app.current_org_id', true), '')::uuid
-        OR is_public
-    );
-
 CREATE TABLE board_member (
     board_id uuid NOT NULL,
     user_id  uuid NOT NULL,
@@ -25,3 +15,13 @@ CREATE TABLE board_member (
 );
 
 CREATE INDEX board_member_user_idx ON board_member (user_id);
+
+CREATE VIEW org_board AS
+    SELECT id, org_id, name, is_public, state
+    FROM board
+    WHERE
+        nullif(current_setting('app.current_org_id', true), '') IS NOT NULL
+        AND (
+            org_id = nullif(current_setting('app.current_org_id', true), '')::uuid
+            OR is_public
+        );

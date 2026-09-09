@@ -92,6 +92,8 @@ pub trait ErasedProjector<P: Principal>: Send + Sync + 'static {
 
     fn nouns(&self) -> &'static [NounName];
 
+    fn renders_under_rls(&self) -> bool;
+
     fn cohort(&self, principal: &P) -> CohortKey;
 
     fn emission(&self, impact: &Impact) -> Emission;
@@ -168,6 +170,10 @@ impl<Pr: Projector> ErasedProjector<Pr::Principal> for ProjectorAdapter<Pr> {
 
     fn nouns(&self) -> &'static [NounName] {
         self.0.nouns()
+    }
+
+    fn renders_under_rls(&self) -> bool {
+        self.0.renders_under_rls()
     }
 
     fn cohort(&self, principal: &Pr::Principal) -> CohortKey {

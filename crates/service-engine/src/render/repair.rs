@@ -22,7 +22,6 @@ pub(crate) struct RepairCost {
 struct WindowSpecShot {
     name: ProjectorName,
     params: WindowParams,
-    rls: bool,
     members: BTreeSet<KeyBytes>,
     shape: WindowShape,
 }
@@ -48,7 +47,6 @@ pub(crate) async fn resnapshot<P: Principal>(
         .map(|window| WindowSpecShot {
             name: window.projector.clone(),
             params: window.params.clone(),
-            rls: window.rls,
             members: window.members.clone(),
             shape: window.shape.clone(),
         })
@@ -78,14 +76,15 @@ pub(crate) async fn resnapshot<P: Principal>(
         }
         let members = refreshed_members(&spec.members, &BTreeSet::new(), &population);
         let shape = spec.shape.refreshed(&population);
-        let cohort = if spec.rls {
+        let under_rls = projector.renders_under_rls();
+        let cohort = if under_rls {
             CohortKey::principal(principal.id())
         } else {
             projector.cohort(&principal)
         };
         let keys: Vec<KeyBytes> = members.iter().cloned().collect();
         let (views, rendered) = renderer
-            .render(projector, spec.rls, cohort, &principal, &keys)
+            .render(projector, under_rls, cohort, &principal, &keys)
             .await?;
         cost.loads += rendered.loads;
         cost.projections += rendered.projections;

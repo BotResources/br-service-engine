@@ -312,7 +312,25 @@ loop and the HTTP server in one call. Mutation resolvers run on
 take a typed `Query<'_, P>` context and read rendered views through
 `cx.fetch::<Projector>` / `cx.fetch_window::<Projector>` (and `fetch_view` /
 `fetch_view_window` over the ergonomic `view::Projector`), never the database,
-under the same RLS the subscription render applies. The subscription is one typed
+under the RLS regime the **projector** declares — `view::Projector`'s `const RLS`
+(the raw `projector::Projector`'s `renders_under_rls`), read on the fetch, the
+snapshot, the render pass and the repair alike, so a fetch and a subscription of
+one key by one principal are one code path with no per-call switch that could
+make them disagree. A `WindowSpec`'s `rls` flag is a caller assertion validated
+against the projector at attach: a contradiction is refused with
+`AttachError::RlsRegimeMismatch`, an RLS projector with no `RlsApplier` with
+`AttachError::MissingRlsApplier`. The reference RLS projector `OrgBoardsRls`
+reads the `org_board` projection under the applier's org context on every path —
+`populate`, so the window is scoped at populate time and not merely at render,
+and the render load through its own `OrgBoardStore`. That projection is
+genuinely deny-when-unset: with no `app.current_org_id` in the transaction it
+returns no rows, so a read that forgets the context leaks nothing instead of
+falling back to every row. The base `board` table carries no RLS and is the
+non-RLS cohort projector `BoardsView`'s source, which must see every candidate so
+`Board::memberships` can grant a cross-org `Member` visibility in the app layer
+that a fail-closed org policy would wrongly hide. The two regimes therefore sit
+on two sources — a fail-closed `org_board` for RLS, the plain `board` table for
+cohorts — and the render regime is the projector's, never the table's. The subscription is one typed
 union member per projector via `subscription_union!` (and `presence_subscription_union!`
 for a presence lane) — the `Reset`/`Upsert`/`Remove` payloads over a typed view
 union with the contiguous revision and the causing event as `cause`. Each slice

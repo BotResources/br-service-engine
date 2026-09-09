@@ -53,6 +53,8 @@ pub trait Projector: Send + Sync + 'static {
 
     const NAME: ProjectorName;
 
+    const RLS: bool = false;
+
     fn populate(
         cx: &Populate<'_, Self::Principal>,
         query: &Self::Query,
@@ -113,6 +115,10 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
 
     fn nouns(&self) -> &'static [NounName] {
         cached_nouns::<V>()
+    }
+
+    fn renders_under_rls(&self) -> bool {
+        V::RLS
     }
 
     fn emission(&self, _impact: &Impact) -> Emission {

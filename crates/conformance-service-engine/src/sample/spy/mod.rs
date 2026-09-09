@@ -40,6 +40,7 @@ pub struct SpyAssignments {
     fail_switch: Option<Arc<AtomicBool>>,
     panic_switch: Option<Arc<AtomicBool>>,
     broken: bool,
+    rls: bool,
 }
 
 impl SpyAssignments {
@@ -78,6 +79,10 @@ impl Projector for SpyAssignments {
     fn nouns(&self) -> &'static [NounName] {
         const NOUNS: &[NounName] = &[Assignment::NAME];
         NOUNS
+    }
+
+    fn renders_under_rls(&self) -> bool {
+        self.rls
     }
 
     fn populate<'a>(

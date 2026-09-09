@@ -274,6 +274,16 @@ pub enum AttachError {
     #[error("the window on {projector} asks for RLS but no RlsApplier is registered")]
     MissingRlsApplier { projector: ProjectorName },
 
+    #[error(
+        "the window on {projector} was attached with rls={requested} but the projector renders \
+         under rls={declared}; the render regime is the projector's, not the call's"
+    )]
+    RlsRegimeMismatch {
+        projector: ProjectorName,
+        declared: bool,
+        requested: bool,
+    },
+
     #[error("attaching a window requires a registered PrincipalResolver")]
     MissingPrincipalResolver,
 
