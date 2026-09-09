@@ -1,3 +1,4 @@
+use example_contract::SealFailed;
 use futures_util::future::BoxFuture;
 use service_engine::SealHash;
 use service_engine::accumulator::ChunkSeq;
@@ -6,7 +7,7 @@ use service_engine::pipeline::Reaction;
 
 use super::aggregate::{Reply, ReplyRow};
 use super::stream::ReplyText;
-use super::wire::{CancelTimedOut, InboundReplyCancelled, InboundReplyFinished};
+use super::wire::{CancelTimedOut, InboundReplyCancelled, InboundReplyFinished, OutSealFailed};
 use crate::kernel::error::ReactionFault;
 
 pub fn reply_finished<'r>(
@@ -23,6 +24,10 @@ pub fn reply_finished<'r>(
             Err(error @ EngineError::SealHashMismatch { .. }) => {
                 return Err(ReactionFault::Terminal(error.to_string()));
             }
+            Err(
+                error @ (EngineError::SealTruncated { .. }
+                | EngineError::SealChunkBeyondLastSeq { .. }),
+            ) => return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error),
             Err(error) => return Err(error.into()),
         };
         let mut reply = cx
@@ -53,6 +58,10 @@ pub fn reply_cancelled<'r>(
             Err(error @ EngineError::SealHashMismatch { .. }) => {
                 return Err(ReactionFault::Terminal(error.to_string()));
             }
+            Err(
+                error @ (EngineError::SealTruncated { .. }
+                | EngineError::SealChunkBeyondLastSeq { .. }),
+            ) => return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error),
             Err(error) => return Err(error.into()),
         };
         let mut reply = cx
@@ -75,10 +84,28 @@ pub fn cancel_timed_out<'r>(
             Some(reply) if reply.is_open() => reply,
             _ => return Ok(()),
         };
-        let text: String = cx.seal_current::<ReplyText>(&msg.reply_id).await?;
+        let text: String = match cx.seal_current::<ReplyText>(&msg.reply_id).await {
+            Ok(text) => text,
+            Err(EngineError::AlreadySealed { .. }) => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
         let cause = reply.complete_cancelled(text);
         cx.save(&reply).await?;
         cx.impact_caused::<Reply, _>(&msg.reply_id, cause)?;
         Ok(())
     })
+}
+
+fn answer_seal_failed(
+    cx: &mut Reaction<'_>,
+    reply_id: uuid::Uuid,
+    board_id: uuid::Uuid,
+    error: EngineError,
+) -> Result<(), ReactionFault> {
+    cx.emit(OutSealFailed(SealFailed {
+        reply_id,
+        board_id,
+        reason: error.to_string(),
+    }))?;
+    Ok(())
 }

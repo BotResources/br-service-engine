@@ -1,7 +1,7 @@
 use example_contract::{
     CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, REPLY_ACCUMULATOR,
-    ReplyCancelled, ReplyFinished, SERVICE, card_ready_coords, create_card_coords,
-    person_created_coords, reply_cancelled_coords, reply_finished_coords,
+    ReplyCancelled, ReplyFinished, SERVICE, SealFailed, card_ready_coords, create_card_coords,
+    person_created_coords, reply_cancelled_coords, reply_finished_coords, seal_failed_coords,
 };
 use futures_util::StreamExt;
 use service_engine::nats::{KvKey, Nats, NatsError, StreamFrame, command_subject, event_subject};
@@ -70,6 +70,17 @@ pub async fn send_reply_finished(nats: &Nats, finished: &ReplyFinished) -> Resul
     Ok(())
 }
 
+pub async fn resend_reply_finished(
+    nats: &Nats,
+    finished: &ReplyFinished,
+) -> Result<(), NatsError> {
+    let subject = command_subject(&reply_finished_coords());
+    let payload = serde_json::to_value(finished).map_err(NatsError::Encode)?;
+    nats.publish_value_with_id(&subject, &payload, &Uuid::now_v7().to_string())
+        .await?;
+    Ok(())
+}
+
 pub async fn send_reply_cancelled(
     nats: &Nats,
     cancelled: &ReplyCancelled,
@@ -79,6 +90,36 @@ pub async fn send_reply_cancelled(
     nats.publish_value_with_id(&subject, &payload, &cancelled.reply_id.to_string())
         .await?;
     Ok(())
+}
+
+pub async fn seal_failed_from_stream(nats: &Nats) -> Result<Option<SealFailed>, NatsError> {
+    let subject = event_subject(&seal_failed_coords());
+    let stream = nats
+        .context()
+        .get_stream("INTEGRATION_EVT")
+        .await
+        .map_err(|error| NatsError::Connect(error.to_string()))?;
+    let consumer = stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            filter_subject: subject,
+            ..Default::default()
+        })
+        .await
+        .map_err(|error| NatsError::Connect(error.to_string()))?;
+    let mut batch = consumer
+        .fetch()
+        .max_messages(1)
+        .messages()
+        .await
+        .map_err(|error| NatsError::Connect(error.to_string()))?;
+    match batch.next().await {
+        Some(Ok(message)) => {
+            let failed = serde_json::from_slice::<SealFailed>(&message.payload).ok();
+            let _ = message.ack().await;
+            Ok(failed)
+        }
+        _ => Ok(None),
+    }
 }
 
 pub async fn next_card_ready(nats: &Nats) -> Result<Option<CardReady>, NatsError> {
