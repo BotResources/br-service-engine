@@ -42,7 +42,8 @@ async fn a_non_rls_projector_returns_the_same_view_on_fetch_and_subscription_und
         .await)["board"]
         .clone();
     assert_eq!(
-        fetched["id"], board.to_string(),
+        fetched["id"],
+        board.to_string(),
         "the cross-org member fetches the board through the non-RLS cohort path, even though an \
          RlsApplier is registered; the old rls_engaged() heuristic would have engaged RLS and \
          returned null here"
@@ -105,19 +106,21 @@ async fn an_rls_projector_hides_a_foreign_org_row_on_both_the_fetch_and_the_subs
         .await);
 
     let fetched: Vec<String> = ok(&world
-        .gql(
-            &principal,
-            "query{orgBoards{id}}",
-            serde_json::json!({}),
-        )
+        .gql(&principal, "query{orgBoards{id}}", serde_json::json!({}))
         .await)["orgBoards"]
         .as_array()
         .unwrap()
         .iter()
         .map(|v| v["id"].as_str().unwrap().to_string())
         .collect();
-    assert!(fetched.contains(&mine.to_string()), "the fetch returns the org's own board");
-    assert!(fetched.contains(&public.to_string()), "the fetch returns the public board");
+    assert!(
+        fetched.contains(&mine.to_string()),
+        "the fetch returns the org's own board"
+    );
+    assert!(
+        fetched.contains(&public.to_string()),
+        "the fetch returns the public board"
+    );
     assert!(
         !fetched.contains(&foreign.to_string()),
         "the RLS query-time load runs under the applier's org context, so the foreign-org row is \
