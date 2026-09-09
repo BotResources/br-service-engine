@@ -18,4 +18,4 @@ pub use schema::engine_schema;
 pub use slices::{SchemaSlices, SliceFragment};
 pub use state::GraphqlState;
 pub use subscription::attach;
-pub use union::{JsonScalar, cause_json, key_json, typed_view};
+pub use union::{JsonScalar, cause_json, key_json, typed_presence_view, typed_view};

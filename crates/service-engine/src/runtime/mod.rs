@@ -73,6 +73,21 @@ impl<P: Principal> SessionRuntime<P> {
         self.after_pass.clone()
     }
 
+    pub async fn settle(&self, quiet: Duration, deadline: Duration) {
+        let end = Instant::now() + deadline;
+        loop {
+            let tick = self.after_pass.notified();
+            tokio::pin!(tick);
+            tokio::select! {
+                () = &mut tick => {}
+                () = tokio::time::sleep(quiet) => return,
+            }
+            if Instant::now() >= end {
+                return;
+            }
+        }
+    }
+
     pub fn registry(&self) -> &RenderRegistry<P> {
         &self.registry
     }

@@ -1,5 +1,6 @@
 pub mod flush;
 pub(crate) mod guard;
+mod hash;
 pub(crate) mod persisted;
 pub mod reader;
 pub mod runtime;
@@ -23,6 +24,7 @@ use crate::name::{AccumulatorName, NounName};
 use crate::wire::Noun;
 
 pub use flush::FlushOutcome;
+pub use hash::SealHash;
 pub use reader::ChunkReader;
 pub use runtime::AccumulatorRuntime;
 pub use seal::{SealMarker, Swept};

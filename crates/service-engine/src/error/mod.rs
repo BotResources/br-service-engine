@@ -118,6 +118,30 @@ pub enum EngineError {
     )]
     SealedChunk { seq: u64, sealed_high_water: u64 },
 
+    #[error(
+        "accumulator {accumulator} cannot seal at last sequence {last_seq}: the stream holds a \
+         contiguous prefix only up to {contiguous_to}, so it is truncated or has a gap"
+    )]
+    SealTruncated {
+        accumulator: AccumulatorName,
+        last_seq: u64,
+        contiguous_to: i64,
+    },
+
+    #[error(
+        "accumulator {accumulator} refuses the seal at last sequence {last_seq}: the replayed \
+         chunks hash to {found} but the finish declared {expected}"
+    )]
+    SealHashMismatch {
+        accumulator: AccumulatorName,
+        last_seq: u64,
+        expected: String,
+        found: String,
+    },
+
+    #[error("a seal hash is not 32 lowercase-hex bytes: {0}")]
+    SealHashFormat(String),
+
     #[error("boot posture: {0}")]
     Posture(String),
 

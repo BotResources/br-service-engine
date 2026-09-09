@@ -70,6 +70,58 @@ impl ChunkReader {
         self.accumulate::<A>(&entry, key).await
     }
 
+    pub async fn replay_verified<A: Accumulator>(
+        &self,
+        key: &<A::Noun as Noun>::Key,
+        last_seq: ChunkSeq,
+    ) -> Result<(A::State, crate::accumulator::SealHash), EngineError> {
+        let entry = lookup::<A>(&self.registry)?;
+        let key = encode_key::<A::Noun>(key)?;
+        let key_value = key.decode::<serde_json::Value>()?;
+        let rows = sqlx::query(
+            "SELECT seq, chunk FROM service_engine.accumulator_chunk \
+             WHERE accumulator = $1 AND key = $2 AND seq >= 0 AND seq <= $3 ORDER BY seq",
+        )
+        .bind(entry.name.as_str())
+        .bind(&key_value)
+        .bind(last_seq.to_i64())
+        .fetch_all(&self.pg)
+        .await?;
+
+        let mut state = entry.erased.init_state();
+        let mut values: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
+        let mut expected = ChunkSeq::ZERO;
+        for row in &rows {
+            let seq = ChunkSeq::from_storable(row.get::<i64, _>("seq"));
+            if seq != expected {
+                return Err(EngineError::SealTruncated {
+                    accumulator: entry.name.clone(),
+                    last_seq: last_seq.get(),
+                    contiguous_to: expected.to_i64() - 1,
+                });
+            }
+            let chunk = row.get::<serde_json::Value, _>("chunk");
+            entry.erased.fold(&mut state, seq, &chunk)?;
+            values.push(chunk);
+            expected = seq.next();
+        }
+        if expected.to_i64() != last_seq.to_i64() + 1 {
+            return Err(EngineError::SealTruncated {
+                accumulator: entry.name.clone(),
+                last_seq: last_seq.get(),
+                contiguous_to: expected.to_i64() - 1,
+            });
+        }
+        let folded = state
+            .downcast_ref::<A::State>()
+            .ok_or_else(|| EngineError::StateMismatch {
+                accumulator: entry.name.clone(),
+            })?
+            .clone();
+        let digest = crate::accumulator::SealHash::of_values(values.iter());
+        Ok((folded, digest))
+    }
+
     pub(crate) fn forget(&self, accumulator: &AccumulatorName, key: &KeyBytes) {
         self.folds
             .lock()
@@ -217,37 +269,5 @@ fn floor(mark: Option<ChunkSeq>) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::accumulator::new_registry;
-
-    #[test]
-    fn an_empty_fold_reads_from_the_very_first_sequence() {
-        assert_eq!(floor(None), -1);
-        assert_eq!(floor(Some(ChunkSeq::ZERO)), 0);
-        assert_eq!(floor(Some(ChunkSeq::new(9).unwrap())), 9);
-    }
-
-    #[tokio::test]
-    async fn the_fold_cache_of_never_sealed_keys_stays_bounded_by_its_capacity() {
-        let pg = PgPool::connect_lazy("postgresql://engine@127.0.0.1:1/engine")
-            .expect("a lazy pool never dials");
-        let mut reader = ChunkReader::with_registry(pg, new_registry());
-        reader.set_capacity(8);
-        let accumulator = AccumulatorName::from_static("tokens");
-        for n in 0..1_000u64 {
-            let key = KeyBytes::encode(&format!("abandoned-{n}")).expect("a key encodes");
-            reader.store(
-                accumulator.clone(),
-                key,
-                Box::new(String::new()) as ErasedState,
-                Some(ChunkSeq::new(n).unwrap()),
-            );
-            assert!(
-                reader.cached_folds() <= 8,
-                "a stream of unsealed keys never grows the cache past its capacity"
-            );
-        }
-        assert_eq!(reader.cached_folds(), 8);
-    }
-}
+#[path = "reader_tests.rs"]
+mod tests;

@@ -155,6 +155,10 @@ impl AccumulatorRuntime {
         Ok(())
     }
 
+    pub fn name_of<A: Accumulator>(&self) -> Result<crate::name::AccumulatorName, EngineError> {
+        Ok(lookup::<A>(&self.registry)?.name)
+    }
+
     pub async fn sealed<A: Accumulator>(
         &self,
         key: &<A::Noun as Noun>::Key,

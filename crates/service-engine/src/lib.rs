@@ -72,7 +72,7 @@ mod transport;
 
 pub use accumulator::{
     Accumulated, Accumulator, AccumulatorRuntime, ChunkReader, ChunkSeq, Durable, FlushOutcome,
-    SealMarker, Swept,
+    SealHash, SealMarker, Swept,
 };
 pub use blobs::{
     Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
@@ -81,7 +81,7 @@ pub use cohort::CohortKey;
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use delta::{Delta, ErasedView, Revision};
-pub use engine::{BlobReader, Engine};
+pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
 pub use gate::{
@@ -91,7 +91,7 @@ pub use graphql::{
     AuthReject, CODE_EXTENSION, GraphqlState, JsonScalar, MutationAck, PASSPORT_HEADER,
     PassportPrincipal, PrincipalRejected, Query, SchemaSlices, SliceFragment, ack, ack_bulk, app,
     attach, cause_json, engine_schema, execute, execute_bulk, key_json, mutation_error, serve,
-    typed_view,
+    typed_presence_view, typed_view,
 };
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};

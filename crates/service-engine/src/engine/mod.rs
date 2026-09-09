@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::nats::Nats;
 use br_util_axum_readiness::ReadinessHandle;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 
 use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, Durable};
 use crate::blobs::BlobRegistry;
@@ -34,6 +34,18 @@ use crate::transport::probe::ListenerProbe;
 use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
 use br_core_scope::ScopeDeclaration;
+
+pub struct Settle<P: Principal> {
+    render: Arc<SessionRuntime<P>>,
+    accumulators: Arc<AccumulatorRuntime>,
+}
+
+impl<P: Principal> Settle<P> {
+    pub async fn settle(&self, quiet: std::time::Duration, deadline: std::time::Duration) {
+        let _ = self.accumulators.flush_once().await;
+        self.render.settle(quiet, deadline).await;
+    }
+}
 
 pub struct Engine<P: Principal> {
     config: EngineConfig,
@@ -157,20 +169,19 @@ impl<P: Principal> Engine<P> {
         self.accumulators.push_chunk::<A>(key, seq, chunk)
     }
 
-    pub async fn seal<A: Accumulator>(
-        &self,
-        tx: &mut PgConnection,
-        key: &<A::Noun as Noun>::Key,
-    ) -> Result<(), EngineError> {
-        self.accumulators.seal::<A>(tx, key).await
-    }
-
     pub fn nats(&self) -> &Nats {
         &self.nats
     }
 
     pub fn accumulator_handle(&self) -> Arc<AccumulatorRuntime> {
         self.accumulators.clone()
+    }
+
+    pub fn settle_handle(&self) -> Settle<P> {
+        Settle {
+            render: self.render_runtime(),
+            accumulators: self.accumulators.clone(),
+        }
     }
 
     pub(crate) fn with_registry(

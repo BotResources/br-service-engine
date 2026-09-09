@@ -6,7 +6,7 @@ use serde::Serialize;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::accumulator::{Accumulator, AccumulatorRuntime};
+use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, SealHash};
 use crate::blobs::{Blob, BlobHandle, BlobRef, BlobRowOp, Blobs};
 use crate::erase::PersonId;
 use crate::error::EngineError;
@@ -199,8 +199,24 @@ impl<'a> Ops<'a> {
     pub async fn seal<A: Accumulator>(
         &mut self,
         key: &<A::Noun as Noun>::Key,
-    ) -> Result<(), EngineError> {
-        self.accumulators.seal::<A>(self.conn, key).await
+        last_seq: ChunkSeq,
+        hash: SealHash,
+    ) -> Result<A::State, EngineError> {
+        let (state, found) = self
+            .accumulators
+            .reader()
+            .replay_verified::<A>(key, last_seq)
+            .await?;
+        if found != hash {
+            return Err(EngineError::SealHashMismatch {
+                accumulator: self.accumulators.name_of::<A>()?,
+                last_seq: last_seq.get(),
+                expected: hash.to_hex(),
+                found: found.to_hex(),
+            });
+        }
+        self.accumulators.seal::<A>(self.conn, key).await?;
+        Ok(state)
     }
 
     pub fn blob<B: Blobs>(
