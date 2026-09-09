@@ -315,8 +315,8 @@ impl<P: Principal> Engine<P> {
         stop_mirrors.notify_waiters();
         stop_presence.notify_waiters();
         stop_sched.notify_waiters();
-        stop_ingress.notify_waiters();
-        stop_purge.notify_waiters();
+        stop_ingress.notify_one();
+        stop_purge.notify_one();
         if let Some(inbound) = inbound.take() {
             inbound.stop();
             inbound.join().await;
