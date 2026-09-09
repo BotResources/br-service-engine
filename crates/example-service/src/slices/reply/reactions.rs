@@ -30,7 +30,7 @@ pub fn reply_finished<'r>(
         let mut reply = cx
             .load::<ReplyRow>(&cmd.reply_id)
             .await?
-            .unwrap_or_else(|| ReplyRow::open(cmd.reply_id, cmd.board_id));
+            .unwrap_or_else(|| ReplyRow::open(cmd.reply_id, cmd.board_id, uuid::Uuid::nil()));
         let cause = reply.complete(text);
         cx.save(&reply).await?;
         cx.impact_caused::<Reply, _>(&cmd.reply_id, cause)?;
@@ -62,7 +62,7 @@ pub fn reply_cancelled<'r>(
         let mut reply = cx
             .load::<ReplyRow>(&cmd.reply_id)
             .await?
-            .unwrap_or_else(|| ReplyRow::open(cmd.reply_id, cmd.board_id));
+            .unwrap_or_else(|| ReplyRow::open(cmd.reply_id, cmd.board_id, uuid::Uuid::nil()));
         let cause = reply.complete_cancelled(text);
         cx.save(&reply).await?;
         cx.impact_caused::<Reply, _>(&cmd.reply_id, cause)?;
