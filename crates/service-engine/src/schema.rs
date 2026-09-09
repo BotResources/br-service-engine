@@ -25,6 +25,7 @@ pub const TABLE_PERSON_ERASURE: &str = "service_engine.person_erasure";
 pub const TABLE_SCHEMA_VERSION: &str = "service_engine.schema_version";
 pub const TABLE_EVENT_LOG: &str = "service_engine.event_log";
 pub const TABLE_EVENT_SNAPSHOT: &str = "service_engine.event_snapshot";
+pub const TABLE_MIRROR_WATERMARK: &str = "service_engine.mirror_watermark";
 
 pub const TABLES: &[&str] = &[
     TABLE_SCHEDULED_IMPACT,
@@ -42,6 +43,7 @@ pub const TABLES: &[&str] = &[
     TABLE_SCHEMA_VERSION,
     TABLE_EVENT_LOG,
     TABLE_EVENT_SNAPSHOT,
+    TABLE_MIRROR_WATERMARK,
 ];
 
 const MAX_ROLE_NAME_LEN: usize = 63;

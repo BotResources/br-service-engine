@@ -1,11 +1,13 @@
 mod builder;
 mod change;
 mod consumed;
+mod empty;
 mod handle;
 mod leader;
 mod projection;
 mod runtime;
 mod shadow;
+mod watermark;
 
 pub use builder::{Mirror, MirrorKeyed, MirrorReady};
 pub use change::{Change, ChangeOp};
