@@ -227,10 +227,38 @@ impl<P: Principal> Engine<P> {
         let stop_purge = Arc::new(Notify::new());
         let mut ingress_task = None;
         let mut purge_task = None;
-        if accumulators.registered() > 0 {
-            match config.service.clone() {
-                None => {
-                    readiness_guard.set_not_ready(crate::boot::REASON_STREAMING_SERVICE);
+        if accumulators.registered() > 0
+            && let Some(service) = config.service.clone()
+        {
+            match crate::accumulator::ingress::establish(
+                &nats,
+                &service,
+                config.seal_retention,
+                accumulators.clone(),
+                crate::inbound::DEFAULT_ACK_WAIT,
+                crate::inbound::DEFAULT_MAX_ACK_PENDING,
+            )
+            .await
+            {
+                Ok((ingress, consumer)) => {
+                    ingress_task =
+                        Some(tokio::spawn(ingress.serve(consumer, stop_ingress.clone())));
+                    purge_task = Some(tokio::spawn(crate::accumulator::ingress::run_purge(
+                        nats.clone(),
+                        accumulators.clone(),
+                        service,
+                        config.beat,
+                        stop_purge.clone(),
+                    )));
+                }
+                Err(error) => {
+                    let reason = match &error {
+                        EngineError::SealRetentionTooShort { .. } => {
+                            crate::boot::REASON_SEAL_RETENTION
+                        }
+                        _ => crate::boot::REASON_STREAMING_STREAM,
+                    };
+                    readiness_guard.set_not_ready(reason);
                     stop_mirrors.notify_waiters();
                     stop_presence.notify_waiters();
                     join_presence(presence_task.take()).await;
@@ -239,50 +267,7 @@ impl<P: Principal> Engine<P> {
                         inbound.join().await;
                     }
                     render.shutdown().await;
-                    return Err(EngineError::StreamingServiceUnset);
-                }
-                Some(service) => {
-                    match crate::accumulator::ingress::establish(
-                        &nats,
-                        &service,
-                        config.seal_retention,
-                        accumulators.clone(),
-                        crate::inbound::DEFAULT_ACK_WAIT,
-                        crate::inbound::DEFAULT_MAX_ACK_PENDING,
-                    )
-                    .await
-                    {
-                        Ok((ingress, consumer)) => {
-                            ingress_task =
-                                Some(tokio::spawn(ingress.serve(consumer, stop_ingress.clone())));
-                            purge_task =
-                                Some(tokio::spawn(crate::accumulator::ingress::run_purge(
-                                    nats.clone(),
-                                    accumulators.clone(),
-                                    service,
-                                    config.beat,
-                                    stop_purge.clone(),
-                                )));
-                        }
-                        Err(error) => {
-                            let reason = match &error {
-                                EngineError::SealRetentionTooShort { .. } => {
-                                    crate::boot::REASON_SEAL_RETENTION
-                                }
-                                _ => crate::boot::REASON_STREAMING_STREAM,
-                            };
-                            readiness_guard.set_not_ready(reason);
-                            stop_mirrors.notify_waiters();
-                            stop_presence.notify_waiters();
-                            join_presence(presence_task.take()).await;
-                            if let Some(inbound) = inbound.take() {
-                                inbound.stop();
-                                inbound.join().await;
-                            }
-                            render.shutdown().await;
-                            return Err(error);
-                        }
-                    }
+                    return Err(error);
                 }
             }
         }

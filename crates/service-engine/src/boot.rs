@@ -16,8 +16,6 @@ pub const REASON_MIRRORS: &str = "waiting for the registered mirrors to converge
 pub const REASON_STREAMING_STREAM: &str = "the lane-A STREAMING_{service} stream is absent or its \
                                            ingress consumer could not be created";
 pub const REASON_SEAL_RETENTION: &str = "seal_retention does not cover the lane-A stream's max_age";
-pub const REASON_STREAMING_SERVICE: &str = "an accumulator is registered but no service label is \
-                                            set to name the STREAMING_{service} stream";
 
 pub async fn establish_transport(
     pool: PgPool,

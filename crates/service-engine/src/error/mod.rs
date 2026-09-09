@@ -75,12 +75,6 @@ pub enum EngineError {
     UnregisteredAccumulatorName { name: AccumulatorName },
 
     #[error(
-        "an accumulator is registered but no service label is set, so the STREAMING_{{service}} \
-         stream has no name; call EngineConfig::with_service"
-    )]
-    StreamingServiceUnset,
-
-    #[error(
         "seal_retention {seal_retention:?} does not cover the {stream} stream's max_age \
          {max_age:?}, so a straggler the stream can still redeliver would meet no seal marker"
     )]
