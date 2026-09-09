@@ -5,6 +5,7 @@ use conformance_service_engine::sample::assignment::Assignment;
 use conformance_service_engine::sample::render::{
     assignment, attach_request, drain, member, next_delta, reset_views, upserted,
 };
+use conformance_service_engine::sample::engine::SAMPLE_SERVICE;
 use conformance_service_engine::sample::{
     SAMPLE_JOB, SampleDirectory, boot_sample_engine, cron_runs, publish_roster,
 };
@@ -29,6 +30,8 @@ async fn the_whole_engine_assembles_boots_serves_and_shuts_down_through_its_publ
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
+    nats.provision_streaming(SAMPLE_SERVICE, Duration::from_secs(60))
+        .await;
     let fabric = nats.nats().await;
 
     let mirrored = Uuid::now_v7();

@@ -14,6 +14,7 @@ use service_engine::error::EngineError;
 use uuid::Uuid;
 
 const CHANNEL: &str = "se_s037_engine";
+const SERVICE: &str = "s037";
 
 async fn flushed(durable: Durable) -> Result<(), EngineError> {
     tokio::time::timeout(SOON, durable)
@@ -26,11 +27,13 @@ async fn s037_engine_the_run_flush_loop_makes_chunks_durable_folds_them_and_refu
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
+    nats.provision_streaming(SERVICE, std::time::Duration::from_secs(60))
+        .await;
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
     let mut engine = Engine::<SamplePrincipal>::boot(
-        engine_config(CHANNEL, "pod-s037"),
+        engine_config(CHANNEL, "pod-s037").with_service(SERVICE),
         pool.clone(),
         fabric,
         ReadinessHandle::ready(),
@@ -94,7 +97,7 @@ async fn s037_engine_the_run_flush_loop_makes_chunks_durable_folds_them_and_refu
 
     let mut committed = pool.begin().await.expect("a caller transaction");
     accumulators
-        .seal::<NoteBody>(&mut committed, &key)
+        .seal_current::<NoteBody>(&mut committed, &key)
         .await
         .expect("seal joins the caller transaction");
     committed.commit().await.expect("the caller commits");

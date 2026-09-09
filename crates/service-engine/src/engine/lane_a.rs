@@ -19,6 +19,7 @@ pub(crate) struct LaneATasks {
 pub(crate) fn ingress_reason(error: &EngineError) -> &'static str {
     match error {
         EngineError::SealRetentionTooShort { .. } => crate::boot::REASON_SEAL_RETENTION,
+        EngineError::AccumulatorWithoutService => crate::boot::REASON_ACCUMULATOR_NO_SERVICE,
         _ => crate::boot::REASON_STREAMING_STREAM,
     }
 }
@@ -30,9 +31,11 @@ pub(crate) async fn spawn_if_registered(
 ) -> Result<LaneATasks, EngineError> {
     let stop_ingress = Arc::new(Notify::new());
     let stop_purge = Arc::new(Notify::new());
-    let (ingress_task, purge_task) = if accumulators.registered() > 0
-        && let Some(service) = config.service.clone()
-    {
+    let (ingress_task, purge_task) = if accumulators.registered() > 0 {
+        let Some(service) = config.service.clone() else {
+            return Err(EngineError::AccumulatorWithoutService);
+        };
+        accumulators.bind_lane_a_purge(nats.clone(), service.clone());
         let (ingress, purge) = spawn_lane_a(
             nats,
             service,

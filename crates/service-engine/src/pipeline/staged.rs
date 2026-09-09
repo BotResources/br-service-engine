@@ -5,7 +5,7 @@ use crate::blobs::{BlobRowOp, insert_reference, orphan_reference};
 use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::inbound::Source;
-use crate::name::NounName;
+use crate::name::{AccumulatorName, NounName};
 use crate::offers::OfferDirty;
 use crate::relays::outbox::{OutboxRecord, stage as stage_outbox};
 use crate::schema::{TABLE_OFFER_DIRTY, TABLE_SCHEDULED_MESSAGE};
@@ -30,6 +30,7 @@ pub(crate) struct Staged {
     pub terminal_violation: Option<String>,
     pub offer_dirty: Vec<OfferDirty>,
     pub blob_ops: Vec<BlobRowOp>,
+    pub sealed_keys: Vec<(AccumulatorName, KeyBytes)>,
 }
 
 impl Staged {

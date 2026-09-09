@@ -120,7 +120,12 @@ impl DirectPipeline {
             )));
         }
         match flush_and_commit(tx, &staged, self.transport.as_ref()).await {
-            Ok(()) => DispatchOutcome::Applied(Applied::Committed),
+            Ok(()) => {
+                self.accumulators
+                    .purge_committed_seals(&staged.sealed_keys)
+                    .await;
+                DispatchOutcome::Applied(Applied::Committed)
+            }
             Err(error) => DispatchOutcome::Failed(classify_engine(&error)),
         }
     }

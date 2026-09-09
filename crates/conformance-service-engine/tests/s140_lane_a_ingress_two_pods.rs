@@ -109,7 +109,7 @@ async fn s140_a_separate_producer_reaches_every_pod_and_a_chunk_after_seal_is_re
         .await
         .expect("open a seal transaction");
     acc_a
-        .seal::<NoteBody>(&mut tx, &key)
+        .seal_current::<NoteBody>(&mut tx, &key)
         .await
         .expect("one pod seals the key through the direct lane");
     tx.commit().await.expect("the seal commits");

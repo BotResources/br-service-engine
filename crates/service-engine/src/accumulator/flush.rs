@@ -48,14 +48,20 @@ pub(crate) async fn flush_once(
     pg: &PgPool,
     transport: &dyn ImpactTransport,
     buffer: &FlushBuffer,
+    lock_timeout: Duration,
 ) -> Result<FlushOutcome, EngineError> {
     let batch = take(buffer);
     if batch.is_empty() {
         return Ok(FlushOutcome::default());
     }
-    match commit_batch(pg, transport, &batch).await {
+    match commit_batch(pg, transport, &batch, lock_timeout).await {
         Ok((verdicts, outcome)) => {
+            let mut deferred = Vec::new();
             for (pending, verdict) in batch.into_iter().zip(verdicts) {
+                let Some(verdict) = verdict else {
+                    deferred.push(pending);
+                    continue;
+                };
                 let seq = pending.seq;
                 let accumulator = pending.accumulator;
                 let _ = pending.done.send(match verdict {
@@ -74,6 +80,9 @@ pub(crate) async fn flush_once(
                         seq: seq.get(),
                     }),
                 });
+            }
+            if !deferred.is_empty() {
+                requeue(buffer, deferred);
             }
             Ok(outcome)
         }
@@ -121,7 +130,8 @@ async fn commit_batch(
     pg: &PgPool,
     transport: &dyn ImpactTransport,
     batch: &[PendingChunk],
-) -> Result<(Vec<Verdict>, FlushOutcome), EngineError> {
+    lock_timeout: Duration,
+) -> Result<(Vec<Option<Verdict>>, FlushOutcome), EngineError> {
     let mut owner: BTreeMap<ChunkAddress, usize> = BTreeMap::new();
     let mut diverged: BTreeSet<ChunkAddress> = BTreeSet::new();
     for (index, pending) in batch.iter().enumerate() {
@@ -147,16 +157,38 @@ async fn commit_batch(
         .collect::<BTreeSet<StreamKey>>()
         .into_iter()
         .collect();
-    let stream_index: BTreeMap<&StreamKey, usize> = streams
+
+    let mut tx = pg.begin().await?;
+    set_lock_timeout(&mut tx, lock_timeout).await?;
+    let held = guard::try_hold(&mut tx, &streams).await?;
+    let acquired: BTreeMap<StreamKey, bool> = streams
+        .iter()
+        .cloned()
+        .zip(held.iter().copied())
+        .collect();
+    let acquired_streams: Vec<StreamKey> = streams
+        .iter()
+        .zip(held.iter().copied())
+        .filter_map(|(stream, held)| held.then(|| stream.clone()))
+        .collect();
+    let stream_index: BTreeMap<&StreamKey, usize> = acquired_streams
         .iter()
         .enumerate()
         .map(|(index, stream)| (stream, index))
         .collect();
+    let acquired_owner: BTreeMap<ChunkAddress, usize> = owner
+        .iter()
+        .filter(|((accumulator, key, _), _)| {
+            acquired
+                .get(&(accumulator.clone(), key.clone()))
+                .copied()
+                .unwrap_or(false)
+        })
+        .map(|(address, index)| (address.clone(), *index))
+        .collect();
 
-    let mut tx = pg.begin().await?;
-    guard::hold(&mut tx, &streams).await?;
-    let sealed = guard::read_seals(&mut tx, &streams).await?;
-    let existing = read_persisted(&mut tx, &owner).await?;
+    let sealed = guard::read_seals(&mut tx, &acquired_streams).await?;
+    let existing = read_persisted(&mut tx, &acquired_owner).await?;
 
     let mut accumulators: Vec<String> = Vec::new();
     let mut keys: Vec<serde_json::Value> = Vec::new();
@@ -165,7 +197,7 @@ async fn commit_batch(
     let mut touched: BTreeSet<(NounName, KeyBytes)> = BTreeSet::new();
     let mut verdict_of: BTreeMap<ChunkAddress, Verdict> = BTreeMap::new();
 
-    for (address, index) in &owner {
+    for (address, index) in &acquired_owner {
         let pending = &batch[*index];
         let stream = (pending.accumulator.clone(), pending.key.clone());
         let position = stream_index[&stream];
@@ -229,34 +261,52 @@ async fn commit_batch(
     tx.commit().await?;
     crate::observe::record_impacts_committed(impacts.len());
 
-    let verdicts: Vec<Verdict> = batch
+    let verdicts: Vec<Option<Verdict>> = batch
         .iter()
         .map(|pending| {
+            let stream = (pending.accumulator.clone(), pending.key.clone());
+            if !acquired.get(&stream).copied().unwrap_or(false) {
+                return None;
+            }
             let address = (
                 pending.accumulator.clone(),
                 pending.key.clone(),
                 pending.seq,
             );
-            verdict_of
-                .get(&address)
-                .copied()
-                .unwrap_or(Verdict::Unmapped)
+            Some(
+                verdict_of
+                    .get(&address)
+                    .copied()
+                    .unwrap_or(Verdict::Unmapped),
+            )
         })
         .collect();
+    let processed = verdicts.iter().filter(|verdict| verdict.is_some()).count();
     let durable = verdicts
         .iter()
-        .filter(|verdict| matches!(verdict, Verdict::Durable))
+        .filter(|verdict| matches!(verdict, Some(Verdict::Durable)))
         .count();
     let conflicts = verdicts
         .iter()
-        .filter(|verdict| matches!(verdict, Verdict::Conflict))
+        .filter(|verdict| matches!(verdict, Some(Verdict::Conflict)))
         .count();
     let outcome = FlushOutcome {
-        buffered: batch.len(),
+        buffered: processed,
         durable,
-        refused: batch.len() - durable - conflicts,
+        refused: processed - durable - conflicts,
         conflicts,
         impacts: impacts.len(),
     };
     Ok((verdicts, outcome))
+}
+
+async fn set_lock_timeout(
+    conn: &mut sqlx::PgConnection,
+    lock_timeout: Duration,
+) -> Result<(), EngineError> {
+    let millis = lock_timeout.as_millis().max(1);
+    sqlx::query(&format!("SET LOCAL lock_timeout = {millis}"))
+        .execute(conn)
+        .await?;
+    Ok(())
 }

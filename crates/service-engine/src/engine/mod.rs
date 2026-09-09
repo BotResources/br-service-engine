@@ -101,7 +101,8 @@ impl<P: Principal> Engine<P> {
                 config.seal_retention,
             )
             .with_max_buffered_chunks(config.max_buffered_chunks)
-            .with_fold_cache_capacity(config.fold_cache_capacity),
+            .with_fold_cache_capacity(config.fold_cache_capacity)
+            .with_flush_lock_timeout(config.lock_timeout),
         );
         let beat = Beat::from_config(&config)?;
         Ok(Engine {

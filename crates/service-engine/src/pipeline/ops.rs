@@ -227,7 +227,8 @@ impl<'a> Ops<'a> {
         key: &<A::Noun as Noun>::Key,
     ) -> Result<A::State, EngineError> {
         let accumulated = self.accumulators.reader().state::<A>(key).await?;
-        self.accumulators.seal::<A>(self.conn, key).await?;
+        let sealed = self.accumulators.seal_current::<A>(self.conn, key).await?;
+        self.staged.sealed_keys.push(sealed);
         Ok(accumulated.state)
     }
 
@@ -250,7 +251,11 @@ impl<'a> Ops<'a> {
                 found: found.to_hex(),
             });
         }
-        self.accumulators.seal::<A>(self.conn, key).await?;
+        let sealed = self
+            .accumulators
+            .seal_upto::<A>(self.conn, key, last_seq)
+            .await?;
+        self.staged.sealed_keys.push(sealed);
         Ok(state)
     }
 

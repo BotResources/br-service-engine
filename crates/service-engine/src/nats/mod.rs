@@ -2,12 +2,14 @@ mod grace;
 mod health;
 mod key;
 mod kv;
+mod publish;
 mod streaming;
 
 pub use grace::{NatsCondition, NatsHealth, NatsHealthChannel, NatsHealthReceiver};
 pub use health::{REASON_NO_STREAM, RelayHealth, RelayHealthChannel, RelayHealthReceiver};
 pub use key::{KvKey, KvKeyError, KvPrefix};
 pub use kv::{KvBucket, KvEvent, KvWatch, Revision};
+pub use publish::{NatsError, PublishFailure, PublishOutcome};
 pub use streaming::{
     StreamFrame, chunk_subject, streaming_filter, streaming_stream, subject_token,
 };
@@ -18,6 +20,8 @@ use async_nats::jetstream::Context;
 use async_nats::jetstream::stream::Stream;
 use br_core_integration::{CommandCoords, EventCoords, IntegrationEvent};
 use serde::Serialize;
+
+use publish::publish_error;
 
 pub fn event_subject(coords: &EventCoords) -> String {
     format!(
@@ -42,86 +46,6 @@ pub fn command_subject(coords: &CommandCoords) -> String {
 pub const INTEGRATION_CMD: &str = "INTEGRATION_CMD";
 pub const INTEGRATION_EVT: &str = "INTEGRATION_EVT";
 pub const KV_PUBLISHED_LANGUAGE: &str = "PUBLISHED_LANGUAGE";
-
-#[derive(thiserror::Error, Debug)]
-#[non_exhaustive]
-pub enum NatsError {
-    #[error("connection to NATS failed: {0}")]
-    Connect(String),
-    #[error("stream {name} is absent; gitops declares streams, the engine only binds them")]
-    NoStream { name: String },
-    #[error("kv bucket {name} is absent; gitops declares buckets, the engine only binds them")]
-    NoBucket { name: String },
-    #[error("kv bucket {name} is not usable for presence: {detail}")]
-    EphemeralNotConfigured { name: String, detail: &'static str },
-    #[error("kv operation on {key} failed: {detail}")]
-    Kv { key: String, detail: String },
-    #[error("a postgres read backing a nats operation failed: {detail}")]
-    Store { detail: String },
-    #[error("kv key {key} was written at another revision than the {expected} expected")]
-    RevisionConflict { key: String, expected: u64 },
-    #[error("publish to {subject} failed ({kind}): {detail}")]
-    Publish {
-        subject: String,
-        kind: PublishFailure,
-        detail: String,
-    },
-    #[error("encoding a kv value failed")]
-    Encode(#[source] serde_json::Error),
-    #[error("decoding kv key {key}")]
-    Decode {
-        key: String,
-        #[source]
-        source: serde_json::Error,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PublishFailure {
-    NoStream,
-    Transient,
-}
-
-impl std::fmt::Display for PublishFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::NoStream => "no stream for subject",
-            Self::Transient => "transient",
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PublishOutcome {
-    Stored { sequence: u64 },
-    Duplicate { sequence: u64 },
-}
-
-impl PublishOutcome {
-    pub fn sequence(&self) -> u64 {
-        match self {
-            Self::Stored { sequence } | Self::Duplicate { sequence } => *sequence,
-        }
-    }
-
-    pub fn is_duplicate(&self) -> bool {
-        matches!(self, Self::Duplicate { .. })
-    }
-
-    fn from_ack(ack: &async_nats::jetstream::publish::PublishAck) -> Self {
-        if ack.duplicate {
-            Self::Duplicate {
-                sequence: ack.sequence,
-            }
-        } else {
-            Self::Stored {
-                sequence: ack.sequence,
-            }
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct Nats {
@@ -276,23 +200,6 @@ impl Nats {
         let payload = serde_json::to_value(frame).map_err(NatsError::Encode)?;
         self.publish_value_with_id(&subject, &payload, &message_id)
             .await
-    }
-}
-
-fn publish_error(
-    subject: &str,
-    kind: async_nats::jetstream::context::PublishErrorKind,
-    detail: &dyn std::fmt::Display,
-) -> NatsError {
-    use async_nats::jetstream::context::PublishErrorKind as K;
-    let kind = match kind {
-        K::StreamNotFound => PublishFailure::NoStream,
-        _ => PublishFailure::Transient,
-    };
-    NatsError::Publish {
-        subject: subject.to_string(),
-        kind,
-        detail: detail.to_string(),
     }
 }
 

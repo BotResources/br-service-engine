@@ -28,6 +28,22 @@ pub(crate) async fn hold(
     Ok(())
 }
 
+pub(crate) async fn try_hold(
+    conn: &mut PgConnection,
+    streams: &[StreamKey],
+) -> Result<Vec<bool>, EngineError> {
+    let mut acquired = Vec::with_capacity(streams.len());
+    for stream in streams {
+        let held: bool = sqlx::query("SELECT pg_try_advisory_xact_lock($1) AS held")
+            .bind(lock_id(stream))
+            .fetch_one(&mut *conn)
+            .await?
+            .get("held");
+        acquired.push(held);
+    }
+    Ok(acquired)
+}
+
 pub(crate) async fn read_seals(
     conn: &mut PgConnection,
     streams: &[StreamKey],
