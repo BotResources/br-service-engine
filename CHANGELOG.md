@@ -877,6 +877,25 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 
 ### Added (0.1.0 rework, unit U13b — authoring ergonomics)
 
+- **`compose_service!` — the whole GraphQL wiring of a service is one list.**
+  The macro takes each slice's module, cargo feature and root objects on one line
+  and generates, for the set, the `pub mod` declarations, the merged
+  `QueryRoot`/`MutationRoot`/`SubscriptionRoot` and a `register` function that
+  calls every slice's `register`. `graphql.rs` mounts the generated roots and
+  `register.rs` calls the generated `slices::register(engine)`; neither names a
+  slice, so a slice comes or goes by editing only its folder and its one line in
+  the `compose_service!` block — the three per-slice edit sites the reference
+  service carried (`slices/mod.rs` `mod`, `graphql.rs` merged-root fields,
+  `register.rs` call) collapse to that single line. Each slice keeps its cargo
+  feature — the mechanism the `removability` CI job compiles a slice out with —
+  and the macro renders the `#[cfg]` gates from it. The reference service's
+  `slices/mod.rs` is now this block; its `graphql.rs` and `register.rs` are
+  slice-agnostic.
+- **`Engine::blobs_configured() -> bool`.** A blob-bearing slice registers its
+  `BlobPolicy` from inside its own `register` (`if engine.blobs_configured()`),
+  so blob wiring no longer leaks a per-slice line into the service's boot. The
+  reference `reply` slice folds its `register_blobs` into `register`; `boot.rs`
+  no longer names the slice.
 - **`view::Projector` (re-exported as `service_engine::Projector`) — the
   snippet-shaped ergonomic projector surface.** A service now writes a view the
   way the intent's "Add a view with a query window" how-to shows: it names its

@@ -54,7 +54,7 @@ fills its part by adding module files and one method body.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many` and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch | U13b |
 | `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) | U13b |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) | U13b |
-| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` | U12 / U12b / U13b |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` | U12 / U12b / U13b |
 
 Every author-facing surface of the 0.1.0 rework is now filled; no `register_*`
 method or engine gesture returns `EngineError::NotYet`.
@@ -163,8 +163,10 @@ person's blobs from storage and the reference table. Presigning uses the sans-IO
 for the engine's own bucket HEAD/DELETE — no cloud SDK.
 
 The `graphql` module (U12, aligned to the intent's authoring ergonomics in
-U12b) is the async-graphql surface kit. A service composes its slices' root
-objects into one schema with `engine_schema`, mounts it with `app` (`POST
+U12b) is the async-graphql surface kit. A service lists its slices once with the
+`compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
+`SubscriptionRoot` and the `register` function; it composes those roots into one
+schema with `engine_schema`, mounts it with `app` (`POST
 /graphql`, the GraphQL-over-WebSocket subscription on `GET /graphql/ws`, and
 `/readyz`), and runs both the engine loop and that HTTP server with one call:
 `Engine::run_with(app)` (or `run_with_listener(listener, app)` when the caller
@@ -257,11 +259,20 @@ bootable reference service built only on this crate's public authoring surface �
 no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
 `kernel/` (principal, scopes, error base), one folder per slice under `slices/`
 (each owning its aggregate, store, view, handlers, offer/mirror and SDL
-fragment + its committed `schema.graphql`), a `register.rs` with one line per
-slice, a `graphql.rs` that assembles the fragments, and a `src/bin/service.rs` that
-boots. Each slice is a cargo feature (default = all): removing one deletes its
-folder and its `register.rs` line, its `slices/mod.rs` mod line (Rust requires the
-mod declaration) and its `#[cfg]`-gated fields in the `graphql.rs` roots. The
+fragment + its committed `schema.graphql`), a `slices/mod.rs` that lists the
+slices once through the `compose_service!` macro, a `register.rs` and a
+`graphql.rs` that are slice-agnostic, and a `src/bin/service.rs` that boots.
+`compose_service!` takes each slice's module, cargo feature and root objects on
+**one line** and generates, for the whole set, the `pub mod` declarations, the
+`QueryRoot`/`MutationRoot`/`SubscriptionRoot` merged objects and the `register`
+function — so `register.rs` calls the generated `slices::register(engine)` and
+`graphql.rs` mounts the generated roots, and neither is touched when a slice
+comes or goes. Removing a slice deletes its folder and its one line in the
+`compose_service!` block; adding one is the reverse. (Each slice is also a cargo
+feature — default = all — which is the mechanism the `removability` CI job uses to
+compile a slice out; a slice that also contributes a kernel fact or scope, such
+as `board` and `card`, additionally carries that feature-gated line in the
+kernel, which is where the intent places the principal and the scopes.) The
 `removability` CI job proves every configuration compiles — the kernel with every
 slice removed, then each slice removed in turn. `crates/example-contract` holds what crosses the service
 frontier (published types + integration coordinates), and `crates/example-twin`
