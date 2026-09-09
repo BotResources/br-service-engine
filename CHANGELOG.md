@@ -113,7 +113,10 @@ lock_timeout` below the consumer's `ack_wait` (a lock timeout is retryable and
 `Ops`: `cx.load` / `cx.save` / `cx.create`, `cx.impact` / `cx.impact_caused` /
 `cx.impact_at`, `cx.command` / `cx.emit`, `cx.seal` / `cx.seal_partial` /
 `cx.seal_current`, `cx.schedule_at`, `cx.now`, `cx.blob` / `cx.blob_owned` /
-`cx.release_blob` / `cx.delete`. `Mutation<P>` adds `cx.principal` and
+`cx.release_blob` / `cx.delete`. `Reaction` adds `cx.delivered` (the JetStream
+delivery count of the frame in hand, so a reaction can bound its own retries and
+answer the producer once a failure is permanent rather than nak toward a silent
+dead letter). `Mutation<P>` adds `cx.principal` and
 `cx.present` (put after commit on the loss-tolerant presence lane); `Bulk<P>`
 adds `cx.impact_all` (one projector-reset impact rather than one per key). An
 ordinary transaction that dirties more than `impacts_per_commit` keys is refused
@@ -492,10 +495,13 @@ affordance, cohort `Visibility`, RLS read projector, published-language offer,
 scheduled deadline reaction, a cron, a bulk import, a contributed scope), `ledger`
 (full EDA with upcasting, a hydration barrier, in-log erasure), `reply`
 (accumulated lane + verified seal, cancel-in-flight, presence, blob attachment;
-a finish whose `last_seq` sits below a chunk already durable is answered with a
-`SealFailed` integration event so the runner resends a corrected finish, rather
-than that seal retrying forever — a hash mismatch stays terminal, and a merely
-truncated prefix is retried so an in-flight fold heals itself) and `roster` (a
+a finish the seal cannot honour is answered with a `SealFailed` integration
+event so the runner resends a corrected finish, rather than nak-ing forever into
+a silent dead letter — a finish whose `last_seq` sits below an already-durable
+chunk fails at once, and a truncated stream is retried a bounded number of times
+(`cx.delivered`) so an in-flight fold can heal and, once the truncation is
+permanent, is answered with `SealFailed`; a hash mismatch stays terminal) and
+`roster` (a
 KV mirror into `known_persons`). `example-twin` is a **separate**
 crate (the producer/runner that closes the cross-service cycle over NATS), so the
 reference service holds no NATS client. `tests/e2e.rs` (split into
