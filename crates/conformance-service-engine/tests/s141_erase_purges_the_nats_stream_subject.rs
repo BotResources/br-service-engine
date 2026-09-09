@@ -4,7 +4,9 @@ mod engine_twin;
 use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
-use conformance_service_engine::sample::erase::{EraseNoteStream, boot_erase_lane_a_engine, seed_note};
+use conformance_service_engine::sample::erase::{
+    EraseNoteStream, boot_erase_lane_a_engine, seed_note,
+};
 use engine_twin::await_ready;
 use service_engine::PersonId;
 use service_engine::accumulator::AccumulatorRuntime;
