@@ -7,7 +7,7 @@ impl EngineConfig {
             ("window", self.window),
             ("beat", self.beat),
             ("session_ttl", self.session_ttl),
-            ("chunk_retention", self.chunk_retention),
+            ("seal_retention", self.seal_retention),
             ("lease", self.lease),
             ("offer_reconcile", self.offer_reconcile),
             ("listener_probe_timeout", self.listener_probe_timeout),
@@ -93,7 +93,7 @@ mod tests {
         assert_eq!(c.session_buffer, 256);
         assert_eq!(c.reset_threshold, 200);
         assert_eq!(c.max_held_impacts, 1_024);
-        assert_eq!(c.chunk_retention, Duration::from_secs(86_400));
+        assert_eq!(c.seal_retention, Duration::from_secs(86_400));
         assert_eq!(c.max_buffered_chunks, 10_000);
         assert_eq!(c.fold_cache_capacity, 10_000);
         assert_eq!(c.lease, Duration::from_secs(30));

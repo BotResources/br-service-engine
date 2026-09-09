@@ -92,7 +92,7 @@ async fn s066_seal_marker() {
         .sweep_expired(service_engine::time::now() + chrono::TimeDelta::hours(2))
         .await
         .expect("the sweep runs");
-    assert_eq!(swept.markers, 1, "the marker is gone after chunk_retention");
+    assert_eq!(swept.markers, 1, "the marker is gone after seal_retention");
     assert_eq!(
         swept.chunks, 1,
         "an orphan chunk is swept on the same bound"

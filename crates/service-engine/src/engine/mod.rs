@@ -96,7 +96,7 @@ impl<P: Principal> Engine<P> {
             AccumulatorRuntime::new(
                 pg.clone(),
                 transport.clone() as Arc<dyn ImpactTransport>,
-                config.chunk_retention,
+                config.seal_retention,
             )
             .with_max_buffered_chunks(config.max_buffered_chunks)
             .with_fold_cache_capacity(config.fold_cache_capacity),
