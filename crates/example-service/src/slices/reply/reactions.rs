@@ -24,10 +24,9 @@ pub fn reply_finished<'r>(
             Err(error @ EngineError::SealHashMismatch { .. }) => {
                 return Err(ReactionFault::Terminal(error.to_string()));
             }
-            Err(
-                error @ (EngineError::SealTruncated { .. }
-                | EngineError::SealChunkBeyondLastSeq { .. }),
-            ) => return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error),
+            Err(error @ EngineError::SealChunkBeyondLastSeq { .. }) => {
+                return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error);
+            }
             Err(error) => return Err(error.into()),
         };
         let mut reply = cx
@@ -58,10 +57,9 @@ pub fn reply_cancelled<'r>(
             Err(error @ EngineError::SealHashMismatch { .. }) => {
                 return Err(ReactionFault::Terminal(error.to_string()));
             }
-            Err(
-                error @ (EngineError::SealTruncated { .. }
-                | EngineError::SealChunkBeyondLastSeq { .. }),
-            ) => return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error),
+            Err(error @ EngineError::SealChunkBeyondLastSeq { .. }) => {
+                return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error);
+            }
             Err(error) => return Err(error.into()),
         };
         let mut reply = cx

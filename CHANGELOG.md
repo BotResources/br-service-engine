@@ -492,10 +492,11 @@ affordance, cohort `Visibility`, RLS read projector, published-language offer,
 scheduled deadline reaction, a cron, a bulk import, a contributed scope), `ledger`
 (full EDA with upcasting, a hydration barrier, in-log erasure), `reply`
 (accumulated lane + verified seal, cancel-in-flight, presence, blob attachment;
-a seal that fails on a truncated or beyond-`last_seq` stream answers the runner
-with a `SealFailed` integration event so the runner republishes and resends the
-finish, rather than the finish retrying forever — a hash mismatch stays terminal)
-and `roster` (a KV mirror into `known_persons`). `example-twin` is a **separate**
+a finish whose `last_seq` sits below a chunk already durable is answered with a
+`SealFailed` integration event so the runner resends a corrected finish, rather
+than that seal retrying forever — a hash mismatch stays terminal, and a merely
+truncated prefix is retried so an in-flight fold heals itself) and `roster` (a
+KV mirror into `known_persons`). `example-twin` is a **separate**
 crate (the producer/runner that closes the cross-service cycle over NATS), so the
 reference service holds no NATS client. `tests/e2e.rs` (split into
 `tests/scenarios/`, driven by `tests/harness/`) proves the slices against real
