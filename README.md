@@ -371,7 +371,9 @@ whichever mode it lives:
   NATS (`bb04`); and a streamed reply is sealed against its hash in the running
   binary — the reply-finished command over NATS makes the binary's reaction
   replay the chunks, verify the hash, commit the record and deliver it, read back
-  over GraphQL (`bb05`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  over GraphQL (`bb05`); and the `graphql-transport-ws` socket is closed by the
+  binary at `session_max_age` measured from the handshake, so a client that holds
+  it open must reconnect with a fresh passport (`bb06`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
   and built on demand otherwise, so the mode is self-sufficient locally. The
   accumulated lane stores its chunks in Postgres (`service_engine.accumulator_chunk`)
@@ -397,7 +399,8 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb02_mutation_gate_and_affordance \
     --test bb03_subscription_reset_and_reconnect \
     --test bb04_cross_service_cycle_twin_binary \
-    --test bb05_seal_streamed_reply
+    --test bb05_seal_streamed_reply \
+    --test bb06_session_max_age_closes_the_socket
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \

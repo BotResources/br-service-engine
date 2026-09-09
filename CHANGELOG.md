@@ -360,7 +360,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s131` — drives the real engine through an in-crate `sample` service and
+`s001`–`s138` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, direct impact-bus/transport assertions): shared-consumer ownership
 across two pods, ack-after-durable with a crash before commit, poison budget to
@@ -374,7 +374,16 @@ undeclared-member boot gates, reconnect-resnapshot repair, a `Terminal` reaction
 that dead-letters through the running inbound loop (`s128`), a live `Upsert` that
 reaches only its own projector's subscription-union member (`s129`), and a
 principal-facts change whose refresh resolver errors ending the session
-fail-closed through the running engine (`s131`). **Black-box mode** — `bb01`–`bb05`
+fail-closed through the running engine (`s131`), the listener isolated into a
+bounded channel whose overflow resets every live session (`s132`) and whose
+queue-usage brake closes the listener into readiness DOWN (`s133`), the
+impacts-committed metric counted only after the transaction commits (`s134`), a
+row that leaves its cohort removed on the `view::Projector` surface with a fixed
+window repopulated in both directions on a principal change (`s135`), the
+schema-version singleton refusing a second pod on a different service version
+(`s136`), erasure under a strict deny-when-unset RLS policy (`s137`), and the
+beat completing a purge the erase committed but never finished (`s138`).
+**Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL
 over HTTP and `graphql-transport-ws`, NATS subjects and streams, the
@@ -383,7 +392,9 @@ handshake plus a second pod on the same store (`bb01`); the affordance==gate
 identity (`bb02`); `Reset`→`Upsert` with a contiguous revision and a reconnect
 `Reset` from committed state (`bb03`); a full cross-service cycle driven by the
 spawned twin binary (`bb04`); and seal — a streamed reply sealed against its hash
-inside the running binary (`bb05`). Because the 0.1.0 accumulated lane stores
+inside the running binary (`bb05`); and the `graphql-transport-ws` socket closed
+at `session_max_age` measured from the handshake, so the client reconnects with a
+fresh passport (`bb06`). Because the 0.1.0 accumulated lane stores
 chunks in Postgres (`service_engine.accumulator_chunk`) and exposes no
 NATS/GraphQL chunk-ingress, `bb05` seeds the chunks through Postgres — the flush
 path's own table shape, a listed black-box channel — while everything the seal
@@ -399,7 +410,7 @@ them on demand otherwise. `infra/pg.rs` / `infra/nats.rs` are the sole
 - CI runs the battery in both modes: the `conformance-service-engine (real
   infra)` job runs the whole crate (both modes, needing MinIO for the in-crate
   blob scenarios), and a dedicated `conformance-service-engine black-box (real
-  binary)` job builds the two example binaries and runs only `bb01`–`bb05`
+  binary)` job builds the two example binaries and runs only `bb01`–`bb06`
   against them on real PostgreSQL and a spawned NATS — no MinIO, since the example
   binary boots without S3 and no black-box scenario exercises a blob.
 

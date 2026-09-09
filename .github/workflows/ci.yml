@@ -310,4 +310,5 @@ jobs:
             --test bb02_mutation_gate_and_affordance \
             --test bb03_subscription_reset_and_reconnect \
             --test bb04_cross_service_cycle_twin_binary \
-            --test bb05_seal_streamed_reply
+            --test bb05_seal_streamed_reply \
+            --test bb06_session_max_age_closes_the_socket
