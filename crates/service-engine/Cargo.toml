@@ -23,6 +23,7 @@ br-scope-declaration-contract = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 croner = { workspace = true }
+futures-channel = { workspace = true }
 futures-util = { workspace = true }
 hmac = { workspace = true }
 metrics = { workspace = true }

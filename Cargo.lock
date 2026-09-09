@@ -2635,6 +2635,7 @@ dependencies = [
  "bytes",
  "chrono",
  "croner",
+ "futures-channel",
  "futures-util",
  "hmac 0.13.0",
  "metrics",

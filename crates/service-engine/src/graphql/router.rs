@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::readiness::{ReadinessHandle, readiness_route};
 use async_graphql::http::ALL_WEBSOCKET_PROTOCOLS;
 use async_graphql::{Data, ObjectType, Schema, SubscriptionType};
-use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse, GraphQLWebSocket};
+use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse};
 use axum::Router;
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
@@ -111,15 +111,13 @@ where
         return unauthorized(AuthReject::Rejected(error.to_string()));
     }
     let schema = state.schema.clone();
+    let max_age = state.engine.runtime().config().session_max_age;
     upgrade
         .protocols(ALL_WEBSOCKET_PROTOCOLS)
         .on_upgrade(move |socket| async move {
             let mut data = Data::default();
             data.insert(principal);
-            GraphQLWebSocket::new(socket, schema, protocol)
-                .with_data(data)
-                .serve()
-                .await
+            crate::graphql::ws::serve_bounded(socket, schema, protocol, data, max_age).await
         })
 }
 

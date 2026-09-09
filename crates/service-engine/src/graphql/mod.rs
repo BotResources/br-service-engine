@@ -9,6 +9,7 @@ mod slices;
 mod state;
 mod subscription;
 mod union;
+mod ws;
 
 pub use error::{CODE_EXTENSION, mutation_error};
 pub use mutation::{MutationAck, ack, ack_bulk, execute, execute_bulk};
@@ -19,4 +20,5 @@ pub use schema::engine_schema;
 pub use slices::{SchemaSlices, SliceFragment};
 pub use state::GraphqlState;
 pub use subscription::attach;
+pub use ws::{SESSION_MAX_AGE_CLOSE_CODE, SESSION_MAX_AGE_CLOSE_REASON};
 pub use union::{JsonScalar, cause_json, key_json, typed_presence_view, typed_view};
