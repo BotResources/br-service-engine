@@ -133,12 +133,14 @@ async fn s071_a_kv_retract_removes_the_known_row_and_the_session_view() {
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    let user = Uuid::now_v7();
+    let kept = Uuid::now_v7();
+    let gone = Uuid::now_v7();
     let mirror =
         directory_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
     let watch = tokio::spawn(mirror.watch());
 
-    establish_email(&fabric, &pool, user, "present@example.test").await;
+    establish_email(&fabric, &pool, kept, "kept@example.test").await;
+    establish_email(&fabric, &pool, gone, "present@example.test").await;
 
     let engine = runtime(&pool, render_config("pod-retract"), roster_registry());
     let principal = member(&pool, Uuid::now_v7(), Uuid::now_v7()).await;
@@ -151,30 +153,30 @@ async fn s071_a_kv_retract_removes_the_known_row_and_the_session_view() {
         .expect("the session attaches");
     assert_eq!(
         reset_views(&next_delta(&mut stream, SOON).await.expect("a Reset")).len(),
-        1
+        2
     );
 
-    retract_user(&fabric, user).await;
+    retract_user(&fabric, gone).await;
     await_state(
         &pool,
-        user,
+        gone,
         None,
         "the watch never removed the retracted key from known_users",
     )
     .await;
     assert_eq!(
         known_users(&pool).await,
-        0,
-        "a retract on the bucket deletes the mirrored known_users row"
+        1,
+        "a retract deletes only the retracted row; a prefix that still has keys is not emptied"
     );
     assert!(
-        staged_touches(&staged_impacts(&pool).await, user),
+        staged_touches(&staged_impacts(&pool).await, gone),
         "the mirror stages its own foreign impact for the retracted user, observed not assumed"
     );
 
     let report = engine
         .render(vec![Impact::foreign(
-            ForeignKey::new("identity.user", &user.to_string()).unwrap(),
+            ForeignKey::new("identity.user", &gone.to_string()).unwrap(),
         )])
         .await
         .expect("the pass runs");
@@ -185,7 +187,7 @@ async fn s071_a_kv_retract_removes_the_known_row_and_the_session_view() {
     let remove = next_delta(&mut stream, SOON).await.expect("a Remove");
     assert_eq!(
         removed_key(&remove),
-        user,
+        gone,
         "the removed key is the retracted user"
     );
 

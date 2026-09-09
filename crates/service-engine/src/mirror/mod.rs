@@ -14,5 +14,5 @@ pub use change::{Change, ChangeOp};
 pub use consumed::Consumed;
 pub use handle::{MirrorHandle, MirrorRun};
 pub use leader::MirrorLeader;
-pub use projection::{Project, Projection};
+pub use projection::{Known, KnownScope, Project, Projection};
 pub use shadow::{Shadow, Shadows};

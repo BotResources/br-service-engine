@@ -114,8 +114,8 @@ pub use housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
 pub use impact::{Deps, Dims, ForeignKey, Impact, TransportEvent};
 pub use inbound::{Disposition, ReactionError};
 pub use mirror::{
-    Change, ChangeOp, Consumed, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader, MirrorReady,
-    Project, Projection, Shadow, Shadows,
+    Change, ChangeOp, Consumed, Known, KnownScope, Mirror, MirrorHandle, MirrorKeyed,
+    MirrorLeader, MirrorReady, Project, Projection, Shadow, Shadows,
 };
 pub use name::{
     AccumulatorName, ChannelName, ForeignId, JobName, MirrorName, Namespace, NounName, PodId,
