@@ -174,13 +174,20 @@ removal of a row when a principal's facts change — with
 
 **Presence lane (lane B).** `register_presence::<Pr>(ttl)` binds one
 `EPHEMERAL_{service}` KV bucket at boot (bind-only, fail-loud when absent, with
-no TTL, or without delete markers on expiry, since without them an expired key
-raises no watch event); each lane's `ttl` must be at least the bucket's
-`max_age`. Every pod watches the bucket, folds the latest value per key with no
-store write, and delivers `Upsert` on a put and `Remove` on TTL-expiry or clear
-through the same session/render machinery. Written with `Engine::present` /
-`PresenceHandle<P>` (`cx.present`). Last-write-wins and loss-tolerance hold by
-construction.
+no TTL, without delete markers on expiry — without them an expired key raises no
+watch event — or when the bucket refuses per-message TTL). Each write carries its
+lane's `ttl` as a per-key `Nats-TTL` header (NATS ≥ 2.11), so lanes with
+different lifetimes share one bucket and each key expires at its own `ttl`; the
+bucket's `max_age` must therefore be at least the longest lane's `ttl`, a global
+ceiling that never truncates a lane below its declared lifetime. Every pod
+watches the bucket, folds the latest value per key with no store write, and
+delivers `Upsert` on a put and `Remove` on TTL-expiry or clear through the same
+session/render machinery. On a NATS reconnection the watch (which async-nats
+silently resumes from new, losing the gap) is detected by the connection state:
+every pod reseeds from the bucket and pushes a `Reset` per presence projector, so
+a key that expired or changed while NATS was down is repaired rather than served
+forever. Written with `Engine::present` / `PresenceHandle<P>` (`cx.present`).
+Last-write-wins and loss-tolerance hold by construction.
 
 **Accumulated lane (lane A) and seal.** Streaming accumulators keyed by the
 source's own `ChunkSeq` (a checked newtype bounded to the `bigint` range; an
