@@ -138,7 +138,10 @@ async fn a_viewer_downloads_an_attachment_a_non_viewer_is_denied_the_same_refere
         .await
         .expect("the presigned upload reaches object storage")
         .status();
-    assert!(status.is_success(), "the presigned POST upload succeeded, got {status}");
+    assert!(
+        status.is_success(),
+        "the presigned POST upload succeeded, got {status}"
+    );
 
     let view = world
         .gql(
