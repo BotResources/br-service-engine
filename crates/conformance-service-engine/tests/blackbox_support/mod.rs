@@ -17,7 +17,7 @@ use service_engine::nats::Nats;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use bin::{SessionBounds, SpawnEnv, Spawned, free_port};
+use bin::{SpawnEnv, Spawned, free_port};
 use pg::BlackboxDb;
 use scopes::{ScopeIdentity, accept_scopes};
 
