@@ -15,7 +15,9 @@ use crate::inbound::{ReactionInvoker, ReactionRegistry};
 use crate::offers::OfferStagers;
 use crate::pipeline::context::Reaction;
 use crate::pipeline::ops::Ops;
+use crate::pipeline::outbound::OutboundContext;
 use crate::pipeline::staged::Staged;
+use crate::principal::{ErasedPrincipal, ReactionPrincipalResolver};
 use crate::time;
 use crate::transport::ImpactTransport;
 
@@ -28,6 +30,8 @@ pub(crate) struct DirectPipeline {
     blobs: Option<BlobHandle>,
     lock_timeout: Duration,
     impacts_per_commit: usize,
+    service: Option<String>,
+    principal_resolver: Option<Arc<dyn ReactionPrincipalResolver>>,
 }
 
 impl DirectPipeline {
@@ -41,6 +45,8 @@ impl DirectPipeline {
         blobs: Option<BlobHandle>,
         lock_timeout: Duration,
         impacts_per_commit: usize,
+        service: Option<String>,
+        principal_resolver: Option<Arc<dyn ReactionPrincipalResolver>>,
     ) -> Self {
         Self {
             pool,
@@ -51,7 +57,36 @@ impl DirectPipeline {
             blobs,
             lock_timeout,
             impacts_per_commit,
+            service,
+            principal_resolver,
         }
+    }
+
+    fn reaction_outbound(&self, msg: &Incoming) -> OutboundContext {
+        let actor = match self.service.as_deref() {
+            Some(service) => crate::identity::service_actor(service),
+            None => msg
+                .metadata
+                .actor
+                .unwrap_or_else(|| crate::identity::service_actor("")),
+        };
+        OutboundContext {
+            actor,
+            correlation_id: msg.metadata.correlation_id.unwrap_or(msg.message_id),
+            causation_id: Some(msg.message_id),
+            producer: self.service.clone(),
+        }
+    }
+
+    async fn resolve_principal(&self, msg: &Incoming) -> Result<Option<ErasedPrincipal>, DispatchError> {
+        let (Some(resolver), Some(actor)) = (&self.principal_resolver, msg.metadata.actor) else {
+            return Ok(None);
+        };
+        resolver
+            .resolve(&self.pool, actor)
+            .await
+            .map(Some)
+            .map_err(|error| classify_engine(&error))
     }
 
     async fn run(&self, msg: &Incoming) -> DispatchOutcome {
@@ -89,6 +124,14 @@ impl DirectPipeline {
                 }
             }
         }
+        let principal = match self.resolve_principal(msg).await {
+            Ok(principal) => principal,
+            Err(error) => {
+                let _ = tx.rollback().await;
+                return DispatchOutcome::Failed(error);
+            }
+        };
+        let outbound = self.reaction_outbound(msg);
         let mut staged = Staged::default();
         let handler = {
             let ops = Ops::new(
@@ -98,9 +141,10 @@ impl DirectPipeline {
                 self.offers.clone(),
                 self.blobs.as_ref(),
                 time::now(),
-            );
-            let mut cx = Reaction::new(ops);
-            invoke(invoker.as_ref(), &mut cx, &msg.payload).await
+            )
+            .with_outbound(outbound);
+            let mut cx = Reaction::new(ops, principal, msg.metadata.clone());
+            invoke(invoker.as_ref(), &mut cx, &msg.body).await
         };
         if let Err(error) = handler {
             let _ = tx.rollback().await;

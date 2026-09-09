@@ -20,6 +20,7 @@ pub mod full_eda;
 pub mod gate;
 pub mod graphql;
 pub mod housekeeping;
+mod identity;
 pub mod impact;
 pub mod inbound;
 pub mod metrics;
@@ -130,7 +131,7 @@ pub use offer::Offer;
 pub use persistence::{Aggregate, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
-    MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, Reaction,
+    MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, ProducerSequence, Reaction,
 };
 pub use population::{Interest, Inverse, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};

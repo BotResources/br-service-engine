@@ -1,6 +1,8 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use br_core_auth::Passport;
+use br_core_integration::Actor;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgConnection, PgPool};
@@ -53,3 +55,52 @@ pub trait PrincipalResolver<P: Principal>: Send + Sync + 'static {
 pub type PrincipalFactLoader<P> = Arc<
     dyn for<'a> Fn(&'a PgPool, &'a mut P) -> BoxFuture<'a, Result<(), EngineError>> + Send + Sync,
 >;
+
+pub type ErasedPrincipal = Arc<dyn Any + Send + Sync>;
+
+pub(crate) trait ReactionPrincipalResolver: Send + Sync + 'static {
+    fn resolve<'a>(
+        &'a self,
+        pg: &'a PgPool,
+        actor: Actor,
+    ) -> BoxFuture<'a, Result<ErasedPrincipal, EngineError>>;
+}
+
+pub(crate) fn erase_reaction_resolver<P, F>(resolver: F) -> Arc<dyn ReactionPrincipalResolver>
+where
+    P: Principal,
+    F: for<'a> Fn(&'a PgPool, Actor) -> BoxFuture<'a, Result<P, EngineError>>
+        + Send
+        + Sync
+        + 'static,
+{
+    struct Erased<P, F> {
+        resolver: F,
+        _principal: std::marker::PhantomData<fn() -> P>,
+    }
+
+    impl<P, F> ReactionPrincipalResolver for Erased<P, F>
+    where
+        P: Principal,
+        F: for<'a> Fn(&'a PgPool, Actor) -> BoxFuture<'a, Result<P, EngineError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        fn resolve<'a>(
+            &'a self,
+            pg: &'a PgPool,
+            actor: Actor,
+        ) -> BoxFuture<'a, Result<ErasedPrincipal, EngineError>> {
+            Box::pin(async move {
+                let principal = (self.resolver)(pg, actor).await?;
+                Ok(Arc::new(principal) as ErasedPrincipal)
+            })
+        }
+    }
+
+    Arc::new(Erased {
+        resolver,
+        _principal: std::marker::PhantomData,
+    })
+}

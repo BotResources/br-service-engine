@@ -39,6 +39,20 @@ impl<P: Principal> Engine<P> {
         })
     }
 
+    pub fn register_reaction_principal<F>(&mut self, resolver: F) -> Result<(), EngineError>
+    where
+        F: for<'a> Fn(
+                &'a PgPool,
+                br_core_integration::Actor,
+            ) -> BoxFuture<'a, Result<P, EngineError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.reaction_principal = Some(crate::principal::erase_reaction_resolver(resolver));
+        Ok(())
+    }
+
     pub fn register_principal_fact<F>(&mut self, loader: F) -> Result<(), EngineError>
     where
         F: for<'a> Fn(&'a PgPool, &'a mut P) -> BoxFuture<'a, Result<(), EngineError>>

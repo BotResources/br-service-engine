@@ -23,8 +23,8 @@ pub use dispatch::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
 pub use disposition::{Disposition, ReactionError, sqlx_is_terminal};
 pub use guard::{Claimed, Ordering, advance_sequence, claim};
 pub use message::{
-    HEADER_MESSAGE_ID, HEADER_PRODUCER, HEADER_SEQ, HEADER_SEQ_KEY, Incoming, SequenceKey,
-    Sequenced, Source, Unidentified,
+    HEADER_MESSAGE_ID, HEADER_PRODUCER, HEADER_SEQ, HEADER_SEQ_KEY, Incoming, MessageMetadata,
+    SequenceKey, Sequenced, Source, Unidentified,
 };
 pub use reaction::{ReactionEntry, ReactionInvoker, ReactionMessage, ReactionRegistry};
 pub use runtime::InboundLoop;

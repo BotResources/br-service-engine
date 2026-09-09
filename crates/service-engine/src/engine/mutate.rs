@@ -41,6 +41,7 @@ impl<P: Principal> Engine<P> {
             self.blobs.maybe_handle(),
             self.config.lock_timeout,
             self.config.impacts_per_commit,
+            self.config.service.clone(),
         )
     }
 

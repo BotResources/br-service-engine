@@ -6,7 +6,7 @@ pub use report::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_MESSAGES, FailureClass, RelayPass, RelayPolicy,
     classify_failure,
 };
-pub use stage::{OutboxRecord, event_subject, stage};
+pub use stage::{OutboundSequence, OutboxRecord, event_subject, stage};
 pub use store::{OUTBOX_NOTIFY_CHANNEL, OUTBOX_TABLE, OutboxStore, PendingOutbox};
 
 use std::sync::Mutex;
@@ -74,9 +74,20 @@ impl OutboxRelay {
         };
 
         let (message_id, id_source) = message_id_for(record.id, &record.payload);
+        let sequence = match (&record.producer, &record.seq_key, record.seq) {
+            (Some(producer), Some(seq_key), Some(seq)) => {
+                Some((producer.as_str(), seq_key.as_str(), seq))
+            }
+            _ => None,
+        };
         let publish_result = self
             .nats
-            .publish_value_with_id(&record.subject, &record.payload, &message_id.to_string())
+            .publish_value_sequenced(
+                &record.subject,
+                &record.payload,
+                &message_id.to_string(),
+                sequence,
+            )
             .await;
 
         let structural =

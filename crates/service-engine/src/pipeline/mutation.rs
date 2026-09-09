@@ -114,6 +114,7 @@ impl<P: Principal> MutationRegistry<P> {
         blobs: Option<BlobHandle>,
         lock_timeout: Duration,
         impacts_per_commit: usize,
+        service: Option<String>,
     ) -> MutationExecutor<P> {
         MutationExecutor {
             services: MutationServices {
@@ -125,6 +126,7 @@ impl<P: Principal> MutationRegistry<P> {
                 blobs,
                 lock_timeout,
                 impacts_per_commit,
+                service,
             },
             mutations: Arc::new(self.mutations.clone()),
             bulks: Arc::new(self.bulks.clone()),

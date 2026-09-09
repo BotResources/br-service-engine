@@ -1,5 +1,7 @@
 use async_nats::HeaderMap;
+use br_core_integration::{Actor, EventMetadata};
 use bytes::Bytes;
+use serde::Deserialize;
 use uuid::Uuid;
 
 pub const HEADER_MESSAGE_ID: &str = "Br-Message-Id";
@@ -25,10 +27,17 @@ pub struct Sequenced {
     pub seq: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageMetadata {
+    pub actor: Option<Actor>,
+    pub correlation_id: Option<Uuid>,
+    pub causation_id: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Unidentified {
     #[error(
-        "the message carries no resolvable id: neither a {HEADER_MESSAGE_ID} header nor a Nats-Msg-Id is present or parses as a uuid"
+        "the message carries no resolvable id: neither a {HEADER_MESSAGE_ID} header, an integration envelope id, nor a uuid Nats-Msg-Id is present"
     )]
     NoMessageId,
 }
@@ -40,6 +49,8 @@ pub struct Incoming {
     pub subject: String,
     pub message_id: Uuid,
     pub sequence: Option<Sequenced>,
+    pub metadata: MessageMetadata,
+    pub body: Bytes,
     pub payload: Bytes,
     pub delivered: u32,
 }
@@ -53,16 +64,75 @@ impl Incoming {
         payload: Bytes,
         delivered: u32,
     ) -> Result<Self, Unidentified> {
-        let message_id = message_id(headers).ok_or(Unidentified::NoMessageId)?;
+        let decoded = Decoded::from(&payload);
+        let message_id = message_id(headers, decoded.id).ok_or(Unidentified::NoMessageId)?;
+        let body = decoded.body.unwrap_or_else(|| payload.clone());
         Ok(Self {
             reaction: reaction.to_string(),
             source,
             subject,
             message_id,
             sequence: sequence(headers),
+            metadata: decoded.metadata,
+            body,
             payload,
             delivered,
         })
+    }
+}
+
+#[derive(Deserialize)]
+struct EnvelopeShell {
+    #[serde(default)]
+    event_id: Option<Uuid>,
+    #[serde(default)]
+    command_id: Option<Uuid>,
+    #[serde(default)]
+    metadata: Option<EventMetadata>,
+    #[serde(default)]
+    payload: Option<serde_json::Value>,
+}
+
+struct Decoded {
+    id: Option<Uuid>,
+    metadata: MessageMetadata,
+    body: Option<Bytes>,
+}
+
+impl Decoded {
+    fn from(raw: &Bytes) -> Self {
+        let Some(shell) = serde_json::from_slice::<EnvelopeShell>(raw).ok() else {
+            return Self {
+                id: None,
+                metadata: MessageMetadata::default(),
+                body: None,
+            };
+        };
+        let id = shell.event_id.or(shell.command_id);
+        let Some(inner) = shell.payload else {
+            return Self {
+                id: None,
+                metadata: MessageMetadata::default(),
+                body: None,
+            };
+        };
+        if id.is_none() {
+            return Self {
+                id: None,
+                metadata: MessageMetadata::default(),
+                body: None,
+            };
+        }
+        let metadata = shell
+            .metadata
+            .map(|m| MessageMetadata {
+                actor: Some(m.actor),
+                correlation_id: Some(m.correlation_id),
+                causation_id: m.causation_id,
+            })
+            .unwrap_or_default();
+        let body = serde_json::to_vec(&inner).ok().map(Bytes::from);
+        Self { id, metadata, body }
     }
 }
 
@@ -70,10 +140,14 @@ fn header<'a>(headers: Option<&'a HeaderMap>, name: &str) -> Option<&'a str> {
     headers.and_then(|h| h.get(name)).map(|v| v.as_str())
 }
 
-fn message_id(headers: Option<&HeaderMap>) -> Option<Uuid> {
-    let raw = header(headers, HEADER_MESSAGE_ID)
-        .or_else(|| header(headers, async_nats::header::NATS_MESSAGE_ID.as_ref()))?;
-    Uuid::parse_str(raw).ok()
+fn message_id(headers: Option<&HeaderMap>, envelope_id: Option<Uuid>) -> Option<Uuid> {
+    header(headers, HEADER_MESSAGE_ID)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+        .or(envelope_id)
+        .or_else(|| {
+            header(headers, async_nats::header::NATS_MESSAGE_ID.as_ref())
+                .and_then(|raw| Uuid::parse_str(raw).ok())
+        })
 }
 
 fn sequence(headers: Option<&HeaderMap>) -> Option<Sequenced> {
@@ -89,6 +163,8 @@ fn sequence(headers: Option<&HeaderMap>) -> Option<Sequenced> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use br_core_integration::{IntegrationCommand, ServiceAccountId};
+    use chrono::Utc;
 
     fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
         let mut map = HeaderMap::new();
@@ -96,6 +172,18 @@ mod tests {
             map.insert(*name, *value);
         }
         map
+    }
+
+    fn enveloped(command_id: Uuid, actor: Actor, correlation_id: Uuid) -> Bytes {
+        let envelope = IntegrationCommand::new(
+            command_id,
+            "work.do",
+            1,
+            Utc::now(),
+            EventMetadata::new(actor, correlation_id).with_causation(correlation_id),
+            serde_json::json!({ "verdict": "ok" }),
+        );
+        Bytes::from(serde_json::to_vec(&envelope).unwrap())
     }
 
     #[test]
@@ -138,6 +226,50 @@ mod tests {
         let err =
             Incoming::identify("r", Source::Event, "s".into(), None, Bytes::new(), 1).unwrap_err();
         assert!(matches!(err, Unidentified::NoMessageId));
+    }
+
+    #[test]
+    fn an_envelope_id_identifies_a_message_carrying_no_id_header() {
+        let command_id = Uuid::now_v7();
+        let actor = Actor::Service(ServiceAccountId::from(Uuid::now_v7()));
+        let correlation = Uuid::now_v7();
+        let raw = enveloped(command_id, actor, correlation);
+        let msg =
+            Incoming::identify("r", Source::Command, "s".into(), None, raw, 1).unwrap();
+        assert_eq!(msg.message_id, command_id);
+        assert_eq!(msg.metadata.actor, Some(actor));
+        assert_eq!(msg.metadata.correlation_id, Some(correlation));
+        assert_eq!(msg.metadata.causation_id, Some(correlation));
+        assert_eq!(&msg.body[..], br#"{"verdict":"ok"}"#);
+    }
+
+    #[test]
+    fn a_non_uuid_nats_msg_id_does_not_dead_letter_an_enveloped_message() {
+        let command_id = Uuid::now_v7();
+        let actor = Actor::Service(ServiceAccountId::from(Uuid::now_v7()));
+        let raw = enveloped(command_id, actor, Uuid::now_v7());
+        let map = headers(&[(async_nats::header::NATS_MESSAGE_ID.as_ref(), "not-a-uuid")]);
+        let msg =
+            Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap();
+        assert_eq!(msg.message_id, command_id);
+    }
+
+    #[test]
+    fn a_bare_payload_keeps_its_bytes_as_the_body_and_carries_no_metadata() {
+        let id = Uuid::now_v7();
+        let map = headers(&[(HEADER_MESSAGE_ID, &id.to_string())]);
+        let raw = Bytes::from_static(br#"{"verdict":"ok"}"#);
+        let msg = Incoming::identify(
+            "r",
+            Source::Command,
+            "s".into(),
+            Some(&map),
+            raw.clone(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(msg.body, raw);
+        assert_eq!(msg.metadata, MessageMetadata::default());
     }
 
     #[test]
