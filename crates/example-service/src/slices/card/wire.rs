@@ -5,7 +5,7 @@ use example_contract::{
 };
 use serde::{Deserialize, Serialize};
 use service_engine::inbound::{ReactionCoordinates, ReactionMessage};
-use service_engine::pipeline::OutboundEvent;
+use service_engine::pipeline::{OutboundEvent, ProducerSequence};
 use uuid::Uuid;
 
 pub struct InboundCreateCard(pub CreateCard);
@@ -32,11 +32,14 @@ impl ReactionMessage for InboundPersonCreated {
     }
 }
 
-pub struct OutCardReady(pub CardReady);
+pub struct OutCardReady {
+    pub ready: CardReady,
+    pub version: u64,
+}
 
 impl Serialize for OutCardReady {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
+        self.ready.serialize(serializer)
     }
 }
 
@@ -46,7 +49,14 @@ impl OutboundEvent for OutCardReady {
     }
 
     fn event_id(&self) -> Uuid {
-        self.0.card_id
+        self.ready.card_id
+    }
+
+    fn sequence(&self) -> Option<ProducerSequence> {
+        Some(ProducerSequence {
+            key: self.ready.card_id.to_string(),
+            version: self.version,
+        })
     }
 }
 
