@@ -30,7 +30,8 @@ pub fn start_reply<'m>(
     input: StartReply,
 ) -> BoxFuture<'m, Result<(), AppFault>> {
     Box::pin(async move {
-        let reply = ReplyRow::open(input.id, input.board_id);
+        let org = cx.principal().org();
+        let reply = ReplyRow::open(input.id, input.board_id, org);
         cx.create(&reply).await?;
         cx.impact_caused::<Reply, _>(&reply.id, ReplyCause::Started)?;
         Ok(())

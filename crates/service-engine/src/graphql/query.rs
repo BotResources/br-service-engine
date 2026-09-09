@@ -3,9 +3,11 @@ use std::sync::Arc;
 use async_graphql::{Context, Error, Json};
 use serde::de::DeserializeOwned;
 
+use crate::blobs::{BlobRef, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
 use crate::graphql::state::GraphqlState;
+use crate::persistence::{Aggregate, Persistence};
 use crate::principal::Principal;
 use crate::projector::Projector;
 use crate::render::group::Renderer;
@@ -67,6 +69,47 @@ impl<'a, P: Principal> Query<'a, P> {
         let params = WindowParams::encode(query)?;
         self.fetch_window::<crate::view::ViewProjector<V>>(params)
             .await
+    }
+
+    pub async fn download<V>(
+        &self,
+        key: &crate::view::ViewKey<V>,
+        reference: BlobRef,
+    ) -> Result<Option<DownloadUrl>, Error>
+    where
+        V: crate::view::Projector<Principal = P>,
+        <V::Store as Persistence>::Aggregate: Aggregate,
+    {
+        if !self.visible::<crate::view::ViewProjector<V>>(key).await? {
+            return Ok(None);
+        }
+        let held = {
+            let mut conn = self.state.pg().acquire().await.map_err(EngineError::from)?;
+            match <V::Store as Persistence>::load(&mut conn, key).await? {
+                Some(aggregate) => Aggregate::blob_refs(&aggregate).contains(&reference),
+                None => false,
+            }
+        };
+        if !held {
+            return Ok(None);
+        }
+        match self.state.blob_store() {
+            Some(store) => Ok(store.download_url(self.state.pg(), reference).await?),
+            None => Ok(None),
+        }
+    }
+
+    async fn visible<Pr>(&self, key: &Pr::Key) -> Result<bool, Error>
+    where
+        Pr: Projector<Principal = P> + Default,
+    {
+        let projector = Pr::default();
+        let erased = self.erased(&projector)?;
+        let key_bytes = KeyBytes::encode(key)?;
+        let population = erased
+            .populate(self.state.pg(), &WindowParams::none(), self.principal)
+            .await?;
+        Ok(is_member(&population, &key_bytes))
     }
 
     pub async fn fetch_json<Pr>(

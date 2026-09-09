@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use sqlx::PgPool;
+use tokio::sync::OnceCell;
 
+use crate::blobs::BlobStore;
 use crate::pipeline::MutationExecutor;
 use crate::principal::Principal;
 use crate::runtime::SessionRuntime;
@@ -10,6 +12,7 @@ pub struct GraphqlState<P: Principal> {
     executor: MutationExecutor<P>,
     runtime: Arc<SessionRuntime<P>>,
     pg: PgPool,
+    blobs: Arc<OnceCell<BlobStore>>,
 }
 
 impl<P: Principal> GraphqlState<P> {
@@ -17,16 +20,22 @@ impl<P: Principal> GraphqlState<P> {
         executor: MutationExecutor<P>,
         runtime: Arc<SessionRuntime<P>>,
         pg: PgPool,
+        blobs: Arc<OnceCell<BlobStore>>,
     ) -> Self {
         Self {
             executor,
             runtime,
             pg,
+            blobs,
         }
     }
 
     pub fn pg(&self) -> &PgPool {
         &self.pg
+    }
+
+    pub(crate) fn blob_store(&self) -> Option<&BlobStore> {
+        self.blobs.get()
     }
 
     pub(crate) fn executor(&self) -> &MutationExecutor<P> {

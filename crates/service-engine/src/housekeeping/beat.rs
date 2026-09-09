@@ -44,6 +44,7 @@ pub struct Beat {
     readiness: Option<ReadinessAssembly>,
     repairs: Option<Arc<dyn RepairRetry>>,
     blob_reaper: Option<BlobReaper>,
+    schema_version: (String, String),
 }
 
 impl Beat {
@@ -62,6 +63,10 @@ impl Beat {
             readiness: None,
             repairs: None,
             blob_reaper: None,
+            schema_version: (
+                crate::schema::ENGINE_SCHEMA_VERSION.to_string(),
+                config.schema_service_version().to_string(),
+            ),
         })
     }
 
@@ -150,6 +155,7 @@ impl Beat {
         let cron = self.cron.beat(pg).await;
         let scheduled = self.fire_boundaries().await;
         let gc = self.gc.sweep(pg, self.cron.slot_retention()).await;
+        self.refresh_schema_version(pg).await;
         let blobs = match &mut self.blob_reaper {
             Some(reaper) => reaper.sweep(pg).await,
             None => ReaperRound::default(),
@@ -168,6 +174,18 @@ impl Beat {
         };
         crate::observe::record_beat(&round);
         round
+    }
+
+    async fn refresh_schema_version(&self, pg: &PgPool) {
+        let (engine_version, service_version) = &self.schema_version;
+        if let Err(error) =
+            crate::schema_version::refresh_schema_version(pg, engine_version, service_version).await
+        {
+            tracing::warn!(
+                reason = %describe(&error),
+                "the beat could not refresh the schema version heartbeat",
+            );
+        }
     }
 
     async fn fire_boundaries(&self) -> ScheduledRound {

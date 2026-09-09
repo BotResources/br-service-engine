@@ -1,11 +1,12 @@
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use service_engine::BlobRef;
 use service_engine::error::EngineError;
 use service_engine::gate::{Gate, Reason};
 use service_engine::name::NounName;
 use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
+use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
+use service_engine::{BlobRef, CohortKey};
 use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
@@ -18,6 +19,24 @@ pub struct Reply;
 impl Noun for Reply {
     type Key = Uuid;
     const NAME: NounName = NounName::from_static("reply");
+}
+
+#[derive(Hash)]
+enum ReplyCohort {
+    Org(Uuid),
+}
+
+impl Visibility for Reply {
+    type Row = ReplyRow;
+    type Principal = AppPrincipal;
+
+    fn cohorts(row: &ReplyRow) -> Cohorts {
+        vec![CohortKey::of(&[ReplyCohort::Org(row.org_id)])]
+    }
+
+    fn memberships(principal: &AppPrincipal) -> Cohorts {
+        vec![CohortKey::of(&[ReplyCohort::Org(principal.org())])]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,16 +53,18 @@ pub enum ReplyCause {
 pub struct ReplyRow {
     pub id: Uuid,
     pub board_id: Uuid,
+    pub org_id: Uuid,
     pub text: String,
     pub status: String,
     pub blob_ref: Option<Uuid>,
 }
 
 impl ReplyRow {
-    pub fn open(id: Uuid, board_id: Uuid) -> Self {
+    pub fn open(id: Uuid, board_id: Uuid, org_id: Uuid) -> Self {
         Self {
             id,
             board_id,
+            org_id,
             text: String::new(),
             status: "streaming".to_string(),
             blob_ref: None,
@@ -95,6 +116,7 @@ fn row_to_reply(row: &sqlx::postgres::PgRow) -> ReplyRow {
     ReplyRow {
         id: row.get("id"),
         board_id: row.get("board_id"),
+        org_id: row.get("org_id"),
         text: row.get("text"),
         status: row.get("status"),
         blob_ref: row.get("blob_ref"),
@@ -115,11 +137,12 @@ impl Persistence for ReplyStore {
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<Option<ReplyRow>, EngineError>> {
         Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, board_id, text, status, blob_ref FROM reply WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
+            let row = sqlx::query(
+                "SELECT id, board_id, org_id, text, status, blob_ref FROM reply WHERE id = $1",
+            )
+            .bind(key)
+            .fetch_optional(conn)
+            .await?;
             Ok(row.as_ref().map(row_to_reply))
         })
     }
@@ -157,12 +180,14 @@ impl Persistence for ReplyStore {
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
             sqlx::query(
-                "INSERT INTO reply (id, board_id, text, status, blob_ref) VALUES ($1, $2, $3, $4, $5) \
+                "INSERT INTO reply (id, board_id, org_id, text, status, blob_ref) \
+                 VALUES ($1, $2, $3, $4, $5, $6) \
                  ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text, status = EXCLUDED.status, \
                    blob_ref = EXCLUDED.blob_ref",
             )
             .bind(reply.id)
             .bind(reply.board_id)
+            .bind(reply.org_id)
             .bind(&reply.text)
             .bind(&reply.status)
             .bind(reply.blob_ref)
@@ -179,10 +204,12 @@ impl Persistence for ReplyStore {
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
             sqlx::query(
-                "INSERT INTO reply (id, board_id, text, status, blob_ref) VALUES ($1, $2, $3, $4, $5)",
+                "INSERT INTO reply (id, board_id, org_id, text, status, blob_ref) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(reply.id)
             .bind(reply.board_id)
+            .bind(reply.org_id)
             .bind(&reply.text)
             .bind(&reply.status)
             .bind(reply.blob_ref)
@@ -205,19 +232,28 @@ impl Aggregate for ReplyRow {
     }
 }
 
-pub async fn all_reply_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
-    let rows = sqlx::query("SELECT id FROM reply").fetch_all(pg).await?;
-    Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+pub async fn candidate_replies(pg: &PgPool) -> Result<Vec<(Uuid, ReplyRow)>, EngineError> {
+    let rows = sqlx::query("SELECT id, board_id, org_id, text, status, blob_ref FROM reply")
+        .fetch_all(pg)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let reply = row_to_reply(row);
+            (reply.id, reply)
+        })
+        .collect())
 }
 
 pub async fn load_replies_conn(
     conn: &mut PgConnection,
     keys: &[Uuid],
 ) -> Result<Vec<ReplyRow>, EngineError> {
-    let rows =
-        sqlx::query("SELECT id, board_id, text, status, blob_ref FROM reply WHERE id = ANY($1)")
-            .bind(keys)
-            .fetch_all(conn)
-            .await?;
+    let rows = sqlx::query(
+        "SELECT id, board_id, org_id, text, status, blob_ref FROM reply WHERE id = ANY($1)",
+    )
+    .bind(keys)
+    .fetch_all(conn)
+    .await?;
     Ok(rows.iter().map(row_to_reply).collect())
 }

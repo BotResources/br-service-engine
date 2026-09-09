@@ -26,6 +26,7 @@ pub const DEFAULT_NATS_GRACE: Duration = Duration::from_secs(10);
 pub const DEFAULT_WINDOW_CAPACITY: usize = 10_000;
 pub const DEFAULT_IMPACTS_PER_COMMIT: usize = 1_000;
 pub const DEFAULT_BLOB_REAPER_INTERVAL: Duration = Duration::from_secs(60);
+pub const DEFAULT_SCHEMA_VERSION_LIVENESS: Duration = Duration::from_secs(30);
 pub const DEFAULT_HTTP_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8080);
 
 #[derive(Debug, Clone)]
@@ -51,10 +52,12 @@ pub struct EngineConfig {
     pub window_capacity: usize,
     pub impacts_per_commit: usize,
     pub blob_reaper_interval: Duration,
+    pub schema_version_liveness: Duration,
     pub http_addr: SocketAddr,
     pub channel: ChannelName,
     pub pod_id: PodId,
     pub service: Option<String>,
+    pub service_version: Option<String>,
     pub blob: Option<BlobConfig>,
 }
 
@@ -81,10 +84,12 @@ impl EngineConfig {
             window_capacity: DEFAULT_WINDOW_CAPACITY,
             impacts_per_commit: DEFAULT_IMPACTS_PER_COMMIT,
             blob_reaper_interval: DEFAULT_BLOB_REAPER_INTERVAL,
+            schema_version_liveness: DEFAULT_SCHEMA_VERSION_LIVENESS,
             http_addr: DEFAULT_HTTP_ADDR,
             channel,
             pod_id,
             service: None,
+            service_version: None,
             blob: None,
         }
     }
@@ -92,6 +97,22 @@ impl EngineConfig {
     pub fn with_service(mut self, service: impl Into<String>) -> Self {
         self.service = Some(service.into());
         self
+    }
+
+    pub fn with_service_version(mut self, service_version: impl Into<String>) -> Self {
+        self.service_version = Some(service_version.into());
+        self
+    }
+
+    pub fn with_schema_version_liveness(mut self, liveness: Duration) -> Self {
+        self.schema_version_liveness = liveness;
+        self
+    }
+
+    pub fn schema_service_version(&self) -> &str {
+        self.service_version
+            .as_deref()
+            .unwrap_or(crate::schema::ENGINE_SCHEMA_VERSION)
     }
 
     pub fn with_blob_storage(mut self, blob: BlobConfig) -> Self {
