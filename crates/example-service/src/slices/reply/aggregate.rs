@@ -125,6 +125,19 @@ impl Persistence for ReplyStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, ReplyRow)>, EngineError>> {
+        Box::pin(async move {
+            Ok(load_replies_conn(conn, keys)
+                .await?
+                .into_iter()
+                .map(|row| (row.id, row))
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         reply: &'a ReplyRow,

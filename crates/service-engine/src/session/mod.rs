@@ -90,7 +90,10 @@ impl WindowSpec {
         }
     }
 
-    pub fn view<V: crate::view::View>(query: &V::Query, rls: bool) -> Result<Self, EngineError> {
+    pub fn view<V: crate::view::Projector>(
+        query: &V::Query,
+        rls: bool,
+    ) -> Result<Self, EngineError> {
         Ok(Self::new(V::NAME, WindowParams::encode(query)?, rls))
     }
 }

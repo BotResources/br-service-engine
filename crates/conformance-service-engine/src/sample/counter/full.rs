@@ -47,6 +47,35 @@ impl Persistence for FullCounterStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, FullCounter)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, tenant, total, closed, last_author, version \
+                 FROM sample_counter_full_snapshot WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let state = CounterState::from_row(
+                        row.get("id"),
+                        row.get("tenant"),
+                        row.get("total"),
+                        row.get("closed"),
+                        row.get("last_author"),
+                        row.get("version"),
+                    );
+                    (state.key, FullCounter(state))
+                })
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         aggregate: &'a FullCounter,

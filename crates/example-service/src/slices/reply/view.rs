@@ -1,15 +1,13 @@
-use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gated};
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
-use service_engine::view::{Populate, View};
-use sqlx::PgConnection;
+use service_engine::view::{Populate, Projector};
 use uuid::Uuid;
 
-use super::aggregate::{Reply, ReplyRow, all_reply_ids, load_replies_conn};
+use super::aggregate::{Reply, ReplyRow, ReplyStore, all_reply_ids};
 use crate::kernel::AppPrincipal;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
@@ -29,37 +27,22 @@ impl RepliesView {
     pub const NAME: ProjectorName = ProjectorName::from_static("replies");
 }
 
-impl View for RepliesView {
+impl Projector for RepliesView {
     type Principal = AppPrincipal;
     type Noun = Reply;
-    type Row = ReplyRow;
+    type Store = ReplyStore;
     type Query = ();
     type Out = ReplyView;
 
     const NAME: ProjectorName = Self::NAME;
 
-    fn rows<'a>(
-        conn: &'a mut PgConnection,
-        keys: &'a [Uuid],
-    ) -> service_engine::view::RowsFuture<'a, Uuid, ReplyRow> {
-        Box::pin(async move {
-            Ok(load_replies_conn(conn, keys)
-                .await?
-                .into_iter()
-                .map(|row| (row.id, row))
-                .collect())
-        })
-    }
-
-    fn populate<'a>(
-        cx: &'a Populate<'a, AppPrincipal>,
-        _query: &'a (),
-    ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
-        Box::pin(async move {
-            Ok(Population::Keys(
-                all_reply_ids(cx.pool()).await?.into_iter().collect(),
-            ))
-        })
+    async fn populate(
+        cx: &Populate<'_, AppPrincipal>,
+        _query: &(),
+    ) -> Result<Population<Uuid>, EngineError> {
+        Ok(Population::Keys(
+            all_reply_ids(cx.pool()).await?.into_iter().collect(),
+        ))
     }
 
     fn project(row: &ReplyRow, principal: &AppPrincipal) -> ReplyView {

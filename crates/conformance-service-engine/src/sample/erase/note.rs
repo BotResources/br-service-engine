@@ -59,6 +59,28 @@ impl Persistence for EraseNoteStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, EraseNote)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, owner, tenant, body, blob_ref FROM sample_erase_note \
+                 WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let note = row_to_note(row);
+                    (note.id, note)
+                })
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         note: &'a EraseNote,

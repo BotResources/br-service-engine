@@ -35,6 +35,34 @@ impl Persistence for LedgerStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, LedgerAggregate)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, org_id, total, last_author, version FROM ledger_snapshot \
+                 WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let state = LedgerState::from_snapshot(
+                        row.get("id"),
+                        row.get("org_id"),
+                        row.get("total"),
+                        row.get("last_author"),
+                        row.get("version"),
+                    );
+                    (state.id, LedgerAggregate(state))
+                })
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         ledger: &'a LedgerAggregate,

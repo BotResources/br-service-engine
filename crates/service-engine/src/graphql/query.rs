@@ -53,7 +53,7 @@ impl<'a, P: Principal> Query<'a, P> {
         key: &crate::view::ViewKey<V>,
     ) -> Result<Option<V::Out>, Error>
     where
-        V: crate::view::View<Principal = P>,
+        V: crate::view::Projector<Principal = P>,
         V::Out: DeserializeOwned,
     {
         self.fetch::<crate::view::ViewProjector<V>>(key).await
@@ -61,7 +61,7 @@ impl<'a, P: Principal> Query<'a, P> {
 
     pub async fn fetch_view_window<V>(&self, query: &V::Query) -> Result<Vec<V::Out>, Error>
     where
-        V: crate::view::View<Principal = P>,
+        V: crate::view::Projector<Principal = P>,
         V::Out: DeserializeOwned,
     {
         let params = WindowParams::encode(query)?;

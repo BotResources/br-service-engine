@@ -182,16 +182,15 @@ async fn a_lost_producer_is_caught_by_the_scheduled_cancel_deadline() {
         )
         .await;
     assert_eq!(
-        ok(&cancelling)["reply"]["status"], "cancelling",
+        ok(&cancelling)["reply"]["status"],
+        "cancelling",
         "the decision is written on the direct lane while the producer is still expected to answer"
     );
 
-    sqlx::query(
-        "UPDATE service_engine.scheduled_message SET at = now() - interval '1 minute'",
-    )
-    .execute(&world.db.app)
-    .await
-    .expect("fast-forward the scheduled cancel deadline so the beat fires it now");
+    sqlx::query("UPDATE service_engine.scheduled_message SET at = now() - interval '1 minute'")
+        .execute(&world.db.app)
+        .await
+        .expect("fast-forward the scheduled cancel deadline so the beat fires it now");
 
     let text = poll_until!(Duration::from_secs(5), {
         let view = world

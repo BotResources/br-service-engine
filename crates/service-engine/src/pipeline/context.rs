@@ -107,7 +107,7 @@ impl<'a, P: Principal> Bulk<'a, P> {
             .push(Impact::projector_reset(projector.name()));
     }
 
-    pub fn impact_all_view<V: crate::view::View<Principal = P>>(&mut self) {
+    pub fn impact_all_view<V: crate::view::Projector<Principal = P>>(&mut self) {
         self.ops
             .staged
             .impacts

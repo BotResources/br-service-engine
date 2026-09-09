@@ -129,7 +129,7 @@ pub use pipeline::{
 pub use population::{Interest, Inverse, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
-pub use projector::{Emission, LoadScope, Projector};
+pub use projector::{Emission, LoadScope};
 #[cfg(feature = "test-support")]
 pub use registry::RenderRegistry;
 #[cfg(feature = "test-support")]
@@ -148,6 +148,6 @@ pub use time::Timestamp;
 pub use transport::{
     ImpactTransport, ListenerProbe, NOTIFY_PAYLOAD_LIMIT, PendingImpacts, PgListenNotify,
 };
-pub use view::{Populate, View, ViewKey, ViewProjector};
+pub use view::{Populate, Projector, ViewKey, ViewProjector};
 pub use visibility::{Cohorts, Visibility, WindowMismatch, check_window_matches_visibility};
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};

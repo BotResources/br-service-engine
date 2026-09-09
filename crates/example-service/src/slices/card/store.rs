@@ -44,6 +44,19 @@ impl Persistence for CardStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, CardAggregate)>, EngineError>> {
+        Box::pin(async move {
+            Ok(load_cards_conn(conn, keys)
+                .await?
+                .into_iter()
+                .map(|state| (state.id, CardAggregate(state)))
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         card: &'a CardAggregate,

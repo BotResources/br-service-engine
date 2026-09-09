@@ -45,7 +45,7 @@ impl<P: Principal> Engine<P> {
         self.with_registry(|registry| registry.add_projector(p))
     }
 
-    pub fn register_view<V: crate::view::View<Principal = P>>(
+    pub fn register_view<V: crate::view::Projector<Principal = P>>(
         &mut self,
         view: V,
     ) -> Result<(), EngineError> {

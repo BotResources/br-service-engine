@@ -15,6 +15,8 @@ pub enum PersistenceStyle {
     FullEda,
 }
 
+pub type RowBatch<'a, K, A> = BoxFuture<'a, Result<Vec<(K, A)>, EngineError>>;
+
 pub trait Persistence: Send + Sync + 'static {
     type Aggregate: Send + Sync + 'static;
     type Key: Clone + Eq + Hash + Send + Sync + Serialize + DeserializeOwned + 'static;
@@ -26,6 +28,11 @@ pub trait Persistence: Send + Sync + 'static {
         conn: &'a mut PgConnection,
         key: &'a Self::Key,
     ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>>;
+
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Self::Key],
+    ) -> RowBatch<'a, Self::Key, Self::Aggregate>;
 
     fn save<'a>(
         conn: &'a mut PgConnection,

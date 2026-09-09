@@ -53,6 +53,32 @@ impl Persistence for DocStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, DocRow)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, tenant_id, name, blob_ref FROM sample_doc WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let doc = DocRow {
+                        id: row.get("id"),
+                        tenant_id: row.get("tenant_id"),
+                        name: row.get("name"),
+                        blob_ref: row.get("blob_ref"),
+                    };
+                    (doc.id, doc)
+                })
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         aggregate: &'a DocRow,

@@ -54,6 +54,19 @@ impl Persistence for BoardStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, BoardRow)>, EngineError>> {
+        Box::pin(async move {
+            Ok(load_boards(conn, keys)
+                .await?
+                .into_iter()
+                .map(|row| (row.id, row))
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         board: &'a BoardRow,

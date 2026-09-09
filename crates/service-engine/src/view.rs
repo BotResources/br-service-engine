@@ -1,16 +1,21 @@
-use std::collections::BTreeMap;
+use std::any::TypeId;
+use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
+use std::marker::PhantomData;
+use std::sync::{Mutex, OnceLock};
 
 use futures_util::future::BoxFuture;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 
 use crate::error::EngineError;
 use crate::impact::{ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};
+use crate::persistence::Persistence;
 use crate::population::{Inverse, Population};
 use crate::principal::Principal;
-use crate::projector::{Emission, LoadScope, Projector};
+use crate::projector::{Emission, LoadScope, Projector as RawProjector};
 use crate::session::WindowParams;
 use crate::wire::Noun;
 
@@ -33,67 +38,64 @@ impl<'a, P: Principal> Populate<'a, P> {
     }
 }
 
-pub type ViewKey<V> = <<V as View>::Noun as Noun>::Key;
+pub type ViewKey<V> = <<V as Projector>::Noun as Noun>::Key;
 
-pub type RowsFuture<'a, K, R> = BoxFuture<'a, Result<Vec<(K, R)>, EngineError>>;
+type ViewRow<V> = <<V as Projector>::Store as Persistence>::Aggregate;
 
-pub trait View: Send + Sync + 'static {
+pub trait Projector: Send + Sync + 'static {
     type Principal: Principal;
     type Noun: Noun;
-    type Row: Send + Sync + 'static;
+    type Store: Persistence<Key = ViewKey<Self>>;
     type Query: Serialize + DeserializeOwned + Default + Send + Sync + 'static;
     type Out: Clone + PartialEq + Serialize + Send + Sync + 'static;
 
     const NAME: ProjectorName;
 
-    fn rows<'a>(
-        conn: &'a mut PgConnection,
-        keys: &'a [ViewKey<Self>],
-    ) -> RowsFuture<'a, ViewKey<Self>, Self::Row>;
+    fn populate(
+        cx: &Populate<'_, Self::Principal>,
+        query: &Self::Query,
+    ) -> impl Future<Output = Result<Population<ViewKey<Self>>, EngineError>> + Send;
 
-    fn populate<'a>(
-        cx: &'a Populate<'a, Self::Principal>,
-        query: &'a Self::Query,
-    ) -> BoxFuture<'a, Result<Population<ViewKey<Self>>, EngineError>>;
-
-    fn project(row: &Self::Row, principal: &Self::Principal) -> Self::Out;
+    fn project(row: &ViewRow<Self>, principal: &Self::Principal) -> Self::Out;
 
     fn emission() -> Emission {
         Emission::Coalesced
     }
 }
 
-pub struct ViewFacts<V: View> {
-    rows: BTreeMap<ViewKey<V>, V::Row>,
+fn cached_nouns<V: Projector>() -> &'static [NounName] {
+    static CACHE: OnceLock<Mutex<HashMap<TypeId, &'static [NounName]>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(nouns) = cache.get(&TypeId::of::<V>()).copied() {
+        return nouns;
+    }
+    let nouns: &'static [NounName] = Box::leak(vec![<V::Noun as Noun>::NAME].into_boxed_slice());
+    cache.insert(TypeId::of::<V>(), nouns);
+    nouns
 }
 
-pub struct ViewProjector<V: View> {
-    nouns: &'static [NounName],
-    _marker: std::marker::PhantomData<fn() -> V>,
+pub struct ViewFacts<V: Projector> {
+    rows: BTreeMap<ViewKey<V>, ViewRow<V>>,
 }
 
-impl<V: View> ViewProjector<V> {
+pub struct ViewProjector<V: Projector>(PhantomData<fn() -> V>);
+
+impl<V: Projector> ViewProjector<V> {
     pub fn new(_view: V) -> Self {
-        Self::of()
-    }
-
-    pub fn of() -> Self {
-        let nouns: &'static [NounName] =
-            Box::leak(vec![<V::Noun as Noun>::NAME].into_boxed_slice());
-        Self {
-            nouns,
-            _marker: std::marker::PhantomData,
-        }
+        Self(PhantomData)
     }
 }
 
-impl<V: View> Default for ViewProjector<V> {
+impl<V: Projector> Default for ViewProjector<V> {
     fn default() -> Self {
-        Self::of()
+        Self(PhantomData)
     }
 }
 
-impl<V: View> Projector for ViewProjector<V> {
+impl<V: Projector> RawProjector for ViewProjector<V> {
     type Principal = V::Principal;
     type Key = ViewKey<V>;
     type Facts = ViewFacts<V>;
@@ -104,7 +106,7 @@ impl<V: View> Projector for ViewProjector<V> {
     }
 
     fn nouns(&self) -> &'static [NounName] {
-        self.nouns
+        cached_nouns::<V>()
     }
 
     fn emission(&self, _impact: &Impact) -> Emission {
@@ -141,9 +143,9 @@ impl<V: View> Projector for ViewProjector<V> {
             let rows = match scope {
                 LoadScope::Bulk { pg, .. } => {
                     let mut conn = pg.acquire().await.map_err(EngineError::from)?;
-                    V::rows(&mut conn, &keys).await?
+                    V::Store::read_many(&mut conn, &keys).await?
                 }
-                LoadScope::PerPrincipal { conn, .. } => V::rows(conn, &keys).await?,
+                LoadScope::PerPrincipal { conn, .. } => V::Store::read_many(conn, &keys).await?,
             };
             Ok(ViewFacts {
                 rows: rows.into_iter().collect(),

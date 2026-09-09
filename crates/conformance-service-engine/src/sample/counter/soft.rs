@@ -54,6 +54,35 @@ impl Persistence for SoftCounterStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, SoftCounter)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, tenant, total, closed, version FROM sample_counter_soft \
+                 WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let state = CounterState::from_row(
+                        row.get("id"),
+                        row.get("tenant"),
+                        row.get("total"),
+                        row.get("closed"),
+                        None,
+                        row.get("version"),
+                    );
+                    (state.key, SoftCounter(state))
+                })
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         aggregate: &'a SoftCounter,

@@ -84,6 +84,32 @@ impl Persistence for WidgetStore {
         })
     }
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, WidgetRow)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, tenant_id, label, closed FROM sample_widget WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let widget = WidgetRow {
+                        id: row.get("id"),
+                        tenant_id: row.get("tenant_id"),
+                        label: row.get("label"),
+                        closed: row.get("closed"),
+                    };
+                    (widget.id, widget)
+                })
+                .collect())
+        })
+    }
+
     fn save<'a>(
         conn: &'a mut PgConnection,
         aggregate: &'a WidgetRow,
