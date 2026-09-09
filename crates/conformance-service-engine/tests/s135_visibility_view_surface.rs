@@ -16,7 +16,7 @@ fn subject_window() -> service_engine::session::WindowSpec {
 }
 
 #[tokio::test]
-async fn s132_a_row_that_leaves_the_cohort_is_removed_on_the_documented_view_surface() {
+async fn s135_a_row_that_leaves_the_cohort_is_removed_on_the_documented_view_surface() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -75,7 +75,7 @@ async fn s132_a_row_that_leaves_the_cohort_is_removed_on_the_documented_view_sur
 }
 
 #[tokio::test]
-async fn s132_a_fixed_window_is_repopulated_on_a_principal_change_both_directions() {
+async fn s135_a_fixed_window_is_repopulated_on_a_principal_change_both_directions() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

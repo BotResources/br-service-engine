@@ -5,7 +5,7 @@ use service_engine::error::EngineError;
 use service_engine::{Engine, Readiness, ReadinessHandle};
 
 #[tokio::test]
-async fn s132_a_second_pod_on_a_different_service_version_refuses_to_go_up() {
+async fn s136_a_second_pod_on_a_different_service_version_refuses_to_go_up() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

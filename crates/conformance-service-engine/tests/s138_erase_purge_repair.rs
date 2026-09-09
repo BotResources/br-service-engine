@@ -56,7 +56,7 @@ async fn purged_at_set(pool: &PgPool, person: Uuid) -> bool {
 }
 
 #[tokio::test]
-async fn s127_the_beat_completes_a_purge_the_erase_committed_but_never_finished() {
+async fn s138_the_beat_completes_a_purge_the_erase_committed_but_never_finished() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

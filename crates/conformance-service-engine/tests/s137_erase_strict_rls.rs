@@ -12,7 +12,7 @@ use uuid::Uuid;
 const SERVICE: &str = "s126strict";
 
 #[tokio::test]
-async fn s126_erase_deletes_rows_under_a_strict_deny_when_unset_rls_policy() {
+async fn s137_erase_deletes_rows_under_a_strict_deny_when_unset_rls_policy() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
