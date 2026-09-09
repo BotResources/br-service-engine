@@ -3,13 +3,14 @@ use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gated};
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
+use service_engine::principal::RlsApplier;
 use service_engine::view::{Populate, Projector};
 use service_engine::visibility::{Unrestricted, Visibility};
 use uuid::Uuid;
 
 use super::aggregate::{Board, BoardRow, BoardState};
 use super::store::{self, BoardStore};
-use crate::kernel::AppPrincipal;
+use crate::kernel::{AppPrincipal, AppRls};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct BoardView {
@@ -91,7 +92,10 @@ impl Projector for OrgBoardsRls {
         cx: &Populate<'_, AppPrincipal>,
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        let candidates = store::candidate_boards(cx.pool()).await?;
+        let mut tx = cx.pool().begin().await?;
+        AppRls.apply(&mut tx, cx.principal()).await?;
+        let candidates = store::candidate_boards(&mut *tx).await?;
+        tx.rollback().await?;
         Ok(Population::Keys(
             candidates.into_iter().map(|(id, _)| id).collect(),
         ))

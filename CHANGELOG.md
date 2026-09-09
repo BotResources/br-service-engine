@@ -267,7 +267,13 @@ one key by one principal are one code path with no per-call switch that could
 make them disagree. A `WindowSpec`'s `rls` flag is a caller assertion validated
 against the projector at attach: a contradiction is refused with
 `AttachError::RlsRegimeMismatch`, an RLS projector with no `RlsApplier` with
-`AttachError::MissingRlsApplier`. The subscription is one typed
+`AttachError::MissingRlsApplier`. The reference RLS projector `OrgBoardsRls`
+populates its window under the applier's org context rather than on a bare pool,
+so the window is scoped at `populate` time and not merely filtered at render; the
+board table it shares with the non-RLS cohort projector `BoardsView` stays
+permissive-when-unset because `Board::memberships` grants cross-org `Member`
+visibility that a fail-closed org policy would hide — RLS scoping is set by the
+projector's regime, never by the shared table. The subscription is one typed
 union member per projector via `subscription_union!` (and `presence_subscription_union!`
 for a presence lane) — the `Reset`/`Upsert`/`Remove` payloads over a typed view
 union with the contiguous revision and the causing event as `cause`. Each slice

@@ -141,9 +141,12 @@ pub async fn boards_of(pg: &PgPool, user: Uuid) -> Result<Vec<Uuid>, EngineError
         .collect())
 }
 
-pub async fn candidate_boards(pg: &PgPool) -> Result<Vec<(Uuid, BoardRow)>, EngineError> {
+pub async fn candidate_boards<'e, E>(exec: E) -> Result<Vec<(Uuid, BoardRow)>, EngineError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
     let rows = sqlx::query("SELECT id, org_id, name, is_public, state FROM board")
-        .fetch_all(pg)
+        .fetch_all(exec)
         .await?;
     Ok(rows
         .iter()
