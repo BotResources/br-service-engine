@@ -295,16 +295,6 @@ jobs:
           tar -xzf /tmp/nats-server.tar.gz -C /tmp
           sudo install "/tmp/nats-server-${NATS_SERVER_VERSION}-linux-amd64/nats-server" /usr/local/bin/nats-server
           nats-server --version
-      - name: install minio
-        env:
-          MINIO_RELEASE: minio.RELEASE.2025-09-06T17-38-46Z
-        run: |
-          set -euo pipefail
-          url="https://dl.min.io/server/minio/release/linux-amd64/archive/${MINIO_RELEASE}"
-          curl -fsSL "$url" -o /tmp/minio
-          chmod +x /tmp/minio
-          sudo install /tmp/minio /usr/local/bin/minio
-          minio --version
       - name: build the example service and twin binaries
         run: |
           cargo build --locked \
@@ -319,4 +309,5 @@ jobs:
             --test bb01_readiness_and_two_pods \
             --test bb02_mutation_gate_and_affordance \
             --test bb03_subscription_reset_and_reconnect \
-            --test bb04_cross_service_cycle_twin_binary
+            --test bb04_cross_service_cycle_twin_binary \
+            --test bb05_seal_streamed_reply
