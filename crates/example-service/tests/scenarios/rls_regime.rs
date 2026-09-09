@@ -199,10 +199,10 @@ async fn the_rls_projector_populates_its_window_under_the_org_context_not_on_a_b
         .execute(&mut *scoped_tx)
         .await
         .expect("set the org context transaction-locally");
-    let scoped: Vec<Uuid> = sqlx::query("SELECT id FROM board")
+    let scoped: Vec<Uuid> = sqlx::query("SELECT id FROM org_board")
         .fetch_all(&mut *scoped_tx)
         .await
-        .expect("read the board table under the org context")
+        .expect("read the org_board projection under the org context")
         .iter()
         .map(|row| row.get::<Uuid, _>("id"))
         .collect();
@@ -213,28 +213,49 @@ async fn the_rls_projector_populates_its_window_under_the_org_context_not_on_a_b
 
     assert!(
         scoped.contains(&mine) && scoped.contains(&public) && !scoped.contains(&foreign),
-        "OrgBoardsRls::populate reads candidate_boards under the applier's org context, so the \
+        "OrgBoardsRls reads the org_board projection under the applier's org context, so the \
          window is narrowed to the org's own boards plus public ones at populate time; the \
          foreign-org row is never a window member, not merely filtered at render: {scoped:?}"
     );
 
-    let mut bare_tx = pool.begin().await.expect("bare tx on the app pool");
-    let bare: Vec<Uuid> = sqlx::query("SELECT id FROM board")
-        .fetch_all(&mut *bare_tx)
+    let mut unset_tx = pool.begin().await.expect("unset tx on the app pool");
+    let unset: Vec<Uuid> = sqlx::query("SELECT id FROM org_board")
+        .fetch_all(&mut *unset_tx)
         .await
-        .expect("read the board table with no org context set")
+        .expect("read the org_board projection with no org context set")
         .iter()
         .map(|row| row.get::<Uuid, _>("id"))
         .collect();
-    bare_tx.rollback().await.expect("rollback the bare read");
+    unset_tx.rollback().await.expect("rollback the unset read");
 
     assert!(
-        bare.contains(&mine) && bare.contains(&foreign) && bare.contains(&public),
-        "with no org context the FORCE-RLS policy returns every board: this is the permissive \
-         branch the non-RLS cohort projector BoardsView depends on, since Board::memberships \
-         grants a cross-org Member visibility a fail-closed org policy would hide; the shared \
-         table therefore stays permissive-when-unset by construction, and RLS scoping is set by \
-         the projector's regime, not by the table: {bare:?}"
+        unset.is_empty(),
+        "the RLS projection is deny-when-unset: with no org context in the transaction the \
+         org_board projection returns no rows at all, so a read that forgets the context leaks \
+         nothing instead of falling back to every row: {unset:?}"
+    );
+
+    let mut cohort_tx = pool.begin().await.expect("cohort tx on the app pool");
+    let cohort: Vec<Uuid> = sqlx::query("SELECT id FROM board")
+        .fetch_all(&mut *cohort_tx)
+        .await
+        .expect("read the base board table the cohort projector uses")
+        .iter()
+        .map(|row| row.get::<Uuid, _>("id"))
+        .collect();
+    cohort_tx
+        .rollback()
+        .await
+        .expect("rollback the cohort read");
+
+    assert!(
+        cohort.contains(&mine) && cohort.contains(&foreign) && cohort.contains(&public),
+        "the base board table carries no RLS: it is the non-RLS cohort projector BoardsView's \
+         source, which must see every candidate so Board::memberships can grant a cross-org \
+         Member visibility in the app layer that a fail-closed org policy would wrongly hide. The \
+         two regimes therefore sit on two sources — a fail-closed org_board projection for RLS, \
+         the plain board table for cohorts — and the regime is the projector's, never the \
+         table's: {cohort:?}"
     );
 
     world.cleanup().await;

@@ -9,7 +9,7 @@ use service_engine::visibility::{Unrestricted, Visibility};
 use uuid::Uuid;
 
 use super::aggregate::{Board, BoardRow, BoardState};
-use super::store::{self, BoardStore};
+use super::store::{self, BoardStore, OrgBoardStore};
 use crate::kernel::{AppPrincipal, AppRls};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
@@ -79,7 +79,7 @@ impl OrgBoardsRls {
 impl Projector for OrgBoardsRls {
     type Principal = AppPrincipal;
     type Noun = Board;
-    type Store = BoardStore;
+    type Store = OrgBoardStore;
     type Query = ();
     type Out = BoardView;
     type Visibility = Unrestricted<BoardRow, AppPrincipal>;
@@ -94,11 +94,9 @@ impl Projector for OrgBoardsRls {
     ) -> Result<Population<Uuid>, EngineError> {
         let mut tx = cx.pool().begin().await?;
         AppRls.apply(&mut tx, cx.principal()).await?;
-        let candidates = store::candidate_boards(&mut *tx).await?;
+        let ids = store::org_board_ids(&mut *tx).await?;
         tx.rollback().await?;
-        Ok(Population::Keys(
-            candidates.into_iter().map(|(id, _)| id).collect(),
-        ))
+        Ok(Population::Keys(ids.into_iter().collect()))
     }
 
     fn project(row: &BoardRow, principal: &AppPrincipal) -> BoardView {

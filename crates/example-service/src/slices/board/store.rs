@@ -157,6 +157,78 @@ where
         .collect())
 }
 
+pub async fn org_board_ids<'e, E>(exec: E) -> Result<Vec<Uuid>, EngineError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let rows = sqlx::query("SELECT id FROM org_board")
+        .fetch_all(exec)
+        .await?;
+    Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+}
+
+pub struct OrgBoardStore;
+
+impl Persistence for OrgBoardStore {
+    type Aggregate = BoardRow;
+    type Key = Uuid;
+    type Event = ();
+
+    const STYLE: PersistenceStyle = PersistenceStyle::Crud;
+
+    fn load<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<Option<BoardRow>, EngineError>> {
+        Box::pin(async move {
+            let row = sqlx::query(
+                "SELECT id, org_id, name, is_public, state FROM org_board WHERE id = $1",
+            )
+            .bind(key)
+            .fetch_optional(conn)
+            .await?;
+            Ok(row.as_ref().map(row_to_board))
+        })
+    }
+
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, BoardRow)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, org_id, name, is_public, state FROM org_board WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .iter()
+                .map(|row| {
+                    let board = row_to_board(row);
+                    (board.id, board)
+                })
+                .collect())
+        })
+    }
+
+    fn save<'a>(
+        conn: &'a mut PgConnection,
+        board: &'a BoardRow,
+        events: &'a [()],
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        BoardStore::save(conn, board, events)
+    }
+
+    fn create<'a>(
+        conn: &'a mut PgConnection,
+        board: &'a BoardRow,
+        events: &'a [()],
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        BoardStore::create(conn, board, events)
+    }
+}
+
 pub async fn load_boards(
     conn: &mut PgConnection,
     keys: &[Uuid],
