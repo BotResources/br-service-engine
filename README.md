@@ -258,7 +258,17 @@ included — so both directions reach a live session then and there. A projector
 that filters through Postgres RLS instead of cohorts, or one that is open to every
 viewer, declares `type Visibility = Unrestricted<Row, Principal>`, a conscious
 "no cohort gate here" that keeps the render-time gate off rather than defaulting
-it open. The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
+it open. Whether a projector renders under RLS is the **projector's** declaration,
+not the call's: `view::Projector` carries `const RLS` (the raw
+`projector::Projector` overrides `renders_under_rls`), and the engine reads it on
+every path — the snapshot, the render pass, the repair and `Query::fetch*`. So a
+fetch and a subscription of the same key by the same principal engage the same
+regime and return the same view; there is no per-call switch that could make the
+two disagree. A `WindowSpec` is still passed an `rls` flag, but it is a caller
+assertion checked against the projector at attach: a flag that contradicts the
+declaration is refused with `AttachError::RlsRegimeMismatch`, and an RLS
+projector attached with no `RlsApplier` registered is refused with
+`AttachError::MissingRlsApplier`. The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
 cancel decision (with the cancel gate as its affordance, a presence signal the
 producer watches and a scheduled deadline), a reaction that seals the producer's
