@@ -7,4 +7,5 @@ mod lifecycle;
 mod multipod;
 mod presence;
 mod reply;
+mod rls_regime;
 mod subscriptions;

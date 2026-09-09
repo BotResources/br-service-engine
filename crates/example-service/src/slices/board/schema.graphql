@@ -29,6 +29,7 @@ type BoardReset {
 
 type BoardSubscription {
 	boardDeltas: BoardDelta!
+	orgBoardDeltas: OrgBoardDelta!
 }
 
 type BoardUpsert {
@@ -55,6 +56,28 @@ scalar JSON
 type MutationAck {
 	success: Boolean!
 }
+
+union OrgBoardDelta = OrgBoardReset | OrgBoardUpsert | OrgBoardRemove
+
+type OrgBoardRemove {
+	revision: Int!
+	projector: String!
+	key: JSON!
+	cause: JSON
+}
+
+type OrgBoardReset {
+	revision: Int!
+	views: [OrgBoardViewUnion!]!
+}
+
+type OrgBoardUpsert {
+	revision: Int!
+	view: OrgBoardViewUnion!
+	cause: JSON
+}
+
+union OrgBoardViewUnion = BoardView
 
 """
 A UUID is a unique 128-bit number, stored as 16 octets. UUIDs are parsed as
