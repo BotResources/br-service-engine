@@ -401,12 +401,24 @@ fails, so a mispooled service never becomes ready.
 ## Configuration, degradation and observability
 
 `EngineConfig` carries one clock and a handful of bounds, every one validated
-at `Engine::boot`: durations are non-zero, `listener_queue_threshold` lies in
-`(0.0, 1.0]`, the `lease` outlasts the `beat`, and `session_max_age` outlasts
-the idle `session_ttl`. A session lives at most `session_max_age`; when it does
+at `Engine::boot`: durations and capacities are non-zero,
+`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
+`beat`, and `session_max_age` outlasts the idle `session_ttl`. A session lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
 reaps a session that has lost its consumer.
+
+The listening connection is drained by a task that does nothing else: it
+forwards notifications into a bounded in-process channel (`listener_channel_capacity`)
+that the render loop consumes, so a slow render pass never stops the drain and
+never lets the cluster's notification queue back up behind this pod. When the
+render loop cannot keep up and the channel overflows, the drained impacts are
+dropped and one `Reconnected` is signalled, which re-snapshots every session on
+the pod — a detectable loss, never a silent gap. The beat samples
+`pg_notification_queue_usage()` each tick; past `listener_queue_threshold` it
+closes the listener, which takes the pod DOWN, then reconnects and resets its
+sessions — losing impacts is repairable, failing every notifying commit on the
+cluster is not.
 
 Degradation follows the dependency: Postgres down means nothing serves; a lost
 listener holds the pod DOWN until it reconnects and then resets every session;
@@ -419,7 +431,9 @@ Every engine metric is exported on the shared observability endpoint labelled
 by `service` and `pod`; each dependency of the degrade table is a
 `service_engine_dependency_up` gauge, so a not-UP state is visible before
 readiness moves. `service_engine_impacts_committed_total` is the notify-budget
-counter watched at the Postgres-cluster level. The four shipped alerts are in
+counter watched at the Postgres-cluster level; it counts impacts of committed
+transactions only, recorded after the commit, never a rolled-back mutation. The
+four shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml).
 
 ## AI disclosure

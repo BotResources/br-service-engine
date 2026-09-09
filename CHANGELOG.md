@@ -53,7 +53,14 @@ returns `AttachError::ShuttingDown`.
   strictly below Postgres's 8000-byte `NOTIFY` limit and reassembles the whole,
   a self-repairing `listen()` stream surfacing every loss of continuity as
   `Reconnected` (the loss detector that resets a pod's sessions), and
-  `queue_usage()`.
+  `queue_usage()`. The listening connection is drained by its own task into a
+  bounded in-process channel (`listener_channel_capacity`) that the render loop
+  consumes, so a slow render never stalls the drain; a channel overflow drops the
+  impacts and signals one `Reconnected`, re-snapshotting every session. Past
+  `listener_queue_threshold` the beat closes the listener through `set_brake`,
+  which takes the pod DOWN, reconnects and resets its sessions.
+  `service_engine_impacts_committed_total` counts impacts of committed
+  transactions only, recorded after commit.
 - Boot posture assertion (`assert_posture`: no superuser, no `rolbypassrls`, no
   ownership or membership of the engine schema/database) and the boot listener
   probe that holds readiness DOWN behind a transaction-mode pooler.
@@ -286,8 +293,8 @@ its own readiness handle and `/readyz` route.
 **Configuration, degradation and observability.** `EngineConfig` validates every
 bound of the intent's config table at boot (`session_max_age`, `lock_timeout`,
 `nats_grace`, `listener_queue_threshold`, `window_capacity`, `impacts_per_commit`,
-the `lease` outlasting the `beat`, `session_max_age` outlasting `session_ttl`,
-`listener_queue_threshold` in `(0.0, 1.0]`) and carries an optional `service`
+`listener_channel_capacity`, the `lease` outlasting the `beat`, `session_max_age`
+outlasting `session_ttl`, `listener_queue_threshold` in `(0.0, 1.0]`) and carries an optional `service`
 label and `http_addr`. A session lives at most `session_max_age` (ended with the
 stream-closing signal so the client reconnects with a fresh passport, distinct
 from `session_ttl`). A `NatsHealth` tracker keeps the pod UP through an outage
