@@ -263,7 +263,15 @@ declares its root fields and types as a `SliceFragment`
 claiming one root field or type) or, once fed the composed SDL with
 `set_schema_sdl`, `EngineError::UndeclaredSchemaMember` (a real root field no
 slice declared). The axum layer resolves the principal from the trusted
-`X-Passport` header (`PassportPrincipal`) — authZ only, never authN.
+`X-Passport` header (`PassportPrincipal`) — authZ only, never authN. The
+subscription principal is resolved once at the WebSocket handshake and serves
+every operation on that socket, so the kit bounds the connection itself: it
+closes the `graphql-transport-ws` socket at `session_max_age` measured from the
+handshake with a `1001` going-away close frame (`SESSION_MAX_AGE_CLOSE_CODE` /
+`SESSION_MAX_AGE_CLOSE_REASON`), then the client reconnects on a fresh upgrade
+where the gateway re-injects the resolved `X-Passport`. A revoked scope cannot
+outlive the bound by keeping the socket open and re-subscribing, and a mutation
+over the socket runs under a principal no older than the bound.
 
 **Ergonomic projector surface (`view`).** A `view::Projector` (re-exported as
 `service_engine::Projector`) names `type Noun` / `type Store` / `type Query` and
@@ -290,7 +298,9 @@ the `lease` outlasting the `beat`, `session_max_age` outlasting `session_ttl`,
 `listener_queue_threshold` in `(0.0, 1.0]`) and carries an optional `service`
 label and `http_addr`. A session lives at most `session_max_age` (ended with the
 stream-closing signal so the client reconnects with a fresh passport, distinct
-from `session_ttl`). A `NatsHealth` tracker keeps the pod UP through an outage
+from `session_ttl`); the WebSocket connection carrying it is closed at the same
+bound measured from the handshake, so the bound holds even when a client keeps
+the socket open. A `NatsHealth` tracker keeps the pod UP through an outage
 shorter than `nats_grace` and DOWN past it. Every metric is labelled by `service`
 and `pod`; `impacts_committed_total` is the notify-budget counter, and each
 degrade-table dependency is a `dependency_up` gauge. Four alerts ship as a

@@ -104,6 +104,49 @@ impl GraphqlWs {
         }
     }
 
+    pub async fn expect_close(&mut self, within: Duration) -> (u16, String) {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "the socket never delivered a Close frame within {within:?}"
+            );
+            match tokio::time::timeout(remaining, self.stream.next()).await {
+                Err(_) => panic!("the socket never delivered a Close frame within {within:?}"),
+                Ok(None) => panic!("the socket ended without a graceful Close frame"),
+                Ok(Some(message)) => {
+                    let message = message.expect("the websocket yields a frame");
+                    if let Message::Close(frame) = message {
+                        let frame = frame.expect("the shutting-down close carries a frame");
+                        return (u16::from(frame.code), frame.reason.as_str().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn resubscribe_refused(&mut self, id: &str, query: &str) -> bool {
+        let subscribe = serde_json::json!({
+            "id": id,
+            "type": "subscribe",
+            "payload": { "query": query },
+        });
+        if self
+            .stream
+            .send(Message::text(subscribe.to_string()))
+            .await
+            .is_err()
+        {
+            return true;
+        }
+        match tokio::time::timeout(Duration::from_secs(2), self.stream.next()).await {
+            Err(_) | Ok(None) => true,
+            Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_))) => true,
+            Ok(Some(Ok(_))) => false,
+        }
+    }
+
     async fn send(&mut self, value: serde_json::Value) {
         self.stream
             .send(Message::text(value.to_string()))

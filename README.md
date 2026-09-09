@@ -406,7 +406,16 @@ at `Engine::boot`: durations are non-zero, `listener_queue_threshold` lies in
 the idle `session_ttl`. A session lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
-reaps a session that has lost its consumer.
+reaps a session that has lost its consumer. The bound is on the connection, not
+only the session: the WebSocket principal is resolved once at the handshake and
+serves every operation on that socket — subscriptions and mutations alike — so
+the kit closes the `graphql-transport-ws` connection itself at `session_max_age`
+measured from the handshake, with a `1001` going-away close frame the client
+recognises as a reconnect. A revoked scope therefore cannot keep an affordance
+allowed by keeping the socket open and re-subscribing, and a mutation over the
+socket runs under a principal no older than the bound. The client opens a new
+upgrade on which the gateway re-injects the resolved `X-Passport`, so the fresh
+socket carries the current passport.
 
 Degradation follows the dependency: Postgres down means nothing serves; a lost
 listener holds the pod DOWN until it reconnects and then resets every session;

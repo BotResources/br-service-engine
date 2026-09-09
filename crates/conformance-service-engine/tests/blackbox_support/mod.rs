@@ -17,10 +17,11 @@ use service_engine::nats::Nats;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use bin::{SpawnEnv, Spawned, free_port};
+use bin::{SessionBounds, SpawnEnv, Spawned, free_port};
 use pg::BlackboxDb;
 use scopes::{ScopeIdentity, accept_scopes};
 
+pub use bin::SessionBounds;
 pub use graphql_support::{GraphqlWs, post_json};
 
 pub struct World {
@@ -33,6 +34,10 @@ pub struct World {
 
 impl World {
     pub async fn start(pod: &str) -> World {
+        World::start_with_bounds(pod, None).await
+    }
+
+    pub async fn start_with_bounds(pod: &str, session_bounds: Option<SessionBounds>) -> World {
         let db = BlackboxDb::fresh().await;
         let nats_server = TestNats::spawn().await;
         nats_server.provision().await;
@@ -60,6 +65,7 @@ impl World {
             pod: pod.to_string(),
             port: free_port(),
             blobs: None,
+            session_bounds,
         })
         .await;
 
@@ -83,6 +89,7 @@ impl World {
             pod: pod.to_string(),
             port: free_port(),
             blobs: None,
+            session_bounds: None,
         })
         .await
     }

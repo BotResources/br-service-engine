@@ -67,6 +67,12 @@ pub struct SpawnEnv {
     pub pod: String,
     pub port: u16,
     pub blobs: Option<BlobEnv>,
+    pub session_bounds: Option<SessionBounds>,
+}
+
+pub struct SessionBounds {
+    pub ttl: Duration,
+    pub max_age: Duration,
 }
 
 pub struct BlobEnv {
@@ -106,6 +112,11 @@ impl Spawned {
                 .env("S3_ACCESS_KEY", &blob.access_key)
                 .env("S3_SECRET_KEY", &blob.secret_key)
                 .env("S3_REGION", &blob.region);
+        }
+        if let Some(bounds) = &env.session_bounds {
+            command
+                .env("SESSION_TTL_MS", bounds.ttl.as_millis().to_string())
+                .env("SESSION_MAX_AGE_MS", bounds.max_age.as_millis().to_string());
         }
 
         let child = command.spawn().expect("spawn the example-service binary");

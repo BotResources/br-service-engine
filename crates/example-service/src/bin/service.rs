@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use example_service::boot::{BootOptions, boot};
 use service_engine::BlobConfig;
@@ -23,6 +24,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = EngineConfig::new(ChannelName::new(&channel)?, PodId::new(&pod)?)
         .with_service(example_contract::SERVICE)
         .with_http_addr(http_addr);
+
+    if let Ok(ms) = std::env::var("SESSION_TTL_MS") {
+        config = config.with_session_ttl(Duration::from_millis(ms.parse()?));
+    }
+    if let Ok(ms) = std::env::var("SESSION_MAX_AGE_MS") {
+        config = config.with_session_max_age(Duration::from_millis(ms.parse()?));
+    }
 
     if let (Ok(endpoint), Ok(bucket), Ok(access), Ok(secret)) = (
         std::env::var("S3_ENDPOINT"),
