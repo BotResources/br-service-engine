@@ -189,6 +189,13 @@ impl<'a> Ops<'a> {
         Ok(())
     }
 
+    pub async fn accumulated<A: Accumulator>(
+        &self,
+        key: &<A::Noun as Noun>::Key,
+    ) -> Result<crate::accumulator::Accumulated<A::State>, EngineError> {
+        self.accumulators.reader().state::<A>(key).await
+    }
+
     pub async fn seal<A: Accumulator>(
         &mut self,
         key: &<A::Noun as Noun>::Key,

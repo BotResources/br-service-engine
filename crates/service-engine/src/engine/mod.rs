@@ -169,6 +169,10 @@ impl<P: Principal> Engine<P> {
         &self.nats
     }
 
+    pub fn accumulator_handle(&self) -> Arc<AccumulatorRuntime> {
+        self.accumulators.clone()
+    }
+
     pub(crate) fn with_registry(
         &mut self,
         f: impl FnOnce(&mut RenderRegistry<P>) -> Result<(), EngineError>,

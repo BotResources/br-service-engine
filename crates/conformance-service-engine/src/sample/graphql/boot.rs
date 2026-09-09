@@ -70,6 +70,17 @@ impl GraphqlService {
     }
 }
 
+fn base_config(channel: &str, pod: &str) -> EngineConfig {
+    EngineConfig::new(
+        ChannelName::new(channel).expect("a valid notify channel"),
+        PodId::new(pod).expect("a valid pod id"),
+    )
+    .with_window(Duration::from_millis(30))
+    .with_beat(Duration::from_millis(80))
+    .with_lease(Duration::from_secs(5))
+    .with_lock_timeout(Duration::from_millis(300))
+}
+
 async fn free_loopback_addr() -> std::net::SocketAddr {
     let probe = TcpListener::bind("127.0.0.1:0")
         .await
@@ -84,15 +95,7 @@ pub async fn boot_graphql_service(
     pod: &str,
 ) -> GraphqlService {
     let addr = free_loopback_addr().await;
-    let config = EngineConfig::new(
-        ChannelName::new(channel).expect("a valid notify channel"),
-        PodId::new(pod).expect("a valid pod id"),
-    )
-    .with_window(Duration::from_millis(30))
-    .with_beat(Duration::from_millis(80))
-    .with_lease(Duration::from_secs(5))
-    .with_lock_timeout(Duration::from_millis(300))
-    .with_http_addr(addr);
+    let config = base_config(channel, pod).with_http_addr(addr);
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,
@@ -161,15 +164,7 @@ pub async fn boot_rls_query_service(
     pod: &str,
 ) -> GraphqlService {
     let addr = free_loopback_addr().await;
-    let config = EngineConfig::new(
-        ChannelName::new(channel).expect("a valid notify channel"),
-        PodId::new(pod).expect("a valid pod id"),
-    )
-    .with_window(Duration::from_millis(30))
-    .with_beat(Duration::from_millis(80))
-    .with_lease(Duration::from_secs(5))
-    .with_lock_timeout(Duration::from_millis(300))
-    .with_http_addr(addr);
+    let config = base_config(channel, pod).with_http_addr(addr);
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,
@@ -228,14 +223,7 @@ pub async fn boot_undeclared_root_field(
     channel: &str,
     pod: &str,
 ) -> Result<(), service_engine::EngineError> {
-    let config = EngineConfig::new(
-        ChannelName::new(channel).expect("a valid notify channel"),
-        PodId::new(pod).expect("a valid pod id"),
-    )
-    .with_window(Duration::from_millis(30))
-    .with_beat(Duration::from_millis(80))
-    .with_lease(Duration::from_secs(5))
-    .with_lock_timeout(Duration::from_millis(300));
+    let config = base_config(channel, pod);
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,
@@ -272,14 +260,7 @@ pub async fn boot_colliding_slices(
     pod: &str,
     colliding: SliceFragment,
 ) -> Result<(), service_engine::EngineError> {
-    let config = EngineConfig::new(
-        ChannelName::new(channel).expect("a valid notify channel"),
-        PodId::new(pod).expect("a valid pod id"),
-    )
-    .with_window(Duration::from_millis(30))
-    .with_beat(Duration::from_millis(80))
-    .with_lease(Duration::from_secs(5))
-    .with_lock_timeout(Duration::from_millis(300));
+    let config = base_config(channel, pod);
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,

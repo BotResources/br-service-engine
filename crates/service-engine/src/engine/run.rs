@@ -48,6 +48,14 @@ impl<P: Principal> Engine<P> {
         } = self;
         let offers = Arc::new(offers);
 
+        beat.relays().register_erased(Arc::new(
+            crate::relays::outbox::HostedOutboxRelay::hosting(
+                crate::name::RelayName::from_static("integration_outbox"),
+                crate::relays::outbox::OutboxRelay::new(pg.clone(), nats.clone()),
+                config.impacts_per_commit.max(1),
+            ),
+        ))?;
+
         let readiness_guard = readiness.clone();
         let assembly = ReadinessAssembly::new(readiness, mirrors.health())
             .with_relays(beat.relays().health())

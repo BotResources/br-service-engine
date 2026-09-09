@@ -5,7 +5,6 @@ use conformance_service_engine::sample::boot_pipeline_engine;
 use conformance_service_engine::sample::pipeline::{
     CreateWidget, create_widget_coords, publish_command, wait_for_widget,
 };
-use service_engine::OutboxRelay;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -50,22 +49,22 @@ async fn s37_an_emitted_event_is_staged_in_the_write_tx_and_published_by_the_lea
     .await;
     assert_eq!(wait_for_widget(&pool, tenant, 1).await, 1);
 
-    assert_eq!(
-        outbox_status(&pool, "%widget.created%").await.as_deref(),
-        Some("PENDING"),
+    assert!(
+        outbox_status(&pool, "%widget.created%").await.is_some(),
         "the emitted event is an outbox row committed with the state change",
     );
 
-    let relay = OutboxRelay::new(pool.clone(), fabric.clone());
-    relay
-        .run_once_detailed()
-        .await
-        .expect("the leader relay drains the outbox");
-    assert_eq!(
-        outbox_status(&pool, "%widget.created%").await.as_deref(),
-        Some("PUBLISHED"),
-        "the leader relay published the staged event",
-    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if outbox_status(&pool, "%widget.created%").await.as_deref() == Some("PUBLISHED") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the engine's leader outbox relay never published the staged event",
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     shutdown.notify_one();
     running.await.expect("join").expect("run returns Ok");
