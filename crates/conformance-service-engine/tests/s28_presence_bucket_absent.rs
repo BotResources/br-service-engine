@@ -1,6 +1,6 @@
-use br_util_axum_readiness::Readiness;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::boot_presence_engine;
+use service_engine::Readiness;
 use service_engine::error::EngineError;
 
 const SERVICE: &str = "s28absent";

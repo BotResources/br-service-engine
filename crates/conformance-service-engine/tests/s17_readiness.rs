@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::TestDb;
 use conformance_service_engine::infra::listener::engine_config;
 use service_engine::boot::{
     REASON_LISTEN, REASON_MIRRORS, REASON_POSTURE_REFUSED, establish_transport,
 };
 use service_engine::error::EngineError;
+use service_engine::{Readiness, ReadinessHandle};
 use sqlx::postgres::PgPoolOptions;
 
 const OBSERVED_WITHIN: Duration = Duration::from_secs(10);

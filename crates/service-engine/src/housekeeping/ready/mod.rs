@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::nats::{Nats, NatsCondition, NatsHealth, RelayHealth, RelayHealthReceiver};
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
+use crate::readiness::{Readiness, ReadinessHandle};
 use tokio::sync::watch;
 
 use crate::boot::REASON_MIRRORS;

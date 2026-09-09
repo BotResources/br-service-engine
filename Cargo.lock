@@ -392,26 +392,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "br-util-axum-readiness"
-version = "1.3.0"
-source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
-dependencies = [
- "axum",
- "tracing",
-]
-
-[[package]]
-name = "br-util-postgres"
-version = "1.3.0"
-source = "git+https://github.com/BotResources/br-rust-common?tag=v1.3.0#edac9c28e3cd0f5b2715710c2df4dfc610c3c680"
-dependencies = [
- "sqlx",
- "thiserror",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -495,8 +475,6 @@ dependencies = [
  "br-core-integration",
  "br-core-kernel",
  "br-core-scope",
- "br-util-axum-readiness",
- "br-util-postgres",
  "bytes",
  "chrono",
  "futures-util",
@@ -958,8 +936,6 @@ dependencies = [
  "axum",
  "br-core-auth",
  "br-core-integration",
- "br-util-axum-readiness",
- "br-util-postgres",
  "chrono",
  "example-contract",
  "example-twin",
@@ -2653,7 +2629,6 @@ dependencies = [
  "br-core-integration",
  "br-core-scope",
  "br-scope-declaration-contract",
- "br-util-axum-readiness",
  "bytes",
  "chrono",
  "croner",

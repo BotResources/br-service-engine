@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::ReadinessHandle;
+use service_engine::ReadinessHandle;
 use service_engine::nats::Nats;
 use service_engine::{BlobConfig, BlobPolicy, Engine};
 

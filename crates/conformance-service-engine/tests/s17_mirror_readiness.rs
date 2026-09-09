@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::{
     DIRECTORY_MIRROR, RecordingTransport, SampleDirectory, backfills, directory_mirror_handle,
@@ -18,6 +17,7 @@ use service_engine::name::{PodId, RelayName};
 use service_engine::nats::RelayHealth;
 use service_engine::relays::outbox::HostedOutboxRelay;
 use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
+use service_engine::{Readiness, ReadinessHandle};
 use tokio::sync::Notify;
 use uuid::Uuid;
 

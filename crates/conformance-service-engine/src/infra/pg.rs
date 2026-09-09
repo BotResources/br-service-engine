@@ -89,9 +89,7 @@ impl TestDb {
         .await;
 
         let owner = pool(&url_for(&admin_url, &owner_role, ROLE_PASSWORD, &database)).await;
-        br_util_postgres::ensure_app_role(&owner, &app_role, ROLE_PASSWORD)
-            .await
-            .expect("provision the runtime app role");
+        ensure_app_role(&owner, &app_role, ROLE_PASSWORD).await;
 
         for role in [&app_role, &bypass_role, &member_role] {
             run(
@@ -109,9 +107,7 @@ impl TestDb {
             .expect("apply the sample service migration set");
 
         for role in [&app_role, &bypass_role] {
-            br_util_postgres::grant_app_access(&owner, role)
-                .await
-                .expect("grant the public schema");
+            grant_app_access(&owner, role).await;
             service_engine::schema::grant_engine_access(&owner, role)
                 .await
                 .expect("grant the engine schema");
@@ -263,8 +259,46 @@ impl TestDb {
     }
 }
 
+async fn ensure_app_role(owner: &PgPool, role: &str, password: &str) {
+    run(
+        owner,
+        &format!(
+            "DO $$ BEGIN \
+               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN \
+                 CREATE ROLE \"{role}\" LOGIN; \
+               END IF; \
+             END $$"
+        ),
+    )
+    .await;
+    run(
+        owner,
+        &format!("ALTER ROLE \"{role}\" LOGIN PASSWORD '{password}'"),
+    )
+    .await;
+}
+
+async fn grant_app_access(owner: &PgPool, role: &str) {
+    for sql in [
+        format!("GRANT USAGE ON SCHEMA public TO \"{role}\""),
+        format!(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"{role}\""
+        ),
+        format!("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"{role}\""),
+        format!(
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public \
+             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"{role}\""
+        ),
+        format!(
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \"{role}\""
+        ),
+    ] {
+        run(owner, &sql).await;
+    }
+}
+
 async fn pool(url: &str) -> PgPool {
-    br_util_postgres::validate_database_tls(url).expect("the connection url carries a TLS posture");
+    service_engine::validate_database_tls(url).expect("the connection url carries a TLS posture");
     PgPoolOptions::new()
         .max_connections(POOL_SIZE)
         .connect(url)

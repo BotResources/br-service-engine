@@ -32,7 +32,7 @@ async fn s36_a_row_lock_timeout_is_retryable_and_never_dead_letters() {
     let shutdown = engine.shutdown_handle();
     let running = tokio::spawn(engine.run());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    while readiness.snapshot() != br_util_axum_readiness::Readiness::Ready {
+    while readiness.snapshot() != service_engine::Readiness::Ready {
         assert!(tokio::time::Instant::now() < deadline, "never ready");
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

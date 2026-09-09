@@ -19,8 +19,6 @@ async-graphql = { workspace = true }
 axum = { workspace = true }
 br-core-auth = { workspace = true }
 br-core-integration = { workspace = true }
-br-util-axum-readiness = { workspace = true }
-br-util-postgres = { workspace = true }
 chrono = { workspace = true }
 example-contract = { workspace = true }
 futures-util = { workspace = true }

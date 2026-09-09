@@ -1,7 +1,6 @@
 #[allow(dead_code)]
 mod engine_twin;
 
-use br_util_axum_readiness::ReadinessHandle;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::SamplePrincipal;
 use conformance_service_engine::sample::engine::engine_config;
@@ -9,6 +8,7 @@ use conformance_service_engine::sample::stream::{text_for, token_for};
 use conformance_service_engine::sample::{NoteBody, NoteKey};
 use engine_twin::{SOON, await_ready};
 use service_engine::Engine;
+use service_engine::ReadinessHandle;
 use service_engine::accumulator::{ChunkSeq, Durable};
 use service_engine::error::EngineError;
 use uuid::Uuid;

@@ -4,13 +4,13 @@ use br_core_integration::{Actor, EventMetadata, IntegrationEvent, UserId};
 use br_core_scope::{
     ScopeDeclarationError, ServiceKey, ServiceScopesAccepted, ServiceScopesRejected,
 };
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use chrono::Utc;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::boot_render_engine;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use service_engine::ScopeManifest;
+use service_engine::{Readiness, ReadinessHandle};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 

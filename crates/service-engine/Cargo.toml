@@ -20,7 +20,6 @@ br-core-auth = { workspace = true }
 br-core-integration = { workspace = true }
 br-core-scope = { workspace = true }
 br-scope-declaration-contract = { workspace = true }
-br-util-axum-readiness = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 croner = { workspace = true }

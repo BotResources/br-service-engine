@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 
-use br_util_axum_readiness::ReadinessHandle;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::Assignment;
 use conformance_service_engine::sample::engine::engine_config;
@@ -11,6 +10,7 @@ use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments};
 use conformance_service_engine::sample::titles::{MiskeyedProjector, TitleProjector};
 use service_engine::Engine;
+use service_engine::ReadinessHandle;
 use service_engine::error::EngineError;
 use service_engine::impact::Dims;
 use service_engine::name::ProjectorName;

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::listener::{engine_config, pool_named};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::principal::SamplePrincipal;
@@ -9,6 +8,7 @@ use service_engine::boot::REASON_MIRRORS;
 use service_engine::error::EngineError;
 use service_engine::transport::ListenerProbe;
 use service_engine::transport::probe::POOLER_REASON;
+use service_engine::{Readiness, ReadinessHandle};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 

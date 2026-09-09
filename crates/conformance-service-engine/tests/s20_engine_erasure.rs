@@ -1,7 +1,6 @@
 #[allow(dead_code)]
 mod engine_twin;
 
-use br_util_axum_readiness::ReadinessHandle;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::SamplePrincipal;
 use conformance_service_engine::sample::assignment::{Assignment, AssignmentProjector};
@@ -11,6 +10,7 @@ use conformance_service_engine::sample::principal::{SamplePrincipalResolver, Sam
 use conformance_service_engine::sample::render::*;
 use engine_twin::{SOON, await_ready};
 use service_engine::Engine;
+use service_engine::ReadinessHandle;
 use service_engine::error::DecodeError;
 use uuid::Uuid;
 

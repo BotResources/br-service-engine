@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::listener::engine_config;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::{Assignment, AssignmentProjector};
@@ -12,6 +11,7 @@ use service_engine::error::EngineError;
 use service_engine::housekeeping::ready::REASON_WORKER_STOPPED;
 use service_engine::mirror::{MirrorHandle, MirrorRun};
 use service_engine::name::MirrorName;
+use service_engine::{Readiness, ReadinessHandle};
 
 const READY_WITHIN: Duration = Duration::from_secs(25);
 const STOPPED_WITHIN: Duration = Duration::from_secs(25);

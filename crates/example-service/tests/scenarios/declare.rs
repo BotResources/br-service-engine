@@ -1,4 +1,4 @@
-use br_util_axum_readiness::Readiness;
+use service_engine::Readiness;
 
 use crate::harness::{World, WorldOptions};
 

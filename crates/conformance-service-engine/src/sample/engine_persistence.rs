@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::ReadinessHandle;
 use service_engine::Engine;
+use service_engine::ReadinessHandle;
 use service_engine::nats::Nats;
 
 use crate::infra::TestDb;

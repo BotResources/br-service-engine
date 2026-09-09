@@ -10,7 +10,7 @@ pub use blobs::BlobReader;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::nats::Nats;
-use br_util_axum_readiness::ReadinessHandle;
+use crate::readiness::ReadinessHandle;
 use sqlx::PgPool;
 
 use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, Durable};

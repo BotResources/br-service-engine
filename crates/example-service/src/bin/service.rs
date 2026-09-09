@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
         .parse()?;
 
-    let pool = br_util_postgres::init_pool(&database_url).await?;
+    let pool = service_engine::connect_pool(&database_url).await?;
     let nats = Nats::connect(&nats_url).await?;
 
     let mut config = EngineConfig::new(ChannelName::new(&channel)?, PodId::new(&pod)?)

@@ -1,7 +1,6 @@
 #[allow(dead_code)]
 mod engine_twin;
 
-use br_util_axum_readiness::ReadinessHandle;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::SamplePrincipal;
 use conformance_service_engine::sample::engine::engine_config;
@@ -10,6 +9,7 @@ use conformance_service_engine::sample::{
 };
 use engine_twin::{POLL, SOON, await_ready};
 use service_engine::Engine;
+use service_engine::ReadinessHandle;
 use service_engine::cron::Schedule;
 
 const CHANNEL: &str = "se_s16_engine";

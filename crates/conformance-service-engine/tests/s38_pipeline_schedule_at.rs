@@ -21,7 +21,7 @@ async fn s38_schedule_at_fires_on_the_db_clock_and_runs_through_the_pipeline() {
         conformance_service_engine::sample::render::member(&pool, Uuid::now_v7(), tenant).await;
     let running = tokio::spawn(engine.run());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    while readiness.snapshot() != br_util_axum_readiness::Readiness::Ready {
+    while readiness.snapshot() != service_engine::Readiness::Ready {
         assert!(tokio::time::Instant::now() < deadline, "never ready");
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

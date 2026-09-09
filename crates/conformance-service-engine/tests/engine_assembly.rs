@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::Assignment;
 use conformance_service_engine::sample::render::{
@@ -13,6 +12,7 @@ use service_engine::impact::{Dims, Impact};
 use service_engine::name::ProjectorName;
 use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::transport::ImpactTransport;
+use service_engine::{Readiness, ReadinessHandle};
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 

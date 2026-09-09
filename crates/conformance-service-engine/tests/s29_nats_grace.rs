@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::listener::engine_config;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::{Assignment, AssignmentProjector};
 use conformance_service_engine::sample::principal::{SamplePrincipalResolver, SampleRls};
 use service_engine::Engine;
 use service_engine::housekeeping::ready::REASON_NATS_UNREACHABLE;
+use service_engine::{Readiness, ReadinessHandle};
 
 const READY_WITHIN: Duration = Duration::from_secs(25);
 const DOWN_WITHIN: Duration = Duration::from_secs(30);

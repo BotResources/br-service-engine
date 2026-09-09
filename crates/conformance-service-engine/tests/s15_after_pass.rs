@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::listener::engine_config;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::{Assignment, AssignmentProjector};
@@ -11,6 +10,7 @@ use conformance_service_engine::sample::render::assignment;
 use conformance_service_engine::sample::{RowClaimSampleRelay, SAMPLE_RELAY};
 use service_engine::Engine;
 use service_engine::impact::{Dims, Impact};
+use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
 use uuid::Uuid;
 

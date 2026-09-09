@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::readiness::{ReadinessHandle, readiness_route};
 use async_graphql::http::ALL_WEBSOCKET_PROTOCOLS;
 use async_graphql::{Data, ObjectType, Schema, SubscriptionType};
 use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse, GraphQLWebSocket};
@@ -8,7 +9,6 @@ use axum::extract::{State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use br_util_axum_readiness::{ReadinessHandle, readiness_route};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 

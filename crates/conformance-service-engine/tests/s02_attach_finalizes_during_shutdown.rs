@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::listener::engine_config;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::Assignment;
@@ -10,6 +9,7 @@ use conformance_service_engine::sample::render::{assignment, attach_request, mem
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments};
 use service_engine::Engine;
 use service_engine::error::AttachError;
+use service_engine::{Readiness, ReadinessHandle};
 use uuid::Uuid;
 
 const READY_WITHIN: Duration = Duration::from_secs(25);

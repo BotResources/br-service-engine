@@ -39,7 +39,7 @@ mod tests {
     use crate::housekeeping::mirror::MirrorCondition;
     use crate::housekeeping::ready::ReadinessAssembly;
     use crate::name::{MirrorName, RelayName};
-    use br_util_axum_readiness::ReadinessHandle;
+    use crate::readiness::ReadinessHandle;
     use std::time::Duration;
 
     fn converged() -> MirrorsHealth {

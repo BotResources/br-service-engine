@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use service_engine::config::EngineConfig;
 use service_engine::graphql::SliceFragment;
 use service_engine::name::{ChannelName, PodId};
 use service_engine::nats::Nats;
 use service_engine::{Engine, engine_schema};
+use service_engine::{Readiness, ReadinessHandle};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;

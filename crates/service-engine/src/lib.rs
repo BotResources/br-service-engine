@@ -10,6 +10,7 @@ pub mod boot;
 pub mod cohort;
 pub mod config;
 pub mod cron;
+pub mod db;
 pub mod delta;
 pub mod dyn_compat;
 pub mod engine;
@@ -32,6 +33,7 @@ pub mod population;
 pub mod presence;
 pub mod principal;
 pub mod projector;
+pub mod readiness;
 pub mod render;
 pub mod schema;
 pub mod scopes;
@@ -81,6 +83,7 @@ pub use blobs::{
 pub use cohort::CohortKey;
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
+pub use db::{connect_pool, validate_database_tls};
 pub use delta::{Delta, ErasedView, Revision};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
@@ -130,6 +133,7 @@ pub use population::{Interest, Inverse, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope};
+pub use readiness::{Readiness, ReadinessHandle, readiness_route};
 #[cfg(feature = "test-support")]
 pub use registry::RenderRegistry;
 #[cfg(feature = "test-support")]

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::ReadinessHandle;
+use service_engine::ReadinessHandle;
 use service_engine::config::EngineConfig;
 use service_engine::cron::Schedule;
 use service_engine::name::{ChannelName, PodId, RelayName};

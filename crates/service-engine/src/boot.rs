@@ -1,4 +1,4 @@
-use br_util_axum_readiness::ReadinessHandle;
+use crate::readiness::ReadinessHandle;
 use sqlx::{PgPool, Row};
 
 use crate::config::EngineConfig;

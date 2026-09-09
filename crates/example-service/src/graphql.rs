@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_graphql::{MergedObject, MergedSubscription};
 use axum::Router;
-use br_util_axum_readiness::ReadinessHandle;
+use service_engine::ReadinessHandle;
 use service_engine::{Engine, engine_schema};
 
 use crate::kernel::AppPrincipal;

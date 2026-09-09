@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::listener::{engine_config, pool_named};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::Assignment;
@@ -13,6 +12,7 @@ use conformance_service_engine::sample::render::{
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments};
 use service_engine::Engine;
 use service_engine::delta::Delta;
+use service_engine::{Readiness, ReadinessHandle};
 use uuid::Uuid;
 
 const READY_WITHIN: Duration = Duration::from_secs(25);

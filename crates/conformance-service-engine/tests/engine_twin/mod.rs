@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::TestDb;
 use conformance_service_engine::sample::assignment::Assignment;
 use conformance_service_engine::sample::note::Note;
@@ -13,6 +12,7 @@ use service_engine::impact::Impact;
 use service_engine::nats::Nats;
 use service_engine::projector::Projector;
 use service_engine::transport::ImpactTransport;
+use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
 
 pub const READY_WITHIN: Duration = Duration::from_secs(25);

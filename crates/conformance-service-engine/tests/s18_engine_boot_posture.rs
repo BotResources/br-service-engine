@@ -1,13 +1,13 @@
 #[allow(dead_code)]
 mod engine_twin;
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::SamplePrincipal;
 use conformance_service_engine::sample::engine::engine_config;
 use service_engine::Engine;
 use service_engine::boot::REASON_POSTURE_REFUSED;
 use service_engine::error::EngineError;
+use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
 
 const CHANNEL: &str = "se_s18_engine";

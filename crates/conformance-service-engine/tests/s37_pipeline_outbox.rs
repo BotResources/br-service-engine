@@ -30,7 +30,7 @@ async fn s37_an_emitted_event_is_staged_in_the_write_tx_and_published_by_the_lea
     let shutdown = engine.shutdown_handle();
     let running = tokio::spawn(engine.run());
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    while readiness.snapshot() != br_util_axum_readiness::Readiness::Ready {
+    while readiness.snapshot() != service_engine::Readiness::Ready {
         assert!(tokio::time::Instant::now() < deadline, "never ready");
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

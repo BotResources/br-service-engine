@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use service_engine::config::EngineConfig;
 use service_engine::erase::{EraseOutcome, Eraser, PersonId};
 use service_engine::error::EngineError;
 use service_engine::nats::Nats;
 use service_engine::{AccumulatorRuntime, Engine, Settle};
+use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;

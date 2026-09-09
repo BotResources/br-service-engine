@@ -20,7 +20,7 @@ async fn s34_a_booted_engine_consumes_a_command_through_the_pipeline_exactly_onc
     let running = tokio::spawn(engine.run());
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
-    while readiness.snapshot() != br_util_axum_readiness::Readiness::Ready {
+    while readiness.snapshot() != service_engine::Readiness::Ready {
         assert!(
             tokio::time::Instant::now() < deadline,
             "engine never became ready"
