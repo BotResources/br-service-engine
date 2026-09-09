@@ -33,6 +33,8 @@ async fn s134_impacts_committed_counts_committed_impacts_only() {
         .await
         .expect("the listener is established");
 
+    let baseline = probe.total_by_name(IMPACTS_COMMITTED_TOTAL);
+
     let rolled_back = impacts(5);
     let mut tx = pool.begin().await.expect("open a write transaction");
     transport
@@ -40,6 +42,13 @@ async fn s134_impacts_committed_counts_committed_impacts_only() {
         .await
         .expect("stage impacts that will never commit");
     tx.rollback().await.expect("roll the staging back");
+
+    assert_eq!(
+        probe.total_by_name(IMPACTS_COMMITTED_TOTAL),
+        baseline,
+        "staging impacts into a transaction that rolls back records nothing on the \
+         notify-budget counter"
+    );
 
     let mut tx = pool.begin().await.expect("open the scheduling transaction");
     for _ in 0..SCHEDULED {
@@ -63,8 +72,9 @@ async fn s134_impacts_committed_counts_committed_impacts_only() {
     assert_eq!(fired, SCHEDULED, "every due row fired");
     let after = probe.total_by_name(IMPACTS_COMMITTED_TOTAL);
 
-    assert!(
-        after >= before + SCHEDULED as u64,
+    assert_eq!(
+        after,
+        before + SCHEDULED as u64,
         "a committed transaction records exactly its impacts on the notify-budget counter; the \
          rolled-back staging before it contributed nothing (before={before}, after={after})"
     );
