@@ -31,7 +31,7 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: cargo test
-        run: cargo test --workspace --exclude conformance-service-engine --all-targets --locked
+        run: cargo test --workspace --exclude conformance-service-engine --exclude example-service --all-targets --locked
       - name: cargo test (doctests)
         run: cargo test --workspace --doc --locked
 
@@ -229,3 +229,5 @@ jobs:
           minio --version
       - name: conformance battery
         run: cargo test -p conformance-service-engine --all-targets --locked
+      - name: example service e2e
+        run: cargo test -p example-service --all-targets --locked -- --test-threads=3
