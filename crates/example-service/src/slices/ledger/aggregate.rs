@@ -128,10 +128,6 @@ impl LedgerState {
     pub fn pending(&self) -> &[LedgerEvent] {
         &self.pending
     }
-
-    pub fn base_version(&self) -> i64 {
-        self.version - self.pending.len() as i64
-    }
 }
 
 pub fn upcast(version: i32, payload: &serde_json::Value) -> Result<LedgerEvent, LedgerError> {
