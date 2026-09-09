@@ -44,6 +44,7 @@ battery-backed.
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` to take the row lock (default no-op; the reference stores implement it as `SELECT … FOR UPDATE`); log-style events reach `save` via `Aggregate::pending_events` |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
+| `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection |
@@ -108,7 +109,20 @@ stays the handler's to classify. The render-side `read_many` and the
 write-side `load`/`save` read one committed store — for full EDA the snapshot is
 the state row the projector reads — so a `fetch`, a session `Upsert` and a
 write-side `load` return the same committed truth.
-`register_presence` binds the `EPHEMERAL_{service}` bucket at
+`register_accumulator::<A>` opens lane A: at boot the engine binds the
+gitops-declared `STREAMING_{service}` stream (bind-only, fail-loud — readiness
+stays DOWN if it is absent) and refuses to go UP unless `seal_retention` covers
+the stream's `max_age`, so a straggler the stream can still redeliver always
+meets a seal marker. A producer (typically an out-of-process runner) publishes
+`(key, seq, chunk)` frames on `stream.{service}.{key}`; every pod runs its own
+ephemeral consumer that folds each frame into the same Postgres-backed
+accumulator as `Engine::push_chunk`, so late joiners replay from the store, the
+verified `Ops::seal` writes the final record and a seal marker in one
+transaction, a chunk that arrives after the seal is refused on every pod, and
+after a seal the beat purges the key's subject. Name the stream with
+`EngineConfig::with_service`; a serviceless engine keeps the in-process
+`push_chunk` path with no stream. `register_presence` binds the
+`EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other
 lane; name the bucket with `EngineConfig::with_service`. With `register_offer`,
@@ -337,14 +351,14 @@ whichever mode it lives:
   replay the chunks, verify the hash, commit the record and deliver it, read back
   over GraphQL (`bb05`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
-  and built on demand otherwise, so the mode is self-sufficient locally. The
-  accumulated lane stores its chunks in Postgres (`service_engine.accumulator_chunk`)
-  and the 0.1.0 engine exposes no NATS/GraphQL chunk-ingress, so `bb05` seeds the
-  chunks through Postgres — the flush path's own table shape, a listed black-box
-  channel — and everything the seal *is* (replay, hash verification, the
-  transactional final write, the impact and delivery) runs in the spawned binary.
-  The accumulator's own internals stay proven in-crate (`s035`, `s066`) and by the
-  reference service's reply e2e.
+  and built on demand otherwise, so the mode is self-sufficient locally. `bb05`
+  drives the real lane-A ingress: the `example-twin` binary streams the reply's
+  chunks over NATS on `stream.example.{reply_id}`, the running binary's ephemeral
+  consumer folds them into `service_engine.accumulator_chunk`, and the
+  reply-finished command then replays the chunks, verifies the hash, commits the
+  record and delivers it — read back over GraphQL — with nothing seeded through
+  Postgres. The accumulator's own internals stay proven in-crate (`s035`, `s066`,
+  `s133`) and by the reference service's reply e2e.
 
 ```bash
 # both modes (in-crate sNNN + black-box bbNN), one crate
