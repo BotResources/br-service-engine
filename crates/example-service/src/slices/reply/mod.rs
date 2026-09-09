@@ -23,7 +23,7 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine.register_accumulator(stream::ReplyText)?;
     engine.register_presence::<presence::Typing>(Duration::from_secs(5))?;
     engine.register_presence::<presence::CancelSignal>(Duration::from_secs(60))?;
-    engine.register_projector(view::RepliesView)?;
+    engine.register_view(view::RepliesView)?;
     engine.register_reaction::<wire::InboundReplyFinished, _, _>(
         "reply-finished",
         reactions::reply_finished,

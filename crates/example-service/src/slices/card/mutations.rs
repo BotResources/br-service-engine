@@ -85,7 +85,7 @@ pub fn import_cards<'m>(
             let card = CardAggregate(CardState::open(Uuid::now_v7(), input.board_id, title));
             cx.create(&card).await?;
         }
-        cx.impact_all(CardsView);
+        cx.impact_all_view::<CardsView>();
         Ok(())
     })
 }

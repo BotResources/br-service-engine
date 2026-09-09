@@ -185,15 +185,6 @@ pub async fn all_reply_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
-pub async fn load_replies(pg: &PgPool, keys: &[Uuid]) -> Result<Vec<ReplyRow>, EngineError> {
-    let rows =
-        sqlx::query("SELECT id, board_id, text, status, blob_ref FROM reply WHERE id = ANY($1)")
-            .bind(keys)
-            .fetch_all(pg)
-            .await?;
-    Ok(rows.iter().map(row_to_reply).collect())
-}
-
 pub async fn load_replies_conn(
     conn: &mut PgConnection,
     keys: &[Uuid],

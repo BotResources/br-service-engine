@@ -141,15 +141,6 @@ pub async fn load_boards(
     Ok(rows.iter().map(row_to_board).collect())
 }
 
-pub async fn load_boards_pool(pg: &PgPool, keys: &[Uuid]) -> Result<Vec<BoardRow>, EngineError> {
-    let rows =
-        sqlx::query("SELECT id, org_id, name, is_public, state FROM board WHERE id = ANY($1)")
-            .bind(keys)
-            .fetch_all(pg)
-            .await?;
-    Ok(rows.iter().map(row_to_board).collect())
-}
-
 pub async fn all_boards(conn: &mut PgConnection) -> Result<Vec<BoardRow>, EngineError> {
     let rows = sqlx::query("SELECT id, org_id, name, is_public, state FROM board")
         .fetch_all(conn)

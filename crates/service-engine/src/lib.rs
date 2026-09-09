@@ -37,6 +37,7 @@ pub mod schema;
 pub mod scopes;
 pub mod session;
 pub mod time;
+pub mod view;
 pub mod visibility;
 pub mod wire;
 
@@ -147,5 +148,6 @@ pub use time::Timestamp;
 pub use transport::{
     ImpactTransport, ListenerProbe, NOTIFY_PAYLOAD_LIMIT, PendingImpacts, PgListenNotify,
 };
+pub use view::{Populate, View, ViewKey, ViewProjector};
 pub use visibility::{Cohorts, Visibility, WindowMismatch, check_window_matches_visibility};
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};

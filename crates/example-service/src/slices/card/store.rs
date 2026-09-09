@@ -140,15 +140,6 @@ pub async fn all_card_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
-pub async fn load_cards(pg: &PgPool, keys: &[Uuid]) -> Result<Vec<CardState>, EngineError> {
-    let rows =
-        sqlx::query("SELECT id, board_id, title, status, version FROM card WHERE id = ANY($1)")
-            .bind(keys)
-            .fetch_all(pg)
-            .await?;
-    Ok(rows.iter().map(row_to_card).collect())
-}
-
 pub async fn load_cards_conn(
     conn: &mut PgConnection,
     keys: &[Uuid],

@@ -12,7 +12,7 @@ use crate::kernel::AppPrincipal;
 service_engine::subscription_union! {
     view = LedgerViewUnion;
     delta = LedgerDelta { reset = LedgerReset, upsert = LedgerUpsert, remove = LedgerRemove };
-    Ledger => LedgersView => LedgerView,
+    Ledger => service_engine::view::ViewProjector<LedgersView> => LedgerView,
 }
 
 pub const FRAGMENT: SliceFragment = SliceFragment {
@@ -28,7 +28,7 @@ pub struct LedgerQuery;
 impl LedgerQuery {
     async fn ledger(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<LedgerView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch::<LedgersView>(&id)
+            .fetch_view::<LedgersView>(&id)
             .await
     }
 }

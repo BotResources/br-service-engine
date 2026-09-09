@@ -1,7 +1,7 @@
 use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::graphql::SliceFragment;
-use service_engine::session::{WindowParams, WindowSpec};
+use service_engine::session::WindowSpec;
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
 
@@ -12,7 +12,7 @@ use crate::kernel::AppPrincipal;
 service_engine::subscription_union! {
     view = CardViewUnion;
     delta = CardDelta { reset = CardReset, upsert = CardUpsert, remove = CardRemove };
-    Card => CardsView => CardView,
+    Card => service_engine::view::ViewProjector<CardsView> => CardView,
 }
 
 pub const FRAGMENT: SliceFragment = SliceFragment {
@@ -35,14 +35,13 @@ pub struct CardQuery;
 impl CardQuery {
     async fn card(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<CardView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch::<CardsView>(&id)
+            .fetch_view::<CardsView>(&id)
             .await
     }
 
     async fn cards(&self, ctx: &Context<'_>, board_id: Uuid) -> Result<Vec<CardView>> {
-        let params = WindowParams::encode(&BoardWindow { board_id })?;
         Query::<AppPrincipal>::new(ctx)?
-            .fetch_window::<CardsView>(params)
+            .fetch_view_window::<CardsView>(&BoardWindow::of(board_id))
             .await
     }
 }
@@ -90,10 +89,12 @@ impl CardSubscription {
         ctx: &Context<'_>,
         board_id: Uuid,
     ) -> Result<impl Stream<Item = Result<CardDelta>>> {
-        let params = WindowParams::encode(&BoardWindow { board_id })?;
         let stream = service_engine::attach::<AppPrincipal>(
             ctx,
-            vec![WindowSpec::new(CardsView::NAME, params, false)],
+            vec![WindowSpec::view::<CardsView>(
+                &BoardWindow::of(board_id),
+                false,
+            )?],
         )
         .await?;
         Ok(stream.map(|delta| CardDelta::from_delta(&delta)))

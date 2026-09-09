@@ -48,6 +48,27 @@ impl<'a, P: Principal> Query<'a, P> {
             .collect()
     }
 
+    pub async fn fetch_view<V>(
+        &self,
+        key: &crate::view::ViewKey<V>,
+    ) -> Result<Option<V::Out>, Error>
+    where
+        V: crate::view::View<Principal = P>,
+        V::Out: DeserializeOwned,
+    {
+        self.fetch::<crate::view::ViewProjector<V>>(key).await
+    }
+
+    pub async fn fetch_view_window<V>(&self, query: &V::Query) -> Result<Vec<V::Out>, Error>
+    where
+        V: crate::view::View<Principal = P>,
+        V::Out: DeserializeOwned,
+    {
+        let params = WindowParams::encode(query)?;
+        self.fetch_window::<crate::view::ViewProjector<V>>(params)
+            .await
+    }
+
     pub async fn fetch_json<Pr>(
         &self,
         key: &Pr::Key,

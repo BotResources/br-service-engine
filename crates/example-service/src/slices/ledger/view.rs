@@ -1,14 +1,10 @@
-use std::collections::BTreeMap;
-
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::impact::ForeignKey;
-use service_engine::name::{NounName, ProjectorName};
-use service_engine::population::{Inverse, Population};
-use service_engine::projector::{LoadScope, Projector};
-use service_engine::session::WindowParams;
-use service_engine::wire::Noun;
+use service_engine::name::ProjectorName;
+use service_engine::population::Population;
+use service_engine::view::{Populate, View};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::aggregate::Ledger;
@@ -22,8 +18,10 @@ pub struct LedgerView {
     pub last_author: Option<Uuid>,
 }
 
-pub struct LedgerFacts {
-    rows: BTreeMap<Uuid, (i64, Option<Uuid>)>,
+pub struct LedgerRow {
+    pub id: Uuid,
+    pub total: i64,
+    pub last_author: Option<Uuid>,
 }
 
 #[derive(Default)]
@@ -33,75 +31,56 @@ impl LedgersView {
     pub const NAME: ProjectorName = ProjectorName::from_static("ledgers");
 }
 
-impl Projector for LedgersView {
+impl View for LedgersView {
     type Principal = AppPrincipal;
-    type Key = Uuid;
-    type Facts = LedgerFacts;
-    type View = LedgerView;
+    type Noun = Ledger;
+    type Row = LedgerRow;
+    type Query = ();
+    type Out = LedgerView;
 
-    fn name(&self) -> ProjectorName {
-        Self::NAME
-    }
+    const NAME: ProjectorName = Self::NAME;
 
-    fn nouns(&self) -> &'static [NounName] {
-        const NOUNS: &[NounName] = &[Ledger::NAME];
-        NOUNS
+    fn rows<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> service_engine::view::RowsFuture<'a, Uuid, LedgerRow> {
+        Box::pin(async move {
+            let mut rows = Vec::with_capacity(keys.len());
+            for key in keys {
+                if let Some((total, last_author)) = store::snapshot_of_conn(conn, *key).await? {
+                    rows.push((
+                        *key,
+                        LedgerRow {
+                            id: *key,
+                            total,
+                            last_author,
+                        },
+                    ));
+                }
+            }
+            Ok(rows)
+        })
     }
 
     fn populate<'a>(
-        &'a self,
-        pg: &'a sqlx::PgPool,
-        _window: &'a WindowParams,
-        _principal: &'a AppPrincipal,
+        cx: &'a Populate<'a, AppPrincipal>,
+        _query: &'a (),
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
             Ok(Population::Keys(
-                store::all_ledger_ids(pg).await?.into_iter().collect(),
+                store::all_ledger_ids(cx.pool())
+                    .await?
+                    .into_iter()
+                    .collect(),
             ))
         })
     }
 
-    fn inverse(&self, _foreign: &ForeignKey) -> Inverse<Uuid> {
-        Inverse::None
-    }
-
-    fn load<'a>(
-        &'a self,
-        scope: LoadScope<'a, Uuid, AppPrincipal>,
-    ) -> BoxFuture<'a, Result<LedgerFacts, EngineError>> {
-        Box::pin(async move {
-            let keys = scope.keys().to_vec();
-            let mut rows = BTreeMap::new();
-            match scope {
-                LoadScope::Bulk { pg, .. } => {
-                    for key in keys {
-                        if let Some(snap) = store::snapshot_of(pg, key).await? {
-                            rows.insert(key, snap);
-                        }
-                    }
-                }
-                LoadScope::PerPrincipal { conn, .. } => {
-                    for key in keys {
-                        if let Some(snap) = store::snapshot_of_conn(conn, key).await? {
-                            rows.insert(key, snap);
-                        }
-                    }
-                }
-            }
-            Ok(LedgerFacts { rows })
-        })
-    }
-
-    fn project(
-        &self,
-        facts: &LedgerFacts,
-        key: &Uuid,
-        _principal: &AppPrincipal,
-    ) -> Option<LedgerView> {
-        facts.rows.get(key).map(|(total, author)| LedgerView {
-            id: *key,
-            total: *total,
-            last_author: *author,
-        })
+    fn project(row: &LedgerRow, _principal: &AppPrincipal) -> LedgerView {
+        LedgerView {
+            id: row.id,
+            total: row.total,
+            last_author: row.last_author,
+        }
     }
 }

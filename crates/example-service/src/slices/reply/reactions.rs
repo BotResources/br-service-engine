@@ -47,7 +47,10 @@ pub fn reply_cancelled<'r>(
         let last_seq = ChunkSeq::new(cmd.last_seq)?;
         let hash = SealHash::from_hex(&cmd.hash)
             .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
-        let text: String = match cx.seal_partial::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
+        let text: String = match cx
+            .seal_partial::<ReplyText>(&cmd.reply_id, last_seq, hash)
+            .await
+        {
             Ok(text) => text,
             Err(
                 error @ (EngineError::SealTruncated { .. } | EngineError::SealHashMismatch { .. }),

@@ -1,7 +1,7 @@
+use br_core_integration::{Aggregate, Bc, CommandCoords, Verb};
 use example_contract::{
     ReplyCancelled, ReplyFinished, reply_cancelled_coords, reply_finished_coords,
 };
-use br_core_integration::{Aggregate, Bc, CommandCoords, Verb};
 use serde::{Deserialize, Serialize};
 use service_engine::inbound::{ReactionCoordinates, ReactionMessage};
 use uuid::Uuid;

@@ -184,22 +184,6 @@ pub async fn all_ledger_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
-pub async fn snapshot_of(
-    pg: &PgPool,
-    id: Uuid,
-) -> Result<Option<(i64, Option<Uuid>)>, EngineError> {
-    let row = sqlx::query("SELECT total, last_author FROM ledger_snapshot WHERE id = $1")
-        .bind(id)
-        .fetch_optional(pg)
-        .await?;
-    Ok(row.map(|row| {
-        (
-            row.get::<i64, _>("total"),
-            row.get::<Option<Uuid>, _>("last_author"),
-        )
-    }))
-}
-
 pub async fn snapshot_of_conn(
     conn: &mut PgConnection,
     id: Uuid,

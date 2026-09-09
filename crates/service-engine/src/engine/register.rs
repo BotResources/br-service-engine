@@ -45,6 +45,13 @@ impl<P: Principal> Engine<P> {
         self.with_registry(|registry| registry.add_projector(p))
     }
 
+    pub fn register_view<V: crate::view::View<Principal = P>>(
+        &mut self,
+        view: V,
+    ) -> Result<(), EngineError> {
+        self.register_projector(crate::view::ViewProjector::new(view))
+    }
+
     pub fn register_accumulator<A: Accumulator>(&mut self, a: A) -> Result<(), EngineError> {
         self.with_registry(|registry| {
             registry.bind_noun::<A::Noun>();

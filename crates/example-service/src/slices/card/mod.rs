@@ -15,7 +15,7 @@ use service_engine::error::EngineError;
 use crate::kernel::AppPrincipal;
 
 pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
-    engine.register_projector(view::CardsView)?;
+    engine.register_view(view::CardsView)?;
     engine.register_mutation::<mutations::AdvanceCard, _>(mutations::advance_card)?;
     engine.register_mutation::<mutations::ScheduleCardDeadline, _>(
         mutations::schedule_card_deadline,

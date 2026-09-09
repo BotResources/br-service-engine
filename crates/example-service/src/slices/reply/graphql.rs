@@ -14,7 +14,7 @@ use crate::kernel::AppPrincipal;
 service_engine::subscription_union! {
     view = ReplyViewUnion;
     delta = ReplyDelta { reset = ReplyReset, upsert = ReplyUpsert, remove = ReplyRemove };
-    Reply => RepliesView => ReplyView,
+    Reply => service_engine::view::ViewProjector<RepliesView> => ReplyView,
 }
 
 service_engine::presence_subscription_union! {
@@ -49,7 +49,7 @@ pub struct ReplyQuery;
 impl ReplyQuery {
     async fn reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<ReplyView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch::<RepliesView>(&id)
+            .fetch_view::<RepliesView>(&id)
             .await
     }
 }

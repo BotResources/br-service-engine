@@ -6,13 +6,13 @@ use service_engine::{MutationAck, Query};
 use uuid::Uuid;
 
 use super::mutations::{ArchiveBoard, CreateBoard, MintBoardInvite};
-use super::view::{BoardView, BoardsView, OrgBoardsRls};
+use super::view::{BoardFilter, BoardView, BoardsView, OrgBoardsRls};
 use crate::kernel::AppPrincipal;
 
 service_engine::subscription_union! {
     view = BoardViewUnion;
     delta = BoardDelta { reset = BoardReset, upsert = BoardUpsert, remove = BoardRemove };
-    Board => BoardsView => BoardView,
+    Board => service_engine::view::ViewProjector<BoardsView> => BoardView,
 }
 
 pub const FRAGMENT: SliceFragment = SliceFragment {
@@ -36,19 +36,19 @@ pub struct BoardQuery;
 impl BoardQuery {
     async fn board(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch::<BoardsView>(&id)
+            .fetch_view::<BoardsView>(&id)
             .await
     }
 
     async fn boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch_window::<BoardsView>(WindowParams::none())
+            .fetch_view_window::<BoardsView>(&BoardFilter::default())
             .await
     }
 
     async fn org_boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch_window::<OrgBoardsRls>(WindowParams::none())
+            .fetch_view_window::<OrgBoardsRls>(&())
             .await
     }
 }
