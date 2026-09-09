@@ -8,7 +8,38 @@ and a single git tag `v{version}` releases the set. Format follows
 ## 0.1.0 - 2026-09-04
 
 First engine release. `service-engine` ships the reactive personalized delivery
-skeleton; `conformance-service-engine` ships its black-box battery.
+skeleton; `conformance-service-engine` ships its conformance battery in two
+modes — in-crate against the real engine through a sample service, and black-box
+against the real `example-service` binary.
+
+### Added (0.1.0 rework, unit U14a — black-box battery + CI)
+
+- `conformance-service-engine` now runs in **two modes**. The existing in-crate
+  scenarios (`sXX_*`) drive the real engine through the in-crate `sample`
+  service and keep the scenarios that need the `test-support` seam (a driven
+  clock, fault injection, direct impact-bus assertions). A new **black-box mode**
+  (`bbXX_*`) spawns the real `example-service` binary — and the `example-twin`
+  binary for the cross-service cycle — and drives them over their public channels
+  only (GraphQL HTTP + `graphql-transport-ws`, NATS subjects and streams, the
+  published-language KV, Postgres state, `/readyz`): `bb01` readiness plus the
+  boot scope handshake plus a second pod on the same store; `bb02` the
+  affordance==gate identity; `bb03` `Reset`→`Upsert` with a contiguous revision
+  and a reconnect `Reset` from committed state; `bb04` a full cross-service cycle
+  driven by the spawned twin binary. The black-box harness
+  (`tests/blackbox_support/`) provisions the owner/app Postgres roles and the
+  engine + example migrations, provisions NATS, seeds the roster and answers the
+  scope declaration, then spawns the binary and gates on `/readyz`; it takes the
+  binaries from `EXAMPLE_SERVICE_BIN` / `EXAMPLE_TWIN_BIN` when set and builds
+  them on demand otherwise, so the mode is self-sufficient locally.
+- A dedicated `conformance-service-engine black-box (real binary)` CI job builds
+  the two example binaries and runs the black-box scenarios against them on real
+  PostgreSQL, a spawned NATS and MinIO; the existing real-infra job (which runs
+  the whole crate, both modes) and the `removability` job stay green.
+- New coverage the reviewers noted: a reaction whose disposition is `Terminal`
+  now dead-letters **through the running inbound loop** rather than via a direct
+  `DeadLetters::record` (`s76`); a live `Upsert` reaches only its own projector's
+  typed subscription union member and never a sibling projector's session
+  (`s77`), the live-delta counterpart of the reset-time isolation in `s68`.
 
 ### Added (0.1.0 rework, unit U1 — delivery core)
 

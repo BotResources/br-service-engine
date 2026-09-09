@@ -294,14 +294,63 @@ The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`
 per test), and — for the blob scenarios — `minio` on `PATH` (it spawns its own
 S3-compatible server per test).
 
+It runs in **two modes**, and every scenario keeps the same assertions in
+whichever mode it lives:
+
+- **In-crate mode** (`sXX_*.rs`) drives the real `service-engine` engine —
+  its render pass, inbound loop, write pipeline, impact bus, relays and beat —
+  through an in-crate `sample` service, in process. This mode keeps the scenarios
+  whose property is **not** observable from outside a running binary because they
+  need the `test-support` seam: a **clock the test drives** (the scheduled-impact
+  boundary, cron slots, session max-age), **fault injection** (poison and parking
+  through a `StubDispatch`, an integrity violation forced terminal, a panicking
+  mirror, a lock-timeout, a NATS grace window, a listener/transport reconnect, a
+  notify-queue limit, the pooler probe, per-pod lag), and **direct bus/transport
+  assertions** (an impact staged atomically with a dead-letter row). These stay
+  in-crate on purpose; a black-box binary exposes none of them.
+
+- **Black-box mode** (`bbXX_*.rs`) spawns the real **`example-service` binary**
+  — built from the public authoring surface, no `test-support`, no seam — and the
+  **`example-twin` binary** for the cross-service cycle, and drives them over
+  their public channels only: GraphQL over HTTP and a real `graphql-transport-ws`
+  WebSocket, NATS subjects and streams, the published-language KV, Postgres
+  state, and `/readyz`. It proves what the slices rely on end to end: the binary
+  reaches readiness after declaring its scopes and a second pod shares the store
+  (`bb01`); the mutation gate refuses exactly what the affordance forbids
+  (`bb02`); a subscriber gets a `Reset` then an `Upsert` with a contiguous
+  revision, and a reconnect gets a fresh `Reset` rendered from committed state
+  (`bb03`); the twin binary drives a full command→commit→event cycle back over
+  NATS (`bb04`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
+  and built on demand otherwise, so the mode is self-sufficient locally. Seal and
+  accumulator behaviour stay proven in-crate (`s14`, `s25`) and by the reference
+  service's reply e2e.
+
 ```bash
+# both modes (in-crate sXX + black-box bbXX), one crate
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
   cargo test -p conformance-service-engine --all-targets
+
+# only the black-box mode, against a prebuilt binary
+cargo build -p example-service --bin example-service -p example-twin --bin example-twin
+EXAMPLE_SERVICE_BIN=target/debug/example-service \
+EXAMPLE_TWIN_BIN=target/debug/example-twin \
+E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+  cargo test -p conformance-service-engine \
+    --test bb01_readiness_and_two_pods \
+    --test bb02_mutation_gate_and_affordance \
+    --test bb03_subscription_reset_and_reconnect \
+    --test bb04_cross_service_cycle_twin_binary
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
   cargo test -p example-service --all-targets -- --test-threads=3
 ```
+
+CI runs both: the `conformance-service-engine (real infra)` job runs the whole
+crate (both modes), and a dedicated `conformance-service-engine black-box (real
+binary)` job builds the two example binaries and runs only the black-box
+scenarios against them on real PostgreSQL, a spawned NATS and MinIO.
 
 ## Deployment constraint
 
