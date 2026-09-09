@@ -12,7 +12,7 @@ async fn s132_a_second_pod_on_a_different_service_version_refuses_to_go_up() {
 
     let ready_a = ReadinessHandle::not_ready("boot");
     let engine_a = Engine::<SamplePrincipal>::boot(
-        engine_config("se-schemaver-a", "pod-a").with_service_version("1.0.0"),
+        engine_config("se_schemaver_a", "pod-a").with_service_version("1.0.0"),
         db.app_pool().clone(),
         nats.nats().await,
         ready_a.clone(),
@@ -22,7 +22,7 @@ async fn s132_a_second_pod_on_a_different_service_version_refuses_to_go_up() {
 
     let ready_b = ReadinessHandle::not_ready("boot");
     let boot_b = Engine::<SamplePrincipal>::boot(
-        engine_config("se-schemaver-b", "pod-b").with_service_version("2.0.0"),
+        engine_config("se_schemaver_b", "pod-b").with_service_version("2.0.0"),
         db.app_pool().clone(),
         nats.nats().await,
         ready_b.clone(),
