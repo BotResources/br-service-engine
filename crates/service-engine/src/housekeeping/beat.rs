@@ -8,6 +8,7 @@ use tokio::sync::Notify;
 use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::{BlobReaper, ReaperRound};
 use crate::chain::describe;
+use crate::erase::ErasureDrain;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
 use crate::housekeeping::cron::{CronRound, CronRuntime};
@@ -44,6 +45,7 @@ pub struct Beat {
     readiness: Option<ReadinessAssembly>,
     repairs: Option<Arc<dyn RepairRetry>>,
     blob_reaper: Option<BlobReaper>,
+    erasures: Option<Arc<dyn ErasureDrain>>,
 }
 
 impl Beat {
@@ -62,11 +64,17 @@ impl Beat {
             readiness: None,
             repairs: None,
             blob_reaper: None,
+            erasures: None,
         })
     }
 
     pub(crate) fn with_blob_reaper(mut self, reaper: BlobReaper) -> Self {
         self.blob_reaper = Some(reaper);
+        self
+    }
+
+    pub(crate) fn with_erasure_drain(mut self, drain: Arc<dyn ErasureDrain>) -> Self {
+        self.erasures = Some(drain);
         self
     }
 
@@ -154,6 +162,14 @@ impl Beat {
             Some(reaper) => reaper.sweep(pg).await,
             None => ReaperRound::default(),
         };
+        if let Some(drain) = &self.erasures
+            && let Err(error) = drain.drain().await
+        {
+            tracing::warn!(
+                reason = %describe(&error),
+                "the beat could not complete a pending person-erasure purge",
+            );
+        }
         if let Some(readiness) = &self.readiness {
             readiness.refresh();
         }
