@@ -819,17 +819,43 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `OneShot` invite, `Erasable`), `card` (soft EDA, a command reaction and an
   event reaction from the twin, an emitted integration event, a scheduled
   deadline reaction, a cron, a bulk import), `ledger` (full EDA with upcasting, a
-  hydration barrier, and in-log erasure), `reply` (accumulated lane + seal,
-  presence, blob attachment via the presigned POST) and `roster` (a KV mirror
-  into `known_persons`). A second binary (`example-twin`) plus a `twin` module
-  drive a real cross-service cycle over NATS. A real-infra e2e suite
-  (`tests/e2e.rs`, own PostgreSQL two-role + NATS harness) boots the real binary
-  across the four observation channels, including two-pod convergence.
-- Engine surface additions the reference service required (each keeps the battery
-  green): `Ops::accumulated::<A>(key)` reads a stream's folded value inside a seal
-  handler before the seal purges it (the intent's `let text = cx.seal(..)` split
-  into read-then-seal); `Engine::accumulator_handle()` hands a runner a live
-  chunk-push handle after `run` has consumed the engine.
+  hydration barrier, and in-log erasure), `reply` (accumulated lane + verified
+  seal, presence over the typed subscription union, blob attachment via the
+  presigned POST) and `roster` (a KV mirror into `known_persons`). Slice causes
+  are typed domain events (`BoardCause`, `CardEvent`, `LedgerEvent`, `ReplyCause`),
+  and every slice carries a pure `tests.rs` (given/when/then on the aggregate, no
+  infra) beside its e2e coverage. `crates/example-twin` is a **separate** crate —
+  the producer/runner that closes the cross-service cycle over NATS — so the
+  reference service holds no NATS client (`async-nats` is a dev-dependency of the
+  e2e harness only, never a dependency of the service). The real-infra e2e suite
+  (`tests/e2e.rs`, split into `tests/scenarios/` and driven by `tests/harness/`)
+  boots the real binaries against PostgreSQL, NATS and MinIO over all four
+  observation channels — including the `Reset`/`Upsert`/`Remove` subscription
+  deltas driven over a real `graphql-transport-ws` WebSocket with their typed
+  cause — and drives erase-across-slices, cron, the scheduled deadline reaction,
+  bulk import, the `declare_scopes` handshake (against a stand-in identity that
+  accepts), the blob presigned-POST round-trip, and two-pod convergence.
+- Engine surface additions/changes the reference service required (each keeps the
+  battery green):
+  - **`Ops::seal::<A>(key, last_seq, hash) -> A::State`** now realizes the
+    intent's `let text = cx.seal(key, last_seq, hash)`: it replays the stream up
+    to `last_seq`, refuses a truncated prefix (`EngineError::SealTruncated`) or a
+    content that does not match the declared `SealHash`
+    (`EngineError::SealHashMismatch`), writes the seal marker, and returns the
+    folded state — so "a truncated or altered stream is never saved silently"
+    holds by construction. Backed by `ChunkReader::replay_verified` and the new
+    public `SealHash` type (SHA-256 of the concatenated chunks, hex on the wire,
+    `of_chunks` for a producer). The low-level `AccumulatorRuntime::seal(tx, key)`
+    marker primitive is unchanged (the battery's seal test is unaffected); the
+    unused `Engine::seal(tx, key)` passthrough was removed.
+  - **`Engine::settle_handle() -> Settle<P>`** (with `SessionRuntime::settle`):
+    flushes buffered accumulator chunks and awaits render quiescence, a real
+    same-process settle seam the e2e uses instead of blind sleeps.
+  - **`presence_subscription_union!` + `graphql::typed_presence_view`**: a
+    presence lane now maps its deltas into a typed GraphQL subscription union,
+    exactly like a projector lane (was a hand-rolled JSON scalar).
+  - `Ops::accumulated::<A>(key)` (folded read) and `Engine::accumulator_handle()`
+    remain from the previous round.
 
 ### Fixed (0.1.0 rework, unit U13)
 
@@ -843,9 +869,11 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 
 ### Changed (0.1.0 rework, unit U13)
 
-- `error.rs` split into `error/{mod,codec}.rs` and the conformance sample's
-  `graphql/boot.rs` factored a shared `base_config` helper, to hold the
-  ~300-line file limit.
+- `error.rs` split into `error/{mod,codec}.rs`, the reader's tests moved to
+  `accumulator/reader_tests.rs`, and the conformance sample's `graphql/boot.rs`
+  factored a shared `base_config` helper, to hold the ~300-line file limit. The
+  `removability` CI job builds the reference service with the kernel alone and
+  with each slice removed in turn, so slice removability cannot regress silently.
 
 ### Deployment constraint
 

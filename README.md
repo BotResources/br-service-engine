@@ -230,15 +230,22 @@ no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
 `kernel/` (principal, scopes, error base), one folder per slice under `slices/`
 (each owning its aggregate, store, view, handlers, offer/mirror and SDL
 fragment), a `register.rs` with one line per slice, a `graphql.rs` that assembles
-the fragments, and a `main.rs` that boots. Every slice is removable by deleting
-its folder and its one register line — each is a cargo feature (default = all),
-so the crate compiles with any slice removed. `crates/example-contract` holds
-what crosses the service frontier (published types + integration coordinates),
-and `example-twin` closes a real cross-service cycle over NATS. The slices
-between them exercise all three lanes, all three persistence styles, offers,
-mirrors, presence, blobs, scheduled work, erasure and the full GraphQL surface;
-`tests/e2e.rs` drives them over the four observation channels against real
-PostgreSQL and NATS.
+the fragments, and a `src/bin/service.rs` that boots. Every slice is removable by
+deleting its folder and its one register line — each is a cargo feature
+(default = all), so the crate compiles with any slice removed; the `removability`
+CI job proves it by building the kernel with every slice removed and then each
+slice removed in turn. `crates/example-contract` holds what crosses the service
+frontier (published types + integration coordinates), and `crates/example-twin`
+is the separate producer/runner that closes a real cross-service cycle over NATS,
+so the reference service itself never holds a NATS client. The slices between
+them exercise all three lanes, all three persistence styles, offers, mirrors,
+presence, blobs, cron, scheduled reactions, bulk writes, `declare_scopes`,
+erasure and the full GraphQL surface. `tests/e2e.rs` (split into
+`tests/scenarios/`, driven by `tests/harness/`) proves them against real
+PostgreSQL, NATS and MinIO over the four observation channels: the mutation
+`{ success }`/typed-error ack, the query with its affordances, the KV offers and
+integration events, and the `Reset`/`Upsert`/`Remove` subscription deltas driven
+over a real `graphql-transport-ws` WebSocket with their typed cause.
 
 ## Conformance battery
 
@@ -250,6 +257,10 @@ S3-compatible server per test).
 ```bash
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
   cargo test -p conformance-service-engine --all-targets
+
+# the reference service's own functional spec (same infra, plus MinIO for blobs)
+E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
+  cargo test -p example-service --all-targets -- --test-threads=3
 ```
 
 ## Deployment constraint

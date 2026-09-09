@@ -82,6 +82,31 @@ jobs:
           tool: cargo-machete
       - run: cargo machete
 
+  removability:
+    name: example-service slices are removable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: removability
+      - name: build the kernel with every slice removed, then each slice removed in turn
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          set -euo pipefail
+          all="board card ledger reply roster"
+          cargo build -p example-service --no-default-features --lib --locked
+          for removed in $all; do
+            feats=$(echo "$all" | tr ' ' '\n' | grep -v "^${removed}$" | paste -sd, -)
+            echo "::group::without ${removed} (features: ${feats})"
+            cargo build -p example-service --no-default-features --features "${feats}" --lib --locked
+            echo "::endgroup::"
+          done
+
   semver:
     name: cargo semver-checks
     runs-on: ubuntu-latest
