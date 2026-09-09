@@ -12,7 +12,8 @@ async fn pg_notify_accepts(pool: &sqlx::PgPool, bytes: usize) -> bool {
 }
 
 #[tokio::test]
-async fn s024_a_frame_packed_to_the_maximum_is_accepted_by_pg_notify_and_one_byte_over_is_refused() {
+async fn s024_a_frame_packed_to_the_maximum_is_accepted_by_pg_notify_and_one_byte_over_is_refused()
+{
     let db = TestDb::fresh().await;
     let pool = db.app_pool();
 

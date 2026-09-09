@@ -16,7 +16,7 @@ async fn rls_assignment(base_url: &str, passport: &str, id: Uuid) -> serde_json:
 
 #[tokio::test]
 async fn s126_a_query_time_fetch_runs_under_the_registered_rls_applier_so_a_forbidden_key_is_absent()
-{
+ {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

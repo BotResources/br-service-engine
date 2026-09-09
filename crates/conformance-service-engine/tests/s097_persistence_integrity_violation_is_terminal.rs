@@ -11,7 +11,8 @@ use service_engine::inbound::{DeadLetterSource, DeadLetters};
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s097_an_integrity_violation_in_cx_save_is_terminal_whatever_the_handler_disposition_says() {
+async fn s097_an_integrity_violation_in_cx_save_is_terminal_whatever_the_handler_disposition_says()
+{
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

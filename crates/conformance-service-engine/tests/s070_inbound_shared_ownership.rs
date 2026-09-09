@@ -15,7 +15,8 @@ async fn s070_two_pods_on_one_durable_process_each_message_exactly_once() {
     let nats = TestNats::spawn().await;
     nats.provision().await;
 
-    let mut engine = boot_render_engine(&db, nats.nats().await, "se_inbound_s070", "se-s070-a").await;
+    let mut engine =
+        boot_render_engine(&db, nats.nats().await, "se_inbound_s070", "se-s070-a").await;
     engine
         .register_reaction::<SampleCommand, _, _>("shared-work", sample_handler)
         .expect("register_reaction records the reaction and derives its subscription");
