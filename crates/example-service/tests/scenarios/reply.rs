@@ -156,6 +156,64 @@ async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
 }
 
 #[tokio::test]
+async fn a_lost_producer_is_caught_by_the_scheduled_cancel_deadline() {
+    let world = World::start("pod-reply-deadline").await;
+    let org = Uuid::now_v7();
+    let pass = passport(Uuid::now_v7(), org, &[], false);
+    let board = Uuid::now_v7();
+    let chunks = ["Half ", "a tho", "ught"];
+
+    let reply = start_and_stream(&world, &pass, board, &chunks).await;
+
+    world.service.settle().await;
+    ok(&world
+        .gql(
+            &pass,
+            "mutation($id:UUID!){cancelReply(id:$id){success}}",
+            serde_json::json!({ "id": reply }),
+        )
+        .await);
+
+    let cancelling = world
+        .gql(
+            &pass,
+            "query($id:UUID!){reply(id:$id){status}}",
+            serde_json::json!({ "id": reply }),
+        )
+        .await;
+    assert_eq!(
+        ok(&cancelling)["reply"]["status"], "cancelling",
+        "the decision is written on the direct lane while the producer is still expected to answer"
+    );
+
+    sqlx::query(
+        "UPDATE service_engine.scheduled_message SET at = now() - interval '1 minute'",
+    )
+    .execute(&world.db.app)
+    .await
+    .expect("fast-forward the scheduled cancel deadline so the beat fires it now");
+
+    let text = poll_until!(Duration::from_secs(5), {
+        let view = world
+            .gql(
+                &pass,
+                "query($id:UUID!){reply(id:$id){text status}}",
+                serde_json::json!({ "id": reply }),
+            )
+            .await;
+        (view["data"]["reply"]["status"] == "cancelled")
+            .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
+    });
+    assert_eq!(
+        text, "Half a thought",
+        "with no producer answer, the scheduled deadline seals whatever the stream held through \
+         seal_current and records it as cancelled"
+    );
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
 async fn a_reply_whose_finish_declares_the_wrong_hash_is_never_sealed() {
     let world = World::start("pod-reply-integrity").await;
     let org = Uuid::now_v7();
