@@ -35,8 +35,8 @@ async fn s126_erase_deletes_rows_under_a_strict_deny_when_unset_rls_policy() {
         "the person owns two rows on a table with FORCE ROW LEVEL SECURITY and no fail-open branch"
     );
 
-    let engine = boot_erase_strict_engine(&db, nats.nats().await, "se_s126", "pod-s126", SERVICE)
-        .await;
+    let engine =
+        boot_erase_strict_engine(&db, nats.nats().await, "se_s126", "pod-s126", SERVICE).await;
     let readiness = engine.readiness();
     let shutdown = engine.shutdown_handle();
     let eraser = engine.eraser();

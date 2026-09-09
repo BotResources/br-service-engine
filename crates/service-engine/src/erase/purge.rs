@@ -105,8 +105,7 @@ async fn purge_manifest<P: Principal>(
         .presence
         .iter()
         .map(|raw| {
-            KvKey::new(raw.clone())
-                .map_err(|error| EngineError::Service(error.to_string().into()))
+            KvKey::new(raw.clone()).map_err(|error| EngineError::Service(error.to_string().into()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     presence.purge(&presence_keys).await?;

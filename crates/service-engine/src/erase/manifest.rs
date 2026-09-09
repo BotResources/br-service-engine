@@ -69,8 +69,16 @@ impl Erased {
             .collect::<Result<Vec<_>, EngineError>>()?;
         Ok(PurgeManifest {
             streams,
-            presence: self.presence.iter().map(|k| k.as_str().to_string()).collect(),
-            blobs: self.blobs.iter().map(|reference| reference.as_uuid()).collect(),
+            presence: self
+                .presence
+                .iter()
+                .map(|k| k.as_str().to_string())
+                .collect(),
+            blobs: self
+                .blobs
+                .iter()
+                .map(|reference| reference.as_uuid())
+                .collect(),
         })
     }
 }

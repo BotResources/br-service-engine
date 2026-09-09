@@ -81,8 +81,15 @@ async fn s127_the_beat_completes_a_purge_the_erase_committed_but_never_finished(
     .await
     .expect("record an erasure whose post-commit purge crashed before it ran");
 
-    assert_eq!(chunk_count(&pool, note).await, 1, "the unpurged chunk is present");
-    assert!(!purged_at_set(&pool, person).await, "the erasure is not yet purged");
+    assert_eq!(
+        chunk_count(&pool, note).await,
+        1,
+        "the unpurged chunk is present"
+    );
+    assert!(
+        !purged_at_set(&pool, person).await,
+        "the erasure is not yet purged"
+    );
 
     let engine = boot_erase_engine(&db, nats.nats().await, "se_s127", "pod-s127", SERVICE).await;
     let readiness = engine.readiness();

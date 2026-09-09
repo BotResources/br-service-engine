@@ -29,12 +29,12 @@ impl<P: Principal> Engine<P> {
             slices.verify_root_fields(sdl)?;
         }
         let render = self.render_runtime();
-        let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> = if self.erasables.is_empty()
-        {
-            None
-        } else {
-            Some(Arc::new(self.eraser()))
-        };
+        let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =
+            if self.erasables.is_empty() {
+                None
+            } else {
+                Some(Arc::new(self.eraser()))
+            };
         let Engine {
             config,
             pg,
