@@ -273,13 +273,24 @@ slice declared). The axum layer resolves the principal from the trusted
 `X-Passport` header (`PassportPrincipal`) — authZ only, never authN.
 
 **Ergonomic projector surface (`view`).** A `view::Projector` (re-exported as
-`service_engine::Projector`) names `type Noun` / `type Store` / `type Query` and
-writes only `async fn populate(cx, q)` over a `Populate` context and
-`fn project(row, principal)` — no future plumbing and no render load SQL; the
-engine loads through `Persistence::read_many` and `ViewProjector` (a zero-sized
-adapter) owns `Facts`, the `LoadScope` match and the derived `name`/`nouns`/
-`inverse`. The low-level `projector::Projector` stays as the escape hatch for a
-projector that joins nouns.
+`service_engine::Projector`) names `type Noun` / `type Store` / `type Query` /
+`type Visibility` and writes only `async fn populate(cx, q)` over a `Populate`
+context and `fn project(row, principal)` — no future plumbing and no render load
+SQL; the engine loads through `Persistence::read_many` and `ViewProjector` (a
+zero-sized adapter) owns `Facts`, the `LoadScope` match and the derived
+`name`/`nouns`/`inverse`. `type Visibility` makes the same cohort declaration
+`populate` uses through `Visibility::window` the render-time gate too: the engine
+applies the projector's `visible` method (defaulting to that declaration) before
+projecting, so a row that leaves the principal's cohorts is delivered as a
+`Remove` and one that enters as an `Upsert`. `Ops::impact_principal_facts(id,
+deps)` stages the principal-facts impact a mutation or reaction emits when it
+changes what a principal may see; the engine re-resolves that principal and
+repopulates every window shape (a `Population::Keys` window included) so both
+directions reach a live session within the frame. A projector gated by Postgres
+RLS or open to every viewer declares `type Visibility = Unrestricted<Row,
+Principal>`, an explicit "no cohort gate here" rather than a permissive default.
+The low-level `projector::Projector` stays as the escape hatch for a projector
+that joins nouns.
 
 **Engine-owned NATS, Postgres connect and readiness.** The engine's internal
 loops run on `async-nats` directly through the `nats` module (`Nats`, `KvBucket`,

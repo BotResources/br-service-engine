@@ -51,7 +51,7 @@ battery-backed.
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
-| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many` and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
+| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
 | `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` |
@@ -236,8 +236,9 @@ Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 
 The authoring ergonomics follow the intent. A projector is
 written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
-names its `type Noun` and `type Store`, a typed `Query`, and writes only a native
-`async fn populate(cx, q)` over a `Populate` context and `project(row, principal)`.
+names its `type Noun` and `type Store`, a typed `Query`, its `type Visibility`, and
+writes only a native `async fn populate(cx, q)` over a `Populate` context and
+`project(row, principal)`.
 No hand-written future plumbing and no render load SQL live in the view: the engine
 loads the noun's rows through the store's `Persistence::read_many` and owns the
 `Facts` type, the `LoadScope::{Bulk, PerPrincipal}` match and the derived
@@ -246,7 +247,18 @@ works in the typed `Query` through `register_view`, `Query::fetch_view` /
 `fetch_view_window`, `WindowSpec::view` and `Bulk::impact_all_view`. `ViewProjector`
 is a zero-sized adapter, so a query resolver constructs no per-call state. The
 low-level `projector::Projector` stays as the escape hatch for a projector that
-joins nouns. The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
+joins nouns. `type Visibility` is the third enforcement point of one declaration:
+the same cohort rule that `populate` uses through `Visibility::window` is applied
+by the engine before it projects (the `visible` method defaults to it), so a row
+that leaves the principal's cohorts is delivered as a `Remove` and one that enters
+as an `Upsert`. When a principal's own facts change (a membership granted or
+revoked, staged with `Ops::impact_principal_facts`), the engine re-resolves the
+principal and repopulates every window shape — a `Population::Keys` window
+included — so both directions reach a live session then and there. A projector
+that filters through Postgres RLS instead of cohorts, or one that is open to every
+viewer, declares `type Visibility = Unrestricted<Row, Principal>`, a conscious
+"no cohort gate here" that keeps the render-time gate off rather than defaulting
+it open. The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
 cancel decision (with the cancel gate as its affordance, a presence signal the
 producer watches and a scheduled deadline), a reaction that seals the producer's

@@ -122,7 +122,10 @@ pub(crate) fn route<P: Principal>(
                 for key in &window.members {
                     entry.dirty.entry(key.clone()).or_default();
                 }
-                if matches!(window.shape, WindowShape::Ordered { open_head: true }) {
+                if matches!(
+                    window.shape,
+                    WindowShape::Fixed | WindowShape::Ordered { open_head: true }
+                ) {
                     entry.repopulate = true;
                 }
             }
@@ -233,7 +236,9 @@ fn route_impact<P: Principal>(
                     entry.touch(key, index);
                 }
                 match &window.shape {
-                    WindowShape::Ordered { open_head: true } => entry.repopulate = true,
+                    WindowShape::Fixed | WindowShape::Ordered { open_head: true } => {
+                        entry.repopulate = true;
+                    }
                     WindowShape::Query(query) if query.interest().intersects(impact) => {
                         entry.repopulate = true;
                     }

@@ -6,6 +6,7 @@ type BoardMutation {
 	createBoard(id: UUID!, name: String!, isPublic: Boolean!): MutationAck!
 	archiveBoard(id: UUID!): MutationAck!
 	mintBoardInvite(id: UUID!): String!
+	setBoardMembership(boardId: UUID!, userId: UUID!, member: Boolean!): MutationAck!
 }
 
 type BoardQuery {

@@ -95,12 +95,14 @@ pub use engine::{
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 
 pub use assignment::{
-    Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentView,
+    Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentStore,
+    AssignmentView,
 };
 pub use engine::boot_pipeline_engine;
 pub use gate::Gate;
 pub use gated::{
-    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, reasons,
+    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, VisibleAssignments,
+    reasons,
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use offer::{

@@ -11,12 +11,15 @@ use service_engine::name::{NounName, ProjectorName};
 use service_engine::population::{Interest, Inverse, Population, WindowQuery};
 use service_engine::projector::{LoadScope, Projector};
 use service_engine::session::WindowParams;
+use service_engine::view::{Populate, Projector as ViewProjectorTrait};
 use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::sample::assignment::{Assignment, AssignmentFacts, AssignmentRow};
+use crate::sample::assignment::{
+    Assignment, AssignmentFacts, AssignmentRow, AssignmentStore, AssignmentView,
+};
 use crate::sample::principal::SamplePrincipal;
 
 pub const DEP_MEMBERSHIP: u8 = 0;
@@ -245,5 +248,40 @@ impl Projector for GatedAssignmentProjector {
             closed: row.closed,
             affordances: row.affordances(principal),
         })
+    }
+}
+
+#[derive(Default)]
+pub struct VisibleAssignments;
+
+impl VisibleAssignments {
+    pub const NAME: ProjectorName = ProjectorName::from_static("visible_assignments");
+}
+
+impl ViewProjectorTrait for VisibleAssignments {
+    type Principal = SamplePrincipal;
+    type Noun = Assignment;
+    type Store = AssignmentStore;
+    type Query = ();
+    type Out = AssignmentView;
+    type Visibility = AssignmentVisibility;
+
+    const NAME: ProjectorName = Self::NAME;
+
+    async fn populate(
+        cx: &Populate<'_, SamplePrincipal>,
+        _query: &(),
+    ) -> Result<Population<Uuid>, EngineError> {
+        let candidates = load_candidates(cx.pool()).await?;
+        Ok(AssignmentVisibility::window(candidates, cx.principal()))
+    }
+
+    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
+        AssignmentView {
+            id: row.id,
+            title: row.title.clone(),
+            closed: row.closed,
+            can_close: !row.closed,
+        }
     }
 }

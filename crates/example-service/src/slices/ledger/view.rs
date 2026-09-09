@@ -3,6 +3,7 @@ use service_engine::error::EngineError;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::view::{Populate, Projector};
+use service_engine::visibility::Unrestricted;
 use uuid::Uuid;
 
 use super::aggregate::Ledger;
@@ -29,6 +30,7 @@ impl Projector for LedgersView {
     type Store = LedgerStore;
     type Query = ();
     type Out = LedgerView;
+    type Visibility = Unrestricted<LedgerAggregate, AppPrincipal>;
 
     const NAME: ProjectorName = Self::NAME;
 

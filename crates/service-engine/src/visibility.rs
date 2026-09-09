@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::marker::PhantomData;
 
 use crate::cohort::CohortKey;
 use crate::population::Population;
@@ -42,6 +43,37 @@ pub trait Visibility: Send + Sync + 'static {
         I: IntoIterator<Item = (K, Self::Row)>,
     {
         Population::Keys(Self::visible_keys(candidates, principal))
+    }
+}
+
+pub struct Unrestricted<Row, Principal>(PhantomData<fn() -> (Row, Principal)>);
+
+impl<Row, Principal> Visibility for Unrestricted<Row, Principal>
+where
+    Row: Send + Sync + 'static,
+    Principal: Send + Sync + 'static,
+{
+    type Row = Row;
+    type Principal = Principal;
+
+    fn cohorts(_row: &Row) -> Cohorts {
+        Vec::new()
+    }
+
+    fn memberships(_principal: &Principal) -> Cohorts {
+        Vec::new()
+    }
+
+    fn visible(_row: &Row, _principal: &Principal) -> bool {
+        true
+    }
+
+    fn visible_keys<K, I>(candidates: I, _principal: &Principal) -> BTreeSet<K>
+    where
+        K: Ord,
+        I: IntoIterator<Item = (K, Row)>,
+    {
+        candidates.into_iter().map(|(key, _)| key).collect()
     }
 }
 

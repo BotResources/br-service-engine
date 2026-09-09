@@ -5,6 +5,7 @@ use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
 use service_engine::view::{Populate, Projector};
+use service_engine::visibility::Unrestricted;
 use uuid::Uuid;
 
 use super::aggregate::{Reply, ReplyRow, ReplyStore, all_reply_ids};
@@ -33,6 +34,7 @@ impl Projector for RepliesView {
     type Store = ReplyStore;
     type Query = ();
     type Out = ReplyView;
+    type Visibility = Unrestricted<ReplyRow, AppPrincipal>;
 
     const NAME: ProjectorName = Self::NAME;
 

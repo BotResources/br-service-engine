@@ -27,6 +27,8 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine.register_mutation::<mutations::CreateBoard, _>(mutations::create_board)?;
     engine.register_mutation::<mutations::ArchiveBoard, _>(mutations::archive_board)?;
     engine.register_mutation::<mutations::MintBoardInvite, _>(mutations::mint_board_invite)?;
+    engine
+        .register_mutation::<mutations::SetBoardMembership, _>(mutations::set_board_membership)?;
     engine.register_erasable(erase::BoardEraser)?;
     engine.register_schema_slice(graphql::FRAGMENT)?;
     Ok(())

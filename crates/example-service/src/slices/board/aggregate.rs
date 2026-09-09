@@ -12,6 +12,7 @@ use crate::kernel::AppPrincipal;
 
 pub const NOT_ACTIVE: Reason = Reason::new("board_not_active");
 pub const MISSING_SCOPE: Reason = Reason::new("missing_archive_scope");
+pub const NOT_A_MEMBER: Reason = Reason::new("not_a_board_member");
 
 pub struct Board;
 
@@ -52,6 +53,17 @@ service_engine::gated! {
             Gate::blocked(NOT_ACTIVE)
         } else {
             Gate::allowed()
+        }
+    }
+    "manage_members" => fn manage_members_gate(this, principal) {
+        let is_member = principal
+            .facts()
+            .get::<BoardMemberships>()
+            .is_some_and(|BoardMemberships(boards)| boards.contains(&this.id));
+        if principal.is_super_admin() || is_member {
+            Gate::allowed()
+        } else {
+            Gate::blocked(NOT_A_MEMBER)
         }
     }
 }
