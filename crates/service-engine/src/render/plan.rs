@@ -48,7 +48,8 @@ pub(crate) fn plan<P: Principal>(
                 .registry
                 .projector(&window.projector)
                 .ok_or_else(|| EngineError::UnboundProjector(window.projector.clone()))?;
-            let cohort = if window.rls {
+            let rls = projector.renders_under_rls();
+            let cohort = if rls {
                 CohortKey::principal(session.principal.id())
             } else {
                 projector.cohort(&session.principal)
@@ -56,7 +57,7 @@ pub(crate) fn plan<P: Principal>(
             planned.entry(id).or_default().push(PlannedWindow {
                 representative: session.principal.clone(),
                 projector: window.projector.clone(),
-                rls: window.rls,
+                rls,
                 cohort,
                 dirty: window_work.dirty,
             });

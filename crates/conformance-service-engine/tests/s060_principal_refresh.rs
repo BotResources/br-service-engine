@@ -23,7 +23,7 @@ async fn s060_principal_refresh() {
     let spy = Spy::new();
     let mut registry = registry();
     registry
-        .register_projector(SpyAssignments::new(spy.clone()))
+        .register_projector(SpyAssignments::new(spy.clone()).under_rls())
         .expect("the spy projector registers on a bound noun");
     let engine = runtime(&pool, render_config("pod-refresh"), registry);
 

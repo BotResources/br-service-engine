@@ -85,6 +85,8 @@ impl Projector for OrgBoardsRls {
 
     const NAME: ProjectorName = Self::NAME;
 
+    const RLS: bool = true;
+
     async fn populate(
         cx: &Populate<'_, AppPrincipal>,
         _query: &(),

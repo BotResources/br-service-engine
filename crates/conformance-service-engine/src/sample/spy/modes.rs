@@ -40,7 +40,13 @@ impl SpyAssignments {
             fail_switch: None,
             panic_switch: None,
             broken: false,
+            rls: false,
         }
+    }
+
+    pub fn under_rls(mut self) -> Self {
+        self.rls = true;
+        self
     }
 
     pub fn with_window(mut self, window: WindowMode) -> Self {

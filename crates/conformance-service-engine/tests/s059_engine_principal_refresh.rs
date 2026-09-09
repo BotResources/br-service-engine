@@ -29,7 +29,7 @@ async fn s059_engine_revoking_a_local_fact_drops_the_row_on_the_same_pass() {
         &db,
         fabric,
         engine_config("se_s059_revoke", "pod-s22a"),
-        SpyAssignments::new(Spy::new()),
+        SpyAssignments::new(Spy::new()).under_rls(),
     )
     .await;
     let readiness = engine.readiness();

@@ -29,7 +29,7 @@ async fn s016_engine_an_rls_window_loads_only_the_principals_own_rows() {
         &db,
         fabric,
         engine_config(CHANNEL, "pod-s016"),
-        SpyAssignments::new(guarded.clone()),
+        SpyAssignments::new(guarded.clone()).under_rls(),
     )
     .await;
     let readiness = engine.readiness();

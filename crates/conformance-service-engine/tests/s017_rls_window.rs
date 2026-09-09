@@ -23,7 +23,7 @@ async fn s017_rls_window() {
     let guarded = Spy::new();
     let mut registry = registry();
     registry
-        .register_projector(SpyAssignments::new(guarded.clone()))
+        .register_projector(SpyAssignments::new(guarded.clone()).under_rls())
         .expect("the spy projector registers on a bound noun");
     let engine = runtime(&pool, render_config("pod-rls"), registry);
 
@@ -64,7 +64,7 @@ async fn s017_a_window_the_service_asked_to_run_under_rls_is_refused_without_an_
     registry.bind_noun::<conformance_service_engine::sample::assignment::Assignment>();
     registry.register_principal_resolver(SamplePrincipalResolver);
     registry
-        .register_projector(SpyAssignments::new(Spy::new()))
+        .register_projector(SpyAssignments::new(Spy::new()).under_rls())
         .expect("the spy projector registers on a bound noun");
     let engine = runtime(&pool, render_config("pod-no-applier"), registry);
 

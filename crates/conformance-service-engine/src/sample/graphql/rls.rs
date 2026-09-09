@@ -38,6 +38,10 @@ impl Projector for RlsAssignmentProjector {
         NOUNS
     }
 
+    fn renders_under_rls(&self) -> bool {
+        true
+    }
+
     fn populate<'a>(
         &'a self,
         pg: &'a PgPool,
