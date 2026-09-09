@@ -4,9 +4,7 @@ use example_contract::{
     person_created_coords, reply_cancelled_coords, reply_finished_coords,
 };
 use futures_util::StreamExt;
-use service_engine::nats::{
-    KvKey, Nats, NatsError, StreamFrame, command_subject, event_subject,
-};
+use service_engine::nats::{KvKey, Nats, NatsError, StreamFrame, command_subject, event_subject};
 use uuid::Uuid;
 
 pub async fn stream_reply_chunk(
@@ -25,11 +23,7 @@ pub async fn stream_reply_chunk(
     Ok(())
 }
 
-pub async fn stream_reply(
-    nats: &Nats,
-    reply_id: Uuid,
-    chunks: &[&str],
-) -> Result<(), NatsError> {
+pub async fn stream_reply(nats: &Nats, reply_id: Uuid, chunks: &[&str]) -> Result<(), NatsError> {
     for (seq, chunk) in chunks.iter().enumerate() {
         stream_reply_chunk(nats, reply_id, seq as u64, chunk).await?;
     }

@@ -251,11 +251,7 @@ impl Nats {
         Ok(stream.cached_info().config.max_age)
     }
 
-    pub async fn purge_chunk_subject(
-        &self,
-        stream: &str,
-        subject: &str,
-    ) -> Result<(), NatsError> {
+    pub async fn purge_chunk_subject(&self, stream: &str, subject: &str) -> Result<(), NatsError> {
         let stream = self.bind_stream(stream).await?;
         stream
             .purge()

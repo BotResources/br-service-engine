@@ -113,7 +113,12 @@ impl TestNats {
             ..Default::default()
         })
         .await
-        .unwrap_or_else(|e| panic!("declare the {} lane-A stream: {e}", streaming_stream(service)));
+        .unwrap_or_else(|e| {
+            panic!(
+                "declare the {} lane-A stream: {e}",
+                streaming_stream(service)
+            )
+        });
     }
 
     pub async fn provision_presence(&self, service: &str, max_age: Duration) {

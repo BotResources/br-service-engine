@@ -90,7 +90,12 @@ impl TestNats {
             ..Default::default()
         })
         .await
-        .unwrap_or_else(|e| panic!("declare the {} lane-A stream: {e}", streaming_stream(service)));
+        .unwrap_or_else(|e| {
+            panic!(
+                "declare the {} lane-A stream: {e}",
+                streaming_stream(service)
+            )
+        });
         js.create_key_value(async_nats::jetstream::kv::Config {
             bucket: KV_PUBLISHED_LANGUAGE.to_string(),
             history: 1,

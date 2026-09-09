@@ -44,7 +44,10 @@ impl StreamingIngress {
     }
 
     pub async fn open(&self) -> Result<Consumer<PullConfig>, EngineError> {
-        let stream = self.nats.bind_stream(&streaming_stream(&self.service)).await?;
+        let stream = self
+            .nats
+            .bind_stream(&streaming_stream(&self.service))
+            .await?;
         stream
             .create_consumer(PullConfig {
                 durable_name: None,

@@ -255,15 +255,14 @@ impl<P: Principal> Engine<P> {
                         Ok((ingress, consumer)) => {
                             ingress_task =
                                 Some(tokio::spawn(ingress.serve(consumer, stop_ingress.clone())));
-                            purge_task = Some(tokio::spawn(
-                                crate::accumulator::ingress::run_purge(
+                            purge_task =
+                                Some(tokio::spawn(crate::accumulator::ingress::run_purge(
                                     nats.clone(),
                                     accumulators.clone(),
                                     service,
                                     config.beat,
                                     stop_purge.clone(),
-                                ),
-                            ));
+                                )));
                         }
                         Err(error) => {
                             let reason = match &error {

@@ -22,7 +22,12 @@ async fn boot_pod(
     db: &TestDb,
     nats: Nats,
     pod: &str,
-) -> (Arc<AccumulatorRuntime>, ReadinessHandle, Arc<tokio::sync::Notify>, tokio::task::JoinHandle<Result<(), service_engine::error::EngineError>>) {
+) -> (
+    Arc<AccumulatorRuntime>,
+    ReadinessHandle,
+    Arc<tokio::sync::Notify>,
+    tokio::task::JoinHandle<Result<(), service_engine::error::EngineError>>,
+) {
     let mut engine = Engine::<SamplePrincipal>::boot(
         engine_config(CHANNEL, pod).with_service(SERVICE),
         db.app_pool().clone(),
@@ -100,7 +105,11 @@ async fn s133_a_separate_producer_reaches_every_pod_and_a_chunk_after_seal_is_re
         }
     }
 
-    let mut tx = db.app_pool().begin().await.expect("open a seal transaction");
+    let mut tx = db
+        .app_pool()
+        .begin()
+        .await
+        .expect("open a seal transaction");
     acc_a
         .seal::<NoteBody>(&mut tx, &key)
         .await
