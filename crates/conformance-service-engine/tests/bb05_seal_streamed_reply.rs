@@ -34,20 +34,18 @@ async fn bb05_a_streamed_reply_seals_against_its_hash_in_the_running_binary() {
         .await
         .expect("a separate producer streams the reply chunks over NATS, not through Postgres");
 
-    example_twin::send_reply_finished(
-        &world.nats,
-        &ReplyFinished {
-            reply_id: reply,
-            board_id: board,
-            last_seq: (chunks.len() - 1) as u64,
-            hash: hash_of(&chunks),
-        },
-    )
-    .await
-    .expect("publish the finish command to the running binary over NATS");
+    let finished = ReplyFinished {
+        reply_id: reply,
+        board_id: board,
+        last_seq: (chunks.len() - 1) as u64,
+        hash: hash_of(&chunks),
+    };
 
     let deadline = Instant::now() + Duration::from_secs(15);
     let text = loop {
+        example_twin::resend_reply_finished(&world.nats, &finished)
+            .await
+            .expect("the runner resends the finish until the chunks are durable and it seals");
         let view = world
             .gql(
                 &pass,
