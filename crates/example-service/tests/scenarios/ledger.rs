@@ -101,7 +101,11 @@ async fn full_eda_snapshot_cadence_writes_once_per_window() {
     );
 
     record(&world, &pass, l, 1).await;
-    assert_eq!(event_count(&world.db.app, l).await, 8, "eight facts on the log");
+    assert_eq!(
+        event_count(&world.db.app, l).await,
+        8,
+        "eight facts on the log"
+    );
     assert_eq!(
         snapshot_version(&world.db.app, l).await,
         8,
@@ -189,7 +193,10 @@ async fn full_eda_erasure_leaves_the_log_readable() {
     .fetch_one(&world.db.app)
     .await
     .unwrap();
-    assert_eq!(authored, 0, "the author is scrubbed from every event in place");
+    assert_eq!(
+        authored, 0,
+        "the author is scrubbed from every event in place"
+    );
 
     assert_eq!(
         total(&world, &pass, l).await,

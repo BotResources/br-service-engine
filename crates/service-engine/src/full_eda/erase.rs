@@ -5,8 +5,8 @@ use sqlx::{PgConnection, Row};
 use crate::erase::PersonId;
 use crate::error::EngineError;
 use crate::full_eda::EventSourced;
-use crate::full_eda::store::{load_aggregate, upsert_snapshot};
 use crate::full_eda::decode_key_text;
+use crate::full_eda::store::{load_aggregate, upsert_snapshot};
 use crate::schema::TABLE_EVENT_LOG;
 
 pub async fn erase<T, R>(

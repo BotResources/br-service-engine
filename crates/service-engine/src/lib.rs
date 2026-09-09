@@ -89,6 +89,7 @@ pub use delta::{Delta, ErasedView, Revision};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
+pub use full_eda::{EventSourced, FullEda};
 pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,
 };
@@ -125,7 +126,6 @@ pub use nats::{
     RelayHealth, RelayHealthReceiver,
 };
 pub use offer::Offer;
-pub use full_eda::{EventSourced, FullEda};
 pub use persistence::{Aggregate, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,

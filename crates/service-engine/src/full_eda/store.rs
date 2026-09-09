@@ -193,7 +193,12 @@ async fn select_snapshot(
     .bind(key_text)
     .fetch_optional(conn)
     .await?;
-    Ok(row.map(|row| (row.get::<i64, _>("version"), row.get::<serde_json::Value, _>("state"))))
+    Ok(row.map(|row| {
+        (
+            row.get::<i64, _>("version"),
+            row.get::<serde_json::Value, _>("state"),
+        )
+    }))
 }
 
 async fn select_events_after(
