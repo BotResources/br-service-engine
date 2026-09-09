@@ -2,9 +2,11 @@
 #![allow(unused_imports)]
 
 pub mod bin;
-pub mod client;
 pub mod pg;
 pub mod scopes;
+
+#[path = "../graphql_support/mod.rs"]
+pub mod graphql_support;
 
 use std::time::Duration;
 
@@ -12,13 +14,14 @@ use br_core_auth::{AuthMethod, Passport, PassportClaims, PassportHeader};
 use conformance_service_engine::infra::TestNats;
 use example_contract::{PublishedPerson, SERVICE};
 use service_engine::nats::Nats;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use bin::{SpawnEnv, Spawned, free_port};
 use pg::BlackboxDb;
 use scopes::{ScopeIdentity, accept_scopes};
 
-pub use client::{GraphqlWs, post_json};
+pub use graphql_support::{GraphqlWs, post_json};
 
 pub struct World {
     pub db: BlackboxDb,
@@ -156,4 +159,22 @@ pub fn error_code(response: &serde_json::Value) -> String {
         .as_str()
         .unwrap_or_default()
         .to_string()
+}
+
+pub async fn seed_chunks(pool: &PgPool, accumulator: &str, key: Uuid, chunks: &[&str]) {
+    for (seq, chunk) in chunks.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO service_engine.accumulator_chunk (accumulator, key, seq, chunk) \
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(accumulator)
+        .bind(serde_json::json!(key))
+        .bind(seq as i64)
+        .bind(serde_json::json!(chunk))
+        .execute(pool)
+        .await
+        .expect(
+            "seed an accumulator chunk into the engine store, byte-identical to the flush path",
+        );
+    }
 }
