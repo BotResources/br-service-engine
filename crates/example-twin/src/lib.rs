@@ -1,6 +1,6 @@
 use br_core_integration::{
     Actor, CommandCoords, EventCoords, EventMetadata, IntegrationCommand, IntegrationEvent,
-    ServiceAccountId,
+    ServiceAccountId, UserId,
 };
 use chrono::Utc;
 use example_contract::{
@@ -18,8 +18,16 @@ pub fn twin_actor() -> Actor {
     Actor::Service(ServiceAccountId::from(TWIN_SERVICE_ID))
 }
 
+pub fn human_actor() -> Actor {
+    Actor::Human(UserId::from(Uuid::now_v7()))
+}
+
 fn metadata(correlation: Uuid) -> EventMetadata {
-    EventMetadata::new(twin_actor(), correlation)
+    metadata_as(twin_actor(), correlation)
+}
+
+fn metadata_as(actor: Actor, correlation: Uuid) -> EventMetadata {
+    EventMetadata::new(actor, correlation)
 }
 
 fn command_type(coords: &CommandCoords) -> String {
@@ -102,10 +110,26 @@ pub async fn retract_person(nats: &Nats, id: Uuid) -> Result<(), NatsError> {
 }
 
 pub async fn send_create_card(nats: &Nats, cmd: &CreateCard) -> Result<(), NatsError> {
+    send_create_card_as(nats, cmd, twin_actor()).await
+}
+
+pub async fn send_create_card_as(
+    nats: &Nats,
+    cmd: &CreateCard,
+    actor: Actor,
+) -> Result<(), NatsError> {
     let coords = create_card_coords();
     let subject = command_subject(&coords);
     let body = serde_json::to_value(cmd).map_err(NatsError::Encode)?;
-    let payload = command_envelope(&coords, cmd.card_id, body)?;
+    let envelope = IntegrationCommand::new(
+        cmd.card_id,
+        command_type(&coords),
+        coords.version,
+        Utc::now(),
+        metadata_as(actor, cmd.card_id),
+        body,
+    );
+    let payload = serde_json::to_value(&envelope).map_err(NatsError::Encode)?;
     nats.publish_value_with_id(&subject, &payload, &cmd.card_id.to_string())
         .await?;
     Ok(())

@@ -2,6 +2,7 @@ mod blobs;
 mod board;
 mod cross_service;
 mod declare;
+mod frontier;
 mod ledger;
 mod lifecycle;
 mod multipod;

@@ -95,7 +95,7 @@ pub(crate) fn scheduled_payload<M: Serialize>(
     let value = match coordinates {
         ReactionCoordinates::Command(coords) => {
             let command_type = format!("{}.{}", coords.aggregate.as_str(), coords.verb.as_str());
-            serde_json::to_value(&IntegrationCommand::new(
+            serde_json::to_value(IntegrationCommand::new(
                 id,
                 command_type,
                 coords.version,
@@ -106,7 +106,7 @@ pub(crate) fn scheduled_payload<M: Serialize>(
         }
         ReactionCoordinates::Event(coords) => {
             let event_type = format!("{}.{}", coords.aggregate.as_str(), coords.fact.as_str());
-            serde_json::to_value(&IntegrationEvent::new(
+            serde_json::to_value(IntegrationEvent::new(
                 id,
                 event_type,
                 coords.version,
