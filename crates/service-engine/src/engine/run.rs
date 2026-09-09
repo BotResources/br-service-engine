@@ -211,50 +211,33 @@ impl<P: Principal> Engine<P> {
             }
         };
 
-        let stop_ingress = Arc::new(Notify::new());
-        let stop_purge = Arc::new(Notify::new());
-        let mut ingress_task = None;
-        let mut purge_task = None;
-        if accumulators.registered() > 0
-            && let Some(service) = config.service.clone()
+        let lane_a = match crate::engine::lane_a::spawn_if_registered(
+            &nats,
+            &config,
+            &accumulators,
+        )
+        .await
         {
-            match crate::accumulator::ingress::spawn_lane_a(
-                &nats,
-                service,
-                config.seal_retention,
-                accumulators.clone(),
-                config.beat,
-                crate::inbound::DEFAULT_ACK_WAIT,
-                crate::inbound::DEFAULT_MAX_ACK_PENDING,
-                stop_ingress.clone(),
-                stop_purge.clone(),
-            )
-            .await
-            {
-                Ok((ingress, purge)) => {
-                    ingress_task = Some(ingress);
-                    purge_task = Some(purge);
+            Ok(tasks) => tasks,
+            Err(error) => {
+                readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
+                stop_mirrors.notify_waiters();
+                stop_presence.notify_waiters();
+                join_presence(presence_task.take()).await;
+                if let Some(inbound) = inbound.take() {
+                    inbound.stop();
+                    inbound.join().await;
                 }
-                Err(error) => {
-                    let reason = match &error {
-                        EngineError::SealRetentionTooShort { .. } => {
-                            crate::boot::REASON_SEAL_RETENTION
-                        }
-                        _ => crate::boot::REASON_STREAMING_STREAM,
-                    };
-                    readiness_guard.set_not_ready(reason);
-                    stop_mirrors.notify_waiters();
-                    stop_presence.notify_waiters();
-                    join_presence(presence_task.take()).await;
-                    if let Some(inbound) = inbound.take() {
-                        inbound.stop();
-                        inbound.join().await;
-                    }
-                    render.shutdown().await;
-                    return Err(error);
-                }
+                render.shutdown().await;
+                return Err(error);
             }
-        }
+        };
+        let crate::engine::lane_a::LaneATasks {
+            stop_ingress,
+            stop_purge,
+            mut ingress_task,
+            mut purge_task,
+        } = lane_a;
 
         let sched_task = tokio::spawn(run_scheduled_messages(
             pg.clone(),
