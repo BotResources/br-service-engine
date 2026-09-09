@@ -1,10 +1,14 @@
 use std::hash::Hash;
 
+use sqlx::PgConnection;
+
 use crate::error::EngineError;
 use crate::housekeeping::leader::try_advisory_xact_lock;
+use crate::impact::Impact;
 
 use super::super::leader::hold_lease;
-use super::super::projection::Project;
+use super::super::projection::{Project, Projection};
+use super::super::shadow::Shadows;
 use super::super::watermark;
 use super::{MirrorRuntime, Revisions};
 
@@ -115,6 +119,23 @@ where
         };
         let advance = self.last_seen.read().await.clone();
         self.project_under_lease(touched, &advance).await?;
+        Ok(())
+    }
+
+    async fn project_into(
+        &self,
+        conn: &mut PgConnection,
+        shadows: &Shadows,
+        keys: Vec<K>,
+        impacts: &mut Vec<Impact>,
+    ) -> Result<(), EngineError> {
+        for key in keys {
+            let cx = Projection::new(conn, shadows, impacts);
+            self.project
+                .project(cx, key)
+                .await
+                .map_err(|error| EngineError::Service(Box::new(error)))?;
+        }
         Ok(())
     }
 }

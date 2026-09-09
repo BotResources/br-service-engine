@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn every_engine_table_lives_in_the_engines_own_schema() {
-        assert_eq!(TABLES.len(), 15);
+        assert_eq!(TABLES.len(), 16);
         for table in TABLES {
             assert!(table.starts_with(&format!("{SCHEMA}.")));
         }

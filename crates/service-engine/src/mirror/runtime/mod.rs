@@ -12,7 +12,6 @@ use tokio::time::MissedTickBehavior;
 
 use crate::config::DEFAULT_BEAT;
 use crate::error::EngineError;
-use crate::impact::Impact;
 use crate::name::MirrorName;
 use crate::nats::{KvKey, Nats, NatsError};
 use crate::transport::ImpactTransport;
@@ -24,7 +23,7 @@ use super::change::Change;
 use super::empty::empty_prefix;
 use super::handle::MirrorRun;
 use super::leader::MirrorGate;
-use super::projection::{Project, Projection};
+use super::projection::Project;
 use super::shadow::Shadows;
 
 type KeyedByFn<K> = Arc<dyn Fn(&Shadows, &Change) -> Vec<K> + Send + Sync>;
@@ -265,23 +264,6 @@ where
                     .to_string(),
             ))),
         }
-    }
-
-    async fn project_into(
-        &self,
-        conn: &mut sqlx::PgConnection,
-        shadows: &Shadows,
-        keys: Vec<K>,
-        impacts: &mut Vec<Impact>,
-    ) -> Result<(), EngineError> {
-        for key in keys {
-            let cx = Projection::new(conn, shadows, impacts);
-            self.project
-                .project(cx, key)
-                .await
-                .map_err(|error| EngineError::Service(Box::new(error)))?;
-        }
-        Ok(())
     }
 }
 
