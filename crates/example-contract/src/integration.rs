@@ -53,6 +53,23 @@ pub fn reply_finished_coords() -> CommandCoords {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplyCancelled {
+    pub reply_id: Uuid,
+    pub board_id: Uuid,
+    pub last_seq: u64,
+    pub hash: String,
+}
+
+pub fn reply_cancelled_coords() -> CommandCoords {
+    CommandCoords {
+        receiver: Bc::new(SERVICE).expect("service bc"),
+        aggregate: Aggregate::new("reply").expect("reply aggregate"),
+        verb: Verb::new("cancel").expect("cancel verb"),
+        version: 1,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonCreated {
     pub person_id: Uuid,
     pub board_id: Uuid,

@@ -76,3 +76,65 @@ impl Presence for Typing {
         params.get::<Uuid>("board") == Some(key.board)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelSignalValue {
+    pub requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CancelSignalView {
+    pub reply: Uuid,
+    pub requested: bool,
+}
+
+pub struct CancelSignal;
+
+impl CancelSignal {
+    pub const NAME: ProjectorName = ProjectorName::from_static("reply_cancel_signal");
+
+    pub fn requested() -> CancelSignalValue {
+        CancelSignalValue { requested: true }
+    }
+}
+
+impl Noun for CancelSignal {
+    type Key = Uuid;
+    const NAME: NounName = NounName::from_static("reply_cancel_signal");
+}
+
+impl Presence for CancelSignal {
+    type Noun = CancelSignal;
+    type Value = CancelSignalValue;
+    type View = CancelSignalView;
+
+    const NAME: ProjectorName = Self::NAME;
+
+    fn kv_key(key: &Uuid) -> KvKey {
+        KvKey::new(format!("cancel/{}", key.simple()))
+            .expect("a hex-and-slash presence key is always valid")
+    }
+
+    fn parse_kv_key(raw: &KvKey) -> Option<Uuid> {
+        let mut parts = raw.as_str().split('/');
+        if parts.next()? != "cancel" {
+            return None;
+        }
+        let reply = Uuid::parse_str(parts.next()?).ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        Some(reply)
+    }
+
+    fn view(key: &Uuid, value: &CancelSignalValue) -> CancelSignalView {
+        CancelSignalView {
+            reply: *key,
+            requested: value.requested,
+        }
+    }
+
+    fn in_window(_key: &Uuid, _params: &WindowParams) -> bool {
+        false
+    }
+}

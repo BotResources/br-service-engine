@@ -2,11 +2,16 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::BlobRef;
 use service_engine::error::EngineError;
+use service_engine::gate::{Gate, Reason};
 use service_engine::name::NounName;
 use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
 use service_engine::wire::Noun;
 use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
+
+use crate::kernel::AppPrincipal;
+
+pub const NOT_STREAMING: Reason = Reason::new("reply_not_streaming");
 
 pub struct Reply;
 
@@ -21,6 +26,8 @@ pub enum ReplyCause {
     Started,
     Completed { chars: usize },
     Attached,
+    CancelRequested,
+    Cancelled { chars: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +60,34 @@ impl ReplyRow {
     pub fn attach(&mut self, blob: Uuid) -> ReplyCause {
         self.blob_ref = Some(blob);
         ReplyCause::Attached
+    }
+
+    pub fn request_cancel(&mut self, principal: &AppPrincipal) -> Result<ReplyCause, Reason> {
+        self.cancel_gate(principal).require()?;
+        self.status = "cancelling".to_string();
+        Ok(ReplyCause::CancelRequested)
+    }
+
+    pub fn complete_cancelled(&mut self, text: String) -> ReplyCause {
+        let chars = text.chars().count();
+        self.text = text;
+        self.status = "cancelled".to_string();
+        ReplyCause::Cancelled { chars }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.status == "streaming" || self.status == "cancelling"
+    }
+}
+
+service_engine::gated! {
+    ReplyRow, AppPrincipal;
+    "cancel" => fn cancel_gate(this, _principal) {
+        if this.status == "streaming" {
+            Gate::allowed()
+        } else {
+            Gate::blocked(NOT_STREAMING)
+        }
     }
 }
 

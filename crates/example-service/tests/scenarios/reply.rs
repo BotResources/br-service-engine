@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use example_contract::ReplyFinished;
+use example_contract::{ReplyCancelled, ReplyFinished};
 use example_service::slices::reply::ReplyText;
 use service_engine::SealHash;
 use service_engine::accumulator::ChunkSeq;
@@ -74,6 +74,83 @@ async fn accumulated_lane_seals_the_streamed_reply_with_a_verified_hash() {
             .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
     });
     assert_eq!(text, "Hello world");
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
+async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
+    let world = World::start("pod-reply-cancel").await;
+    let org = Uuid::now_v7();
+    let pass = passport(Uuid::now_v7(), org, &[], false);
+    let board = Uuid::now_v7();
+    let chunks = ["Onc", "e up", "on a "];
+
+    let reply = start_and_stream(&world, &pass, board, &chunks).await;
+
+    world.service.settle().await;
+    let streaming = world
+        .gql(
+            &pass,
+            "query($id:UUID!){reply(id:$id){status affordances}}",
+            serde_json::json!({ "id": reply }),
+        )
+        .await;
+    assert_eq!(ok(&streaming)["reply"]["status"], "streaming");
+    assert_eq!(
+        ok(&streaming)["reply"]["affordances"]["cancel"]["allowed"],
+        true,
+        "the cancel affordance and the cancel gate are one function: allowed while streaming"
+    );
+
+    ok(&world
+        .gql(
+            &pass,
+            "mutation($id:UUID!){cancelReply(id:$id){success}}",
+            serde_json::json!({ "id": reply }),
+        )
+        .await);
+
+    example_twin::send_reply_cancelled(
+        &world.nats,
+        &ReplyCancelled {
+            reply_id: reply,
+            board_id: board,
+            last_seq: (chunks.len() - 1) as u64,
+            hash: hash_of(&chunks),
+        },
+    )
+    .await
+    .unwrap();
+
+    let text = poll_until!(Duration::from_secs(5), {
+        let view = world
+            .gql(
+                &pass,
+                "query($id:UUID!){reply(id:$id){text status}}",
+                serde_json::json!({ "id": reply }),
+            )
+            .await;
+        (view["data"]["reply"]["status"] == "cancelled")
+            .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
+    });
+    assert_eq!(
+        text, "Once upon a ",
+        "seal_partial saves what the stream held up to the cancel point, verified by the hash"
+    );
+
+    let cancelled = world
+        .gql(
+            &pass,
+            "query($id:UUID!){reply(id:$id){affordances}}",
+            serde_json::json!({ "id": reply }),
+        )
+        .await;
+    assert_eq!(
+        ok(&cancelled)["reply"]["affordances"]["cancel"]["allowed"],
+        false,
+        "a cancelled reply can no longer be cancelled — the gate blocks it and the affordance says so"
+    );
 
     world.cleanup().await;
 }

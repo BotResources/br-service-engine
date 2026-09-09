@@ -1,3 +1,4 @@
+use chrono::TimeDelta;
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use service_engine::UploadUrl;
@@ -6,8 +7,11 @@ use uuid::Uuid;
 
 use super::aggregate::{Reply, ReplyCause, ReplyRow};
 use super::blob::Attachment;
-use super::presence::{Typing, TypingKey, TypingValue};
+use super::presence::{CancelSignal, Typing, TypingKey, TypingValue};
+use super::wire::CancelTimedOut;
 use crate::kernel::{AppFault, AppPrincipal};
+
+const CANCEL_GRACE_SECONDS: i64 = 30;
 
 #[derive(Debug, Deserialize)]
 pub struct StartReply {
@@ -58,6 +62,43 @@ pub fn set_typing<'m>(
             },
             &TypingValue { label: input.label },
         );
+        Ok(())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CancelReply {
+    pub id: Uuid,
+}
+
+impl MutationInput for CancelReply {
+    type Output = ();
+    type Error = AppFault;
+    const NAME: &'static str = "cancel_reply";
+}
+
+pub fn cancel_reply<'m>(
+    cx: &'m mut Mutation<'m, AppPrincipal>,
+    input: CancelReply,
+) -> BoxFuture<'m, Result<(), AppFault>> {
+    Box::pin(async move {
+        let mut reply = cx
+            .load::<ReplyRow>(&input.id)
+            .await?
+            .ok_or(AppFault::NotFound)?;
+        let board_id = reply.board_id;
+        let cause = reply.request_cancel(cx.principal())?;
+        cx.save(&reply).await?;
+        cx.present::<CancelSignal>(&reply.id, &CancelSignal::requested());
+        let deadline = cx.now() + TimeDelta::seconds(CANCEL_GRACE_SECONDS);
+        cx.schedule_at(
+            deadline,
+            CancelTimedOut {
+                reply_id: reply.id,
+                board_id,
+            },
+        )?;
+        cx.impact_caused::<Reply, _>(&reply.id, cause)?;
         Ok(())
     })
 }

@@ -6,7 +6,7 @@ use service_engine::pipeline::Reaction;
 
 use super::aggregate::{Reply, ReplyRow};
 use super::stream::ReplyText;
-use super::wire::InboundReplyFinished;
+use super::wire::{CancelTimedOut, InboundReplyCancelled, InboundReplyFinished};
 use crate::kernel::error::ReactionFault;
 
 pub fn reply_finished<'r>(
@@ -34,6 +34,52 @@ pub fn reply_finished<'r>(
         let cause = reply.complete(text);
         cx.save(&reply).await?;
         cx.impact_caused::<Reply, _>(&cmd.reply_id, cause)?;
+        Ok(())
+    })
+}
+
+pub fn reply_cancelled<'r>(
+    cx: &'r mut Reaction<'r>,
+    msg: InboundReplyCancelled,
+) -> BoxFuture<'r, Result<(), ReactionFault>> {
+    Box::pin(async move {
+        let cmd = msg.0;
+        let last_seq = ChunkSeq::new(cmd.last_seq)?;
+        let hash = SealHash::from_hex(&cmd.hash)
+            .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
+        let text: String = match cx.seal_partial::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
+            Ok(text) => text,
+            Err(
+                error @ (EngineError::SealTruncated { .. } | EngineError::SealHashMismatch { .. }),
+            ) => {
+                return Err(ReactionFault::Terminal(error.to_string()));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let mut reply = cx
+            .load::<ReplyRow>(&cmd.reply_id)
+            .await?
+            .unwrap_or_else(|| ReplyRow::open(cmd.reply_id, cmd.board_id));
+        let cause = reply.complete_cancelled(text);
+        cx.save(&reply).await?;
+        cx.impact_caused::<Reply, _>(&cmd.reply_id, cause)?;
+        Ok(())
+    })
+}
+
+pub fn cancel_timed_out<'r>(
+    cx: &'r mut Reaction<'r>,
+    msg: CancelTimedOut,
+) -> BoxFuture<'r, Result<(), ReactionFault>> {
+    Box::pin(async move {
+        let mut reply = match cx.load::<ReplyRow>(&msg.reply_id).await? {
+            Some(reply) if reply.is_open() => reply,
+            _ => return Ok(()),
+        };
+        let text: String = cx.seal_current::<ReplyText>(&msg.reply_id).await?;
+        let cause = reply.complete_cancelled(text);
+        cx.save(&reply).await?;
+        cx.impact_caused::<Reply, _>(&msg.reply_id, cause)?;
         Ok(())
     })
 }

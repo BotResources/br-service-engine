@@ -6,7 +6,7 @@ use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{JsonScalar, MutationAck, Query};
 use uuid::Uuid;
 
-use super::mutations::{AttachReply, SetTyping, StartReply};
+use super::mutations::{AttachReply, CancelReply, SetTyping, StartReply};
 use super::presence::{Typing, TypingView};
 use super::view::{RepliesView, ReplyView};
 use crate::kernel::AppPrincipal;
@@ -31,6 +31,7 @@ pub const FRAGMENT: SliceFragment = SliceFragment {
         "typingDeltas",
         "startReply",
         "setTyping",
+        "cancelReply",
         "attachReply",
     ],
     types: &["ReplyView"],
@@ -74,6 +75,10 @@ impl ReplyMutation {
         label: String,
     ) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, SetTyping>(ctx, SetTyping { board, label }).await
+    }
+
+    async fn cancel_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
+        service_engine::ack::<AppPrincipal, CancelReply>(ctx, CancelReply { id }).await
     }
 
     async fn attach_reply(

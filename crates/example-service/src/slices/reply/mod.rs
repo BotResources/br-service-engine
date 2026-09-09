@@ -22,13 +22,23 @@ pub use stream::ReplyText;
 pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine.register_accumulator(stream::ReplyText)?;
     engine.register_presence::<presence::Typing>(Duration::from_secs(5))?;
+    engine.register_presence::<presence::CancelSignal>(Duration::from_secs(60))?;
     engine.register_projector(view::RepliesView)?;
     engine.register_reaction::<wire::InboundReplyFinished, _, _>(
         "reply-finished",
         reactions::reply_finished,
     )?;
+    engine.register_reaction::<wire::InboundReplyCancelled, _, _>(
+        "reply-cancelled",
+        reactions::reply_cancelled,
+    )?;
+    engine.register_reaction::<wire::CancelTimedOut, _, _>(
+        "reply-cancel-timeout",
+        reactions::cancel_timed_out,
+    )?;
     engine.register_mutation::<mutations::StartReply, _>(mutations::start_reply)?;
     engine.register_mutation::<mutations::SetTyping, _>(mutations::set_typing)?;
+    engine.register_mutation::<mutations::CancelReply, _>(mutations::cancel_reply)?;
     engine.register_mutation::<mutations::AttachReply, _>(mutations::attach_reply)?;
     engine.register_schema_slice(graphql::FRAGMENT)?;
     Ok(())

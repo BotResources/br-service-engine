@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
+use service_engine::gate::{Affordances, Gated};
 use service_engine::impact::{ForeignKey, Impact};
 use service_engine::name::{NounName, ProjectorName};
 use service_engine::population::{Inverse, Population};
@@ -22,6 +23,7 @@ pub struct ReplyView {
     pub text: String,
     pub status: String,
     pub has_attachment: bool,
+    pub affordances: Affordances,
 }
 
 pub struct ReplyFacts {
@@ -91,7 +93,7 @@ impl Projector for RepliesView {
         &self,
         facts: &ReplyFacts,
         key: &Uuid,
-        _principal: &AppPrincipal,
+        principal: &AppPrincipal,
     ) -> Option<ReplyView> {
         facts.rows.get(key).map(|row| ReplyView {
             id: row.id,
@@ -99,6 +101,7 @@ impl Projector for RepliesView {
             text: row.text.clone(),
             status: row.status.clone(),
             has_attachment: row.blob_ref.is_some(),
+            affordances: row.affordances(principal),
         })
     }
 }

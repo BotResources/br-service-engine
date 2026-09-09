@@ -202,6 +202,33 @@ impl<'a> Ops<'a> {
         last_seq: ChunkSeq,
         hash: SealHash,
     ) -> Result<A::State, EngineError> {
+        self.seal_verified::<A>(key, last_seq, hash).await
+    }
+
+    pub async fn seal_partial<A: Accumulator>(
+        &mut self,
+        key: &<A::Noun as Noun>::Key,
+        last_seq: ChunkSeq,
+        hash: SealHash,
+    ) -> Result<A::State, EngineError> {
+        self.seal_verified::<A>(key, last_seq, hash).await
+    }
+
+    pub async fn seal_current<A: Accumulator>(
+        &mut self,
+        key: &<A::Noun as Noun>::Key,
+    ) -> Result<A::State, EngineError> {
+        let accumulated = self.accumulators.reader().state::<A>(key).await?;
+        self.accumulators.seal::<A>(self.conn, key).await?;
+        Ok(accumulated.state)
+    }
+
+    async fn seal_verified<A: Accumulator>(
+        &mut self,
+        key: &<A::Noun as Noun>::Key,
+        last_seq: ChunkSeq,
+        hash: SealHash,
+    ) -> Result<A::State, EngineError> {
         let (state, found) = self
             .accumulators
             .reader()

@@ -1,6 +1,7 @@
 use example_contract::{
-    CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, ReplyFinished,
-    card_ready_coords, create_card_coords, person_created_coords, reply_finished_coords,
+    CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, ReplyCancelled,
+    ReplyFinished, card_ready_coords, create_card_coords, person_created_coords,
+    reply_cancelled_coords, reply_finished_coords,
 };
 use futures_util::StreamExt;
 use service_engine::nats::{KvKey, Nats, NatsError, command_subject, event_subject};
@@ -42,6 +43,17 @@ pub async fn send_reply_finished(nats: &Nats, finished: &ReplyFinished) -> Resul
     let subject = command_subject(&reply_finished_coords());
     let payload = serde_json::to_value(finished).map_err(NatsError::Encode)?;
     nats.publish_value_with_id(&subject, &payload, &finished.reply_id.to_string())
+        .await?;
+    Ok(())
+}
+
+pub async fn send_reply_cancelled(
+    nats: &Nats,
+    cancelled: &ReplyCancelled,
+) -> Result<(), NatsError> {
+    let subject = command_subject(&reply_cancelled_coords());
+    let payload = serde_json::to_value(cancelled).map_err(NatsError::Encode)?;
+    nats.publish_value_with_id(&subject, &payload, &cancelled.reply_id.to_string())
         .await?;
     Ok(())
 }

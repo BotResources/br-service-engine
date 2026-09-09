@@ -2,8 +2,8 @@ mod integration;
 mod published;
 
 pub use integration::{
-    CardReady, CreateCard, PersonCreated, ReplyFinished, card_ready_coords, create_card_coords,
-    person_created_coords, reply_finished_coords,
+    CardReady, CreateCard, PersonCreated, ReplyCancelled, ReplyFinished, card_ready_coords,
+    create_card_coords, person_created_coords, reply_cancelled_coords, reply_finished_coords,
 };
 pub use published::{BOARD_PREFIX, PERSON_PREFIX, PublishedBoard, PublishedPerson};
 
