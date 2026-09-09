@@ -191,19 +191,30 @@ already-durable sequence with identical content is idempotent; different content
 is a typed `EngineError::ChunkConflict`. `Ops::seal::<A>(key, last_seq, hash)`
 replays the stream up to `last_seq`, refuses a truncated prefix
 (`EngineError::SealTruncated`) or a hash mismatch (`EngineError::SealHashMismatch`),
-writes the seal marker and returns the folded state (`SealHash` = SHA-256 of the
-concatenated chunks, hex on the wire); `seal_partial` and `seal_current` are the
-cancel gestures. Boot binds the gitops-declared `STREAMING_{service}` stream
-(bind-only, fail-loud; readiness stays DOWN when a registered accumulator has no
-stream) and one ephemeral consumer per pod folds every `(key, seq, chunk)` frame
-published on `stream.{service}.{key}` into the same Postgres-backed accumulator
-as `Engine::push_chunk`, so a separate out-of-process producer feeds the lane
-while late joiners, seal, the refusal-after-seal marker and retention are
-unchanged; every pod drops chunks of a sealed key and after a seal the beat
-purges the key's subject. A serviceless engine keeps the in-process `push_chunk`
-path with no stream. The marker must outlive the stream: boot fails loud unless
-`seal_retention` (the former `chunk_retention`) covers the bound stream's
-`max_age`.
+writes the seal marker at high water `last_seq + 1` and returns the folded state
+(`SealHash` = SHA-256 of the concatenated chunks, hex on the wire). A chunk that
+landed beyond `last_seq` between the replay and the seal is refused
+(`EngineError::SealChunkBeyondLastSeq`) so a chunk acked durable is never dropped
+by the seal, and sealing a key that already carries a marker is refused
+(`EngineError::AlreadySealed`) rather than rewriting the sealed record — the
+deadline `seal_current` treats that as a lost race. `seal_partial` and
+`seal_current` are the cancel gestures. Boot binds the gitops-declared
+`STREAMING_{service}` stream (bind-only, fail-loud; readiness stays DOWN when a
+registered accumulator has no stream) and one ephemeral consumer per pod folds
+every `(key, seq, chunk)` frame published on `stream.{service}.{key}` into the
+same Postgres-backed accumulator as `Engine::push_chunk`, so a separate
+out-of-process producer feeds the lane while late joiners, seal, the
+refusal-after-seal marker and retention are unchanged; every pod drops chunks of
+a sealed key. After the commit the sealing pod purges the key's NATS subject
+synchronously and the beat is the backstop for a key still in the stream if the
+pod died first. An engine that registers an accumulator with no service
+configured fails loud at boot (`EngineError::AccumulatorWithoutService`) rather
+than silently keeping an in-process-only `push_chunk` path with no stream to
+bind. The flush takes each stream's advisory lock with a non-blocking try under
+a `lock_timeout` and defers a stream a slow seal is holding to the next window,
+so one slow seal never parks the whole pod's flush batch. The marker must
+outlive the stream: boot fails loud unless `seal_retention` (the former
+`chunk_retention`) covers the bound stream's `max_age`.
 
 **Leader work — offers and mirrors.** Outbox relays with `RowClaim` and `Leader`
 disciplines (a fenced lease over `leader_slot`), the hosted `FabricOutboxRelay`
@@ -480,7 +491,10 @@ affordance, cohort `Visibility`, RLS read projector, published-language offer,
 (soft EDA, command and event reactions, an emitted integration event, a
 scheduled deadline reaction, a cron, a bulk import, a contributed scope), `ledger`
 (full EDA with upcasting, a hydration barrier, in-log erasure), `reply`
-(accumulated lane + verified seal, cancel-in-flight, presence, blob attachment)
+(accumulated lane + verified seal, cancel-in-flight, presence, blob attachment;
+a seal that fails on a truncated or beyond-`last_seq` stream answers the runner
+with a `SealFailed` integration event so the runner republishes and resends the
+finish, rather than the finish retrying forever — a hash mismatch stays terminal)
 and `roster` (a KV mirror into `known_persons`). `example-twin` is a **separate**
 crate (the producer/runner that closes the cross-service cycle over NATS), so the
 reference service holds no NATS client. `tests/e2e.rs` (split into

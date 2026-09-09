@@ -143,10 +143,17 @@ meets a seal marker. A producer (typically an out-of-process runner) publishes
 ephemeral consumer that folds each frame into the same Postgres-backed
 accumulator as `Engine::push_chunk`, so late joiners replay from the store, the
 verified `Ops::seal` writes the final record and a seal marker in one
-transaction, a chunk that arrives after the seal is refused on every pod, and
-after a seal the beat purges the key's subject. Name the stream with
-`EngineConfig::with_service`; a serviceless engine keeps the in-process
-`push_chunk` path with no stream. `register_presence` binds the
+transaction, and a chunk that arrives after the seal is refused on every pod.
+The seal marker's high water is the declared `last_seq`, so a chunk that landed
+beyond it fails the seal (`SealChunkBeyondLastSeq`) rather than being dropped
+after the producer was told it was durable, and re-sealing a key that already
+carries a marker is refused with `AlreadySealed` instead of rewriting the sealed
+record. After the commit the sealing pod purges the key's NATS subject
+synchronously; the beat is the backstop that purges any sealed key still in the
+stream if the pod died first. Name the stream with `EngineConfig::with_service`;
+a serviceless engine that registers an accumulator fails loud at boot
+(`AccumulatorWithoutService`) rather than silently folding in process with no
+stream to bind. `register_presence` binds the
 `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other
@@ -337,7 +344,8 @@ so a service can implement the intent's "Cancel work in flight": a direct-lane
 cancel decision (with the cancel gate as its affordance, a presence signal the
 producer watches and a scheduled deadline), a reaction that seals the producer's
 verified partial as cancelled, and a deadline reaction that seals whatever the
-stream holds when the producer never answers.
+stream holds when the producer never answers, treating an already-sealed key as
+a lost race (no-op) rather than rewriting the sealed record.
 
 A service depends on `br-rust-common` only for frontier types: the
 engine provides its own `connect_pool` / `validate_database_tls` (the
