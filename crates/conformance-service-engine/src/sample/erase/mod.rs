@@ -5,8 +5,8 @@ pub mod slice;
 pub mod store;
 
 pub use engine::{
-    boot_erase_blob_engine, boot_erase_engine, boot_erase_presence_engine,
-    boot_erase_strict_engine, boot_failing_erase_engine,
+    boot_erase_blob_engine, boot_erase_engine, boot_erase_lane_a_engine,
+    boot_erase_presence_engine, boot_erase_strict_engine, boot_failing_erase_engine,
 };
 pub use note::{
     EraseNote, EraseNoteNoun, EraseNoteOffer, EraseNoteProjector, EraseNoteStream, EraseNoteView,

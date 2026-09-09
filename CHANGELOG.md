@@ -387,7 +387,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s138` — drives the real engine through an in-crate `sample` service and
+`s001`–`s141` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, direct impact-bus/transport assertions): shared-consumer ownership
 across two pods, ack-after-durable with a crash before commit, poison budget to

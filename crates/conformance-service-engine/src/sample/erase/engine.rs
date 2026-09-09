@@ -6,7 +6,7 @@ use service_engine::{BlobConfig, BlobPolicy, Engine};
 
 use crate::infra::TestDb;
 use crate::sample::engine::engine_config;
-use crate::sample::erase::note::{EraseNoteOffer, EraseNoteProjector};
+use crate::sample::erase::note::{EraseNoteOffer, EraseNoteProjector, EraseNoteStream};
 use crate::sample::erase::secret::SecretEraser;
 use crate::sample::erase::slice::{
     AttachNoteBlob, FailingEraser, LedgerEraser, MemoEraser, NoteEraser, attach_note_blob,
@@ -63,6 +63,21 @@ pub async fn boot_erase_engine(
 ) -> Engine<SamplePrincipal> {
     let mut engine = boot(db, nats, channel, pod, service).await;
     register_common(&mut engine);
+    engine
+}
+
+pub async fn boot_erase_lane_a_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    service: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = boot(db, nats, channel, pod, service).await;
+    register_common(&mut engine);
+    engine
+        .register_accumulator(EraseNoteStream)
+        .expect("register the erase-note accumulator so lane A binds its STREAMING stream");
     engine
 }
 
