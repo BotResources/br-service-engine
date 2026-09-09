@@ -1,15 +1,12 @@
 use std::sync::Arc;
 
-use futures_util::StreamExt;
-use futures_util::stream::BoxStream;
 use tokio::sync::Notify;
 
 use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
 use crate::engine::loops::{RenderGc, RenderRepairs, join_presence, run_scheduled_messages};
-use crate::error::{EngineError, TransportError};
+use crate::error::EngineError;
 use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
-use crate::impact::TransportEvent;
 use crate::inbound::{DeadLetters, InboundConfig, InboundLoop};
 use crate::pipeline::DirectPipeline;
 use crate::presence::REASON_PRESENCE_BUCKET;
@@ -110,39 +107,21 @@ impl<P: Principal> Engine<P> {
             }
         }
 
-        let mut presence_task = None;
-        let events: BoxStream<'static, Result<TransportEvent, TransportError>> = if presence
-            .is_empty()
+        let (events, mut presence_task) = match crate::engine::loops::open_presence_stream(
+            &nats,
+            &config,
+            &presence,
+            &transport,
+            stop_presence.clone(),
+        )
+        .await
         {
-            transport.listen()
-        } else {
-            let Some(bucket_name) = config.ephemeral_bucket() else {
+            Ok(pair) => pair,
+            Err(error) => {
                 readiness_guard.set_not_ready(REASON_PRESENCE_BUCKET);
                 render.shutdown().await;
-                return Err(EngineError::Config(
-                    "a presence lane is registered but no service is configured, so the \
-                     EPHEMERAL_{service} bucket has no name; call EngineConfig::with_service"
-                        .into(),
-                ));
-            };
-            let lanes = presence.lanes();
-            let bucket = match crate::presence::bind_and_seed(&nats, &bucket_name, &lanes).await {
-                Ok(bucket) => bucket,
-                Err(error) => {
-                    readiness_guard.set_not_ready(REASON_PRESENCE_BUCKET);
-                    render.shutdown().await;
-                    return Err(error);
-                }
-            };
-            let _ = presence.bucket_slot().set(bucket.clone());
-            let (sender, stream) = crate::presence::presence_channel();
-            presence_task = Some(tokio::spawn(crate::presence::run_watch(
-                bucket,
-                lanes,
-                sender,
-                stop_presence.clone(),
-            )));
-            futures_util::stream::select(transport.listen(), stream).boxed()
+                return Err(error);
+            }
         };
 
         let blob_handle = match crate::blobs::bind(&blobs, &config).await {
@@ -197,7 +176,7 @@ impl<P: Principal> Engine<P> {
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
         );
         let subscriptions = reactions.subscriptions();
-        let inbound = if subscriptions.is_empty() {
+        let mut inbound = if subscriptions.is_empty() {
             None
         } else {
             let pipeline = Arc::new(DirectPipeline::new(
@@ -232,6 +211,51 @@ impl<P: Principal> Engine<P> {
             }
         };
 
+        let stop_ingress = Arc::new(Notify::new());
+        let stop_purge = Arc::new(Notify::new());
+        let mut ingress_task = None;
+        let mut purge_task = None;
+        if accumulators.registered() > 0
+            && let Some(service) = config.service.clone()
+        {
+            match crate::accumulator::ingress::spawn_lane_a(
+                &nats,
+                service,
+                config.seal_retention,
+                accumulators.clone(),
+                config.beat,
+                crate::inbound::DEFAULT_ACK_WAIT,
+                crate::inbound::DEFAULT_MAX_ACK_PENDING,
+                stop_ingress.clone(),
+                stop_purge.clone(),
+            )
+            .await
+            {
+                Ok((ingress, purge)) => {
+                    ingress_task = Some(ingress);
+                    purge_task = Some(purge);
+                }
+                Err(error) => {
+                    let reason = match &error {
+                        EngineError::SealRetentionTooShort { .. } => {
+                            crate::boot::REASON_SEAL_RETENTION
+                        }
+                        _ => crate::boot::REASON_STREAMING_STREAM,
+                    };
+                    readiness_guard.set_not_ready(reason);
+                    stop_mirrors.notify_waiters();
+                    stop_presence.notify_waiters();
+                    join_presence(presence_task.take()).await;
+                    if let Some(inbound) = inbound.take() {
+                        inbound.stop();
+                        inbound.join().await;
+                    }
+                    render.shutdown().await;
+                    return Err(error);
+                }
+            }
+        }
+
         let sched_task = tokio::spawn(run_scheduled_messages(
             pg.clone(),
             nats.clone(),
@@ -254,49 +278,32 @@ impl<P: Principal> Engine<P> {
             () = mirror_tasks.any_stopped() => Some(("mirror", Ok(()))),
         };
 
-        stop_render.notify_one();
-        stop_beat.notify_waiters();
-        stop_flush.notify_one();
-        stop_mirrors.notify_waiters();
-        stop_presence.notify_waiters();
-        stop_sched.notify_waiters();
-        if let Some(inbound) = inbound {
-            inbound.stop();
-            inbound.join().await;
-        }
-        let _ = sched_task.await;
-        render_handle.shutdown().await;
-        join_presence(presence_task.take()).await;
-
-        let outcome = match stopped {
-            None => {
-                let _ = render_task.await;
-                let _ = beat_task.await;
-                let _ = flush_task.await;
-                Ok(())
-            }
-            Some((worker, result)) => {
-                if let Err(join) = &result {
-                    tracing::error!(worker, %join, "an engine worker panicked before shutdown");
-                }
-                if worker != "beat" {
-                    let _ = beat_task.await;
-                }
-                readiness_guard.set_not_ready(REASON_WORKER_STOPPED);
-                tracing::error!(
-                    worker,
-                    "the engine worker stopped before shutdown, so the pod is taken out of \
-                     rotation and run returns loudly rather than serving readiness over a dead loop"
-                );
-                if worker != "render" {
-                    let _ = render_task.await;
-                }
-                if worker != "flush" {
-                    let _ = flush_task.await;
-                }
-                Err(EngineError::WorkerStopped { worker })
-            }
-        };
+        let outcome = crate::engine::shutdown::finish(
+            stopped,
+            crate::engine::shutdown::StopHandles {
+                render: stop_render,
+                beat: stop_beat,
+                flush: stop_flush,
+                mirrors: stop_mirrors,
+                presence: stop_presence,
+                sched: stop_sched,
+                ingress: stop_ingress,
+                purge: stop_purge,
+            },
+            crate::engine::shutdown::RunTasks {
+                render_handle,
+                render_task,
+                beat_task,
+                flush_task,
+                sched_task,
+                inbound: inbound.take(),
+                ingress_task: ingress_task.take(),
+                purge_task: purge_task.take(),
+                presence_task: presence_task.take(),
+            },
+            &readiness_guard,
+        )
+        .await;
         drop(mirror_tasks);
         outcome
     }

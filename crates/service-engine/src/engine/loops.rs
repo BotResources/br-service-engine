@@ -1,18 +1,24 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
+use futures_util::stream::BoxStream;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::error::EngineError;
+use crate::config::EngineConfig;
+use crate::error::{EngineError, TransportError};
 use crate::housekeeping::beat::RepairRetry;
 use crate::housekeeping::gc::SessionGc;
 use crate::housekeeping::scheduled_message::{DEFAULT_SCHEDULED_MESSAGE_BATCH, fire_due};
+use crate::impact::TransportEvent;
 use crate::nats::Nats;
+use crate::presence::PresenceRegistry;
 use crate::principal::Principal;
 use crate::runtime::SessionRuntime;
 use crate::time::Timestamp;
+use crate::transport::{ImpactTransport, PgListenNotify};
 
 pub(super) struct RenderGc<P: Principal>(pub(super) Arc<SessionRuntime<P>>);
 
@@ -52,6 +58,45 @@ pub(super) async fn run_scheduled_messages(
             () = tokio::time::sleep(interval) => {}
         }
     }
+}
+
+pub(super) async fn open_presence_stream<P: Principal>(
+    nats: &Nats,
+    config: &EngineConfig,
+    presence: &PresenceRegistry<P>,
+    transport: &Arc<PgListenNotify>,
+    stop_presence: Arc<Notify>,
+) -> Result<
+    (
+        BoxStream<'static, Result<TransportEvent, TransportError>>,
+        Option<JoinHandle<()>>,
+    ),
+    EngineError,
+> {
+    if presence.is_empty() {
+        return Ok((transport.listen(), None));
+    }
+    let Some(bucket_name) = config.ephemeral_bucket() else {
+        return Err(EngineError::Config(
+            "a presence lane is registered but no service is configured, so the \
+             EPHEMERAL_{service} bucket has no name; call EngineConfig::with_service"
+                .into(),
+        ));
+    };
+    let lanes = presence.lanes();
+    let bucket = crate::presence::bind_and_seed(nats, &bucket_name, &lanes).await?;
+    let _ = presence.bucket_slot().set(bucket.clone());
+    let (sender, stream) = crate::presence::presence_channel();
+    let presence_task = tokio::spawn(crate::presence::run_watch(
+        bucket,
+        lanes,
+        sender,
+        stop_presence,
+    ));
+    Ok((
+        futures_util::stream::select(transport.listen(), stream).boxed(),
+        Some(presence_task),
+    ))
 }
 
 pub(super) async fn join_presence(task: Option<JoinHandle<()>>) {

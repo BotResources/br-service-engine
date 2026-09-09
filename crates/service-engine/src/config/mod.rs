@@ -12,7 +12,7 @@ pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(30);
 pub const DEFAULT_SESSION_BUFFER: usize = 256;
 pub const DEFAULT_RESET_THRESHOLD: usize = 200;
 pub const DEFAULT_MAX_HELD_IMPACTS: usize = 1_024;
-pub const DEFAULT_CHUNK_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+pub const DEFAULT_SEAL_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 pub const DEFAULT_MAX_BUFFERED_CHUNKS: usize = 10_000;
 pub const DEFAULT_FOLD_CACHE_CAPACITY: usize = 10_000;
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(30);
@@ -39,7 +39,7 @@ pub struct EngineConfig {
     pub session_buffer: usize,
     pub reset_threshold: usize,
     pub max_held_impacts: usize,
-    pub chunk_retention: Duration,
+    pub seal_retention: Duration,
     pub max_buffered_chunks: usize,
     pub fold_cache_capacity: usize,
     pub lease: Duration,
@@ -72,7 +72,7 @@ impl EngineConfig {
             session_buffer: DEFAULT_SESSION_BUFFER,
             reset_threshold: DEFAULT_RESET_THRESHOLD,
             max_held_impacts: DEFAULT_MAX_HELD_IMPACTS,
-            chunk_retention: DEFAULT_CHUNK_RETENTION,
+            seal_retention: DEFAULT_SEAL_RETENTION,
             max_buffered_chunks: DEFAULT_MAX_BUFFERED_CHUNKS,
             fold_cache_capacity: DEFAULT_FOLD_CACHE_CAPACITY,
             lease: DEFAULT_LEASE,
@@ -163,8 +163,8 @@ impl EngineConfig {
         self
     }
 
-    pub fn with_chunk_retention(mut self, chunk_retention: Duration) -> Self {
-        self.chunk_retention = chunk_retention;
+    pub fn with_seal_retention(mut self, seal_retention: Duration) -> Self {
+        self.seal_retention = seal_retention;
         self
     }
 

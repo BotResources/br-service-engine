@@ -193,8 +193,17 @@ replays the stream up to `last_seq`, refuses a truncated prefix
 (`EngineError::SealTruncated`) or a hash mismatch (`EngineError::SealHashMismatch`),
 writes the seal marker and returns the folded state (`SealHash` = SHA-256 of the
 concatenated chunks, hex on the wire); `seal_partial` and `seal_current` are the
-cancel gestures. The marker must outlive the stream: boot fails loud unless
-`seal_retention` covers the bound stream's `max_age`.
+cancel gestures. Boot binds the gitops-declared `STREAMING_{service}` stream
+(bind-only, fail-loud; readiness stays DOWN when a registered accumulator has no
+stream) and one ephemeral consumer per pod folds every `(key, seq, chunk)` frame
+published on `stream.{service}.{key}` into the same Postgres-backed accumulator
+as `Engine::push_chunk`, so a separate out-of-process producer feeds the lane
+while late joiners, seal, the refusal-after-seal marker and retention are
+unchanged; every pod drops chunks of a sealed key and after a seal the beat
+purges the key's subject. A serviceless engine keeps the in-process `push_chunk`
+path with no stream. The marker must outlive the stream: boot fails loud unless
+`seal_retention` (the former `chunk_retention`) covers the bound stream's
+`max_age`.
 
 **Leader work — offers and mirrors.** Outbox relays with `RowClaim` and `Leader`
 disciplines (a fenced lease over `leader_slot`), the hosted `FabricOutboxRelay`
@@ -281,9 +290,10 @@ durable fact in `service_engine.person_erasure`, runs every slice's `erase`
 across all three styles, persists the manifest's stream/presence/blob keys onto
 that row, stages `PersonErased` (`integration.evt.{service}.person.erased.v1`)
 through the outbox on the fresh erase only, and commits (a failing slice rolls
-the whole gesture back); after the commit it purges the person's stream subjects
-(keeping the `accumulator_seal` marker, deleting only the chunks, so the erased
-key stays sealed), presence keys and blobs, then marks the row purged. The purge
+the whole gesture back); after the commit it purges the person's accumulated-lane
+data (keeping the `accumulator_seal` marker unpurged and deleting only the
+Postgres chunks, so the erased key stays sealed and the beat's seal-purge then
+drops its NATS subject), presence keys and blobs, then marks the row purged. The purge
 is durable: a pod that dies between commit and purge leaves the row unpurged and
 the beat drains it over the persisted manifest. A slice retracts the person's
 offers by dirtying them (`cx.dirty_offer`), so the leader retracts within a beat.
@@ -411,13 +421,15 @@ identity (`bb02`); `Reset`→`Upsert` with a contiguous revision and a reconnect
 spawned twin binary (`bb04`); and seal — a streamed reply sealed against its hash
 inside the running binary (`bb05`); and the `graphql-transport-ws` socket closed
 at `session_max_age` measured from the handshake, so the client reconnects with a
-fresh passport (`bb06`). Because the 0.1.0 accumulated lane stores
-chunks in Postgres (`service_engine.accumulator_chunk`) and exposes no
-NATS/GraphQL chunk-ingress, `bb05` seeds the chunks through Postgres — the flush
-path's own table shape, a listed black-box channel — while everything the seal
-*is* (replay, hash verification, the transactional final write, the impact and
-delivery) runs in the spawned binary; the accumulator's own internals stay proven
-in-crate. The black-box harness provisions the owner/app Postgres roles and the
+fresh passport (`bb06`). `bb05` drives the real lane-A ingress: the
+spawned `example-twin` streams the reply's chunks over NATS on
+`stream.example.{reply_id}`, the running binary's ephemeral consumer folds them,
+and the reply-finished command then replays, verifies the hash, commits and
+delivers — nothing seeded through Postgres. The in-crate `s139`/`s140` scenarios
+prove the boot bind (absent stream → DOWN, `seal_retention` below the stream's
+`max_age` → boot fails loud) and that a separate producer's chunks reach two
+pods while a chunk after the seal is refused on every pod. The black-box harness
+provisions the owner/app Postgres roles and the
 engine + example migrations, provisions NATS, seeds the roster and answers the
 scope declaration, then spawns the binary and gates on `/readyz`, taking the
 binaries from `EXAMPLE_SERVICE_BIN` / `EXAMPLE_TWIN_BIN` when set and building

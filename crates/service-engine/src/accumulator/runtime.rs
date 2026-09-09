@@ -20,7 +20,7 @@ pub struct AccumulatorRuntime {
     registry: Registry,
     reader: ChunkReader,
     buffer: FlushBuffer,
-    chunk_retention: Duration,
+    seal_retention: Duration,
     max_buffered_chunks: usize,
     flush_failures: AtomicU64,
 }
@@ -30,13 +30,13 @@ impl std::fmt::Debug for AccumulatorRuntime {
         f.debug_struct("AccumulatorRuntime")
             .field("pending", &self.pending())
             .field("max_buffered_chunks", &self.max_buffered_chunks)
-            .field("chunk_retention", &self.chunk_retention)
+            .field("seal_retention", &self.seal_retention)
             .finish()
     }
 }
 
 impl AccumulatorRuntime {
-    pub fn new(pg: PgPool, transport: Arc<dyn ImpactTransport>, chunk_retention: Duration) -> Self {
+    pub fn new(pg: PgPool, transport: Arc<dyn ImpactTransport>, seal_retention: Duration) -> Self {
         let registry = crate::accumulator::new_registry();
         let reader = ChunkReader::with_registry(pg.clone(), registry.clone());
         Self {
@@ -45,7 +45,7 @@ impl AccumulatorRuntime {
             registry,
             reader,
             buffer: FlushBuffer::default(),
-            chunk_retention,
+            seal_retention,
             max_buffered_chunks: crate::config::DEFAULT_MAX_BUFFERED_CHUNKS,
             flush_failures: AtomicU64::new(0),
         }
@@ -69,8 +69,8 @@ impl AccumulatorRuntime {
         &self.reader
     }
 
-    pub fn chunk_retention(&self) -> Duration {
-        self.chunk_retention
+    pub fn seal_retention(&self) -> Duration {
+        self.seal_retention
     }
 
     pub fn max_buffered_chunks(&self) -> usize {
@@ -97,6 +97,32 @@ impl AccumulatorRuntime {
             what: "chunk",
             source,
         })?;
+        self.enqueue(entry, key, seq, chunk)
+    }
+
+    pub fn push_frame(
+        &self,
+        accumulator: &crate::name::AccumulatorName,
+        key: &serde_json::Value,
+        seq: ChunkSeq,
+        chunk: serde_json::Value,
+    ) -> Result<Durable, EngineError> {
+        let entry = crate::accumulator::lookup_by_name(&self.registry, accumulator)?;
+        let key = crate::wire::KeyBytes::encode(key)?;
+        self.enqueue(entry, key, seq, chunk)
+    }
+
+    pub fn registered(&self) -> usize {
+        crate::accumulator::registered_count(&self.registry)
+    }
+
+    fn enqueue(
+        &self,
+        entry: crate::accumulator::Registered,
+        key: crate::wire::KeyBytes,
+        seq: ChunkSeq,
+        chunk: serde_json::Value,
+    ) -> Result<Durable, EngineError> {
         let (done, receipt) = oneshot::channel();
         let accumulator = entry.name.clone();
         let mut held = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
@@ -169,7 +195,7 @@ impl AccumulatorRuntime {
     }
 
     pub async fn sweep_expired(&self, now: Timestamp) -> Result<Swept, EngineError> {
-        seal::sweep(&self.pg, now, self.chunk_retention).await
+        seal::sweep(&self.pg, now, self.seal_retention).await
     }
 }
 

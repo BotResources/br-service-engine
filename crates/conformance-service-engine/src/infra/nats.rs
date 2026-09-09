@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use service_engine::nats::{INTEGRATION_CMD, INTEGRATION_EVT, KV_PUBLISHED_LANGUAGE, Nats};
+use service_engine::nats::{
+    INTEGRATION_CMD, INTEGRATION_EVT, KV_PUBLISHED_LANGUAGE, Nats, streaming_filter,
+    streaming_stream,
+};
 use uuid::Uuid;
 
 const BOOT_TIMEOUT: Duration = Duration::from_secs(20);
@@ -99,6 +102,23 @@ impl TestNats {
         })
         .await
         .expect("declare the PUBLISHED_LANGUAGE bucket");
+    }
+
+    pub async fn provision_streaming(&self, service: &str, max_age: Duration) {
+        let js = self.jetstream().await;
+        js.create_stream(async_nats::jetstream::stream::Config {
+            name: streaming_stream(service),
+            subjects: vec![streaming_filter(service)],
+            max_age,
+            ..Default::default()
+        })
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "declare the {} lane-A stream: {e}",
+                streaming_stream(service)
+            )
+        });
     }
 
     pub async fn provision_presence(&self, service: &str, max_age: Duration) {

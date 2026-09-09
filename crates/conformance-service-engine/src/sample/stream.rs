@@ -66,9 +66,9 @@ pub fn text_for(seqs: impl IntoIterator<Item = u64>) -> String {
 pub fn note_body_runtime(
     pg: sqlx::PgPool,
     transport: std::sync::Arc<dyn service_engine::transport::ImpactTransport>,
-    chunk_retention: std::time::Duration,
+    seal_retention: std::time::Duration,
 ) -> std::sync::Arc<AccumulatorRuntime> {
-    let runtime = AccumulatorRuntime::new(pg, transport, chunk_retention);
+    let runtime = AccumulatorRuntime::new(pg, transport, seal_retention);
     runtime
         .register(NoteBody)
         .expect("the note body accumulator enrolls");

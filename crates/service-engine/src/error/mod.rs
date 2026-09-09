@@ -71,6 +71,19 @@ pub enum EngineError {
     #[error("no accumulator of type {0} is registered")]
     UnregisteredAccumulator(&'static str),
 
+    #[error("no accumulator named {name} is registered, so an ingress chunk cannot be routed")]
+    UnregisteredAccumulatorName { name: AccumulatorName },
+
+    #[error(
+        "seal_retention {seal_retention:?} does not cover the {stream} stream's max_age \
+         {max_age:?}, so a straggler the stream can still redeliver would meet no seal marker"
+    )]
+    SealRetentionTooShort {
+        stream: String,
+        seal_retention: Duration,
+        max_age: Duration,
+    },
+
     #[error("accumulator name {name} is already held by another accumulator type")]
     DuplicateAccumulatorName { name: AccumulatorName },
 

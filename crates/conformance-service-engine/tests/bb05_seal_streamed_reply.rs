@@ -2,12 +2,10 @@ mod blackbox_support;
 
 use std::time::{Duration, Instant};
 
-use blackbox_support::{World, ok, passport, seed_chunks};
+use blackbox_support::{World, ok, passport};
 use example_contract::ReplyFinished;
 use service_engine::SealHash;
 use uuid::Uuid;
-
-const ACCUMULATOR: &str = "reply_text";
 
 fn hash_of(chunks: &[&str]) -> String {
     SealHash::of_chunks(chunks.iter().map(|c| c.to_string()))
@@ -32,7 +30,9 @@ async fn bb05_a_streamed_reply_seals_against_its_hash_in_the_running_binary() {
         )
         .await);
 
-    seed_chunks(&world.db.app, ACCUMULATOR, reply, &chunks).await;
+    example_twin::stream_reply(&world.nats, reply, &chunks)
+        .await
+        .expect("a separate producer streams the reply chunks over NATS, not through Postgres");
 
     example_twin::send_reply_finished(
         &world.nats,

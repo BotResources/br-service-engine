@@ -21,7 +21,7 @@ use crate::sample::assignment::Assignment;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::transport::RecordingTransport;
 
-pub const CHUNK_RETENTION: Duration = Duration::from_secs(3600);
+pub const SEAL_RETENTION: Duration = Duration::from_secs(3600);
 
 pub fn render_config(pod: &str) -> EngineConfig {
     EngineConfig::new(
@@ -45,7 +45,7 @@ pub fn runtime(
     registry: RenderRegistry<SamplePrincipal>,
 ) -> Arc<SessionRuntime<SamplePrincipal>> {
     let accumulators =
-        AccumulatorRuntime::new(pool.clone(), Arc::new(RecordingTransport), CHUNK_RETENTION);
+        AccumulatorRuntime::new(pool.clone(), Arc::new(RecordingTransport), SEAL_RETENTION);
     SessionRuntime::new(
         config,
         pool.clone(),

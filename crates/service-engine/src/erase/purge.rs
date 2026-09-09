@@ -122,11 +122,12 @@ async fn purge_streams(
 ) -> Result<(), EngineError> {
     for stream in streams {
         sqlx::query(&format!(
-            "INSERT INTO {TABLE_ACCUMULATOR_SEAL} (accumulator, key, high_water, sealed_at) \
-             SELECT $1, $2::jsonb, COALESCE(MAX(seq) + 1, 0), $3 \
+            "INSERT INTO {TABLE_ACCUMULATOR_SEAL} (accumulator, key, high_water, sealed_at, purged_at) \
+             SELECT $1, $2::jsonb, COALESCE(MAX(seq) + 1, 0), $3, NULL \
              FROM {TABLE_ACCUMULATOR_CHUNK} WHERE accumulator = $1 AND key = $2::jsonb \
              ON CONFLICT (accumulator, key) DO UPDATE \
-             SET high_water = GREATEST(EXCLUDED.high_water, accumulator_seal.high_water)"
+             SET high_water = GREATEST(EXCLUDED.high_water, accumulator_seal.high_water), \
+                 purged_at = NULL"
         ))
         .bind(&stream.accumulator)
         .bind(&stream.key)

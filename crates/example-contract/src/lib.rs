@@ -9,3 +9,4 @@ pub use published::{BOARD_PREFIX, PERSON_PREFIX, PublishedBoard, PublishedPerson
 
 pub const SERVICE: &str = "example";
 pub const TWIN: &str = "exampletwin";
+pub const REPLY_ACCUMULATOR: &str = "reply_text";

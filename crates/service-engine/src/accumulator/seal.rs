@@ -56,11 +56,12 @@ pub(crate) async fn seal(
         .await?;
 
     sqlx::query(
-        "INSERT INTO service_engine.accumulator_seal (accumulator, key, high_water, sealed_at) \
-         VALUES ($1, $2, $3, $4) \
+        "INSERT INTO service_engine.accumulator_seal (accumulator, key, high_water, sealed_at, purged_at) \
+         VALUES ($1, $2, $3, $4, NULL) \
          ON CONFLICT (accumulator, key) DO UPDATE \
          SET high_water = GREATEST(EXCLUDED.high_water, accumulator_seal.high_water), \
-             sealed_at = EXCLUDED.sealed_at",
+             sealed_at = EXCLUDED.sealed_at, \
+             purged_at = NULL",
     )
     .bind(entry.name.as_str())
     .bind(&key_value)
@@ -90,6 +91,39 @@ pub(crate) async fn marker(
         high_water: ChunkSeq::from_storable(row.get::<i64, _>("high_water").max(0)),
         sealed_at: row.get("sealed_at"),
     }))
+}
+
+pub(crate) async fn unpurged(
+    pg: &PgPool,
+) -> Result<Vec<(crate::name::AccumulatorName, serde_json::Value)>, EngineError> {
+    let rows = sqlx::query(
+        "SELECT accumulator, key FROM service_engine.accumulator_seal \
+         WHERE purged_at IS NULL ORDER BY sealed_at LIMIT 256",
+    )
+    .fetch_all(pg)
+    .await?;
+    let mut pending = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let name = crate::name::AccumulatorName::new(row.get::<String, _>("accumulator"))?;
+        pending.push((name, row.get::<serde_json::Value, _>("key")));
+    }
+    Ok(pending)
+}
+
+pub(crate) async fn mark_purged(
+    pg: &PgPool,
+    accumulator: &crate::name::AccumulatorName,
+    key: &serde_json::Value,
+) -> Result<(), EngineError> {
+    sqlx::query(
+        "UPDATE service_engine.accumulator_seal SET purged_at = now() \
+         WHERE accumulator = $1 AND key = $2",
+    )
+    .bind(accumulator.as_str())
+    .bind(key)
+    .execute(pg)
+    .await?;
+    Ok(())
 }
 
 pub(crate) async fn sweep(
