@@ -51,7 +51,8 @@ fills its part by adding module files and one method body.
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) | U11 |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) | U1 |
-| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context, per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot | U12 / U12b |
+| `view` | ergonomic projector surface: a `View` declares a typed `Query`, a bulk `rows` read, `populate(cx, q)` and `project(row, principal)`; the engine's `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch | U13b |
+| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot | U12 / U12b |
 
 Every author-facing surface of the 0.1.0 rework is now filled; no `register_*`
 method or engine gesture returns `EngineError::NotYet`.
@@ -221,6 +222,22 @@ mirrors and shadows are left untouched and follow the producer's offer retract.
 Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `engine.eraser()` before `run` to erase while the pod is serving, exactly as
 `mutation_executor` and `blob_reader` are captured.
+
+The authoring ergonomics were then aligned to the intent (U13b). A projector is
+written as a `view::View` — a typed `Query`, a bulk lock-free `rows(conn, keys)`
+read of the noun's committed store, `populate(cx, q)` over a `Populate` context
+and `project(row, principal)` — and the engine owns the `Facts` type, the
+`LoadScope::{Bulk, PerPrincipal}` match and the derived `name`/`nouns`/`inverse`;
+the opaque `WindowParams` never reaches the author, who works in the typed
+`Query` through `register_view`, `Query::fetch_view` / `fetch_view_window`,
+`WindowSpec::view` and `Bulk::impact_all_view`. The low-level `Projector` stays
+as the escape hatch for a projector that joins nouns. The accumulated lane gained
+`Ops::seal_partial` and `Ops::seal_current` so a service can implement the
+intent's "Cancel work in flight": a direct-lane cancel decision (with the cancel
+gate as its affordance, a presence signal the producer watches and a scheduled
+deadline), a reaction that seals the producer's verified partial as cancelled,
+and a deadline reaction that seals whatever the stream holds when the producer
+never answers.
 
 ## Writing a service
 

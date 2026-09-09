@@ -875,6 +875,41 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   `removability` CI job builds the reference service with the kernel alone and
   with each slice removed in turn, so slice removability cannot regress silently.
 
+### Added (0.1.0 rework, unit U13b — authoring ergonomics)
+
+- **`view::View` — the ergonomic projector surface.** A service now writes a
+  view the way the intent's "Add a view with a query window" how-to shows: a
+  `type Query` (serde), a bulk lock-free `rows(conn, keys)` read of the noun's
+  committed store, `populate(cx, q) -> Population` over a `Populate` context
+  (`cx.pool()`, `cx.principal()`), and `project(row, principal) -> View`. The
+  engine's `ViewProjector` adapter owns everything the author previously
+  hand-wrote against the low-level `Projector`: the `Facts` associated type, the
+  `load` with its `LoadScope::{Bulk, PerPrincipal}` match, and the derived
+  `name` / `nouns` / `inverse`. The opaque `WindowParams` no longer appears on
+  the author surface — the engine decodes the typed `Query` (defaulting it when
+  the window is null). `Engine::register_view`, `Query::fetch_view` /
+  `Query::fetch_view_window` (typed query, no hand `WindowParams::encode`),
+  `WindowSpec::view::<V>(query, rls)` and `Bulk::impact_all_view::<V>` mirror the
+  projector gestures for a `View`. The low-level `Projector` trait is retained
+  unchanged as the **escape hatch for a projector that joins nouns** (the
+  reference `roster` mirror keeps using it). The `board`, `reply`, `card` and
+  `ledger` reference views were rewritten to `View`; `card`'s `BoardWindow` typed
+  query shows the typed `Query` replacing the former `window.get::<Uuid>` read.
+- **`Ops::seal_partial::<A>(key, last_seq, hash)` and `Ops::seal_current::<A>(key)`
+  — the accumulated-lane cancel gestures.** `seal_partial` replays and verifies
+  exactly like `seal` but is the named gesture for a cancel: the reaction saves
+  what the stream held up to the cancel point and marks the record cancelled
+  rather than complete, so a short text is a decision, never a loss.
+  `seal_current` seals whatever the stream currently holds without a hash, for
+  the lost-producer deadline. The reference `reply` slice now implements the
+  intent's "Cancel work in flight" how-to: a `cancel_reply` mutation (direct-lane
+  decision with the cancel gate as its affordance, a `CancelSignal` presence
+  value the producer watches, and a scheduled `CancelTimedOut` deadline), a
+  `reply_cancelled` reaction that `seal_partial`s the producer's verified
+  partial, and a `cancel_timed_out` reaction that `seal_current`s on the
+  deadline. A new e2e scenario proves the partial is sealed as `cancelled` and
+  that the `cancel` affordance flips once it is.
+
 ### Deployment constraint
 
 - No transaction-mode pooler in front of an engine service: `LISTEN` is session
