@@ -6,7 +6,7 @@ use std::time::Duration;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::render::{attach_request, member, next_delta, upserted};
 use conformance_service_engine::sample::{
-    Typing, TypingKey, boot_presence_engine, typing_key, typing_value, typing_window,
+    Typing, TypingKey, boot_dual_presence_engine, typing_key, typing_value, typing_window,
 };
 use engine_twin::{SOON, await_ready};
 use service_engine::delta::Delta;
@@ -27,7 +27,7 @@ async fn s075_a_key_that_expires_by_ttl_leaves_every_session_as_a_remove() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
-    nats.provision_presence(SERVICE, Duration::from_secs(1))
+    nats.provision_presence(SERVICE, Duration::from_secs(30))
         .await;
 
     let pool = db.app_pool().clone();
@@ -35,7 +35,8 @@ async fn s075_a_key_that_expires_by_ttl_leaves_every_session_as_a_remove() {
     let typist = Uuid::now_v7();
     let principal = member(&pool, Uuid::now_v7(), Uuid::now_v7()).await;
 
-    let engine = boot_presence_engine(&db, nats.nats().await, CHANNEL, "pod-ttl", SERVICE).await;
+    let engine =
+        boot_dual_presence_engine(&db, nats.nats().await, CHANNEL, "pod-ttl", SERVICE).await;
     let readiness = engine.readiness();
     let handle = engine.presence_handle();
     let stop = engine.shutdown_handle();
