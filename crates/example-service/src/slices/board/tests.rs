@@ -1,7 +1,8 @@
 use uuid::Uuid;
 
+use super::BOARD_ARCHIVE;
 use super::aggregate::{BoardRow, BoardState};
-use crate::kernel::{AppPrincipal, scopes};
+use crate::kernel::AppPrincipal;
 
 fn board(state: BoardState) -> BoardRow {
     BoardRow {
@@ -17,14 +18,13 @@ fn holder(org: Uuid) -> AppPrincipal {
     AppPrincipal::new(
         Uuid::now_v7(),
         org,
-        Vec::new(),
-        vec![scopes::BOARD_ARCHIVE.to_string()],
+        vec![BOARD_ARCHIVE.to_string()],
         false,
     )
 }
 
 fn bystander(org: Uuid) -> AppPrincipal {
-    AppPrincipal::new(Uuid::now_v7(), org, Vec::new(), Vec::new(), false)
+    AppPrincipal::new(Uuid::now_v7(), org, Vec::new(), false)
 }
 
 #[test]

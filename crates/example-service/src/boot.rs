@@ -84,7 +84,7 @@ pub async fn assemble(
     let mut engine = Engine::<AppPrincipal>::boot(config, pool, nats, readiness.clone()).await?;
     crate::register::all(&mut engine)?;
     if options.declare_scopes {
-        engine.declare_scopes(crate::register::scopes())?;
+        engine.declare_contributed_scopes()?;
     }
     let app = crate::graphql::build(&mut engine, readiness);
     Ok((engine, app))

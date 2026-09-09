@@ -3,19 +3,24 @@ pub mod erase;
 pub mod graphql;
 mod mutations;
 mod offer;
+mod principal;
 mod store;
 #[cfg(test)]
 mod tests;
 mod view;
 
-pub use store::boards_of;
+pub use principal::BoardMemberships;
 
 use service_engine::Engine;
 use service_engine::error::EngineError;
 
 use crate::kernel::AppPrincipal;
 
+pub const BOARD_ARCHIVE: &str = "example:board_archive";
+
 pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
+    engine.contribute_scopes(&[BOARD_ARCHIVE])?;
+    engine.register_principal_fact(principal::load_board_memberships)?;
     engine.register_view(view::BoardsView)?;
     engine.register_view(view::OrgBoardsRls)?;
     engine.register_offer::<offer::BoardOffer>()?;

@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use br_core_auth::{Passport, PassportClaims};
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
@@ -5,6 +7,8 @@ use service_engine::principal::{Principal, PrincipalId, PrincipalResolver, RlsAp
 use service_engine::{PassportPrincipal, PrincipalRejected};
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
+
+use crate::kernel::facts::PrincipalFacts;
 
 pub const ORG_CLAIM: &str = "org";
 pub const USER_SESSION_VAR: &str = "app.current_user_id";
@@ -16,20 +20,14 @@ pub const SCOPES_CLAIM: &str = "scopes";
 pub struct AppPrincipal {
     id: PrincipalId,
     org: Uuid,
-    boards: Vec<Uuid>,
     scopes: Vec<String>,
     super_admin: bool,
     passport: Passport,
+    facts: PrincipalFacts,
 }
 
 impl AppPrincipal {
-    pub fn new(
-        user: Uuid,
-        org: Uuid,
-        boards: Vec<Uuid>,
-        scopes: Vec<String>,
-        super_admin: bool,
-    ) -> Self {
+    pub fn new(user: Uuid, org: Uuid, scopes: Vec<String>, super_admin: bool) -> Self {
         let mut map = serde_json::Map::new();
         map.insert(
             ORG_CLAIM.to_string(),
@@ -48,7 +46,6 @@ impl AppPrincipal {
         Self {
             id: PrincipalId::from(user),
             org,
-            boards,
             scopes,
             super_admin,
             passport: Passport::human(
@@ -59,7 +56,13 @@ impl AppPrincipal {
                 None,
                 PassportClaims::from_map(map),
             ),
+            facts: PrincipalFacts::new(),
         }
+    }
+
+    pub fn with_fact<F: Any + Send + Sync>(mut self, fact: F) -> Self {
+        self.facts.insert(fact);
+        self
     }
 
     pub fn user(&self) -> Uuid {
@@ -70,8 +73,12 @@ impl AppPrincipal {
         self.org
     }
 
-    pub fn boards(&self) -> &[Uuid] {
-        &self.boards
+    pub fn facts(&self) -> &PrincipalFacts {
+        &self.facts
+    }
+
+    pub fn facts_mut(&mut self) -> &mut PrincipalFacts {
+        &mut self.facts
     }
 
     pub fn is_super_admin(&self) -> bool {
@@ -93,20 +100,9 @@ impl Principal for AppPrincipal {
     }
 }
 
-async fn boards_of(_pg: &PgPool, _user: Uuid) -> Result<Vec<Uuid>, EngineError> {
-    #[cfg(feature = "board")]
-    {
-        return crate::slices::board::boards_of(_pg, _user).await;
-    }
-    #[cfg(not(feature = "board"))]
-    {
-        Ok(Vec::new())
-    }
-}
-
 impl PassportPrincipal for AppPrincipal {
     fn from_passport(
-        pg: &PgPool,
+        _pg: &PgPool,
         passport: Passport,
     ) -> BoxFuture<'_, Result<Self, PrincipalRejected>> {
         Box::pin(async move {
@@ -116,19 +112,16 @@ impl PassportPrincipal for AppPrincipal {
             let org = passport
                 .claim::<Uuid>(ORG_CLAIM)
                 .ok_or_else(|| PrincipalRejected::new("the passport carries no org claim"))?;
-            let boards = boards_of(pg, user)
-                .await
-                .map_err(|error| PrincipalRejected::new(error.to_string()))?;
             let scopes = passport
                 .claim::<Vec<String>>(SCOPES_CLAIM)
                 .unwrap_or_default();
             Ok(AppPrincipal {
                 id: PrincipalId::from(user),
                 org,
-                boards,
                 scopes,
                 super_admin: passport.is_super_admin(),
                 passport,
+                facts: PrincipalFacts::new(),
             })
         })
     }
@@ -139,18 +132,17 @@ pub struct AppPrincipalResolver;
 impl PrincipalResolver<AppPrincipal> for AppPrincipalResolver {
     fn resolve<'a>(
         &'a self,
-        pg: &'a PgPool,
+        _pg: &'a PgPool,
         current: &'a AppPrincipal,
     ) -> BoxFuture<'a, Result<Option<AppPrincipal>, EngineError>> {
         Box::pin(async move {
-            let boards = boards_of(pg, current.user()).await?;
             Ok(Some(AppPrincipal {
                 id: current.id,
                 org: current.org,
-                boards,
                 scopes: current.scopes.clone(),
                 super_admin: current.super_admin,
                 passport: current.passport.clone(),
+                facts: PrincipalFacts::new(),
             }))
         })
     }

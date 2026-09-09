@@ -1,14 +1,14 @@
 use uuid::Uuid;
 
+use super::CARD_ADVANCE;
 use super::aggregate::{CardEvent, CardState, Status};
-use crate::kernel::{AppPrincipal, scopes};
+use crate::kernel::AppPrincipal;
 
 fn holder() -> AppPrincipal {
     AppPrincipal::new(
         Uuid::now_v7(),
         Uuid::now_v7(),
-        Vec::new(),
-        vec![scopes::CARD_ADVANCE.to_string()],
+        vec![CARD_ADVANCE.to_string()],
         false,
     )
 }
@@ -45,13 +45,7 @@ fn advancing_a_done_card_is_refused() {
 #[test]
 fn advancing_without_the_scope_is_refused() {
     let mut card = CardState::open(Uuid::now_v7(), Uuid::now_v7(), "Draft".to_string());
-    let bystander = AppPrincipal::new(
-        Uuid::now_v7(),
-        Uuid::now_v7(),
-        Vec::new(),
-        Vec::new(),
-        false,
-    );
+    let bystander = AppPrincipal::new(Uuid::now_v7(), Uuid::now_v7(), Vec::new(), false);
     let refused = card.advance(&bystander).expect_err("advance is gated");
     assert_eq!(refused.code(), "missing_advance_scope");
 }

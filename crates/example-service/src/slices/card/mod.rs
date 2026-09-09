@@ -14,7 +14,10 @@ use service_engine::error::EngineError;
 
 use crate::kernel::AppPrincipal;
 
+pub const CARD_ADVANCE: &str = "example:card_advance";
+
 pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
+    engine.contribute_scopes(&[CARD_ADVANCE])?;
     engine.register_view(view::CardsView)?;
     engine.register_mutation::<mutations::AdvanceCard, _>(mutations::advance_card)?;
     engine.register_mutation::<mutations::ScheduleCardDeadline, _>(

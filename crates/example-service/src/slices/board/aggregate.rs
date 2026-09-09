@@ -6,7 +6,9 @@ use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
 use uuid::Uuid;
 
-use crate::kernel::{AppPrincipal, scopes};
+use super::BoardMemberships;
+use super::BOARD_ARCHIVE;
+use crate::kernel::AppPrincipal;
 
 pub const NOT_ACTIVE: Reason = Reason::new("board_not_active");
 pub const MISSING_SCOPE: Reason = Reason::new("missing_archive_scope");
@@ -44,7 +46,7 @@ pub struct BoardRow {
 service_engine::gated! {
     BoardRow, AppPrincipal;
     "archive" => fn archive_gate(this, principal) {
-        if !principal.has_scope(scopes::BOARD_ARCHIVE) {
+        if !principal.has_scope(BOARD_ARCHIVE) {
             Gate::blocked(MISSING_SCOPE)
         } else if this.state != BoardState::Active {
             Gate::blocked(NOT_ACTIVE)
@@ -90,8 +92,10 @@ impl Visibility for Board {
             CohortKey::of(&[Cohort::Org(principal.org())]),
             CohortKey::of(&[Cohort::Public]),
         ];
-        for board in principal.boards() {
-            cohorts.push(CohortKey::of(&[Cohort::Member(*board)]));
+        if let Some(BoardMemberships(boards)) = principal.facts().get::<BoardMemberships>() {
+            for board in boards {
+                cohorts.push(CohortKey::of(&[Cohort::Member(*board)]));
+            }
         }
         if principal.is_super_admin() {
             cohorts.push(CohortKey::of(&[Cohort::Super]));

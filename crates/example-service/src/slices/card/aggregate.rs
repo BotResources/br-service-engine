@@ -4,7 +4,8 @@ use service_engine::name::NounName;
 use service_engine::wire::Noun;
 use uuid::Uuid;
 
-use crate::kernel::{AppPrincipal, scopes};
+use super::CARD_ADVANCE;
+use crate::kernel::AppPrincipal;
 
 pub const DONE: Reason = Reason::new("card_already_done");
 pub const MISSING_SCOPE: Reason = Reason::new("missing_advance_scope");
@@ -92,7 +93,7 @@ impl CardState {
     }
 
     pub fn advance_gate(&self, principal: &AppPrincipal) -> Gate {
-        if !principal.has_scope(scopes::CARD_ADVANCE) {
+        if !principal.has_scope(CARD_ADVANCE) {
             Gate::blocked(MISSING_SCOPE)
         } else if self.status == Status::Done {
             Gate::blocked(DONE)
