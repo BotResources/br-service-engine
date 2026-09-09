@@ -219,17 +219,31 @@ place and re-snapshots), stage a Remove impact per touched key
 naming what to purge after the commit: accumulated-lane stream keys
 (`purge_stream`), presence keys (`purge_presence`) and un-owned blob references
 the person's rows released (`purge_blob`). `engine.erase(person)` runs **every**
-registered slice's `erase` in **one** direct-lane transaction, records the
-durable erasure fact in `service_engine.person_erasure`, and — on the first
-erasure only — stages the `PersonErased` integration event
-(`integration.evt.{service}.person.erased.v1`) through the outbox in that same
-transaction; a failing slice rolls the whole gesture back. After the commit it
-purges the manifest's stream subjects, presence keys and released blobs, and
-calls `purge_person_blobs` for the person's owned blobs. It is idempotent:
-because each slice's `erase` is data-driven, a second call finds nothing, the
-erasure fact conflicts (no second `PersonErased`), and the outcome is the same.
-Other services react to `PersonErased` by erasing their own rows; `known_*`
-mirrors and shadows are left untouched and follow the producer's offer retract.
+registered slice's `erase` in **one** direct-lane transaction. That transaction
+sets a transaction-local `app.erasing = 'on'` (through `set_config`, alongside
+the write path's `lock_timeout`), so a service that gates its tables with a
+strict, deny-when-unset RLS policy erases under the low-privilege app role
+(which boot forbids `bypassrls`) by whitelisting that setting —
+`current_setting('app.erasing', true) = 'on'` — in the policy; a fail-open
+policy simply ignores it. The transaction records the durable erasure fact in
+`service_engine.person_erasure`, persists the manifest's stream, presence and
+blob keys onto that row, and — on the first erasure only — stages the
+`PersonErased` integration event (`integration.evt.{service}.person.erased.v1`)
+through the outbox in that same transaction; a failing slice rolls the whole
+gesture back. After the commit it purges the manifest's streams (writing/keeping
+the stream's `accumulator_seal` marker and deleting only the chunks, so the
+erased key stays sealed and no straggler re-opens it), presence keys and
+released blobs, and `purge_person`'s owned blobs, then marks the row purged.
+That post-commit purge is **durable**: if the pod dies between commit and purge
+the row is left unpurged and the **beat drains it** — the same complete-or-drain
+path over the persisted manifest — so the purge always finishes. It is
+idempotent: because each slice's `erase` is data-driven, a second call finds
+nothing, the erasure fact conflicts (no second `PersonErased`), and the outcome
+is the same. Other services react to `PersonErased` by erasing their own rows;
+`known_*` mirrors and shadows are left untouched and follow the producer's offer
+retract, which the slice triggers by dirtying the offers of the rows it erases
+(`cx.dirty_offer`) so the leader retracts them within a beat, ahead of the
+periodic offer reconcile.
 Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `engine.eraser()` before `run` to erase while the pod is serving, exactly as
 `mutation_executor` and `blob_reader` are captured.

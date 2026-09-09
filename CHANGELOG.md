@@ -234,11 +234,20 @@ own folder.
 context (the write pipeline's `Ops` carrying the `PersonId`), the `Erased`
 post-commit purge manifest, and `Engine::register_erasable`. `Engine::erase`
 (via a cloneable `Eraser<P>` captured before `run`) opens **one** direct-lane
-transaction, records the durable fact in `service_engine.person_erasure`, runs
-every slice's `erase` across all three styles, stages `PersonErased`
-(`integration.evt.{service}.person.erased.v1`) through the outbox on the fresh
-erase only, and commits (a failing slice rolls the whole gesture back); after the
-commit it purges the person's stream subjects, presence keys and blobs. Idempotent.
+transaction that sets a transaction-local `app.erasing = 'on'`, so a strict,
+deny-when-unset RLS policy erases under the low-privilege app role by
+whitelisting `current_setting('app.erasing', true) = 'on'`. It records the
+durable fact in `service_engine.person_erasure`, runs every slice's `erase`
+across all three styles, persists the manifest's stream/presence/blob keys onto
+that row, stages `PersonErased` (`integration.evt.{service}.person.erased.v1`)
+through the outbox on the fresh erase only, and commits (a failing slice rolls
+the whole gesture back); after the commit it purges the person's stream subjects
+(keeping the `accumulator_seal` marker, deleting only the chunks, so the erased
+key stays sealed), presence keys and blobs, then marks the row purged. The purge
+is durable: a pod that dies between commit and purge leaves the row unpurged and
+the beat drains it over the persisted manifest. A slice retracts the person's
+offers by dirtying them (`cx.dirty_offer`), so the leader retracts within a beat.
+Idempotent.
 Other services react to `PersonErased`; `known_*` mirrors follow the producer's
 offer retract, never the event.
 

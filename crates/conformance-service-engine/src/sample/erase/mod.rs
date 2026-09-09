@@ -1,12 +1,14 @@
 pub mod engine;
 pub mod note;
+pub mod secret;
 pub mod slice;
 pub mod store;
 
 pub use engine::{
     boot_erase_blob_engine, boot_erase_engine, boot_erase_presence_engine,
-    boot_failing_erase_engine,
+    boot_erase_strict_engine, boot_failing_erase_engine,
 };
+pub use secret::{SecretEraser, count_secrets, seed_secret};
 pub use note::{
     EraseNote, EraseNoteNoun, EraseNoteOffer, EraseNoteProjector, EraseNoteStream, EraseNoteView,
     PublishedNote, note_offer_key, published_note,
