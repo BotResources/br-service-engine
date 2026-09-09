@@ -4,7 +4,7 @@ use service_engine::pipeline::{Mutation, MutationInput};
 use uuid::Uuid;
 
 use super::aggregate::{Ledger, LedgerEvent, LedgerState};
-use super::store::{LedgerAggregate, snapshot_of_conn};
+use super::store::LedgerAggregate;
 use crate::kernel::{AppFault, AppPrincipal};
 
 #[derive(Debug, Deserialize)]
@@ -26,15 +26,14 @@ pub fn record_entry<'m>(
     Box::pin(async move {
         let org = cx.principal().org();
         let author = cx.principal().user();
-        let existing = snapshot_of_conn(cx.connection(), input.id).await?;
-        if existing.is_none() {
-            let ledger = LedgerAggregate(LedgerState::open(input.id, org));
-            cx.create(&ledger).await?;
-        }
-        let mut ledger = cx
-            .load::<LedgerAggregate>(&input.id)
-            .await?
-            .ok_or(AppFault::NotFound)?;
+        let mut ledger = match cx.load::<LedgerAggregate>(&input.id).await? {
+            Some(ledger) => ledger,
+            None => {
+                let fresh = LedgerAggregate(LedgerState::open(input.id, org));
+                cx.create(&fresh).await?;
+                fresh
+            }
+        };
         ledger.0.record(input.amount, author)?;
         cx.save(&ledger).await?;
         cx.impact_caused::<Ledger, _>(

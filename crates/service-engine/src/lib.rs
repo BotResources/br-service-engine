@@ -16,6 +16,7 @@ pub mod dyn_compat;
 pub mod engine;
 pub mod erase;
 pub mod error;
+pub mod full_eda;
 pub mod gate;
 pub mod graphql;
 pub mod housekeeping;
@@ -124,6 +125,7 @@ pub use nats::{
     RelayHealth, RelayHealthReceiver,
 };
 pub use offer::Offer;
+pub use full_eda::{EventSourced, FullEda};
 pub use persistence::{Aggregate, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
