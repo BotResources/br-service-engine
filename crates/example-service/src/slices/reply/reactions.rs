@@ -10,6 +10,8 @@ use super::stream::ReplyText;
 use super::wire::{CancelTimedOut, InboundReplyCancelled, InboundReplyFinished, OutSealFailed};
 use crate::kernel::error::ReactionFault;
 
+const SEAL_TRUNCATION_ATTEMPTS: u32 = 3;
+
 pub fn reply_finished<'r>(
     cx: &'r mut Reaction<'r>,
     msg: InboundReplyFinished,
@@ -21,13 +23,7 @@ pub fn reply_finished<'r>(
             .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
         let text: String = match cx.seal::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
             Ok(text) => text,
-            Err(error @ EngineError::SealHashMismatch { .. }) => {
-                return Err(ReactionFault::Terminal(error.to_string()));
-            }
-            Err(error @ EngineError::SealChunkBeyondLastSeq { .. }) => {
-                return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error);
-            }
-            Err(error) => return Err(error.into()),
+            Err(error) => return on_seal_error(cx, cmd.reply_id, cmd.board_id, error),
         };
         let mut reply = cx
             .load::<ReplyRow>(&cmd.reply_id)
@@ -54,13 +50,7 @@ pub fn reply_cancelled<'r>(
             .await
         {
             Ok(text) => text,
-            Err(error @ EngineError::SealHashMismatch { .. }) => {
-                return Err(ReactionFault::Terminal(error.to_string()));
-            }
-            Err(error @ EngineError::SealChunkBeyondLastSeq { .. }) => {
-                return answer_seal_failed(cx, cmd.reply_id, cmd.board_id, error);
-            }
-            Err(error) => return Err(error.into()),
+            Err(error) => return on_seal_error(cx, cmd.reply_id, cmd.board_id, error),
         };
         let mut reply = cx
             .load::<ReplyRow>(&cmd.reply_id)
@@ -92,6 +82,24 @@ pub fn cancel_timed_out<'r>(
         cx.impact_caused::<Reply, _>(&msg.reply_id, cause)?;
         Ok(())
     })
+}
+
+fn on_seal_error(
+    cx: &mut Reaction<'_>,
+    reply_id: uuid::Uuid,
+    board_id: uuid::Uuid,
+    error: EngineError,
+) -> Result<(), ReactionFault> {
+    match error {
+        EngineError::SealHashMismatch { .. } => Err(ReactionFault::Terminal(error.to_string())),
+        EngineError::SealChunkBeyondLastSeq { .. } => {
+            answer_seal_failed(cx, reply_id, board_id, error)
+        }
+        EngineError::SealTruncated { .. } if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS => {
+            answer_seal_failed(cx, reply_id, board_id, error)
+        }
+        other => Err(other.into()),
+    }
 }
 
 fn answer_seal_failed(

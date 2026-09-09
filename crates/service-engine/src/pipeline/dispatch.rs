@@ -99,7 +99,7 @@ impl DirectPipeline {
                 self.blobs.as_ref(),
                 time::now(),
             );
-            let mut cx = Reaction::new(ops);
+            let mut cx = Reaction::new(ops, msg.delivered);
             invoke(invoker.as_ref(), &mut cx, &msg.payload).await
         };
         if let Err(error) = handler {

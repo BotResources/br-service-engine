@@ -14,11 +14,16 @@ pub(crate) type PresencePut =
 
 pub struct Reaction<'a> {
     ops: Ops<'a>,
+    delivered: u32,
 }
 
 impl<'a> Reaction<'a> {
-    pub(crate) fn new(ops: Ops<'a>) -> Self {
-        Self { ops }
+    pub(crate) fn new(ops: Ops<'a>, delivered: u32) -> Self {
+        Self { ops, delivered }
+    }
+
+    pub fn delivered(&self) -> u32 {
+        self.delivered
     }
 }
 

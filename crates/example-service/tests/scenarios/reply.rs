@@ -92,6 +92,58 @@ async fn a_finish_below_a_durable_chunk_is_answered_with_seal_failed_not_retried
 }
 
 #[tokio::test]
+async fn a_permanently_truncated_stream_is_answered_with_seal_failed_after_the_retry_budget() {
+    let world = World::start("pod-reply-truncated").await;
+    let org = Uuid::now_v7();
+    let pass = passport(Uuid::now_v7(), org, &[], false);
+    let board = Uuid::now_v7();
+    let chunks = ["Half ", "of a "];
+
+    let reply = start_and_stream(&world, &pass, board, &chunks).await;
+
+    example_twin::send_reply_finished(
+        &world.nats,
+        &ReplyFinished {
+            reply_id: reply,
+            board_id: board,
+            last_seq: 3,
+            hash: hash_of(&chunks),
+        },
+    )
+    .await
+    .unwrap();
+
+    let failed = poll_until!(Duration::from_secs(20), {
+        example_twin::seal_failed_from_stream(&world.nats)
+            .await
+            .expect("reading the seal-failed subject")
+    });
+    assert_eq!(
+        failed.reply_id, reply,
+        "a stream shorter than the declared last_seq is a truncation the fold cannot heal; after \
+         the retry budget the runner is told to resend, never nak'd forever into a silent dead letter"
+    );
+    assert!(
+        !failed.reason.is_empty(),
+        "the SealFailed confirmation carries the reason the runner needs to resend"
+    );
+
+    let view = world
+        .gql(
+            &pass,
+            "query($id:UUID!){reply(id:$id){status text}}",
+            serde_json::json!({ "id": reply }),
+        )
+        .await;
+    assert_eq!(
+        view["data"]["reply"]["status"], "streaming",
+        "a permanently truncated stream is never silently saved; the reply stays open for the resend"
+    );
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
 async fn accumulated_lane_seals_the_streamed_reply_with_a_verified_hash() {
     let world = World::start("pod-reply").await;
     let org = Uuid::now_v7();

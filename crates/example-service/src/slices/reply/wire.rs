@@ -46,7 +46,7 @@ impl OutboundEvent for OutSealFailed {
     }
 
     fn event_id(&self) -> Uuid {
-        self.0.reply_id
+        Uuid::now_v7()
     }
 }
 
