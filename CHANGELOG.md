@@ -9,56 +9,13 @@ and a single git tag `v{version}` releases the set. Format follows
 
 Prepared 2026-09-09 (UTC); unreleased — the `v0.1.0` tag is cut when this lands
 on `main`. This is the first functional engine release: `service-engine` ships
-the reactive personalized delivery and process skeleton, `conformance-service-engine`
-its black-box battery, and `example-service` (with `example-contract` and
-`example-twin`) the in-repo reference service the battery and the functional
+the reactive personalized delivery and process skeleton, and
+`conformance-service-engine` its conformance battery in two modes — in-crate
+against the real engine through a sample service, and black-box against the real
+`example-service` binary. `example-service` (with `example-contract` and
+`example-twin`) is the in-repo reference service the battery and the functional
 spec run against. The sections below describe the shipped 0.1.0 surface; where a
-choice is not obvious the rationale is stated, not the unit that made it.
-First engine release. `service-engine` ships the reactive personalized delivery
-skeleton; `conformance-service-engine` ships its conformance battery in two
-modes — in-crate against the real engine through a sample service, and black-box
-against the real `example-service` binary.
-
-### Added (0.1.0 rework, unit U14a — black-box battery + CI)
-
-- `conformance-service-engine` now runs in **two modes**. The existing in-crate
-  scenarios (`sXX_*`) drive the real engine through the in-crate `sample`
-  service and keep the scenarios that need the `test-support` seam (a driven
-  clock, fault injection, direct impact-bus assertions). A new **black-box mode**
-  (`bbXX_*`) spawns the real `example-service` binary — and the `example-twin`
-  binary for the cross-service cycle — and drives them over their public channels
-  only (GraphQL HTTP + `graphql-transport-ws`, NATS subjects and streams, the
-  published-language KV, Postgres state, `/readyz`): `bb01` readiness plus the
-  boot scope handshake plus a second pod on the same store; `bb02` the
-  affordance==gate identity; `bb03` `Reset`→`Upsert` with a contiguous revision
-  and a reconnect `Reset` from committed state; `bb04` a full cross-service cycle
-  driven by the spawned twin binary; `bb05` seal — a streamed reply is sealed
-  against its hash inside the running binary (a reply-finished command over NATS
-  makes the binary's reaction replay the chunks, verify the hash, commit the
-  record and deliver it, read back over GraphQL). Because the 0.1.0 accumulated
-  lane stores chunks in Postgres (`service_engine.accumulator_chunk`) and exposes
-  no NATS/GraphQL chunk-ingress, `bb05` seeds the chunks through Postgres — the
-  flush path's own table shape, a listed black-box channel — while everything the
-  seal *is* (replay, hash verification, the transactional final write, the impact
-  and delivery) runs in the spawned binary. The black-box harness
-  (`tests/blackbox_support/`) provisions the owner/app Postgres roles and the
-  engine + example migrations, provisions NATS, seeds the roster and answers the
-  scope declaration, then spawns the binary and gates on `/readyz`; it reuses the
-  in-crate `graphql_support` WebSocket/HTTP client rather than duplicating it, and
-  takes the binaries from `EXAMPLE_SERVICE_BIN` / `EXAMPLE_TWIN_BIN` when set and
-  builds them on demand otherwise, so the mode is self-sufficient locally.
-- A dedicated `conformance-service-engine black-box (real binary)` CI job builds
-  the two example binaries and runs the black-box scenarios against them on real
-  PostgreSQL and a spawned NATS (no MinIO: the example binary boots without S3,
-  since blobs are registered only when configured, and no black-box scenario
-  exercises a blob); the existing real-infra job (which runs the whole crate, both
-  modes, and needs MinIO for the in-crate blob scenarios) and the `removability`
-  job stay green.
-- New coverage the reviewers noted: a reaction whose disposition is `Terminal`
-  now dead-letters **through the running inbound loop** rather than via a direct
-  `DeadLetters::record` (`s76`); a live `Upsert` reaches only its own projector's
-  typed subscription union member and never a sibling projector's session
-  (`s77`), the live-delta counterpart of the reset-time isolation in `s68`.
+choice is not obvious the rationale is stated.
 
 ### Added
 
@@ -151,7 +108,7 @@ that can only reach the caller — never a view, impact, offer, event or outbox 
 
 **Persistence — CRUD, soft EDA, full EDA behind one trait.** `Persistence`
 (`type Aggregate` / `type Key` / `type Event`, `const STYLE`, `load` / `save` /
-`create` / `read_many`) plus an `Aggregate` trait naming a `Store`, so
+`create` / `read_many` / `lock`) plus an `Aggregate` trait naming a `Store`, so
 `cx.load::<A>` / `cx.save(&a)` / `cx.create(&a)` resolve statically with no
 registry, and the pipeline never learns the style. The command's events reach
 `save` through the default `Aggregate::pending_events` (`&[]` for CRUD). A style
@@ -161,10 +118,14 @@ failure rolls the state row and its events back together. Full EDA hydrates on
 `load` (replay the events above the snapshot, then the aggregate's hydration
 check as the second barrier) and owns the log's two gestures — upcasting an
 older event version at read time, and erasure (rewrite the person's events in
-place and re-snapshot from the rewritten log in the same transaction). The
-render side is lock-free: the engine loads a projector's rows through
-`Persistence::read_many`, a single batched read of the same committed table
-`load`/`save` use, so the render-side load and the write-side load are one
+place and re-snapshot from the rewritten log in the same transaction). `load`
+and `read_many` are both non-locking; the write pipeline takes the row lock
+itself by calling `Persistence::lock` (default no-op; the reference stores run
+`SELECT … FOR UPDATE`) before `load`, inside the transaction under
+`lock_timeout`, so concurrent commands on one key serialize in every style while
+the render side never takes a row lock. The engine loads a projector's rows
+through `Persistence::read_many`, a single batched read of the same committed
+table `load`/`save` use, so the render-side load and the write-side load are one
 truth (for full EDA the snapshot **is** the state row the projector reads).
 
 **Gate/affordance and visibility author layers.** `Gate` / `Reason` (a stable
@@ -343,19 +304,51 @@ degrade-table dependency is a `dependency_up` gauge. Four alerts ship as a
 never the pod clock. The app-role grant includes `USAGE, SELECT` on the engine
 schema's sequences.
 
-**`conformance-service-engine`.** The named scenarios `s01`–`s75` run against a
-fresh database and a spawned `nats-server` (and, for the blob scenarios, a
-spawned `minio`) per test, over a sample service that exercises the wiring the
-slices rely on — shared-consumer ownership across two pods, ack-after-durable
-with a crash before commit, poison budget to dead letter, early parking and
-release, the sequence guard, the mutation gate deny/allow through one pipeline,
-all three persistence styles over one `counter` sample, the seal and its hash
-barrier, presence, offers and leader failover, the mirror, scope declaration
-against a fake Identity, the blob presigned-POST round-trip and reaper, erasure
-across slices, the query-time RLS gate, the schema-collision and
-undeclared-member boot gates, and reconnect-resnapshot repair. `infra/pg.rs` /
-`infra/nats.rs` are the sole `async-nats` user, only to declare gitops-owned
-streams and buckets.
+**`conformance-service-engine`.** The battery runs in **two modes** against real
+infra (a fresh database and a spawned `nats-server` per test, plus a spawned
+`minio` for the blob scenarios). **In-crate mode** — the named scenarios
+`s001`–`s131` — drives the real engine through an in-crate `sample` service and
+keeps the properties that need the `test-support` seam (a driven clock, fault
+injection, direct impact-bus/transport assertions): shared-consumer ownership
+across two pods, ack-after-durable with a crash before commit, poison budget to
+dead letter, early parking and release, the sequence guard, the mutation gate
+deny/allow through one pipeline, all three persistence styles over one `counter`
+sample, a render frame that takes no row lock while a mutation does (`s130`), the
+seal and its hash barrier, presence, offers and leader failover, the mirror,
+scope declaration against a fake Identity, the blob presigned-POST round-trip and
+reaper, erasure across slices, the query-time RLS gate, the schema-collision and
+undeclared-member boot gates, reconnect-resnapshot repair, a `Terminal` reaction
+that dead-letters through the running inbound loop (`s128`), a live `Upsert` that
+reaches only its own projector's subscription-union member (`s129`), and a
+principal-facts change whose refresh resolver errors ending the session
+fail-closed through the running engine (`s131`). **Black-box mode** — `bb01`–`bb05`
+— spawns the real `example-service` binary (and the `example-twin` binary for the
+cross-service cycle) and drives them over their public channels only (GraphQL
+over HTTP and `graphql-transport-ws`, NATS subjects and streams, the
+published-language KV, Postgres state, `/readyz`): readiness plus the boot scope
+handshake plus a second pod on the same store (`bb01`); the affordance==gate
+identity (`bb02`); `Reset`→`Upsert` with a contiguous revision and a reconnect
+`Reset` from committed state (`bb03`); a full cross-service cycle driven by the
+spawned twin binary (`bb04`); and seal — a streamed reply sealed against its hash
+inside the running binary (`bb05`). Because the 0.1.0 accumulated lane stores
+chunks in Postgres (`service_engine.accumulator_chunk`) and exposes no
+NATS/GraphQL chunk-ingress, `bb05` seeds the chunks through Postgres — the flush
+path's own table shape, a listed black-box channel — while everything the seal
+*is* (replay, hash verification, the transactional final write, the impact and
+delivery) runs in the spawned binary; the accumulator's own internals stay proven
+in-crate. The black-box harness provisions the owner/app Postgres roles and the
+engine + example migrations, provisions NATS, seeds the roster and answers the
+scope declaration, then spawns the binary and gates on `/readyz`, taking the
+binaries from `EXAMPLE_SERVICE_BIN` / `EXAMPLE_TWIN_BIN` when set and building
+them on demand otherwise. `infra/pg.rs` / `infra/nats.rs` are the sole
+`async-nats` user, only to declare gitops-owned streams and buckets.
+
+- CI runs the battery in both modes: the `conformance-service-engine (real
+  infra)` job runs the whole crate (both modes, needing MinIO for the in-crate
+  blob scenarios), and a dedicated `conformance-service-engine black-box (real
+  binary)` job builds the two example binaries and runs only `bb01`–`bb05`
+  against them on real PostgreSQL and a spawned NATS — no MinIO, since the example
+  binary boots without S3 and no black-box scenario exercises a blob.
 
 **Reference service (`example-service`, `example-contract`, `example-twin`).**
 A complete, bootable service built **only** on the public authoring surface (no
@@ -386,11 +379,17 @@ cause — and two-pod convergence.
 
 ### Changed
 
-- **`Persistence::read_many` has a default derived from `load`.** A store author
-  writes only `load` / `save` / `create` (the intent's persistence how-to);
-  `read_many` falls back to loading each key through `load`. A store that wants a
-  single batched query overrides it, which the reference stores do (`WHERE id =
-  ANY($1)`) per the "every read function answers in one query" rule.
+- **The write-path row lock lives in `Persistence::lock`, not in `load`.** `load`
+  is a plain, non-locking read and `read_many` (the batched render read) defaults
+  to it, so both reads are lock-free and a store author who writes only `load`
+  gets a render frame that never takes a row lock. The write pipeline calls
+  `Persistence::lock` (default no-op) before `load` to take the row lock; the
+  reference stores implement it as `SELECT … FOR UPDATE` on the row (or snapshot)
+  key, so concurrent commands on one key serialize in every style — inside the
+  pipeline transaction, under `lock_timeout`, so a contended write is retryable —
+  while a render never waits on that lock. A store that wants a single batched
+  render query overrides `read_many` (`WHERE id = ANY($1)`) per the "every read
+  function answers in one query" rule; the reference stores do.
 
 ### Removed
 

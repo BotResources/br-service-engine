@@ -30,40 +30,40 @@ engine minor pins one exact `br-rust-common` tag.
 
 ## Module map
 
-The 0.1.0 rework lands in units. The multi-pod delivery core (`transport`,
-`render`, `session`, `cohort`, `population`, `accumulator`, `housekeeping`,
-`relays`, `mirror`, `principal`, `projector`) is implemented and battery-backed.
-The author-facing surface is laid out one module per remaining unit, so each
-fills its part by adding module files and one method body.
+The engine is one crate laid out one module per capability. The multi-pod
+delivery core (`transport`, `render`, `session`, `cohort`, `population`,
+`accumulator`, `housekeeping`, `relays`, `mirror`, `principal`, `projector`) and
+every author-facing surface in the table below are implemented and
+battery-backed.
 
-| Module | Responsibility | Unit |
-|---|---|---|
-| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface | U1 (skeleton) |
-| `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish | U1 |
-| `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 (done) |
-| `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 (done) |
-| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create` plus `read_many` (the lock-free batched render read from the same committed store — it defaults to `load`, so a store author writes only `load`/`save`, and overrides it with one batched query for the "every read answers in one query" rule); log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) / U13b (`read_many`) |
-| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
-| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
-| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile | U7 (done) |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection | U8 (done) / U7 (leader gate) |
-| `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper | U9 |
-| `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness | U10 (done) |
-| `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) | U11 |
-| `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) | U1 |
-| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many` and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch | U13b |
-| `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) | U13b |
-| `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) | U13b |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` | U12 / U12b / U13b |
+| Module | Responsibility |
+|---|---|
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface |
+| `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
+| `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
+| `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
+| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` to take the row lock (default no-op; the reference stores implement it as `SELECT … FOR UPDATE`); log-style events reach `save` via `Aggregate::pending_events` |
+| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
+| `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
+| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`, leader-gated projection |
+| `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
+| `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
+| `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
+| `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
+| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many` and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
+| `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) |
+| `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
-Every author-facing surface of the 0.1.0 rework is now filled; no `register_*`
-method or engine gesture returns `EngineError::NotYet`.
-`register_reaction` (U2) is live: it records a reaction and
+No `register_*` method or engine gesture returns `EngineError::NotYet`; every
+author-facing surface is implemented.
+`register_reaction` records a reaction and
 derives its inbound subscription, and the engine-owned inbound loop (durable
 consumer, ack-after-durable, `Disposition` routing, poison budget with the
 `service_engine.dead_letter` table and its retry/discard gestures, the
 per-(producer, key) sequence guard beside the idempotency claim) runs over it.
-`register_mutation` and `register_bulk` (U3) are live: a GraphQL mutation and a
+`register_mutation` and `register_bulk`: a GraphQL mutation and a
 NATS command run **one** direct write pipeline — load, gate (the affordance
 function in deny mode), domain command, `save` through the `Persistence` trait,
 stage impacts (`cx.impact_caused` / `cx.impact_at` / `cx.impact_all`), stage
@@ -77,7 +77,7 @@ scheduled reaction the beat fires on the database clock; dead-lettering stages
 an impact on the ops view. The engine starts the inbound loop at boot, after
 the scope handshake, so a booted engine with registered reactions consumes with
 no test-support seam.
-All three persistence styles (U4) fill the same `Persistence` trait behind the
+All three persistence styles fill the same `Persistence` trait behind the
 one-arg `cx.save` / `cx.create`, so one mutation handler runs unchanged over
 CRUD, soft EDA (the state row plus an appended fact per change) and full EDA (an
 event log plus a synchronous snapshot that is the locked state row). The
@@ -85,12 +85,17 @@ command's events reach `save` through the default `Aggregate::pending_events`
 (`&[]` for CRUD), never through the pipeline. A style writes the state row (or
 snapshot) and its events (or facts) in the one transaction the pipeline opened
 and never opens its own, so a foreign-key, unique or check-constraint failure on
-either table rolls the state row and its events back together. The reference
-stores take the row (or snapshot) lock at `load` with `SELECT … FOR UPDATE`, so
-concurrent commands on one key serialize in every style. The render side never
-takes that lock: the engine loads a projector's rows through the store's
-`Persistence::read_many`, a single batched lock-free read of the same committed
-table `load` writes, so the author writes no render load SQL in the view. Full EDA hydrates
+either table rolls the state row and its events back together. Both
+reads are non-locking — `load` is a plain read and `read_many` defaults to it —
+so the render side takes no row lock, whatever the author writes. The write
+pipeline takes the row lock itself: before `load` it calls the store's
+`Persistence::lock`, which the reference stores implement as
+`SELECT … FOR UPDATE` on the row (or snapshot) key, so concurrent commands on
+one key serialize in every style while a render frame never waits on that lock.
+`lock` runs inside the pipeline transaction under `lock_timeout`, so a contended
+write is retryable, not stuck. The engine loads a projector's rows through the
+store's `Persistence::read_many`, a single batched read of the same committed
+table `load` reads, so the author writes no render load SQL in the view. Full EDA hydrates
 on `load` by replaying the events above the snapshot and running the aggregate's
 hydration check as the second barrier, and owns the log's two gestures —
 upcasting an older event version at read time, and erasure, which rewrites a
@@ -103,11 +108,11 @@ stays the handler's to classify. The render-side `read_many` and the
 write-side `load`/`save` read one committed store — for full EDA the snapshot is
 the state row the projector reads — so a `fetch`, a session `Upsert` and a
 write-side `load` return the same committed truth.
-`register_presence` (U6) is filled: it binds the `EPHEMERAL_{service}` bucket at
+`register_presence` binds the `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other
-lane; name the bucket with `EngineConfig::with_service`. `register_offer` (U7)
-is filled: a saved noun that carries an offer stages the offer's dirty key in
+lane; name the bucket with `EngineConfig::with_service`. With `register_offer`,
+a saved noun that carries an offer stages the offer's dirty key in
 the same transaction as the write (`service_engine.offer_dirty`), the pod that
 holds the offer's leader lease drains those keys — re-reading the row, then
 putting or retracting the published value on the `PUBLISHED_LANGUAGE` bucket
@@ -116,15 +121,15 @@ bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
 drift; the version lives in the offer's key for a breaking change (register a
-second `Offer`). `register_mirror` (U8) projects a consumed KV offer into
-`known_*` through the direct lane, and its projection is now leader-gated (U7):
+second `Offer`). `register_mirror` projects a consumed KV offer into
+`known_*` through the direct lane, and its projection is leader-gated:
 only the pod holding the mirror lease projects, standby pods keep their shadows
 current and take over on lease loss. Scopes are assembled from the slices: each
 slice contributes its keys with `engine.contribute_scopes(&[..])`, and
-`declare_contributed_scopes` (U10) unions them into one `ScopeManifest` and runs
+`declare_contributed_scopes` unions them into one `ScopeManifest` and runs
 the boot scope-declaration handshake that gates readiness until Identity confirms
 (`declare_scopes` remains for a service that assembles the manifest itself).
-`register_blobs` (U9) is filled: it records a `BlobPolicy` per blob kind and, at
+`register_blobs` records a `BlobPolicy` per blob kind and, at
 boot, binds the service's S3-compatible object-storage bucket (bind-only,
 fail-loud, never created — configured with `EngineConfig::with_blob_storage`).
 `cx.blob::<Kind>(name, content_type)` stages a blob **reference row**
@@ -159,14 +164,13 @@ reaped**; a slice that writes its own SQL against a blob-referencing table owns
 releasing the blob. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
 **not** reached by `purge_person_blobs`; a personal file that must be erasable
 with its owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type,
-person)`. `Engine::purge_person_blobs` is the erase hook U11 calls to drop a
+person)`. `Engine::purge_person_blobs` is the erase hook `Engine::erase` calls to drop a
 person's blobs from storage and the reference table. Presigning uses the sans-IO
 `rusty-s3` crate for the GET, an in-engine SigV4 POST-policy signer (`hmac` +
 `sha2` + `base64`) for the upload, and `reqwest` (rustls) as the thin HTTP client
 for the engine's own bucket HEAD/DELETE — no cloud SDK.
 
-The `graphql` module (U12, aligned to the intent's authoring ergonomics in
-U12b) is the async-graphql surface kit. A service lists its slices once with the
+The `graphql` module is the async-graphql surface kit, aligned to the intent's authoring ergonomics. A service lists its slices once with the
 `compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
 `SubscriptionRoot` and the `register` function; it composes those roots into one
 schema with `engine_schema`, mounts it with `app` (`POST
@@ -204,7 +208,7 @@ is not slice-only.) The axum layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
 kit does authZ only, never authN.
 
-`register_erasable` and `Engine::erase` / `Engine::eraser` (U11) are filled. A
+`register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
 the `Erase` context — the same `Ops` the write pipeline gives a handler — to
 delete or anonymize its rows (CRUD deletes, soft EDA also scrubs the person's
@@ -230,7 +234,7 @@ Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `engine.eraser()` before `run` to erase while the pod is serving, exactly as
 `mutation_executor` and `blob_reader` are captured.
 
-The authoring ergonomics were then aligned to the intent (U13b). A projector is
+The authoring ergonomics follow the intent. A projector is
 written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
 names its `type Noun` and `type Store`, a typed `Query`, and writes only a native
 `async fn populate(cx, q)` over a `Populate` context and `project(row, principal)`.
@@ -249,7 +253,7 @@ producer watches and a scheduled deadline), a reaction that seals the producer's
 verified partial as cancelled, and a deadline reaction that seals whatever the
 stream holds when the producer never answers.
 
-Also in U13b, a service depends on `br-rust-common` only for frontier types: the
+A service depends on `br-rust-common` only for frontier types: the
 engine provides its own `connect_pool` / `validate_database_tls` (the
 secure-by-default Postgres connect) and its own `Readiness` / `ReadinessHandle` /
 `readiness_route`, so `br-util-postgres` and `br-util-axum-readiness` are gone from
@@ -305,7 +309,7 @@ S3-compatible server per test).
 It runs in **two modes**, and every scenario keeps the same assertions in
 whichever mode it lives:
 
-- **In-crate mode** (`sXX_*.rs`) drives the real `service-engine` engine —
+- **In-crate mode** (`sNNN_*.rs`) drives the real `service-engine` engine —
   its render pass, inbound loop, write pipeline, impact bus, relays and beat —
   through an in-crate `sample` service, in process. This mode keeps the scenarios
   whose property is **not** observable from outside a running binary because they
@@ -339,11 +343,11 @@ whichever mode it lives:
   chunks through Postgres — the flush path's own table shape, a listed black-box
   channel — and everything the seal *is* (replay, hash verification, the
   transactional final write, the impact and delivery) runs in the spawned binary.
-  The accumulator's own internals stay proven in-crate (`s14`, `s25`) and by the
+  The accumulator's own internals stay proven in-crate (`s035`, `s066`) and by the
   reference service's reply e2e.
 
 ```bash
-# both modes (in-crate sXX + black-box bbXX), one crate
+# both modes (in-crate sNNN + black-box bbNN), one crate
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
   cargo test -p conformance-service-engine --all-targets
 
@@ -371,6 +375,21 @@ blob scenarios need it), and a dedicated `conformance-service-engine black-box
 scenarios against them on real PostgreSQL and a spawned NATS — no MinIO, since
 the example binary boots without S3 (blobs are registered only when configured)
 and no black-box scenario exercises a blob.
+
+## Authoring caveats
+
+- A slice's `Visibility` declaration must be **total and injective**: `cohorts`
+  and `memberships` return the same cohorts for the same input on every call, and
+  two cohorts the projector means to keep distinct must serialise to distinct
+  bytes. The engine keys an RLS render group on the exact `PrincipalId` and a
+  declared cohort on the exact bytes of its parts, never a 64-bit hash, so it is
+  the totality and injectivity of the declaration — not a hash width — that keeps
+  two principals, or two distinct cohorts, from ever sharing one render.
+- `Persistence::load` and `read_many` must stay non-locking; the row lock that
+  serialises concurrent commands on one key belongs in `Persistence::lock`, a
+  `SELECT … FOR UPDATE` on the row (or snapshot) key. A slice whose commands
+  read-modify-write one key must implement `lock`; its default is a no-op, which
+  is correct only for a slice that needs no cross-command serialisation of a key.
 
 ## Deployment constraint
 
