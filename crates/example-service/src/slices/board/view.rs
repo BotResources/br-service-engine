@@ -4,7 +4,7 @@ use service_engine::gate::{Affordances, Gated};
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::view::{Populate, Projector};
-use service_engine::visibility::Visibility;
+use service_engine::visibility::{Unrestricted, Visibility};
 use uuid::Uuid;
 
 use super::aggregate::{Board, BoardRow, BoardState};
@@ -48,6 +48,7 @@ impl Projector for BoardsView {
     type Store = BoardStore;
     type Query = BoardFilter;
     type Out = BoardView;
+    type Visibility = Board;
 
     const NAME: ProjectorName = Self::NAME;
 
@@ -80,6 +81,7 @@ impl Projector for OrgBoardsRls {
     type Store = BoardStore;
     type Query = ();
     type Out = BoardView;
+    type Visibility = Unrestricted<BoardRow, AppPrincipal>;
 
     const NAME: ProjectorName = Self::NAME;
 

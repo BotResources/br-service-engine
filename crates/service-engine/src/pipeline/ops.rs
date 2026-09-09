@@ -10,12 +10,13 @@ use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, SealHash};
 use crate::blobs::{Blob, BlobHandle, BlobRef, BlobRowOp, Blobs};
 use crate::erase::PersonId;
 use crate::error::EngineError;
-use crate::impact::{Dims, Impact};
+use crate::impact::{Deps, Dims, Impact};
 use crate::inbound::ReactionMessage;
 use crate::offers::OfferStagers;
 use crate::persistence::{Aggregate, Persistence};
 use crate::pipeline::outbound::{OutboundCommand, OutboundEvent, command_record, event_record};
 use crate::pipeline::staged::{ScheduledMessage, Staged};
+use crate::principal::PrincipalId;
 use crate::time::Timestamp;
 use crate::wire::{Cause, Noun, encode_key};
 
@@ -151,6 +152,12 @@ impl<'a> Ops<'a> {
             .impacts
             .push(Impact::resource_caused::<N>(key, Dims::ALL, cause)?);
         Ok(())
+    }
+
+    pub fn impact_principal_facts(&mut self, principal: PrincipalId, deps: Deps) {
+        self.staged
+            .impacts
+            .push(Impact::principal_facts(principal, deps));
     }
 
     pub fn impact_at<N: Noun>(&mut self, at: Timestamp, key: &N::Key) -> Result<(), EngineError> {

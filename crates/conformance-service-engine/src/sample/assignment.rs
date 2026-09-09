@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::impact::{Dims, ForeignKey};
 use service_engine::name::{NounName, ProjectorName};
+use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
 use service_engine::population::{Inverse, Population};
 use service_engine::projector::{LoadScope, Projector};
 use service_engine::session::WindowParams;
 use service_engine::wire::Noun;
-use sqlx::{PgPool, Row};
+use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
 use crate::sample::principal::SamplePrincipal;
@@ -43,6 +44,111 @@ pub struct AssignmentRow {
     pub tenant_id: Uuid,
     pub title: String,
     pub closed: bool,
+}
+
+pub struct AssignmentStore;
+
+impl Persistence for AssignmentStore {
+    type Aggregate = AssignmentRow;
+    type Key = Uuid;
+    type Event = ();
+
+    const STYLE: PersistenceStyle = PersistenceStyle::Crud;
+
+    fn load<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<Option<AssignmentRow>, EngineError>> {
+        Box::pin(async move {
+            let row = sqlx::query(
+                "SELECT id, tenant_id, title, closed FROM sample_assignment WHERE id = $1",
+            )
+            .bind(key)
+            .fetch_optional(conn)
+            .await?;
+            Ok(row.map(|row| AssignmentRow {
+                id: row.get("id"),
+                tenant_id: row.get("tenant_id"),
+                title: row.get("title"),
+                closed: row.get("closed"),
+            }))
+        })
+    }
+
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, AssignmentRow)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id, tenant_id, title, closed FROM sample_assignment WHERE id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let assignment = AssignmentRow {
+                        id: row.get("id"),
+                        tenant_id: row.get("tenant_id"),
+                        title: row.get("title"),
+                        closed: row.get("closed"),
+                    };
+                    (assignment.id, assignment)
+                })
+                .collect())
+        })
+    }
+
+    fn save<'a>(
+        conn: &'a mut PgConnection,
+        aggregate: &'a AssignmentRow,
+        _events: &'a [()],
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO sample_assignment (id, tenant_id, title, closed) \
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET \
+                   tenant_id = EXCLUDED.tenant_id, title = EXCLUDED.title, closed = EXCLUDED.closed",
+            )
+            .bind(aggregate.id)
+            .bind(aggregate.tenant_id)
+            .bind(&aggregate.title)
+            .bind(aggregate.closed)
+            .execute(conn)
+            .await?;
+            Ok(())
+        })
+    }
+
+    fn create<'a>(
+        conn: &'a mut PgConnection,
+        aggregate: &'a AssignmentRow,
+        _events: &'a [()],
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO sample_assignment (id, tenant_id, title, closed) \
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(aggregate.id)
+            .bind(aggregate.tenant_id)
+            .bind(&aggregate.title)
+            .bind(aggregate.closed)
+            .execute(conn)
+            .await?;
+            Ok(())
+        })
+    }
+}
+
+impl Aggregate for AssignmentRow {
+    type Store = AssignmentStore;
+
+    fn key(&self) -> Uuid {
+        self.id
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]

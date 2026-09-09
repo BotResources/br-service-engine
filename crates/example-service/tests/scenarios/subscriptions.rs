@@ -67,6 +67,89 @@ async fn a_subscriber_receives_reset_then_an_upsert_with_its_cause_over_the_wire
 }
 
 #[tokio::test]
+async fn a_membership_change_grants_then_revokes_a_board_on_a_live_session_both_directions() {
+    let world = World::start("pod-sub-visibility").await;
+    let org_a = Uuid::now_v7();
+    let org_b = Uuid::now_v7();
+    let owner_id = Uuid::now_v7();
+    let subscriber_id = Uuid::now_v7();
+    let owner = passport(owner_id, org_a, &[BOARD_ARCHIVE], false);
+    let subscriber = passport(subscriber_id, org_b, &[], false);
+
+    let board = Uuid::now_v7();
+    ok(&world
+        .gql(
+            &owner,
+            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            serde_json::json!({ "id": board, "n": "Private A" }),
+        )
+        .await);
+
+    let query = "subscription{boardDeltas{\
+        __typename \
+        ... on BoardReset{revision views{... on BoardView{id name}}} \
+        ... on BoardUpsert{revision view{... on BoardView{id name}}} \
+        ... on BoardRemove{revision projector key}}}";
+    let mut sub = Subscription::open(&world.subscription_url(), &subscriber, query).await;
+
+    let reset = sub.next_payload(RECV).await;
+    assert_eq!(reset["boardDeltas"]["__typename"], "BoardReset");
+    let sees_board = reset["boardDeltas"]["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["id"] == board.to_string());
+    assert!(
+        !sees_board,
+        "an outsider of another org is not a member and never sees the private board on attach"
+    );
+
+    ok(&world
+        .gql(
+            &owner,
+            "mutation($b:UUID!,$u:UUID!){setBoardMembership(boardId:$b,userId:$u,member:true){success}}",
+            serde_json::json!({ "b": board, "u": subscriber_id }),
+        )
+        .await);
+
+    let granted = loop {
+        let delta = sub.next_payload(RECV).await;
+        if delta["boardDeltas"]["__typename"] == "BoardUpsert"
+            && delta["boardDeltas"]["view"]["id"] == board.to_string()
+        {
+            break delta;
+        }
+    };
+    assert_eq!(
+        granted["boardDeltas"]["view"]["name"], "Private A",
+        "granting the membership repopulates the window and the board arrives as an Upsert"
+    );
+
+    ok(&world
+        .gql(
+            &owner,
+            "mutation($b:UUID!,$u:UUID!){setBoardMembership(boardId:$b,userId:$u,member:false){success}}",
+            serde_json::json!({ "b": board, "u": subscriber_id }),
+        )
+        .await);
+
+    let revoked = loop {
+        let delta = sub.next_payload(RECV).await;
+        if delta["boardDeltas"]["__typename"] == "BoardRemove"
+            && delta["boardDeltas"]["key"] == board.to_string()
+        {
+            break delta;
+        }
+    };
+    assert_eq!(
+        revoked["boardDeltas"]["projector"], "boards",
+        "revoking the membership removes the board that is no longer visible, on the live session"
+    );
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
 async fn a_reply_upsert_carries_the_seal_cause_over_the_wire() {
     use example_contract::ReplyFinished;
     use example_service::slices::reply::ReplyText;

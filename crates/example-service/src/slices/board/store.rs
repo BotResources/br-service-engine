@@ -187,3 +187,16 @@ pub async fn add_member(
     .await?;
     Ok(())
 }
+
+pub async fn remove_member(
+    conn: &mut PgConnection,
+    board: Uuid,
+    user: Uuid,
+) -> Result<(), EngineError> {
+    sqlx::query("DELETE FROM board_member WHERE board_id = $1 AND user_id = $2")
+        .bind(board)
+        .bind(user)
+        .execute(conn)
+        .await?;
+    Ok(())
+}

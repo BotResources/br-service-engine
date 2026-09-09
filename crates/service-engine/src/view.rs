@@ -17,6 +17,7 @@ use crate::population::{Inverse, Population};
 use crate::principal::Principal;
 use crate::projector::{Emission, LoadScope, Projector as RawProjector};
 use crate::session::WindowParams;
+use crate::visibility::Visibility;
 use crate::wire::Noun;
 
 pub struct Populate<'a, P: Principal> {
@@ -48,6 +49,7 @@ pub trait Projector: Send + Sync + 'static {
     type Store: Persistence<Key = ViewKey<Self>>;
     type Query: Serialize + DeserializeOwned + Default + Send + Sync + 'static;
     type Out: Clone + PartialEq + Serialize + Send + Sync + 'static;
+    type Visibility: Visibility<Row = ViewRow<Self>, Principal = Self::Principal>;
 
     const NAME: ProjectorName;
 
@@ -57,6 +59,10 @@ pub trait Projector: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Population<ViewKey<Self>>, EngineError>> + Send;
 
     fn project(row: &ViewRow<Self>, principal: &Self::Principal) -> Self::Out;
+
+    fn visible(row: &ViewRow<Self>, principal: &Self::Principal) -> bool {
+        <Self::Visibility as Visibility>::visible(row, principal)
+    }
 
     fn emission() -> Emission {
         Emission::Coalesced
@@ -159,6 +165,10 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
         key: &ViewKey<V>,
         principal: &V::Principal,
     ) -> Option<V::Out> {
-        facts.rows.get(key).map(|row| V::project(row, principal))
+        facts
+            .rows
+            .get(key)
+            .filter(|row| V::visible(row, principal))
+            .map(|row| V::project(row, principal))
     }
 }

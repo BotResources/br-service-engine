@@ -1,11 +1,15 @@
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
+use service_engine::impact::Deps;
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
+use service_engine::principal::PrincipalId;
 use uuid::Uuid;
 
 use super::aggregate::{Board, BoardCause, BoardRow, BoardState};
 use super::store;
 use crate::kernel::{AppFault, AppPrincipal};
+
+pub const BOARD_MEMBERSHIP_DEP: u8 = 0;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBoard {
@@ -91,5 +95,41 @@ pub fn mint_board_invite<'m>(
         let token = format!("invite-{}-{}", board.id.simple(), Uuid::now_v7().simple());
         cx.impact_caused::<Board, _>(&board.id, BoardCause::InviteMinted)?;
         Ok(OneShot(token))
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetBoardMembership {
+    pub board_id: Uuid,
+    pub user_id: Uuid,
+    pub member: bool,
+}
+
+impl MutationInput for SetBoardMembership {
+    type Output = ();
+    type Error = AppFault;
+    const NAME: &'static str = "set_board_membership";
+}
+
+pub fn set_board_membership<'m>(
+    cx: &'m mut Mutation<'m, AppPrincipal>,
+    input: SetBoardMembership,
+) -> BoxFuture<'m, Result<(), AppFault>> {
+    Box::pin(async move {
+        let board = cx
+            .load::<BoardRow>(&input.board_id)
+            .await?
+            .ok_or(AppFault::NotFound)?;
+        board.manage_members_gate(cx.principal()).require()?;
+        if input.member {
+            store::add_member(cx.connection(), input.board_id, input.user_id).await?;
+        } else {
+            store::remove_member(cx.connection(), input.board_id, input.user_id).await?;
+        }
+        cx.impact_principal_facts(
+            PrincipalId::from(input.user_id),
+            Deps::bit(BOARD_MEMBERSHIP_DEP).expect("a declared dependency fits the bit set"),
+        );
+        Ok(())
     })
 }

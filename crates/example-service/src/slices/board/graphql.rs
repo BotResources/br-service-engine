@@ -5,7 +5,7 @@ use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
 
-use super::mutations::{ArchiveBoard, CreateBoard, MintBoardInvite};
+use super::mutations::{ArchiveBoard, CreateBoard, MintBoardInvite, SetBoardMembership};
 use super::view::{BoardFilter, BoardView, BoardsView, OrgBoardsRls};
 use crate::kernel::AppPrincipal;
 
@@ -25,6 +25,7 @@ pub const FRAGMENT: SliceFragment = SliceFragment {
         "createBoard",
         "archiveBoard",
         "mintBoardInvite",
+        "setBoardMembership",
     ],
     types: &["BoardView"],
 };
@@ -85,6 +86,24 @@ impl BoardMutation {
             service_engine::execute::<AppPrincipal, MintBoardInvite>(ctx, MintBoardInvite { id })
                 .await?;
         Ok(token.into_inner())
+    }
+
+    async fn set_board_membership(
+        &self,
+        ctx: &Context<'_>,
+        board_id: Uuid,
+        user_id: Uuid,
+        member: bool,
+    ) -> Result<MutationAck> {
+        service_engine::ack::<AppPrincipal, SetBoardMembership>(
+            ctx,
+            SetBoardMembership {
+                board_id,
+                user_id,
+                member,
+            },
+        )
+        .await
     }
 }
 

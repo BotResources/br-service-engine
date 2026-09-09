@@ -3,6 +3,7 @@ use service_engine::error::EngineError;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::view::{Populate, Projector};
+use service_engine::visibility::Unrestricted;
 use uuid::Uuid;
 
 use super::aggregate::Card;
@@ -43,6 +44,7 @@ impl Projector for CardsView {
     type Store = CardStore;
     type Query = BoardWindow;
     type Out = CardView;
+    type Visibility = Unrestricted<CardAggregate, AppPrincipal>;
 
     const NAME: ProjectorName = Self::NAME;
 
