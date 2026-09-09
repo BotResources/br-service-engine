@@ -40,13 +40,12 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine.register_mutation::<mutations::SetTyping, _>(mutations::set_typing)?;
     engine.register_mutation::<mutations::CancelReply, _>(mutations::cancel_reply)?;
     engine.register_mutation::<mutations::AttachReply, _>(mutations::attach_reply)?;
+    if engine.blobs_configured() {
+        engine.register_blobs::<blob::Attachment>(BlobPolicy {
+            max_bytes: 50 << 20,
+            orphan_after: Duration::from_secs(24 * 60 * 60),
+        })?;
+    }
     engine.register_schema_slice(graphql::FRAGMENT)?;
     Ok(())
-}
-
-pub fn register_blobs(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
-    engine.register_blobs::<blob::Attachment>(BlobPolicy {
-        max_bytes: 50 << 20,
-        orphan_after: Duration::from_secs(24 * 60 * 60),
-    })
 }

@@ -1,3 +1,4 @@
+mod compose;
 mod error;
 mod mutation;
 mod principal;

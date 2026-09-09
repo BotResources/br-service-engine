@@ -160,6 +160,10 @@ impl<P: Principal> Engine<P> {
         self.presence.handle().present::<Pr>(key, value).await
     }
 
+    pub fn blobs_configured(&self) -> bool {
+        self.config.blob.is_some()
+    }
+
     pub fn register_blobs<B: crate::blobs::Blobs>(
         &mut self,
         policy: crate::blobs::BlobPolicy,

@@ -81,14 +81,8 @@ pub async fn assemble(
     readiness: ReadinessHandle,
     options: &BootOptions,
 ) -> Result<(Engine<AppPrincipal>, axum::Router), EngineError> {
-    let with_blobs = config.blob.is_some();
     let mut engine = Engine::<AppPrincipal>::boot(config, pool, nats, readiness.clone()).await?;
     crate::register::all(&mut engine)?;
-    #[cfg(feature = "reply")]
-    if with_blobs {
-        crate::slices::reply::register_blobs(&mut engine)?;
-    }
-    let _ = with_blobs;
     if options.declare_scopes {
         engine.declare_scopes(crate::register::scopes())?;
     }
