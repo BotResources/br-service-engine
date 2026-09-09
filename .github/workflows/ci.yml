@@ -256,3 +256,58 @@ jobs:
         run: cargo test -p conformance-service-engine --all-targets --locked
       - name: example service e2e
         run: cargo test -p example-service --all-targets --locked -- --test-threads=3
+
+  conformance-blackbox:
+    name: conformance-service-engine black-box (real binary)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      E2E_PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: blackbox
+      - name: install nats-server
+        env:
+          NATS_SERVER_VERSION: v2.14.1
+        run: |
+          set -euo pipefail
+          url="https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_VERSION}/nats-server-${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/nats-server.tar.gz
+          tar -xzf /tmp/nats-server.tar.gz -C /tmp
+          sudo install "/tmp/nats-server-${NATS_SERVER_VERSION}-linux-amd64/nats-server" /usr/local/bin/nats-server
+          nats-server --version
+      - name: build the example service and twin binaries
+        run: |
+          cargo build --locked \
+            -p example-service --bin example-service \
+            -p example-twin --bin example-twin
+      - name: black-box battery against the built binaries
+        env:
+          EXAMPLE_SERVICE_BIN: ${{ github.workspace }}/target/debug/example-service
+          EXAMPLE_TWIN_BIN: ${{ github.workspace }}/target/debug/example-twin
+        run: |
+          cargo test -p conformance-service-engine --locked \
+            --test bb01_readiness_and_two_pods \
+            --test bb02_mutation_gate_and_affordance \
+            --test bb03_subscription_reset_and_reconnect \
+            --test bb04_cross_service_cycle_twin_binary \
+            --test bb05_seal_streamed_reply
