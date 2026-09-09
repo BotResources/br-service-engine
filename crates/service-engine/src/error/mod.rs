@@ -145,6 +145,17 @@ pub enum EngineError {
     #[error("boot posture: {0}")]
     Posture(String),
 
+    #[error(
+        "schema version conflict: a live pod runs engine {live_engine} / service {live_service}, \
+         this pod is engine {engine_version} / service {service_version}"
+    )]
+    SchemaVersionConflict {
+        live_engine: String,
+        live_service: String,
+        engine_version: String,
+        service_version: String,
+    },
+
     #[error("the {probe} probe did not complete within {timeout:?}")]
     ProbeTimeout {
         probe: &'static str,

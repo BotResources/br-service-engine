@@ -27,6 +27,7 @@ pub const FRAGMENT: SliceFragment = SliceFragment {
     slice: "reply",
     root_fields: &[
         "reply",
+        "replyDownload",
         "replyDeltas",
         "typingDeltas",
         "startReply",
@@ -51,6 +52,18 @@ impl ReplyQuery {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view::<RepliesView>(&id)
             .await
+    }
+
+    async fn reply_download(
+        &self,
+        ctx: &Context<'_>,
+        reply_id: Uuid,
+        reference: Uuid,
+    ) -> Result<Option<String>> {
+        Ok(Query::<AppPrincipal>::new(ctx)?
+            .download::<RepliesView>(&reply_id, service_engine::BlobRef(reference))
+            .await?
+            .map(|url| url.into_string()))
     }
 }
 

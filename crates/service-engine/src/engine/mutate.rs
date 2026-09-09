@@ -49,6 +49,7 @@ impl<P: Principal> Engine<P> {
             self.mutation_executor(),
             self.render_runtime(),
             self.pg.clone(),
+            self.blobs.store_slot(),
         )
     }
 }

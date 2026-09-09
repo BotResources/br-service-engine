@@ -20,6 +20,7 @@ type ReplyMutation {
 
 type ReplyQuery {
 	reply(id: UUID!): ReplyView
+	replyDownload(replyId: UUID!, reference: UUID!): String
 }
 
 type ReplyRemove {
@@ -51,6 +52,7 @@ type ReplyView {
 	text: String!
 	status: String!
 	hasAttachment: Boolean!
+	attachment: UUID
 	affordances: Affordances!
 }
 

@@ -55,13 +55,6 @@ impl<P: Principal> Engine<P> {
         }
     }
 
-    pub async fn download_url(
-        &self,
-        reference: BlobRef,
-    ) -> Result<Option<DownloadUrl>, EngineError> {
-        self.blob_reader().download_url(reference).await
-    }
-
     pub async fn purge_person_blobs(&self, person: PersonId) -> Result<u64, EngineError> {
         self.blob_reader().purge_person(person).await
     }

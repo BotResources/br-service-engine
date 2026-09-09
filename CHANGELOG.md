@@ -64,6 +64,15 @@ returns `AttachError::ShuttingDown`.
 - Boot posture assertion (`assert_posture`: no superuser, no `rolbypassrls`, no
   ownership or membership of the engine schema/database) and the boot listener
   probe that holds readiness DOWN behind a transaction-mode pooler.
+- Schema-version singleton (`service_engine.schema_version`, one row): boot claims
+  it after the posture check under a per-service advisory lock, writing the engine
+  version and the configured service version. A pod that finds a **different**
+  version whose row is still live (heartbeat within `schema_version_liveness`,
+  default 30s, refreshed by the beat) refuses to go UP — `Engine::boot` returns
+  `EngineError::SchemaVersionConflict` and readiness stays DOWN with both versions
+  in the reason — so a rolling deploy configured by mistake fails loud instead of
+  two versions sharing one store; a stale row (heartbeat lapsed) never blocks. The
+  service version is `EngineConfig::with_service_version`.
 - `Timestamp`, a newtype truncated to microseconds at construction, so every
   instant crossing the PostgreSQL `timestamptz` boundary round-trips equal.
 
@@ -199,7 +208,14 @@ carries `content-length-range = [0, max_bytes]`, so an oversize object is refuse
 at upload and never lands; `DownloadUrl` is a presigned GET. Neither is
 `Serialize` (the POST carries endpoint + signed fields, not a URL string), so —
 like `OneShot` — neither can enter a view, impact, offer, outbox row or chunk;
-only the opaque reference travels. The beat reaper's scope is exactly two
+only the opaque reference travels. A download URL is minted only through the
+gated `Query::download::<View>(key, reference)` gesture, never from a bare
+reference: because a reference travels in a view, a bare-reference presign would
+be a permanent bearer capability outliving the row and the viewer. `download`
+takes the same visibility path as `fetch` — it presigns only when the caller can
+currently see the referencing view and the loaded aggregate still lists the
+reference in `Aggregate::blob_refs`, and resolves to `None` otherwise (the
+authorization is the view's own gate, one code path with `fetch`). The beat reaper's scope is exactly two
 categories — an incomplete upload (a `pending` row past `orphan_after` whose
 object never landed) and an unreferenced blob (a reference released past
 `orphan_after`, whose object it deletes) — and it promotes a completed upload,
@@ -318,7 +334,7 @@ degrade-table dependency is a `dependency_up` gauge. Four alerts ship as a
 (`ignore_missing`) with `grant_engine_access`: `scheduled_impact`, `leader_slot`,
 `accumulator_chunk`, `accumulator_seal`, `kv_relay_watermark`, `message_claim`,
 `sequence_guard`, `dead_letter`, `scheduled_message`, `offer_dirty`, `blob`,
-`person_erasure`. Scheduled boundaries are claimed against the database clock,
+`person_erasure`, `schema_version`. Scheduled boundaries are claimed against the database clock,
 never the pod clock. The app-role grant includes `USAGE, SELECT` on the engine
 schema's sequences.
 

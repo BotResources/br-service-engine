@@ -3,13 +3,15 @@ use sqlx::{PgPool, Row};
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
-use crate::schema::SCHEMA;
+use crate::schema::{ENGINE_SCHEMA_VERSION, SCHEMA};
+use crate::schema_version::{claim_schema_version, version_conflict_reason};
 use crate::transport::PgListenNotify;
 use crate::transport::probe::{ListenerProbe, POOLER_REASON};
 
 pub const REASON_POSTURE: &str = "verifying the PostgreSQL boot posture";
 pub const REASON_POSTURE_REFUSED: &str = "the PostgreSQL boot posture was refused: the engine \
                                           must run under the low-privilege application role";
+pub const REASON_SCHEMA_VERSION: &str = "claiming the schema version singleton";
 pub const REASON_LISTEN: &str = "establishing the impact listener";
 pub const REASON_LISTEN_FAILED: &str = "the impact listener could not be established";
 pub const REASON_MIRRORS: &str = "waiting for the registered mirrors to converge";
@@ -32,6 +34,33 @@ pub async fn establish_transport_with_probe(
     if let Err(e) = assert_posture(&pool).await {
         tracing::error!(error = %e, "the PostgreSQL boot posture was refused");
         readiness.set_not_ready(REASON_POSTURE_REFUSED);
+        return Err(e);
+    }
+    readiness.set_not_ready(REASON_SCHEMA_VERSION);
+    if let Err(e) = claim_schema_version(
+        &pool,
+        ENGINE_SCHEMA_VERSION,
+        config.schema_service_version(),
+        config.pod_id.as_str(),
+        config.schema_version_liveness,
+    )
+    .await
+    {
+        if let EngineError::SchemaVersionConflict {
+            live_engine,
+            live_service,
+            engine_version,
+            service_version,
+        } = &e
+        {
+            let reason =
+                version_conflict_reason(live_engine, live_service, engine_version, service_version);
+            tracing::error!(reason = %reason, "refusing to go UP: a different schema version is live");
+            readiness.set_not_ready(reason);
+        } else {
+            tracing::error!(error = %e, "the schema version singleton could not be claimed");
+            readiness.set_not_ready(REASON_SCHEMA_VERSION);
+        }
         return Err(e);
     }
     readiness.set_not_ready(REASON_LISTEN);

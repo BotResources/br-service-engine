@@ -138,8 +138,18 @@ owner, size and state) inside the pipeline transaction, so it commits with the
 referencing aggregate and a rollback leaves no row; it returns a typed
 `UploadUrl` — an S3 SigV4 **presigned POST** carrying a policy whose
 `content-length-range` is `[0, max_bytes]`, so an object over the cap is refused
-by object storage at upload and can never land — and `Engine::download_url` a
-`DownloadUrl`, an S3 SigV4 presigned GET, both short-lived. The bytes flow
+by object storage at upload and can never land. A download `DownloadUrl` — an S3
+SigV4 presigned GET, short-lived — is minted only through the gated
+`Query::download::<View>(key, reference)` gesture, never from a bare reference: a
+reference travels in a view by design, so a bare-reference presign would make it a
+permanent bearer capability that outlives the row and the viewer. `download`
+takes the same visibility path as `fetch` — it presigns only when the caller can
+currently see the referencing view (`populate` → membership) **and** the loaded
+referencing aggregate still lists the reference in `Aggregate::blob_refs`; a
+non-viewer, or a reference the named aggregate no longer holds, resolves to
+`None`. A resolver therefore mints a download through `Query::download` and never
+through a raw presign; the reference reply slice's `replyDownload(replyId,
+reference)` field is the reference resolver. The bytes flow
 client-to-storage directly, so `size` is unknown at commit and is recorded from
 the object's head when the reaper first sees the upload has completed (promoting
 the row to `uploaded`), independent of the orphan window. A reference whose
@@ -409,6 +419,20 @@ No transaction-mode pooler in front of an engine service: the realtime
 transport holds a session-level `LISTEN`, which such a pooler drops silently —
 the engine proves the path with a boot probe and holds readiness DOWN when it
 fails, so a mispooled service never becomes ready.
+
+Recreate, never a rolling deploy: two versions must never share the store, since
+the engine schema and the service migrations move with the version. Boot enforces
+this after the posture check — it claims a single-row `service_engine.schema_version`
+(engine version, service version, pod, heartbeat) under a per-service advisory
+lock. A pod that finds a **different** version whose row is still live (its
+heartbeat inside `schema_version_liveness`, default 30s, refreshed by the beat)
+refuses to go UP: `Engine::boot` returns `EngineError::SchemaVersionConflict` and
+readiness stays DOWN with both versions named in the reason, turning a
+mis-configured rolling deploy into a loud failure instead of two versions quietly
+sharing one store. A stale row (a pod that died more than `schema_version_liveness`
+ago, so its heartbeat lapsed) never blocks — the booting pod claims the row. The
+service version comes from `EngineConfig::with_service_version`; the engine version
+is the engine crate's own version.
 
 ## Configuration, degradation and observability
 

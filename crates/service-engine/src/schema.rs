@@ -5,6 +5,8 @@ use crate::error::EngineError;
 
 pub const SCHEMA: &str = "service_engine";
 
+pub const ENGINE_SCHEMA_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub const RESERVED_VERSION_MIN: i64 = 9_113_000_001;
 pub const RESERVED_VERSION_MAX: i64 = 9_113_999_999;
 
@@ -20,6 +22,7 @@ pub const TABLE_SCHEDULED_MESSAGE: &str = "service_engine.scheduled_message";
 pub const TABLE_OFFER_DIRTY: &str = "service_engine.offer_dirty";
 pub const TABLE_BLOB: &str = "service_engine.blob";
 pub const TABLE_PERSON_ERASURE: &str = "service_engine.person_erasure";
+pub const TABLE_SCHEMA_VERSION: &str = "service_engine.schema_version";
 
 pub const TABLES: &[&str] = &[
     TABLE_SCHEDULED_IMPACT,
@@ -34,6 +37,7 @@ pub const TABLES: &[&str] = &[
     TABLE_OFFER_DIRTY,
     TABLE_BLOB,
     TABLE_PERSON_ERASURE,
+    TABLE_SCHEMA_VERSION,
 ];
 
 const MAX_ROLE_NAME_LEN: usize = 63;
@@ -110,7 +114,7 @@ mod tests {
 
     #[test]
     fn every_engine_table_lives_in_the_engines_own_schema() {
-        assert_eq!(TABLES.len(), 12);
+        assert_eq!(TABLES.len(), 13);
         for table in TABLES {
             assert!(table.starts_with(&format!("{SCHEMA}.")));
         }

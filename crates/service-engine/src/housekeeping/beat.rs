@@ -45,6 +45,7 @@ pub struct Beat {
     repairs: Option<Arc<dyn RepairRetry>>,
     blob_reaper: Option<BlobReaper>,
     listener_queue_threshold: f64,
+    schema_version: (String, String),
 }
 
 impl Beat {
@@ -64,6 +65,10 @@ impl Beat {
             repairs: None,
             blob_reaper: None,
             listener_queue_threshold: config.listener_queue_threshold,
+            schema_version: (
+                crate::schema::ENGINE_SCHEMA_VERSION.to_string(),
+                config.schema_service_version().to_string(),
+            ),
         })
     }
 
@@ -152,6 +157,7 @@ impl Beat {
         let cron = self.cron.beat(pg).await;
         let scheduled = self.fire_boundaries().await;
         let gc = self.gc.sweep(pg, self.cron.slot_retention()).await;
+        self.refresh_schema_version(pg).await;
         let blobs = match &mut self.blob_reaper {
             Some(reaper) => reaper.sweep(pg).await,
             None => ReaperRound::default(),
@@ -177,6 +183,18 @@ impl Beat {
     fn apply_listener_brake(&self, queue_usage: Option<f64>) {
         if let (Some(transport), Some(usage)) = (&self.transport, queue_usage) {
             transport.set_brake(usage >= self.listener_queue_threshold);
+        }
+    }
+
+    async fn refresh_schema_version(&self, pg: &PgPool) {
+        let (engine_version, service_version) = &self.schema_version;
+        if let Err(error) =
+            crate::schema_version::refresh_schema_version(pg, engine_version, service_version).await
+        {
+            tracing::warn!(
+                reason = %describe(&error),
+                "the beat could not refresh the schema version heartbeat",
+            );
         }
     }
 
