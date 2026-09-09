@@ -99,7 +99,8 @@ where
         *self.shadows.write().await = shadows;
         *self.read_revision.write().await = read_revision.clone();
         *self.last_seen.write().await = read_revision.clone();
-        self.converge_as_leader_or_wait(touched, &read_revision).await
+        self.converge_as_leader_or_wait(touched, &read_revision)
+            .await
     }
 
     async fn watch_forever(&self) -> Result<(), EngineError> {
@@ -209,7 +210,9 @@ where
             if loaded.entries.is_empty() {
                 return Err(empty_prefix(consumption.prefix));
             }
-            let entry = read_revision.entry(consumption.bucket.to_string()).or_insert(0);
+            let entry = read_revision
+                .entry(consumption.bucket.to_string())
+                .or_insert(0);
             *entry = (*entry).max(loaded.read_revision);
             for (key, apply) in loaded.entries {
                 changes.push(Change {
@@ -227,7 +230,11 @@ where
         })
     }
 
-    async fn touched_for(&self, shadows: &Shadows, changes: &[Change]) -> Result<Vec<K>, EngineError> {
+    async fn touched_for(
+        &self,
+        shadows: &Shadows,
+        changes: &[Change],
+    ) -> Result<Vec<K>, EngineError> {
         let mut touched = self.join_keys(shadows, changes);
         if let Some(reconcile_keys) = self.reconcile_keys.as_ref() {
             let existing = reconcile_keys(self.pool.clone()).await?;

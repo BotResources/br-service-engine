@@ -35,8 +35,7 @@ pub(super) struct Loaded {
     pub(super) read_revision: u64,
 }
 
-type LoadFn =
-    Arc<dyn Fn(Nats) -> BoxFuture<'static, Result<Loaded, EngineError>> + Send + Sync>;
+type LoadFn = Arc<dyn Fn(Nats) -> BoxFuture<'static, Result<Loaded, EngineError>> + Send + Sync>;
 type OpenWatchFn = Arc<
     dyn Fn(
             Nats,
@@ -71,8 +70,10 @@ impl Consumption {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
                 let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
-                let (entries, read_revision) =
-                    bucket.entries_with_revision(&prefix).await.map_err(service)?;
+                let (entries, read_revision) = bucket
+                    .entries_with_revision(&prefix)
+                    .await
+                    .map_err(service)?;
                 let entries = entries
                     .into_iter()
                     .map(|(key, value)| {

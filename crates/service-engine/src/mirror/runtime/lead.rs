@@ -23,7 +23,10 @@ where
             return Ok(());
         };
         loop {
-            if self.project_under_lease(touched.clone(), read_revision).await? {
+            if self
+                .project_under_lease(touched.clone(), read_revision)
+                .await?
+            {
                 return Ok(());
             }
             if self.watermark_caught_up(read_revision).await? {

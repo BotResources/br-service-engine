@@ -157,11 +157,12 @@ impl KnownScope for GroupMembers {
         conn: &'c mut PgConnection,
     ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
         Box::pin(async move {
-            let rows: Vec<Uuid> =
-                sqlx::query_scalar("DELETE FROM known_user_group WHERE group_id = $1 RETURNING user_id")
-                    .bind(self.0)
-                    .fetch_all(conn)
-                    .await?;
+            let rows: Vec<Uuid> = sqlx::query_scalar(
+                "DELETE FROM known_user_group WHERE group_id = $1 RETURNING user_id",
+            )
+            .bind(self.0)
+            .fetch_all(conn)
+            .await?;
             Ok(rows.into_iter().map(|id| id.to_string()).collect())
         })
     }

@@ -39,7 +39,8 @@ async fn s143_the_boot_join_merges_two_offers_and_retires_a_stale_group() {
     let group = Uuid::now_v7();
     publish_group(&fabric, group, "team", &[one, two]).await;
 
-    let mirror = staffing_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
+    let mirror =
+        staffing_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
     mirror
         .reconcile()
         .await
@@ -83,7 +84,8 @@ async fn s143_a_user_retract_reaches_every_group_the_user_was_joined_into() {
     let group = Uuid::now_v7();
     publish_group(&fabric, group, "team", &[one, two]).await;
 
-    let mirror = staffing_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
+    let mirror =
+        staffing_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
     mirror
         .reconcile()
         .await

@@ -93,10 +93,7 @@ pub trait Known: Send + Sync + 'static {
 
     fn foreign_key(&self) -> String;
 
-    fn upsert<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<(), EngineError>>;
+    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>>;
 }
 
 pub trait KnownScope: Send + Sync {

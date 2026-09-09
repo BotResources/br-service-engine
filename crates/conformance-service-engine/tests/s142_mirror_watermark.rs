@@ -225,7 +225,11 @@ async fn s142_the_periodic_reconcile_repairs_a_retract_the_watch_missed() {
         .fetch_all(&pool)
         .await
         .expect("read the repaired roster");
-    assert_eq!(present, vec![kept], "the periodic reconcile keeps only the offered user");
+    assert_eq!(
+        present,
+        vec![kept],
+        "the periodic reconcile keeps only the offered user"
+    );
 
     watched.abort();
     drop(nats);
