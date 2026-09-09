@@ -75,7 +75,10 @@ async fn s143_a_key_that_expires_while_nats_is_down_is_repaired_by_a_reseed_and_
     let deadline = tokio::time::Instant::now() + SOON;
     let mut saw_reset = false;
     let mut key_present = true;
-    while tokio::time::Instant::now() < deadline && !(saw_reset && !key_present) {
+    while tokio::time::Instant::now() < deadline {
+        if saw_reset && !key_present {
+            break;
+        }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         let Some(delta) = next_delta(&mut stream, remaining).await else {
             break;
@@ -88,12 +91,10 @@ async fn s143_a_key_that_expires_while_nats_is_down_is_repaired_by_a_reseed_and_
             key: removed,
             ..
         } = &delta
+            && projector == &Typing::NAME
+            && removed.decode::<TypingKey>().ok().as_ref() == Some(&key)
         {
-            if projector == &Typing::NAME
-                && removed.decode::<TypingKey>().ok().as_ref() == Some(&key)
-            {
-                key_present = false;
-            }
+            key_present = false;
         }
     }
 
