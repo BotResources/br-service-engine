@@ -16,12 +16,44 @@ impl Noun for Reply {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum ReplyCause {
+    Started,
+    Completed { chars: usize },
+    Attached,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplyRow {
     pub id: Uuid,
     pub board_id: Uuid,
     pub text: String,
     pub status: String,
     pub blob_ref: Option<Uuid>,
+}
+
+impl ReplyRow {
+    pub fn open(id: Uuid, board_id: Uuid) -> Self {
+        Self {
+            id,
+            board_id,
+            text: String::new(),
+            status: "streaming".to_string(),
+            blob_ref: None,
+        }
+    }
+
+    pub fn complete(&mut self, text: String) -> ReplyCause {
+        let chars = text.chars().count();
+        self.text = text;
+        self.status = "complete".to_string();
+        ReplyCause::Completed { chars }
+    }
+
+    pub fn attach(&mut self, blob: Uuid) -> ReplyCause {
+        self.blob_ref = Some(blob);
+        ReplyCause::Attached
+    }
 }
 
 fn row_to_reply(row: &sqlx::postgres::PgRow) -> ReplyRow {

@@ -3,7 +3,7 @@ use serde::Deserialize;
 use service_engine::pipeline::{Mutation, MutationInput};
 use uuid::Uuid;
 
-use super::aggregate::{Ledger, LedgerState};
+use super::aggregate::{Ledger, LedgerEvent, LedgerState};
 use super::store::{LedgerAggregate, snapshot_of_conn};
 use crate::kernel::{AppFault, AppPrincipal};
 
@@ -37,7 +37,13 @@ pub fn record_entry<'m>(
             .ok_or(AppFault::NotFound)?;
         ledger.0.record(input.amount, author)?;
         cx.save(&ledger).await?;
-        cx.impact_caused::<Ledger, _>(&input.id, "recorded")?;
+        cx.impact_caused::<Ledger, _>(
+            &input.id,
+            LedgerEvent::Recorded {
+                amount: input.amount,
+                author,
+            },
+        )?;
         Ok(())
     })
 }

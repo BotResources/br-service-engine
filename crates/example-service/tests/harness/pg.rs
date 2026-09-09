@@ -11,7 +11,10 @@ pub fn admin_url() -> String {
 }
 
 fn url_for(admin: &str, role: &str, database: &str) -> String {
-    let base = admin.split('@').next_back().unwrap_or("localhost:5432/postgres");
+    let base = admin
+        .split('@')
+        .next_back()
+        .unwrap_or("localhost:5432/postgres");
     let host_port = base.split('/').next().unwrap_or("localhost:5432");
     format!("postgresql://{role}:{ROLE_PASSWORD}@{host_port}/{database}")
 }

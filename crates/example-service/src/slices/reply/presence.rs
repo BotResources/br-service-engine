@@ -17,7 +17,7 @@ pub struct TypingValue {
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct TypingView {
     pub board: Uuid,
     pub user: Uuid,

@@ -1,6 +1,6 @@
 use example_contract::{
-    CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, card_ready_coords,
-    create_card_coords, person_created_coords,
+    CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, ReplyFinished,
+    card_ready_coords, create_card_coords, person_created_coords, reply_finished_coords,
 };
 use futures_util::StreamExt;
 use service_engine::nats::{KvKey, Nats, NatsError, command_subject, event_subject};
@@ -38,15 +38,10 @@ pub async fn send_person_created(nats: &Nats, event: &PersonCreated) -> Result<(
     Ok(())
 }
 
-#[cfg(feature = "reply")]
-pub async fn send_reply_finished(
-    nats: &Nats,
-    reply_id: Uuid,
-    board_id: Uuid,
-) -> Result<(), NatsError> {
-    let subject = command_subject(&crate::slices::reply::reply_finished_coords());
-    let payload = serde_json::json!({ "reply_id": reply_id, "board_id": board_id });
-    nats.publish_value_with_id(&subject, &payload, &reply_id.to_string())
+pub async fn send_reply_finished(nats: &Nats, finished: &ReplyFinished) -> Result<(), NatsError> {
+    let subject = command_subject(&reply_finished_coords());
+    let payload = serde_json::to_value(finished).map_err(NatsError::Encode)?;
+    nats.publish_value_with_id(&subject, &payload, &finished.reply_id.to_string())
         .await?;
     Ok(())
 }
@@ -66,7 +61,6 @@ pub async fn next_card_ready(nats: &Nats) -> Result<Option<CardReady>, NatsError
 }
 
 pub async fn card_ready_from_stream(nats: &Nats) -> Result<Option<CardReady>, NatsError> {
-    use futures_util::StreamExt;
     let subject = event_subject(&card_ready_coords());
     let stream = nats
         .context()

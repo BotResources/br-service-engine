@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::impact::ForeignKey;
+use service_engine::impact::{ForeignKey, Impact};
 use service_engine::name::{NounName, ProjectorName};
 use service_engine::population::{Inverse, Population};
-use service_engine::projector::{LoadScope, Projector};
+use service_engine::projector::{Emission, LoadScope, Projector};
 use service_engine::session::WindowParams;
 use service_engine::wire::Noun;
 use uuid::Uuid;
@@ -48,6 +48,10 @@ impl Projector for RepliesView {
     fn nouns(&self) -> &'static [NounName] {
         const NOUNS: &[NounName] = &[Reply::NAME];
         NOUNS
+    }
+
+    fn emission(&self, _impact: &Impact) -> Emission {
+        Emission::PerImpact
     }
 
     fn populate<'a>(

@@ -3,6 +3,8 @@ pub mod erase;
 pub mod graphql;
 mod mutations;
 mod store;
+#[cfg(test)]
+mod tests;
 mod view;
 
 use service_engine::Engine;

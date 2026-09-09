@@ -4,6 +4,8 @@ pub mod graphql;
 mod mutations;
 mod offer;
 mod store;
+#[cfg(test)]
+mod tests;
 mod view;
 
 pub use store::boards_of;

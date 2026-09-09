@@ -1,7 +1,7 @@
 use service_engine::ScopeManifest;
 
-pub const BOARD_ARCHIVE: &str = "example.board.archive";
-pub const CARD_ADVANCE: &str = "example.card.advance";
+pub const BOARD_ARCHIVE: &str = "example:board_archive";
+pub const CARD_ADVANCE: &str = "example:card_advance";
 
 pub const BOARD_SCOPES: &[&str] = &[BOARD_ARCHIVE];
 pub const CARD_SCOPES: &[&str] = &[CARD_ADVANCE];

@@ -5,7 +5,7 @@ use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
 
-use super::mutations::{AdvanceCard, ImportCards};
+use super::mutations::{AdvanceCard, ImportCards, ScheduleCardDeadline};
 use super::view::{BoardWindow, CardView, CardsView};
 use crate::kernel::AppPrincipal;
 
@@ -17,7 +17,14 @@ service_engine::subscription_union! {
 
 pub const FRAGMENT: SliceFragment = SliceFragment {
     slice: "card",
-    root_fields: &["card", "cards", "cardDeltas", "advanceCard", "importCards"],
+    root_fields: &[
+        "card",
+        "cards",
+        "cardDeltas",
+        "advanceCard",
+        "scheduleCardDeadline",
+        "importCards",
+    ],
     types: &["CardView"],
 };
 
@@ -47,6 +54,19 @@ pub struct CardMutation;
 impl CardMutation {
     async fn advance_card(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, AdvanceCard>(ctx, AdvanceCard { id }).await
+    }
+
+    async fn schedule_card_deadline(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        in_seconds: i64,
+    ) -> Result<MutationAck> {
+        service_engine::ack::<AppPrincipal, ScheduleCardDeadline>(
+            ctx,
+            ScheduleCardDeadline { id, in_seconds },
+        )
+        .await
     }
 
     async fn import_cards(

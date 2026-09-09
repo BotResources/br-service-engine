@@ -962,8 +962,10 @@ dependencies = [
  "br-util-postgres",
  "chrono",
  "example-contract",
+ "example-twin",
  "futures-util",
  "reqwest",
+ "rusty-s3",
  "serde",
  "serde_json",
  "service-engine",
@@ -971,6 +973,19 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "example-twin"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "example-contract",
+ "futures-util",
+ "serde_json",
+ "service-engine",
+ "tokio",
  "uuid",
 ]
 

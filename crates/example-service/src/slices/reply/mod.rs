@@ -5,6 +5,8 @@ mod mutations;
 mod presence;
 mod reactions;
 mod stream;
+#[cfg(test)]
+mod tests;
 mod view;
 mod wire;
 
@@ -16,13 +18,12 @@ use service_engine::{BlobPolicy, Engine};
 use crate::kernel::AppPrincipal;
 
 pub use stream::ReplyText;
-pub use wire::{ReplyFinished, reply_finished_coords};
 
 pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine.register_accumulator(stream::ReplyText)?;
     engine.register_presence::<presence::Typing>(Duration::from_secs(5))?;
     engine.register_projector(view::RepliesView)?;
-    engine.register_reaction::<wire::ReplyFinished, _, _>(
+    engine.register_reaction::<wire::InboundReplyFinished, _, _>(
         "reply-finished",
         reactions::reply_finished,
     )?;

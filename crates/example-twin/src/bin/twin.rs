@@ -1,5 +1,4 @@
 use example_contract::{CreateCard, PersonCreated, PublishedPerson};
-use example_service::twin;
 use service_engine::nats::Nats;
 use uuid::Uuid;
 
@@ -21,8 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         email: format!("{}@example.test", person_id.simple()),
         display_name: "Twin Person".to_string(),
     };
-    twin::publish_person(&nats, &person).await?;
-    twin::send_person_created(
+    example_twin::publish_person(&nats, &person).await?;
+    example_twin::send_person_created(
         &nats,
         &PersonCreated {
             person_id,
@@ -31,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )
     .await?;
-    twin::send_create_card(
+    example_twin::send_create_card(
         &nats,
         &CreateCard {
             card_id,
@@ -41,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    if let Some(ready) = twin::next_card_ready(&nats).await? {
+    if let Some(ready) = example_twin::next_card_ready(&nats).await? {
         println!("twin saw the main service confirm card {}", ready.card_id);
     }
     Ok(())

@@ -4,7 +4,7 @@ use service_engine::UploadUrl;
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
 use uuid::Uuid;
 
-use super::aggregate::{Reply, ReplyRow};
+use super::aggregate::{Reply, ReplyCause, ReplyRow};
 use super::blob::Attachment;
 use super::presence::{Typing, TypingKey, TypingValue};
 use crate::kernel::{AppFault, AppPrincipal};
@@ -26,15 +26,9 @@ pub fn start_reply<'m>(
     input: StartReply,
 ) -> BoxFuture<'m, Result<(), AppFault>> {
     Box::pin(async move {
-        let reply = ReplyRow {
-            id: input.id,
-            board_id: input.board_id,
-            text: String::new(),
-            status: "streaming".to_string(),
-            blob_ref: None,
-        };
+        let reply = ReplyRow::open(input.id, input.board_id);
         cx.create(&reply).await?;
-        cx.impact_caused::<Reply, _>(&reply.id, "started")?;
+        cx.impact_caused::<Reply, _>(&reply.id, ReplyCause::Started)?;
         Ok(())
     })
 }
@@ -91,9 +85,9 @@ pub fn attach_reply<'m>(
             .load::<ReplyRow>(&input.reply_id)
             .await?
             .ok_or(AppFault::NotFound)?;
-        reply.blob_ref = Some(blob.reference().as_uuid());
+        let cause = reply.attach(blob.reference().as_uuid());
         cx.save(&reply).await?;
-        cx.impact_caused::<Reply, _>(&reply.id, "attached")?;
+        cx.impact_caused::<Reply, _>(&reply.id, cause)?;
         Ok(OneShot(blob.upload_url()))
     })
 }

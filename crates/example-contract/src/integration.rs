@@ -36,6 +36,23 @@ pub fn card_ready_coords() -> EventCoords {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplyFinished {
+    pub reply_id: Uuid,
+    pub board_id: Uuid,
+    pub last_seq: u64,
+    pub hash: String,
+}
+
+pub fn reply_finished_coords() -> CommandCoords {
+    CommandCoords {
+        receiver: Bc::new(SERVICE).expect("service bc"),
+        aggregate: Aggregate::new("reply").expect("reply aggregate"),
+        verb: Verb::new("finish").expect("finish verb"),
+        version: 1,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonCreated {
     pub person_id: Uuid,
     pub board_id: Uuid,

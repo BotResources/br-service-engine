@@ -4,7 +4,7 @@ use futures_util::future::BoxFuture;
 use service_engine::pipeline::Reaction;
 use uuid::Uuid;
 
-use super::aggregate::{Card, CardState};
+use super::aggregate::{Card, CardEvent, CardState};
 use super::store::CardAggregate;
 use super::wire::{CardDeadline, InboundCreateCard, InboundPersonCreated, OutCardReady};
 use crate::kernel::error::ReactionFault;
@@ -21,6 +21,10 @@ pub fn create_card<'r>(
 ) -> BoxFuture<'r, Result<(), ReactionFault>> {
     Box::pin(async move {
         let cmd = msg.0;
+        let cause = CardEvent::Created {
+            board_id: cmd.board_id,
+            title: cmd.title.clone(),
+        };
         let card = CardAggregate(CardState::open(cmd.card_id, cmd.board_id, cmd.title));
         cx.create(&card).await?;
         cx.emit(OutCardReady(CardReady {
@@ -37,7 +41,7 @@ pub fn create_card<'r>(
                 card_id: cmd.card_id,
             },
         )?;
-        cx.impact_caused::<Card, _>(&cmd.card_id, "created")?;
+        cx.impact_caused::<Card, _>(&cmd.card_id, cause)?;
         Ok(())
     })
 }
@@ -49,13 +53,14 @@ pub fn person_created<'r>(
     Box::pin(async move {
         let event = msg.0;
         let card_id = welcome_card_id(event.person_id);
-        let card = CardAggregate(CardState::open(
-            card_id,
-            event.board_id,
-            format!("Welcome {}", event.display_name),
-        ));
+        let title = format!("Welcome {}", event.display_name);
+        let cause = CardEvent::Created {
+            board_id: event.board_id,
+            title: title.clone(),
+        };
+        let card = CardAggregate(CardState::open(card_id, event.board_id, title));
         cx.create(&card).await?;
-        cx.impact_caused::<Card, _>(&card_id, "welcomed")?;
+        cx.impact_caused::<Card, _>(&card_id, cause)?;
         Ok(())
     })
 }
@@ -70,7 +75,7 @@ pub fn card_deadline<'r>(
         };
         card.0.pass_deadline();
         cx.save(&card).await?;
-        cx.impact_caused::<Card, _>(&msg.card_id, "deadline")?;
+        cx.impact_caused::<Card, _>(&msg.card_id, CardEvent::DeadlinePassed)?;
         Ok(())
     })
 }

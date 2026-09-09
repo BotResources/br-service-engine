@@ -25,6 +25,14 @@ pub enum BoardState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum BoardCause {
+    Created,
+    Archived,
+    InviteMinted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BoardRow {
     pub id: Uuid,
     pub org_id: Uuid,

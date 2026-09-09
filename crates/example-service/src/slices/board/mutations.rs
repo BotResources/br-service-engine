@@ -3,7 +3,7 @@ use serde::Deserialize;
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
 use uuid::Uuid;
 
-use super::aggregate::{Board, BoardRow, BoardState};
+use super::aggregate::{Board, BoardCause, BoardRow, BoardState};
 use super::store;
 use crate::kernel::{AppFault, AppPrincipal};
 
@@ -36,7 +36,7 @@ pub fn create_board<'m>(
         };
         cx.create(&board).await?;
         store::add_member(cx.connection(), board.id, user).await?;
-        cx.impact_caused::<Board, _>(&board.id, "created")?;
+        cx.impact_caused::<Board, _>(&board.id, BoardCause::Created)?;
         Ok(())
     })
 }
@@ -63,7 +63,7 @@ pub fn archive_board<'m>(
             .ok_or(AppFault::NotFound)?;
         board.archive(cx.principal())?;
         cx.save(&board).await?;
-        cx.impact_caused::<Board, _>(&board.id, "archived")?;
+        cx.impact_caused::<Board, _>(&board.id, BoardCause::Archived)?;
         Ok(())
     })
 }
@@ -89,7 +89,7 @@ pub fn mint_board_invite<'m>(
             .await?
             .ok_or(AppFault::NotFound)?;
         let token = format!("invite-{}-{}", board.id.simple(), Uuid::now_v7().simple());
-        cx.impact_caused::<Board, _>(&board.id, "invited")?;
+        cx.impact_caused::<Board, _>(&board.id, BoardCause::InviteMinted)?;
         Ok(OneShot(token))
     })
 }

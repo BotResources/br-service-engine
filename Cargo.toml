@@ -5,6 +5,7 @@ members = [
     "crates/conformance-service-engine",
     "crates/example-contract",
     "crates/example-service",
+    "crates/example-twin",
 ]
 
 [workspace.package]
@@ -26,6 +27,7 @@ br-util-postgres = { git = "https://github.com/BotResources/br-rust-common", pac
 service-engine = { path = "crates/service-engine", version = "0.1.0" }
 example-contract = { path = "crates/example-contract", version = "0.1.0" }
 example-service = { path = "crates/example-service", version = "0.1.0" }
+example-twin = { path = "crates/example-twin", version = "0.1.0" }
 
 async-graphql = { version = "=7.0.19", features = ["uuid"] }
 async-graphql-axum = "=7.0.19"

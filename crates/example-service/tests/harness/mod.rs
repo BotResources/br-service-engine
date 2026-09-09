@@ -1,5 +1,8 @@
+pub mod minio;
 pub mod nats;
 pub mod pg;
+pub mod scopes;
+pub mod ws;
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -11,8 +14,11 @@ use service_engine::name::{ChannelName, PodId};
 use service_engine::nats::Nats;
 use uuid::Uuid;
 
+pub use minio::TestMinio;
 pub use nats::TestNats;
 pub use pg::TestDb;
+pub use scopes::ScopeIdentity;
+pub use ws::Subscription;
 
 pub struct World {
     pub db: TestDb,
@@ -20,16 +26,35 @@ pub struct World {
     pub nats: Nats,
     pub service: Service,
     pub http: reqwest::Client,
+    pub minio: Option<TestMinio>,
+    pub blob_bucket: Option<String>,
+    scopes: Option<ScopeIdentity>,
+}
+
+pub struct WorldOptions {
+    pub blobs: bool,
+    pub declare_scopes: bool,
 }
 
 impl World {
     pub async fn start(pod: &str) -> World {
+        World::start_with(
+            pod,
+            WorldOptions {
+                blobs: false,
+                declare_scopes: false,
+            },
+        )
+        .await
+    }
+
+    pub async fn start_with(pod: &str, options: WorldOptions) -> World {
         let db = TestDb::fresh().await;
         let nats_server = TestNats::spawn().await;
         nats_server.provision(example_contract::SERVICE).await;
         let nats = nats_server.nats().await;
 
-        example_service::twin::publish_person(
+        example_twin::publish_person(
             &nats,
             &example_contract::PublishedPerson {
                 id: Uuid::now_v7(),
@@ -40,24 +65,34 @@ impl World {
         .await
         .expect("seed the roster so the directory mirror has a non-empty prefix at boot");
 
+        let (minio, blob_bucket, blob_config) = if options.blobs {
+            let minio = TestMinio::spawn().await;
+            let bucket = format!("ex-blobs-{}", Uuid::now_v7().simple());
+            minio.create_bucket(&bucket).await;
+            let config = minio.config(&bucket);
+            (Some(minio), Some(bucket), Some(config))
+        } else {
+            (None, None, None)
+        };
+
+        let scopes = if options.declare_scopes {
+            Some(scopes::accept_scopes(&nats).await)
+        } else {
+            None
+        };
+
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let config = EngineConfig::new(
-            ChannelName::new("example").expect("valid channel"),
-            PodId::new(pod).expect("valid pod id"),
-        )
-        .with_service(example_contract::SERVICE)
-        .with_window(Duration::from_millis(30))
-        .with_beat(Duration::from_millis(80))
-        .with_lease(Duration::from_secs(5))
-        .with_lock_timeout(Duration::from_millis(400))
-        .with_http_addr(addr);
+        let mut config = base_config(pod, addr);
+        if let Some(blob_config) = blob_config {
+            config = config.with_blob_storage(blob_config);
+        }
 
         let service = boot(
             config,
             db.app.clone(),
             nats_server.nats().await,
             BootOptions {
-                declare_scopes: false,
+                declare_scopes: options.declare_scopes,
                 await_ready: true,
             },
         )
@@ -70,23 +105,22 @@ impl World {
             nats,
             service,
             http: reqwest::Client::new(),
+            minio,
+            blob_bucket,
+            scopes,
         }
+    }
+
+    pub fn scope_identity(&self) -> &ScopeIdentity {
+        self.scopes
+            .as_ref()
+            .expect("this world was started declaring scopes")
     }
 
     pub async fn boot_second_pod(&self, pod: &str) -> Service {
         let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let config = EngineConfig::new(
-            ChannelName::new("example").expect("valid channel"),
-            PodId::new(pod).expect("valid pod id"),
-        )
-        .with_service(example_contract::SERVICE)
-        .with_window(Duration::from_millis(30))
-        .with_beat(Duration::from_millis(80))
-        .with_lease(Duration::from_secs(5))
-        .with_lock_timeout(Duration::from_millis(400))
-        .with_http_addr(addr);
         boot(
-            config,
+            base_config(pod, addr),
             self.db.app.clone(),
             self.nats_server.nats().await,
             BootOptions {
@@ -96,6 +130,10 @@ impl World {
         )
         .await
         .expect("the second pod boots")
+    }
+
+    pub fn subscription_url(&self) -> String {
+        self.service.ws("/graphql/ws")
     }
 
     pub async fn gql(
@@ -131,6 +169,19 @@ impl World {
     }
 }
 
+fn base_config(pod: &str, addr: SocketAddr) -> EngineConfig {
+    EngineConfig::new(
+        ChannelName::new("example").expect("valid channel"),
+        PodId::new(pod).expect("valid pod id"),
+    )
+    .with_service(example_contract::SERVICE)
+    .with_window(Duration::from_millis(30))
+    .with_beat(Duration::from_millis(80))
+    .with_lease(Duration::from_secs(5))
+    .with_lock_timeout(Duration::from_millis(400))
+    .with_http_addr(addr)
+}
+
 pub fn passport(user: Uuid, org: Uuid, scopes: &[&str], super_admin: bool) -> String {
     let mut map = serde_json::Map::new();
     map.insert(
@@ -157,8 +208,22 @@ pub fn passport(user: Uuid, org: Uuid, scopes: &[&str], super_admin: bool) -> St
     .to_header()
 }
 
-pub async fn settle() {
-    tokio::time::sleep(Duration::from_millis(300)).await;
+#[macro_export]
+macro_rules! poll_until {
+    ($within:expr, $probe:block) => {{
+        let deadline = std::time::Instant::now() + $within;
+        loop {
+            if let Some(value) = $probe {
+                break value;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the observed effect never appeared within {:?}",
+                $within
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    }};
 }
 
 pub fn ok(response: &serde_json::Value) -> &serde_json::Value {

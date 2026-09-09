@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use br_util_axum_readiness::{Readiness, ReadinessHandle};
 use service_engine::config::EngineConfig;
+use service_engine::erase::{EraseOutcome, Eraser, PersonId};
 use service_engine::error::EngineError;
 use service_engine::nats::Nats;
-use service_engine::{AccumulatorRuntime, Engine};
+use service_engine::{AccumulatorRuntime, Engine, Settle};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
@@ -16,6 +17,8 @@ use crate::kernel::AppPrincipal;
 pub struct Service {
     pub base_url: String,
     pub chunks: Arc<AccumulatorRuntime>,
+    settle: Settle<AppPrincipal>,
+    eraser: Eraser<AppPrincipal>,
     readiness: ReadinessHandle,
     stop: Arc<Notify>,
     handle: JoinHandle<Result<(), EngineError>>,
@@ -32,6 +35,16 @@ impl Service {
 
     pub fn readiness(&self) -> &ReadinessHandle {
         &self.readiness
+    }
+
+    pub async fn settle(&self) {
+        self.settle
+            .settle(Duration::from_millis(150), Duration::from_secs(5))
+            .await;
+    }
+
+    pub async fn erase(&self, person: PersonId) -> Result<EraseOutcome, EngineError> {
+        self.eraser.erase(person).await
     }
 
     pub async fn shutdown(self) {
@@ -94,6 +107,8 @@ pub async fn boot(
     let (engine, app) = assemble(config, pool, nats, readiness.clone(), &options).await?;
     let stop = engine.shutdown_handle();
     let chunks = engine.accumulator_handle();
+    let settle = engine.settle_handle();
+    let eraser = engine.eraser();
 
     let listener = TcpListener::bind(http_addr)
         .await
@@ -124,6 +139,8 @@ pub async fn boot(
     Ok(Service {
         base_url: format!("http://{addr}"),
         chunks,
+        settle,
+        eraser,
         readiness,
         stop,
         handle,

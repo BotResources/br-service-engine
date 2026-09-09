@@ -1,13 +1,13 @@
-use async_graphql::{Context, Error, Json, Object, Result, Subscription};
+use async_graphql::{Context, Json, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
 use serde::Serialize;
 use service_engine::graphql::SliceFragment;
 use service_engine::session::{WindowParams, WindowSpec};
-use service_engine::{Delta, JsonScalar, MutationAck, Query};
+use service_engine::{JsonScalar, MutationAck, Query};
 use uuid::Uuid;
 
 use super::mutations::{AttachReply, SetTyping, StartReply};
-use super::presence::Typing;
+use super::presence::{Typing, TypingView};
 use super::view::{RepliesView, ReplyView};
 use crate::kernel::AppPrincipal;
 
@@ -17,12 +17,18 @@ service_engine::subscription_union! {
     Reply => RepliesView => ReplyView,
 }
 
+service_engine::presence_subscription_union! {
+    view = TypingUnion;
+    delta = TypingDelta { reset = TypingReset, upsert = TypingUpsert, remove = TypingRemove };
+    Typing => Typing => TypingView,
+}
+
 pub const FRAGMENT: SliceFragment = SliceFragment {
     slice: "reply",
     root_fields: &[
         "reply",
         "replyDeltas",
-        "typing",
+        "typingDeltas",
         "startReply",
         "setTyping",
         "attachReply",
@@ -33,39 +39,6 @@ pub const FRAGMENT: SliceFragment = SliceFragment {
 #[derive(Serialize)]
 struct TypingWindow {
     board: Uuid,
-}
-
-fn delta_to_json(delta: &Delta) -> Result<JsonScalar> {
-    let value = match delta {
-        Delta::Reset { views, revision } => {
-            let mut out = Vec::with_capacity(views.len());
-            for view in views {
-                out.push(
-                    view.view
-                        .decode::<serde_json::Value>()
-                        .map_err(Error::from)?,
-                );
-            }
-            serde_json::json!({ "kind": "reset", "revision": revision.get(), "views": out })
-        }
-        Delta::Upsert { view, revision, .. } => serde_json::json!({
-            "kind": "upsert",
-            "revision": revision.get(),
-            "view": view.view.decode::<serde_json::Value>().map_err(Error::from)?,
-        }),
-        Delta::Remove {
-            projector,
-            key,
-            revision,
-            ..
-        } => serde_json::json!({
-            "kind": "remove",
-            "revision": revision.get(),
-            "projector": projector.to_string(),
-            "key": key.decode::<serde_json::Value>().map_err(Error::from)?,
-        }),
-    };
-    Ok(Json(value))
 }
 
 #[derive(Default)]
@@ -151,17 +124,17 @@ impl ReplySubscription {
         Ok(stream.map(|delta| ReplyDelta::from_delta(&delta)))
     }
 
-    async fn typing(
+    async fn typing_deltas(
         &self,
         ctx: &Context<'_>,
         board: Uuid,
-    ) -> Result<impl Stream<Item = Result<JsonScalar>>> {
+    ) -> Result<impl Stream<Item = Result<TypingDelta>>> {
         let params = WindowParams::encode(&TypingWindow { board })?;
         let stream = service_engine::attach::<AppPrincipal>(
             ctx,
             vec![WindowSpec::new(Typing::NAME, params, false)],
         )
         .await?;
-        Ok(stream.map(|delta| delta_to_json(&delta)))
+        Ok(stream.map(|delta| TypingDelta::from_delta(&delta)))
     }
 }
