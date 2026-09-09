@@ -48,7 +48,11 @@ impl World {
         .await
     }
 
-    pub async fn start_bounded(pod: &str, session_ttl: Duration, session_max_age: Duration) -> World {
+    pub async fn start_bounded(
+        pod: &str,
+        session_ttl: Duration,
+        session_max_age: Duration,
+    ) -> World {
         World::start_tweaked(
             pod,
             WorldOptions {
