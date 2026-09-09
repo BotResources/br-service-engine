@@ -408,8 +408,9 @@ impacts-committed metric counted only after the transaction commits (`s134`), a
 row that leaves its cohort removed on the `view::Projector` surface with a fixed
 window repopulated in both directions on a principal change (`s135`), the
 schema-version singleton refusing a second pod on a different service version
-(`s136`), erasure under a strict deny-when-unset RLS policy (`s137`), and the
-beat completing a purge the erase committed but never finished (`s138`).
+(`s136`), erasure under a strict deny-when-unset RLS policy (`s137`), the
+beat completing a purge the erase committed but never finished (`s138`), and
+erasing a person purging their chunks from the lane-A NATS stream (`s141`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL
