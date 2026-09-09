@@ -206,7 +206,10 @@ async fn the_rls_projector_populates_its_window_under_the_org_context_not_on_a_b
         .iter()
         .map(|row| row.get::<Uuid, _>("id"))
         .collect();
-    scoped_tx.rollback().await.expect("rollback the scoped read");
+    scoped_tx
+        .rollback()
+        .await
+        .expect("rollback the scoped read");
 
     assert!(
         scoped.contains(&mine) && scoped.contains(&public) && !scoped.contains(&foreign),
