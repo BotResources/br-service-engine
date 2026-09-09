@@ -39,6 +39,9 @@ impl World {
         nats_server
             .provision_presence(SERVICE, Duration::from_secs(5))
             .await;
+        nats_server
+            .provision_streaming(SERVICE, Duration::from_secs(300))
+            .await;
         let nats = nats_server.nats().await;
 
         example_twin::publish_person(

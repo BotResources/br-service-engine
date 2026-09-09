@@ -188,7 +188,7 @@ impl<P: Principal> Engine<P> {
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
         );
         let subscriptions = reactions.subscriptions();
-        let inbound = if subscriptions.is_empty() {
+        let mut inbound = if subscriptions.is_empty() {
             None
         } else {
             let pipeline = Arc::new(DirectPipeline::new(
@@ -223,6 +223,71 @@ impl<P: Principal> Engine<P> {
             }
         };
 
+        let stop_ingress = Arc::new(Notify::new());
+        let stop_purge = Arc::new(Notify::new());
+        let mut ingress_task = None;
+        let mut purge_task = None;
+        if accumulators.registered() > 0 {
+            match config.service.clone() {
+                None => {
+                    readiness_guard.set_not_ready(crate::boot::REASON_STREAMING_SERVICE);
+                    stop_mirrors.notify_waiters();
+                    stop_presence.notify_waiters();
+                    join_presence(presence_task.take()).await;
+                    if let Some(inbound) = inbound.take() {
+                        inbound.stop();
+                        inbound.join().await;
+                    }
+                    render.shutdown().await;
+                    return Err(EngineError::StreamingServiceUnset);
+                }
+                Some(service) => {
+                    match crate::accumulator::ingress::establish(
+                        &nats,
+                        &service,
+                        config.seal_retention,
+                        accumulators.clone(),
+                        crate::inbound::DEFAULT_ACK_WAIT,
+                        crate::inbound::DEFAULT_MAX_ACK_PENDING,
+                    )
+                    .await
+                    {
+                        Ok((ingress, consumer)) => {
+                            ingress_task =
+                                Some(tokio::spawn(ingress.serve(consumer, stop_ingress.clone())));
+                            purge_task = Some(tokio::spawn(
+                                crate::accumulator::ingress::run_purge(
+                                    nats.clone(),
+                                    accumulators.clone(),
+                                    service,
+                                    config.beat,
+                                    stop_purge.clone(),
+                                ),
+                            ));
+                        }
+                        Err(error) => {
+                            let reason = match &error {
+                                EngineError::SealRetentionTooShort { .. } => {
+                                    crate::boot::REASON_SEAL_RETENTION
+                                }
+                                _ => crate::boot::REASON_STREAMING_STREAM,
+                            };
+                            readiness_guard.set_not_ready(reason);
+                            stop_mirrors.notify_waiters();
+                            stop_presence.notify_waiters();
+                            join_presence(presence_task.take()).await;
+                            if let Some(inbound) = inbound.take() {
+                                inbound.stop();
+                                inbound.join().await;
+                            }
+                            render.shutdown().await;
+                            return Err(error);
+                        }
+                    }
+                }
+            }
+        }
+
         let sched_task = tokio::spawn(run_scheduled_messages(
             pg.clone(),
             nats.clone(),
@@ -251,9 +316,17 @@ impl<P: Principal> Engine<P> {
         stop_mirrors.notify_waiters();
         stop_presence.notify_waiters();
         stop_sched.notify_waiters();
-        if let Some(inbound) = inbound {
+        stop_ingress.notify_waiters();
+        stop_purge.notify_waiters();
+        if let Some(inbound) = inbound.take() {
             inbound.stop();
             inbound.join().await;
+        }
+        if let Some(task) = ingress_task.take() {
+            let _ = task.await;
+        }
+        if let Some(task) = purge_task.take() {
+            let _ = task.await;
         }
         let _ = sched_task.await;
         render_handle.shutdown().await;

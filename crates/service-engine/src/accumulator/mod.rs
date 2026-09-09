@@ -1,6 +1,7 @@
 pub mod flush;
 pub(crate) mod guard;
 mod hash;
+pub(crate) mod ingress;
 pub(crate) mod persisted;
 pub mod reader;
 pub mod runtime;
@@ -152,6 +153,26 @@ pub(crate) fn lookup<A: Accumulator>(registry: &Registry) -> Result<Registered, 
         .ok_or(EngineError::UnregisteredAccumulator(
             std::any::type_name::<A>(),
         ))
+}
+
+pub(crate) fn lookup_by_name(
+    registry: &Registry,
+    name: &AccumulatorName,
+) -> Result<Registered, EngineError> {
+    registry
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .values()
+        .find(|entry| &entry.name == name)
+        .cloned()
+        .ok_or_else(|| EngineError::UnregisteredAccumulatorName { name: name.clone() })
+}
+
+pub(crate) fn registered_count(registry: &Registry) -> usize {
+    registry
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len()
 }
 
 pub(crate) fn enroll<A: Accumulator>(

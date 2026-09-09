@@ -3,8 +3,13 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use service_engine::nats::{INTEGRATION_CMD, INTEGRATION_EVT, KV_PUBLISHED_LANGUAGE, Nats};
+use service_engine::nats::{
+    INTEGRATION_CMD, INTEGRATION_EVT, KV_PUBLISHED_LANGUAGE, Nats, streaming_filter,
+    streaming_stream,
+};
 use uuid::Uuid;
+
+pub const STREAMING_MAX_AGE: Duration = Duration::from_secs(300);
 
 pub struct TestNats {
     child: Child,
@@ -78,6 +83,14 @@ impl TestNats {
             .await
             .unwrap_or_else(|e| panic!("declare {name}: {e}"));
         }
+        js.create_stream(async_nats::jetstream::stream::Config {
+            name: streaming_stream(service),
+            subjects: vec![streaming_filter(service)],
+            max_age: STREAMING_MAX_AGE,
+            ..Default::default()
+        })
+        .await
+        .unwrap_or_else(|e| panic!("declare the {} lane-A stream: {e}", streaming_stream(service)));
         js.create_key_value(async_nats::jetstream::kv::Config {
             bucket: KV_PUBLISHED_LANGUAGE.to_string(),
             history: 1,

@@ -97,6 +97,32 @@ impl AccumulatorRuntime {
             what: "chunk",
             source,
         })?;
+        self.enqueue(entry, key, seq, chunk)
+    }
+
+    pub fn push_frame(
+        &self,
+        accumulator: &crate::name::AccumulatorName,
+        key: &serde_json::Value,
+        seq: ChunkSeq,
+        chunk: serde_json::Value,
+    ) -> Result<Durable, EngineError> {
+        let entry = crate::accumulator::lookup_by_name(&self.registry, accumulator)?;
+        let key = crate::wire::KeyBytes::encode(key)?;
+        self.enqueue(entry, key, seq, chunk)
+    }
+
+    pub fn registered(&self) -> usize {
+        crate::accumulator::registered_count(&self.registry)
+    }
+
+    fn enqueue(
+        &self,
+        entry: crate::accumulator::Registered,
+        key: crate::wire::KeyBytes,
+        seq: ChunkSeq,
+        chunk: serde_json::Value,
+    ) -> Result<Durable, EngineError> {
         let (done, receipt) = oneshot::channel();
         let accumulator = entry.name.clone();
         let mut held = self.buffer.lock().unwrap_or_else(|p| p.into_inner());

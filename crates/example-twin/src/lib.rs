@@ -1,11 +1,40 @@
 use example_contract::{
-    CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, ReplyCancelled,
-    ReplyFinished, card_ready_coords, create_card_coords, person_created_coords,
-    reply_cancelled_coords, reply_finished_coords,
+    CardReady, CreateCard, PERSON_PREFIX, PersonCreated, PublishedPerson, REPLY_ACCUMULATOR,
+    ReplyCancelled, ReplyFinished, SERVICE, card_ready_coords, create_card_coords,
+    person_created_coords, reply_cancelled_coords, reply_finished_coords,
 };
 use futures_util::StreamExt;
-use service_engine::nats::{KvKey, Nats, NatsError, command_subject, event_subject};
+use service_engine::nats::{
+    KvKey, Nats, NatsError, StreamFrame, command_subject, event_subject,
+};
 use uuid::Uuid;
+
+pub async fn stream_reply_chunk(
+    nats: &Nats,
+    reply_id: Uuid,
+    seq: u64,
+    chunk: &str,
+) -> Result<(), NatsError> {
+    let frame = StreamFrame {
+        accumulator: REPLY_ACCUMULATOR.to_string(),
+        key: serde_json::json!(reply_id),
+        seq,
+        chunk: serde_json::json!(chunk),
+    };
+    nats.publish_chunk(SERVICE, &frame).await?;
+    Ok(())
+}
+
+pub async fn stream_reply(
+    nats: &Nats,
+    reply_id: Uuid,
+    chunks: &[&str],
+) -> Result<(), NatsError> {
+    for (seq, chunk) in chunks.iter().enumerate() {
+        stream_reply_chunk(nats, reply_id, seq as u64, chunk).await?;
+    }
+    Ok(())
+}
 
 pub fn person_key(id: Uuid) -> KvKey {
     KvKey::new(format!("{PERSON_PREFIX}{id}")).expect("a published-person key is valid")

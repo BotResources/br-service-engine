@@ -20,9 +20,7 @@ pub fn reply_finished<'r>(
             .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
         let text: String = match cx.seal::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
             Ok(text) => text,
-            Err(
-                error @ (EngineError::SealTruncated { .. } | EngineError::SealHashMismatch { .. }),
-            ) => {
+            Err(error @ EngineError::SealHashMismatch { .. }) => {
                 return Err(ReactionFault::Terminal(error.to_string()));
             }
             Err(error) => return Err(error.into()),
@@ -52,9 +50,7 @@ pub fn reply_cancelled<'r>(
             .await
         {
             Ok(text) => text,
-            Err(
-                error @ (EngineError::SealTruncated { .. } | EngineError::SealHashMismatch { .. }),
-            ) => {
+            Err(error @ EngineError::SealHashMismatch { .. }) => {
                 return Err(ReactionFault::Terminal(error.to_string()));
             }
             Err(error) => return Err(error.into()),

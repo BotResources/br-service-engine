@@ -2,11 +2,17 @@ mod grace;
 mod health;
 mod key;
 mod kv;
+mod streaming;
 
 pub use grace::{NatsCondition, NatsHealth, NatsHealthChannel, NatsHealthReceiver};
 pub use health::{REASON_NO_STREAM, RelayHealth, RelayHealthChannel, RelayHealthReceiver};
 pub use key::{KvKey, KvKeyError, KvPrefix};
 pub use kv::{KvBucket, KvEvent, KvWatch, Revision};
+pub use streaming::{
+    StreamFrame, chunk_subject, streaming_filter, streaming_stream, subject_token,
+};
+
+use std::time::Duration;
 
 use async_nats::jetstream::Context;
 use async_nats::jetstream::stream::Stream;
@@ -238,6 +244,42 @@ impl Nats {
             .await
             .map_err(|e| publish_error(subject, e.kind(), &e))?;
         Ok(PublishOutcome::from_ack(&ack))
+    }
+
+    pub async fn stream_max_age(&self, name: &str) -> Result<Duration, NatsError> {
+        let stream = self.bind_stream(name).await?;
+        Ok(stream.cached_info().config.max_age)
+    }
+
+    pub async fn purge_chunk_subject(
+        &self,
+        stream: &str,
+        subject: &str,
+    ) -> Result<(), NatsError> {
+        let stream = self.bind_stream(stream).await?;
+        stream
+            .purge()
+            .filter(subject)
+            .await
+            .map_err(|error| NatsError::Store {
+                detail: format!("purging the sealed subject {subject}: {error}"),
+            })?;
+        Ok(())
+    }
+
+    pub async fn publish_chunk(
+        &self,
+        service: &str,
+        frame: &StreamFrame,
+    ) -> Result<PublishOutcome, NatsError> {
+        let token = subject_token(&frame.key).map_err(|error| NatsError::Store {
+            detail: error.to_string(),
+        })?;
+        let subject = chunk_subject(service, &token);
+        let message_id = frame.message_id(&token);
+        let payload = serde_json::to_value(frame).map_err(NatsError::Encode)?;
+        self.publish_value_with_id(&subject, &payload, &message_id)
+            .await
     }
 }
 
