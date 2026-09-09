@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
@@ -19,6 +19,32 @@ use crate::wire::KeyBytes;
 
 pub use crate::transport::listening::{RECONNECT_BACKOFF_MAX, RECONNECT_BACKOFF_MIN};
 
+pub(super) const QUEUE_USAGE_UNSET: u64 = u64::MAX;
+
+pub(super) struct Brake {
+    engaged: watch::Sender<bool>,
+}
+
+impl Brake {
+    pub(super) fn new() -> Self {
+        Self {
+            engaged: watch::channel(false).0,
+        }
+    }
+
+    pub(super) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.engaged.subscribe()
+    }
+
+    pub(super) fn set(&self, engaged: bool) {
+        self.engaged.send_if_modified(|current| {
+            let changed = *current != engaged;
+            *current = engaged;
+            changed
+        });
+    }
+}
+
 pub struct PgListenNotify {
     pub(super) pool: PgPool,
     pub(super) channel: ChannelName,
@@ -26,6 +52,8 @@ pub struct PgListenNotify {
     pub(super) consumed: AtomicBool,
     pub(super) health_tx: Mutex<Option<watch::Sender<bool>>>,
     pub(super) health_rx: watch::Receiver<bool>,
+    pub(super) brake: Brake,
+    pub(super) queue_usage_override: AtomicU64,
 }
 
 impl std::fmt::Debug for PgListenNotify {
@@ -51,7 +79,27 @@ impl PgListenNotify {
         &self.pool
     }
 
+    pub fn set_brake(&self, engaged: bool) {
+        self.brake.set(engaged);
+    }
+
+    fn forced_queue_usage(&self) -> Option<f64> {
+        match self.queue_usage_override.load(Ordering::Relaxed) {
+            QUEUE_USAGE_UNSET => None,
+            bits => Some(f64::from_bits(bits)),
+        }
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn force_queue_usage(&self, usage: f64) {
+        self.queue_usage_override
+            .store(usage.to_bits(), Ordering::Relaxed);
+    }
+
     pub async fn queue_usage(&self) -> Result<f64, EngineError> {
+        if let Some(forced) = self.forced_queue_usage() {
+            return Ok(forced);
+        }
         let usage: f64 = sqlx::query_scalar("SELECT pg_notification_queue_usage()")
             .fetch_one(&self.pool)
             .await?;
@@ -94,6 +142,7 @@ impl PgListenNotify {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        crate::observe::record_impacts_committed(impacts.len());
         Ok(impacts.len())
     }
 }
@@ -113,7 +162,6 @@ impl ImpactTransport for PgListenNotify {
                     .await
                     .map_err(TransportError::Stage)?;
             }
-            crate::observe::record_impacts_committed(impacts.len());
             Ok(())
         })
     }

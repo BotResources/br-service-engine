@@ -44,6 +44,7 @@ pub struct Beat {
     readiness: Option<ReadinessAssembly>,
     repairs: Option<Arc<dyn RepairRetry>>,
     blob_reaper: Option<BlobReaper>,
+    listener_queue_threshold: f64,
 }
 
 impl Beat {
@@ -62,6 +63,7 @@ impl Beat {
             readiness: None,
             repairs: None,
             blob_reaper: None,
+            listener_queue_threshold: config.listener_queue_threshold,
         })
     }
 
@@ -154,12 +156,14 @@ impl Beat {
             Some(reaper) => reaper.sweep(pg).await,
             None => ReaperRound::default(),
         };
+        let queue_usage = self.queue_usage().await;
+        self.apply_listener_brake(queue_usage);
         if let Some(readiness) = &self.readiness {
             readiness.refresh();
         }
         let round = BeatRound {
             more: relays.more || scheduled.more,
-            queue_usage: self.queue_usage().await,
+            queue_usage,
             relays,
             cron,
             scheduled,
@@ -168,6 +172,12 @@ impl Beat {
         };
         crate::observe::record_beat(&round);
         round
+    }
+
+    fn apply_listener_brake(&self, queue_usage: Option<f64>) {
+        if let (Some(transport), Some(usage)) = (&self.transport, queue_usage) {
+            transport.set_brake(usage >= self.listener_queue_threshold);
+        }
     }
 
     async fn fire_boundaries(&self) -> ScheduledRound {

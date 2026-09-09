@@ -1,17 +1,17 @@
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use futures_util::stream::BoxStream;
 use sqlx::PgPool;
-use sqlx::postgres::PgListener;
+use sqlx::postgres::{PgListener, PgNotification};
 use tokio::sync::watch;
 
 use crate::config::EngineConfig;
 use crate::error::{EngineError, TransportError};
 use crate::impact::TransportEvent;
 use crate::transport::payload::Frame;
-use crate::transport::pg::PgListenNotify;
+use crate::transport::pg::{Brake, PgListenNotify, QUEUE_USAGE_UNSET};
 use crate::transport::probe::ListenerProbe;
 use crate::transport::reassemble::{Accepted, Reassembler};
 
@@ -47,6 +47,8 @@ impl PgListenNotify {
             consumed: AtomicBool::new(false),
             health_tx: Mutex::new(Some(health_tx)),
             health_rx,
+            brake: Brake::new(),
+            queue_usage_override: AtomicU64::new(QUEUE_USAGE_UNSET),
         })
     }
 
@@ -79,6 +81,7 @@ impl PgListenNotify {
             backoff: RECONNECT_BACKOFF_MIN,
             repair: false,
             health,
+            brake: self.brake.subscribe(),
         };
         Box::pin(futures_util::stream::unfold(state, next_event))
     }
@@ -93,6 +96,7 @@ struct Listening {
     backoff: Duration,
     repair: bool,
     health: Option<watch::Sender<bool>>,
+    brake: watch::Receiver<bool>,
 }
 
 impl Listening {
@@ -101,6 +105,23 @@ impl Listening {
             let _ = health.send(up);
         }
     }
+
+    fn braked(&self) -> bool {
+        *self.brake.borrow()
+    }
+
+    async fn await_release(&mut self) {
+        while *self.brake.borrow_and_update() {
+            if self.brake.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
+enum Woke {
+    Braked,
+    Received(Result<Option<PgNotification>, sqlx::Error>),
 }
 
 type Heard = Option<(Result<TransportEvent, TransportError>, Listening)>;
@@ -114,6 +135,10 @@ async fn next_event(mut state: Listening) -> Heard {
     loop {
         if state.listener.is_none() {
             state.mark(false);
+            if state.braked() {
+                state.reassembler.clear();
+                state.await_release().await;
+            }
             match listening_connection(&state.pool, &state.channel).await {
                 Ok(listener) => {
                     state.listener = Some(listener);
@@ -131,11 +156,29 @@ async fn next_event(mut state: Listening) -> Heard {
                 }
             }
         }
-        let listener = state
-            .listener
-            .as_mut()
-            .expect("a listener was just established");
-        let received = listener.try_recv().await;
+        let woke = {
+            let Listening {
+                listener, brake, ..
+            } = &mut state;
+            let listener = listener.as_mut().expect("a listener was just established");
+            tokio::select! {
+                biased;
+                changed = brake.changed() => {
+                    let _ = changed;
+                    Woke::Braked
+                }
+                received = listener.try_recv() => Woke::Received(received),
+            }
+        };
+        let received = match woke {
+            Woke::Braked => {
+                state.listener = None;
+                state.mark(false);
+                state.reassembler.clear();
+                continue;
+            }
+            Woke::Received(received) => received,
+        };
         match received {
             Ok(Some(notification)) => {
                 state.backoff = RECONNECT_BACKOFF_MIN;

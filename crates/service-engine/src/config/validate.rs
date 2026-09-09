@@ -27,6 +27,7 @@ impl EngineConfig {
             ("max_held_impacts", self.max_held_impacts),
             ("window_capacity", self.window_capacity),
             ("impacts_per_commit", self.impacts_per_commit),
+            ("listener_channel_capacity", self.listener_channel_capacity),
         ] {
             if value == 0 {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));
@@ -103,6 +104,7 @@ mod tests {
         assert_eq!(c.session_max_age, Duration::from_secs(43_200));
         assert_eq!(c.lock_timeout, Duration::from_secs(5));
         assert_eq!(c.listener_queue_threshold, 0.5);
+        assert_eq!(c.listener_channel_capacity, 1_024);
         assert_eq!(c.nats_grace, Duration::from_secs(10));
         assert_eq!(c.window_capacity, 10_000);
         assert_eq!(c.impacts_per_commit, 1_000);
@@ -134,6 +136,12 @@ mod tests {
         );
         assert!(config().with_window_capacity(0).validate().is_err());
         assert!(config().with_impacts_per_commit(0).validate().is_err());
+        assert!(
+            config()
+                .with_listener_channel_capacity(0)
+                .validate()
+                .is_err()
+        );
     }
 
     #[test]

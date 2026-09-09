@@ -1,5 +1,6 @@
 mod connect;
 mod counters;
+mod drain;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -191,9 +192,13 @@ impl<P: Principal> SessionRuntime<P> {
 
     pub async fn run(
         self: Arc<Self>,
-        mut events: BoxStream<'static, Result<TransportEvent, TransportError>>,
+        source: BoxStream<'static, Result<TransportEvent, TransportError>>,
         shutdown: Arc<Notify>,
     ) {
+        let (sink, receiver) = tokio::sync::mpsc::channel(self.config.listener_channel_capacity);
+        let drain_stop = Arc::new(Notify::new());
+        let listener = tokio::spawn(drain::drain_listener(source, sink, drain_stop.clone()));
+        let mut events = drain::receiver_stream(receiver);
         let stopping = shutdown.notified();
         tokio::pin!(stopping);
         stopping.as_mut().enable();
@@ -211,6 +216,8 @@ impl<P: Principal> SessionRuntime<P> {
             }
         }
         self.shutdown().await;
+        drain_stop.notify_one();
+        let _ = listener.await;
     }
 
     fn signal_after_pass(&self) {

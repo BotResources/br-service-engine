@@ -22,6 +22,7 @@ pub const DEFAULT_REPAIR_ATTEMPTS: u32 = 5;
 pub const DEFAULT_SESSION_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
 pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_LISTENER_QUEUE_THRESHOLD: f64 = 0.5;
+pub const DEFAULT_LISTENER_CHANNEL_CAPACITY: usize = 1_024;
 pub const DEFAULT_NATS_GRACE: Duration = Duration::from_secs(10);
 pub const DEFAULT_WINDOW_CAPACITY: usize = 10_000;
 pub const DEFAULT_IMPACTS_PER_COMMIT: usize = 1_000;
@@ -47,6 +48,7 @@ pub struct EngineConfig {
     pub session_max_age: Duration,
     pub lock_timeout: Duration,
     pub listener_queue_threshold: f64,
+    pub listener_channel_capacity: usize,
     pub nats_grace: Duration,
     pub window_capacity: usize,
     pub impacts_per_commit: usize,
@@ -77,6 +79,7 @@ impl EngineConfig {
             session_max_age: DEFAULT_SESSION_MAX_AGE,
             lock_timeout: DEFAULT_LOCK_TIMEOUT,
             listener_queue_threshold: DEFAULT_LISTENER_QUEUE_THRESHOLD,
+            listener_channel_capacity: DEFAULT_LISTENER_CHANNEL_CAPACITY,
             nats_grace: DEFAULT_NATS_GRACE,
             window_capacity: DEFAULT_WINDOW_CAPACITY,
             impacts_per_commit: DEFAULT_IMPACTS_PER_COMMIT,
@@ -186,6 +189,11 @@ impl EngineConfig {
 
     pub fn with_listener_queue_threshold(mut self, listener_queue_threshold: f64) -> Self {
         self.listener_queue_threshold = listener_queue_threshold;
+        self
+    }
+
+    pub fn with_listener_channel_capacity(mut self, listener_channel_capacity: usize) -> Self {
+        self.listener_channel_capacity = listener_channel_capacity;
         self
     }
 
