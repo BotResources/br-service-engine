@@ -1,5 +1,6 @@
 use crate::accumulator::Accumulator;
 use crate::blobs::BlobRef;
+use crate::erase::purge::{PurgeManifest, PurgeStream};
 use crate::error::EngineError;
 use crate::name::AccumulatorName;
 use crate::nats::KvKey;
@@ -48,22 +49,36 @@ impl Erased {
         self.rows
     }
 
-    pub(crate) fn streams(&self) -> &[(AccumulatorName, KeyBytes)] {
-        &self.streams
-    }
-
-    pub(crate) fn presence_keys(&self) -> &[KvKey] {
-        &self.presence
-    }
-
-    pub(crate) fn blob_refs(&self) -> &[BlobRef] {
-        &self.blobs
-    }
-
     pub(crate) fn merge(&mut self, other: Erased) {
         self.rows += other.rows;
         self.streams.extend(other.streams);
         self.presence.extend(other.presence);
         self.blobs.extend(other.blobs);
+    }
+
+    pub(crate) fn to_purge(&self) -> Result<PurgeManifest, EngineError> {
+        let streams = self
+            .streams
+            .iter()
+            .map(|(accumulator, key)| {
+                Ok(PurgeStream {
+                    accumulator: accumulator.as_str().to_string(),
+                    key: key.decode::<serde_json::Value>()?,
+                })
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?;
+        Ok(PurgeManifest {
+            streams,
+            presence: self
+                .presence
+                .iter()
+                .map(|k| k.as_str().to_string())
+                .collect(),
+            blobs: self
+                .blobs
+                .iter()
+                .map(|reference| reference.as_uuid())
+                .collect(),
+        })
     }
 }

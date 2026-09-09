@@ -29,6 +29,12 @@ impl<P: Principal> Engine<P> {
             slices.verify_root_fields(sdl)?;
         }
         let render = self.render_runtime();
+        let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =
+            if self.erasables.is_empty() {
+                None
+            } else {
+                Some(Arc::new(self.eraser()))
+            };
         let Engine {
             config,
             pg,
@@ -66,6 +72,9 @@ impl<P: Principal> Engine<P> {
             .with_accumulators(accumulators.clone())
             .with_readiness(assembly)
             .with_repairs(Arc::new(RenderRepairs(render.clone())));
+        if let Some(drain) = erasure_drain {
+            beat = beat.with_erasure_drain(drain);
+        }
         beat.gc().set_sessions(Arc::new(RenderGc(render.clone())));
 
         let stop_render = Arc::new(Notify::new());

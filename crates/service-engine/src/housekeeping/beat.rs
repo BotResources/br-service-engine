@@ -9,6 +9,7 @@ use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::{BlobReaper, ReaperRound};
 use crate::chain::describe;
 use crate::config::EngineConfig;
+use crate::erase::ErasureDrain;
 use crate::error::EngineError;
 use crate::housekeeping::cron::{CronRound, CronRuntime};
 use crate::housekeeping::gc::{Gc, GcRound};
@@ -46,6 +47,7 @@ pub struct Beat {
     blob_reaper: Option<BlobReaper>,
     listener_queue_threshold: f64,
     schema_version: (String, String),
+    erasures: Option<Arc<dyn ErasureDrain>>,
 }
 
 impl Beat {
@@ -69,11 +71,17 @@ impl Beat {
                 crate::schema::ENGINE_SCHEMA_VERSION.to_string(),
                 config.schema_service_version().to_string(),
             ),
+            erasures: None,
         })
     }
 
     pub(crate) fn with_blob_reaper(mut self, reaper: BlobReaper) -> Self {
         self.blob_reaper = Some(reaper);
+        self
+    }
+
+    pub(crate) fn with_erasure_drain(mut self, drain: Arc<dyn ErasureDrain>) -> Self {
+        self.erasures = Some(drain);
         self
     }
 
@@ -162,6 +170,14 @@ impl Beat {
             Some(reaper) => reaper.sweep(pg).await,
             None => ReaperRound::default(),
         };
+        if let Some(drain) = &self.erasures
+            && let Err(error) = drain.drain().await
+        {
+            tracing::warn!(
+                reason = %describe(&error),
+                "the beat could not complete a pending person-erasure purge",
+            );
+        }
         let queue_usage = self.queue_usage().await;
         self.apply_listener_brake(queue_usage);
         if let Some(readiness) = &self.readiness {

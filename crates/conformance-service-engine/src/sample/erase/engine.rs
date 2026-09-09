@@ -7,6 +7,7 @@ use service_engine::{BlobConfig, BlobPolicy, Engine};
 use crate::infra::TestDb;
 use crate::sample::engine::engine_config;
 use crate::sample::erase::note::{EraseNoteOffer, EraseNoteProjector};
+use crate::sample::erase::secret::SecretEraser;
 use crate::sample::erase::slice::{
     AttachNoteBlob, FailingEraser, LedgerEraser, MemoEraser, NoteEraser, attach_note_blob,
 };
@@ -77,6 +78,23 @@ pub async fn boot_failing_erase_engine(
     engine
         .register_erasable(FailingEraser)
         .expect("register the failing eraser after the real ones");
+    engine
+}
+
+pub async fn boot_erase_strict_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    service: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = boot(db, nats, channel, pod, service).await;
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_erasable(SecretEraser)
+        .expect("register the strict-RLS secret eraser");
     engine
 }
 
