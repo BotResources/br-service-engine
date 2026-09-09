@@ -339,7 +339,32 @@ producer watches and a scheduled deadline), a reaction that seals the producer's
 verified partial as cancelled, and a deadline reaction that seals whatever the
 stream holds when the producer never answers.
 
-A service depends on `br-rust-common` only for frontier types: the
+**The frontier contract.** Everything the engine puts on the integration bus —
+`cx.emit` / `cx.command`, the scheduled reaction messages, the outbox relay
+publish, the dead-letter republish, and the scope-declaration handshake — travels
+inside the `br-core-integration` envelope (`IntegrationEvent<T>` /
+`IntegrationCommand<T>`: `event_id`/`command_id`, a `{aggregate}.{fact|verb}`
+type, the coordinate version, `occurred_at`, and `EventMetadata { actor,
+correlation_id, causation_id }`). The actor is the acting principal for a mutation
+and the engine's own service identity for a reaction, cron or erasure; the
+correlation and causation ids are propagated from the inbound message that caused
+the effect (its envelope id is the causation). The inbound loop decodes the
+envelope, dedups on its id (the `Br-Message-Id`/envelope id, so a foreign
+producer's non-uuid `Nats-Msg-Id` no longer dead-letters), hands the reaction the
+inner payload, exposes the metadata on `Reaction` (`cx.metadata`, `cx.actor`), and
+resolves the sender's identity into the service's `Principal` through a registered
+resolver (`Engine::register_reaction_principal`) so `cx.principal()` lets a
+reaction gate on who sent the command — the example's `create_card` refuses a
+command whose actor is not a service. An `OutboundEvent`/`OutboundCommand` derives
+its producer sequence from the aggregate's key and version at emit time
+(`sequence()`); the engine renders it as the three `Br-Producer` / `Br-Seq-Key` /
+`Br-Seq` headers and persists it on the outbox row, so engine→engine traffic is
+ordered and the per-`(producer, seq_key)` sequence guard on the receiver drops a
+stale message as an acked no-op — a view never walks backwards.
+
+A service depends on `br-rust-common` only for frontier types (the Passport, the
+integration envelope and coordinates, the scope declaration and its handshake, the
+shared value types): the
 engine provides its own `connect_pool` / `validate_database_tls` (the
 secure-by-default Postgres connect) and its own `Readiness` / `ReadinessHandle` /
 `readiness_route`, so `br-util-postgres` and `br-util-axum-readiness` are gone from
@@ -374,8 +399,11 @@ default = all — which is the mechanism the `removability` CI job uses to compi
 slice out.) The `removability` CI job proves every configuration compiles — the
 kernel with every slice removed, then each slice removed in turn. `crates/example-contract` holds what crosses the service
 frontier (published types + integration coordinates), and `crates/example-twin`
-is the separate producer/runner that closes a real cross-service cycle over NATS,
-so the reference service itself never holds a NATS client. The slices between
+is the separate producer/runner that closes a real cross-service cycle over NATS —
+building the `br-core-integration` envelope exactly as a fabric producer would and
+decoding the engine's emitted event back through it, which is what makes the cycle
+interop and not just engine↔engine — so the reference service itself never holds a
+NATS client. The slices between
 them exercise all three lanes, all three persistence styles, offers, mirrors,
 presence, blobs, cron, scheduled reactions, bulk writes, `declare_scopes`,
 erasure and the full GraphQL surface. `tests/e2e.rs` (split into
