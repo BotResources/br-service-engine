@@ -803,6 +803,50 @@ skeleton; `conformance-service-engine` ships its black-box battery.
   cluster, sustained resets, dead letters present) ship as a `PrometheusRule`
   in `observability/service-engine-alerts.yaml`.
 
+### Added (0.1.0 rework, unit U13 — slice scaffold + reference service)
+
+- `crates/example-contract` and `crates/example-service` ship an in-repo
+  reference service built **only** on the public authoring surface (no
+  `test-support`, no `pub(crate)` reach-around), laid out exactly as the intent's
+  Code structure prescribes: a thin kernel (`AppPrincipal` + `PassportPrincipal`
+  + `AppRls`, scopes, error base), one folder per slice, a `register.rs` with one
+  line per slice, and a `graphql.rs` that composes the slices' `SliceFragment`s
+  and per-projector subscription unions. Every slice is removable by deleting its
+  folder plus one register line — proven by a per-slice cargo feature (default =
+  all five); the workspace compiles with any single slice removed. The five
+  slices exercise every gesture the engine defines: `board` (direct CRUD, gate ==
+  affordance, cohort `Visibility`, RLS read projector, published-language offer,
+  `OneShot` invite, `Erasable`), `card` (soft EDA, a command reaction and an
+  event reaction from the twin, an emitted integration event, a scheduled
+  deadline reaction, a cron, a bulk import), `ledger` (full EDA with upcasting, a
+  hydration barrier, and in-log erasure), `reply` (accumulated lane + seal,
+  presence, blob attachment via the presigned POST) and `roster` (a KV mirror
+  into `known_persons`). A second binary (`example-twin`) plus a `twin` module
+  drive a real cross-service cycle over NATS. A real-infra e2e suite
+  (`tests/e2e.rs`, own PostgreSQL two-role + NATS harness) boots the real binary
+  across the four observation channels, including two-pod convergence.
+- Engine surface additions the reference service required (each keeps the battery
+  green): `Ops::accumulated::<A>(key)` reads a stream's folded value inside a seal
+  handler before the seal purges it (the intent's `let text = cx.seal(..)` split
+  into read-then-seal); `Engine::accumulator_handle()` hands a runner a live
+  chunk-push handle after `run` has consumed the engine.
+
+### Fixed (0.1.0 rework, unit U13)
+
+- `Engine::run` now starts the integration-outbox relay (leader-gated,
+  `RelayName "integration_outbox"`), so a service that stages an outbox row with
+  `cx.emit` / `cx.command` actually publishes it. Before this, outbox rows were
+  committed but never drained in a real boot; the reference service's
+  cross-service cycle exposed it. The `integration_outbox` table stays
+  service-owned (declared in the service's migrations, as the sample already
+  does).
+
+### Changed (0.1.0 rework, unit U13)
+
+- `error.rs` split into `error/{mod,codec}.rs` and the conformance sample's
+  `graphql/boot.rs` factored a shared `base_config` helper, to hold the
+  ~300-line file limit.
+
 ### Deployment constraint
 
 - No transaction-mode pooler in front of an engine service: `LISTEN` is session

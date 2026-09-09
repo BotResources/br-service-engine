@@ -222,6 +222,24 @@ Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `engine.eraser()` before `run` to erase while the pod is serving, exactly as
 `mutation_executor` and `blob_reader` are captured.
 
+## Writing a service
+
+The example **is** the documentation. `crates/example-service` is a complete,
+bootable reference service built only on this crate's public authoring surface —
+no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
+`kernel/` (principal, scopes, error base), one folder per slice under `slices/`
+(each owning its aggregate, store, view, handlers, offer/mirror and SDL
+fragment), a `register.rs` with one line per slice, a `graphql.rs` that assembles
+the fragments, and a `main.rs` that boots. Every slice is removable by deleting
+its folder and its one register line — each is a cargo feature (default = all),
+so the crate compiles with any slice removed. `crates/example-contract` holds
+what crosses the service frontier (published types + integration coordinates),
+and `example-twin` closes a real cross-service cycle over NATS. The slices
+between them exercise all three lanes, all three persistence styles, offers,
+mirrors, presence, blobs, scheduled work, erasure and the full GraphQL surface;
+`tests/e2e.rs` drives them over the four observation channels against real
+PostgreSQL and NATS.
+
 ## Conformance battery
 
 The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`

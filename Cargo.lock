@@ -941,6 +941,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-contract"
+version = "0.1.0"
+dependencies = [
+ "br-core-integration",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "example-service"
+version = "0.1.0"
+dependencies = [
+ "async-graphql",
+ "async-nats",
+ "axum",
+ "br-core-auth",
+ "br-core-integration",
+ "br-util-axum-readiness",
+ "br-util-postgres",
+ "chrono",
+ "example-contract",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "service-engine",
+ "sqlx",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "fast_chemail"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

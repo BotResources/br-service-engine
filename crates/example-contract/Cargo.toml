@@ -1,0 +1,12 @@
+[package]
+name = "example-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+br-core-integration = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
