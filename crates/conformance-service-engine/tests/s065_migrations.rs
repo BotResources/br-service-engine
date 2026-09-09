@@ -26,7 +26,7 @@ async fn s065_the_engine_set_and_a_timestamp_versioned_service_set_apply_in_ever
     for pool in [&engine_first, &service_first] {
         assert_eq!(
             reserved_versions(pool).await,
-            16,
+            17,
             "every engine migration is on the shared ledger, inside its reserved range"
         );
         assert!(

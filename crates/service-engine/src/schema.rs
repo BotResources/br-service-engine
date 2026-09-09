@@ -23,6 +23,8 @@ pub const TABLE_OFFER_DIRTY: &str = "service_engine.offer_dirty";
 pub const TABLE_BLOB: &str = "service_engine.blob";
 pub const TABLE_PERSON_ERASURE: &str = "service_engine.person_erasure";
 pub const TABLE_SCHEMA_VERSION: &str = "service_engine.schema_version";
+pub const TABLE_EVENT_LOG: &str = "service_engine.event_log";
+pub const TABLE_EVENT_SNAPSHOT: &str = "service_engine.event_snapshot";
 
 pub const TABLES: &[&str] = &[
     TABLE_SCHEDULED_IMPACT,
@@ -38,6 +40,8 @@ pub const TABLES: &[&str] = &[
     TABLE_BLOB,
     TABLE_PERSON_ERASURE,
     TABLE_SCHEMA_VERSION,
+    TABLE_EVENT_LOG,
+    TABLE_EVENT_SNAPSHOT,
 ];
 
 const MAX_ROLE_NAME_LEN: usize = 63;
@@ -114,7 +118,7 @@ mod tests {
 
     #[test]
     fn every_engine_table_lives_in_the_engines_own_schema() {
-        assert_eq!(TABLES.len(), 13);
+        assert_eq!(TABLES.len(), 15);
         for table in TABLES {
             assert!(table.starts_with(&format!("{SCHEMA}.")));
         }

@@ -16,6 +16,7 @@ pub mod dyn_compat;
 pub mod engine;
 pub mod erase;
 pub mod error;
+pub mod full_eda;
 pub mod gate;
 pub mod graphql;
 pub mod housekeeping;
@@ -89,6 +90,7 @@ pub use delta::{Delta, ErasedView, Revision};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
+pub use full_eda::{EventSourced, FullEda};
 pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,
 };

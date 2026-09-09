@@ -57,11 +57,14 @@ async fn erase_removes_a_person_across_every_slice() {
             .unwrap();
     assert_eq!(members_after, 0, "the person left the board slice");
 
-    let authored: i64 = sqlx::query_scalar("SELECT count(*) FROM ledger_event WHERE author = $1")
-        .bind(user)
-        .fetch_one(&world.db.app)
-        .await
-        .unwrap();
+    let authored: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.event_log \
+         WHERE noun = 'ledger' AND payload ->> 'author' = $1",
+    )
+    .bind(user.to_string())
+    .fetch_one(&world.db.app)
+    .await
+    .unwrap();
     assert_eq!(
         authored, 0,
         "the person's authorship was scrubbed from the log"
