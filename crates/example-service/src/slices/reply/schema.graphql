@@ -1,0 +1,113 @@
+scalar Affordances
+
+"""
+A scalar that can represent any JSON value.
+"""
+scalar JSON
+
+type MutationAck {
+	success: Boolean!
+}
+
+union ReplyDelta = ReplyReset | ReplyUpsert | ReplyRemove
+
+type ReplyMutation {
+	startReply(id: UUID!, boardId: UUID!): MutationAck!
+	setTyping(board: UUID!, label: String!): MutationAck!
+	cancelReply(id: UUID!): MutationAck!
+	attachReply(replyId: UUID!, name: String!, contentType: String!): JSON!
+}
+
+type ReplyQuery {
+	reply(id: UUID!): ReplyView
+}
+
+type ReplyRemove {
+	revision: Int!
+	projector: String!
+	key: JSON!
+	cause: JSON
+}
+
+type ReplyReset {
+	revision: Int!
+	views: [ReplyViewUnion!]!
+}
+
+type ReplySubscription {
+	replyDeltas: ReplyDelta!
+	typingDeltas(board: UUID!): TypingDelta!
+}
+
+type ReplyUpsert {
+	revision: Int!
+	view: ReplyViewUnion!
+	cause: JSON
+}
+
+type ReplyView {
+	id: UUID!
+	boardId: UUID!
+	text: String!
+	status: String!
+	hasAttachment: Boolean!
+	affordances: Affordances!
+}
+
+union ReplyViewUnion = ReplyView
+
+union TypingDelta = TypingReset | TypingUpsert | TypingRemove
+
+type TypingRemove {
+	revision: Int!
+	projector: String!
+	key: JSON!
+}
+
+type TypingReset {
+	revision: Int!
+	views: [TypingUnion!]!
+}
+
+union TypingUnion = TypingView
+
+type TypingUpsert {
+	revision: Int!
+	view: TypingUnion!
+}
+
+type TypingView {
+	board: UUID!
+	user: UUID!
+	label: String!
+}
+
+"""
+A UUID is a unique 128-bit number, stored as 16 octets. UUIDs are parsed as
+Strings within GraphQL. UUIDs are used to assign unique identifiers to
+entities without requiring a central allocating authority.
+
+# References
+
+* [Wikipedia: Universally Unique Identifier](http://en.wikipedia.org/wiki/Universally_unique_identifier)
+* [RFC4122: A Universally Unique Identifier (UUID) URN Namespace](http://tools.ietf.org/html/rfc4122)
+"""
+scalar UUID
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Provides a scalar specification URL for specifying the behavior of custom scalar types.
+"""
+directive @specifiedBy(url: String!) on SCALAR
+schema {
+	query: ReplyQuery
+	mutation: ReplyMutation
+	subscription: ReplySubscription
+}
