@@ -68,6 +68,7 @@ pub struct Engine<P: Principal> {
     schema_sdl: Option<String>,
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
+    contributed_scopes: Vec<&'static str>,
 }
 
 impl<P: Principal> Engine<P> {
@@ -122,6 +123,7 @@ impl<P: Principal> Engine<P> {
             schema_sdl: None,
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
+            contributed_scopes: Vec::new(),
         })
     }
 

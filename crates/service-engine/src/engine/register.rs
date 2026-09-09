@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
+use sqlx::PgPool;
 
 use crate::accumulator::Accumulator;
 use crate::engine::Engine;
@@ -34,6 +35,19 @@ impl<P: Principal> Engine<P> {
     ) -> Result<(), EngineError> {
         self.with_registry(|registry| {
             registry.register_principal_resolver(r);
+            Ok(())
+        })
+    }
+
+    pub fn register_principal_fact<F>(&mut self, loader: F) -> Result<(), EngineError>
+    where
+        F: for<'a> Fn(&'a PgPool, &'a mut P) -> BoxFuture<'a, Result<(), EngineError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.with_registry(|registry| {
+            registry.register_principal_fact(loader);
             Ok(())
         })
     }
@@ -178,6 +192,19 @@ impl<P: Principal> Engine<P> {
         let declaration = manifest.declaration()?;
         self.declared_scopes = Some(declaration);
         Ok(())
+    }
+
+    pub fn contribute_scopes(&mut self, scopes: &[&'static str]) -> Result<(), EngineError> {
+        self.contributed_scopes.extend_from_slice(scopes);
+        Ok(())
+    }
+
+    pub fn declare_contributed_scopes(&mut self) -> Result<(), EngineError> {
+        if self.contributed_scopes.is_empty() {
+            return Ok(());
+        }
+        let manifest = crate::scopes::ScopeManifest::of(&[self.contributed_scopes.as_slice()]);
+        self.declare_scopes(manifest)
     }
 
     pub fn register_erasable<E: crate::erase::Erasable>(

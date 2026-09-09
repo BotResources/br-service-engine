@@ -2,10 +2,13 @@ use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use futures_util::future::BoxFuture;
+use sqlx::PgPool;
+
 use crate::dyn_compat::{ErasedProjector, erase_projector};
 use crate::error::EngineError;
 use crate::name::{NounName, ProjectorName};
-use crate::principal::{Principal, PrincipalResolver, RlsApplier};
+use crate::principal::{Principal, PrincipalFactLoader, PrincipalResolver, RlsApplier};
 use crate::projector::Projector;
 use crate::wire::Noun;
 
@@ -17,6 +20,7 @@ pub struct RenderRegistry<P: Principal> {
     key_types: BTreeMap<NounName, TypeId>,
     rls: Option<Arc<dyn RlsApplier<P>>>,
     resolver: Option<Arc<dyn PrincipalResolver<P>>>,
+    fact_loaders: Vec<PrincipalFactLoader<P>>,
 }
 
 impl<P: Principal> Default for RenderRegistry<P> {
@@ -32,6 +36,7 @@ impl<P: Principal> std::fmt::Debug for RenderRegistry<P> {
             .field("nouns", &self.key_types.keys().collect::<Vec<_>>())
             .field("rls", &self.rls.is_some())
             .field("resolver", &self.resolver.is_some())
+            .field("fact_loaders", &self.fact_loaders.len())
             .finish()
     }
 }
@@ -44,6 +49,7 @@ impl<P: Principal> RenderRegistry<P> {
             key_types: BTreeMap::new(),
             rls: None,
             resolver: None,
+            fact_loaders: Vec::new(),
         }
     }
 
@@ -104,6 +110,27 @@ impl<P: Principal> RenderRegistry<P> {
 
     pub fn register_principal_resolver<R: PrincipalResolver<P>>(&mut self, resolver: R) {
         self.resolver = Some(Arc::new(resolver));
+    }
+
+    pub fn register_principal_fact<F>(&mut self, loader: F)
+    where
+        F: for<'a> Fn(&'a PgPool, &'a mut P) -> BoxFuture<'a, Result<(), EngineError>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.fact_loaders.push(Arc::new(loader));
+    }
+
+    pub(crate) async fn load_facts(
+        &self,
+        pg: &PgPool,
+        principal: &mut P,
+    ) -> Result<(), EngineError> {
+        for loader in &self.fact_loaders {
+            loader(pg, principal).await?;
+        }
+        Ok(())
     }
 
     pub fn projector(&self, name: &ProjectorName) -> Option<&Arc<dyn ErasedProjector<P>>> {

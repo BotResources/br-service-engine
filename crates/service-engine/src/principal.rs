@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use br_core_auth::Passport;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -47,3 +49,7 @@ pub trait PrincipalResolver<P: Principal>: Send + Sync + 'static {
         current: &'a P,
     ) -> BoxFuture<'a, Result<Option<P>, EngineError>>;
 }
+
+pub type PrincipalFactLoader<P> = Arc<
+    dyn for<'a> Fn(&'a PgPool, &'a mut P) -> BoxFuture<'a, Result<(), EngineError>> + Send + Sync,
+>;

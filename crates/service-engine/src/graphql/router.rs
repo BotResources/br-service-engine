@@ -68,10 +68,19 @@ where
     M: ObjectType + 'static,
     S: SubscriptionType + 'static,
 {
-    let principal = match resolve::<P>(state.engine.pg(), passport_header(&headers)).await {
+    let mut principal = match resolve::<P>(state.engine.pg(), passport_header(&headers)).await {
         Ok(principal) => principal,
         Err(reject) => return unauthorized(reject),
     };
+    if let Err(error) = state
+        .engine
+        .runtime()
+        .registry()
+        .load_facts(state.engine.pg(), &mut principal)
+        .await
+    {
+        return unauthorized(AuthReject::Rejected(error.to_string()));
+    }
     let request = request.into_inner().data(principal);
     GraphQLResponse::from(state.schema.execute(request).await).into_response()
 }
@@ -88,10 +97,19 @@ where
     M: ObjectType + 'static,
     S: SubscriptionType + 'static,
 {
-    let principal = match resolve::<P>(state.engine.pg(), passport_header(&headers)).await {
+    let mut principal = match resolve::<P>(state.engine.pg(), passport_header(&headers)).await {
         Ok(principal) => principal,
         Err(reject) => return unauthorized(reject),
     };
+    if let Err(error) = state
+        .engine
+        .runtime()
+        .registry()
+        .load_facts(state.engine.pg(), &mut principal)
+        .await
+    {
+        return unauthorized(AuthReject::Rejected(error.to_string()));
+    }
     let schema = state.schema.clone();
     upgrade
         .protocols(ALL_WEBSOCKET_PROTOCOLS)

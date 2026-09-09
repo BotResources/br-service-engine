@@ -45,7 +45,17 @@ pub(crate) async fn refresh_principals<P: Principal>(
                 report.ended += table.end_principal(principal).len();
             }
             Ok(None) => report.ended += table.end_principal(principal).len(),
-            Ok(Some(next)) => {
+            Ok(Some(mut next)) => {
+                if let Err(error) = ctx.registry.load_facts(ctx.pg, &mut next).await {
+                    tracing::error!(
+                        %principal,
+                        reason = %crate::chain::describe(&error),
+                        "a principal fact reload failed; its sessions are ended fail-closed rather \
+                         than served under stale facts",
+                    );
+                    report.ended += table.end_principal(principal).len();
+                    continue;
+                }
                 table.replace_principal(principal, next);
                 refreshed.extend(table.sessions_of(principal));
             }

@@ -32,7 +32,17 @@ pub trait Persistence: Send + Sync + 'static {
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Self::Key],
-    ) -> RowBatch<'a, Self::Key, Self::Aggregate>;
+    ) -> RowBatch<'a, Self::Key, Self::Aggregate> {
+        Box::pin(async move {
+            let mut rows = Vec::with_capacity(keys.len());
+            for key in keys {
+                if let Some(aggregate) = Self::load(&mut *conn, key).await? {
+                    rows.push((key.clone(), aggregate));
+                }
+            }
+            Ok(rows)
+        })
+    }
 
     fn save<'a>(
         conn: &'a mut PgConnection,
