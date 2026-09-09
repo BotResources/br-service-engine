@@ -83,8 +83,15 @@ async fn s143_a_key_that_expires_while_nats_is_down_is_repaired_by_a_reseed_and_
         if let Some(has_key) = reset_has_typing(&delta, &key) {
             saw_reset = true;
             key_present = has_key;
-        } else if let Delta::Remove { projector, key: removed, .. } = &delta {
-            if projector == &Typing::NAME && removed.decode::<TypingKey>().ok().as_ref() == Some(&key) {
+        } else if let Delta::Remove {
+            projector,
+            key: removed,
+            ..
+        } = &delta
+        {
+            if projector == &Typing::NAME
+                && removed.decode::<TypingKey>().ok().as_ref() == Some(&key)
+            {
                 key_present = false;
             }
         }

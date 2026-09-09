@@ -175,7 +175,10 @@ where
         }
         let subject = format!(
             "{}{}",
-            self.store.put_prefix.as_deref().unwrap_or(&self.store.prefix),
+            self.store
+                .put_prefix
+                .as_deref()
+                .unwrap_or(&self.store.prefix),
             key.as_str()
         );
         let bytes = encode(value)?;

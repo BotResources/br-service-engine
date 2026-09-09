@@ -134,8 +134,12 @@ impl Presence for Cursor {
     const NAME: ProjectorName = Self::NAME;
 
     fn kv_key(key: &CursorKey) -> KvKey {
-        KvKey::new(format!("cursor/{}/{}", key.room.simple(), key.user.simple()))
-            .expect("a hex-and-slash presence key is always valid")
+        KvKey::new(format!(
+            "cursor/{}/{}",
+            key.room.simple(),
+            key.user.simple()
+        ))
+        .expect("a hex-and-slash presence key is always valid")
     }
 
     fn parse_kv_key(raw: &KvKey) -> Option<CursorKey> {
