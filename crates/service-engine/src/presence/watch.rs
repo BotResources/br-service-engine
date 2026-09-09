@@ -42,16 +42,24 @@ pub(crate) async fn bind_and_seed<P: Principal>(
         .await
         .map_err(|error| EngineError::Service(Box::new(error)))?;
     for lane in lanes {
-        if max_age > lane.ttl() {
+        if max_age < lane.ttl() {
             return Err(EngineError::Posture(format!(
-                "presence bucket {bucket_name} keeps values for {max_age:?}, longer than the \
-                 {ttl:?} lifetime the {projector} lane declares, so a stale value would outlive \
-                 its presence",
+                "presence bucket {bucket_name} caps values at {max_age:?}, shorter than the \
+                 {ttl:?} lifetime the {projector} lane declares, so the per-key TTL would be \
+                 truncated and the value would vanish before its presence ends",
                 ttl = lane.ttl(),
                 projector = lane.projector_name(),
             )));
         }
     }
+    reseed(&bucket, lanes).await?;
+    Ok(bucket)
+}
+
+async fn reseed<P: Principal>(
+    bucket: &KvBucket<Value>,
+    lanes: &[Arc<dyn PresenceLane<P>>],
+) -> Result<(), EngineError> {
     let entries = bucket
         .all()
         .await
@@ -59,7 +67,7 @@ pub(crate) async fn bind_and_seed<P: Principal>(
     for lane in lanes {
         lane.reseed(&entries)?;
     }
-    Ok(bucket)
+    Ok(())
 }
 
 pub(crate) async fn run_watch<P: Principal>(
@@ -71,6 +79,7 @@ pub(crate) async fn run_watch<P: Principal>(
     let stopping = shutdown.notified();
     tokio::pin!(stopping);
     stopping.as_mut().enable();
+    let mut first_open = true;
     loop {
         let mut watch = match bucket.watch_all().await {
             Ok(watch) => watch,
@@ -82,6 +91,25 @@ pub(crate) async fn run_watch<P: Principal>(
                 }
             }
         };
+        if !first_open {
+            match reseed(&bucket, &lanes).await {
+                Ok(()) => {
+                    let resets = lanes
+                        .iter()
+                        .map(|lane| Impact::projector_reset(lane.projector_name()))
+                        .collect();
+                    let _ = impacts.send(Ok(TransportEvent::Impacts(resets)));
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "reseeding presence after a reconnect failed; sessions keep their last \
+                         values until the next write repairs them"
+                    );
+                }
+            }
+        }
+        first_open = false;
         loop {
             let event = tokio::select! {
                 () = &mut stopping => return,

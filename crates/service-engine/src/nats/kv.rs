@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
+use std::time::Duration;
 
+use async_nats::jetstream::Context;
 use async_nats::jetstream::kv::{Operation, Store};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -93,6 +95,7 @@ fn watch_error(detail: &dyn std::fmt::Display) -> NatsError {
 
 pub struct KvBucket<V> {
     store: Store,
+    context: Context,
     _value: PhantomData<V>,
 }
 
@@ -100,15 +103,17 @@ impl<V> Clone for KvBucket<V> {
     fn clone(&self) -> Self {
         Self {
             store: self.store.clone(),
+            context: self.context.clone(),
             _value: PhantomData,
         }
     }
 }
 
 impl<V> KvBucket<V> {
-    pub(crate) fn bind(store: Store) -> Self {
+    pub(crate) fn bind(store: Store, context: Context) -> Self {
         Self {
             store,
+            context,
             _value: PhantomData,
         }
     }
@@ -151,6 +156,40 @@ where
             .put(key.as_str(), bytes.into())
             .await
             .map_err(|e| kv_error(key, &e))?;
+        Ok(())
+    }
+
+    pub async fn put_with_ttl(
+        &self,
+        key: &KvKey,
+        value: &V,
+        ttl: Duration,
+    ) -> Result<(), NatsError> {
+        if self.store.use_jetstream_prefix {
+            return Err(NatsError::Kv {
+                key: key.as_str().to_string(),
+                detail: "a jetstream domain prefix is configured, which the per-key TTL put path \
+                         does not build a subject for"
+                    .to_string(),
+            });
+        }
+        let subject = format!(
+            "{}{}",
+            self.store.put_prefix.as_deref().unwrap_or(&self.store.prefix),
+            key.as_str()
+        );
+        let bytes = encode(value)?;
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert(
+            async_nats::header::NATS_MESSAGE_TTL,
+            async_nats::HeaderValue::from(ttl.as_secs()),
+        );
+        let ack = self
+            .context
+            .publish_with_headers(subject, headers, bytes.into())
+            .await
+            .map_err(|e| kv_error(key, &e))?;
+        ack.await.map_err(|e| kv_error(key, &e))?;
         Ok(())
     }
 

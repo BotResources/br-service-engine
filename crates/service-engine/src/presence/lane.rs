@@ -62,7 +62,7 @@ impl<P, Pr: Presence> Lane<P, Pr> {
             source,
         })?;
         bucket
-            .put(&kv_key, &json)
+            .put_with_ttl(&kv_key, &json, self.ttl)
             .await
             .map_err(|error| EngineError::Service(Box::new(error)))
     }

@@ -169,7 +169,7 @@ impl Nats {
                 .map_err(|_| NatsError::NoBucket {
                     name: bucket.to_string(),
                 })?;
-        Ok(KvBucket::bind(store))
+        Ok(KvBucket::bind(store, self.jetstream.clone()))
     }
 
     pub async fn published_language<V>(&self) -> Result<KvBucket<V>, NatsError> {
@@ -185,16 +185,19 @@ impl Nats {
             });
         }
         let backing = self.bind_stream(&format!("KV_{name}")).await?;
-        if backing
-            .cached_info()
-            .config
-            .subject_delete_marker_ttl
-            .is_none()
-        {
+        let config = &backing.cached_info().config;
+        if config.subject_delete_marker_ttl.is_none() {
             return Err(NatsError::EphemeralNotConfigured {
                 name: name.to_string(),
                 detail: "no delete markers: an expired key would raise no watch event, so a \
                          presence Remove could never fire",
+            });
+        }
+        if !config.allow_message_ttl {
+            return Err(NatsError::EphemeralNotConfigured {
+                name: name.to_string(),
+                detail: "no per-message TTL: the bucket refuses a Nats-TTL header, so a lane's \
+                         declared lifetime could not be applied per key",
             });
         }
         Ok(bucket)

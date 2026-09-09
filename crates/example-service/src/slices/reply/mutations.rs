@@ -2,6 +2,7 @@ use chrono::TimeDelta;
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use service_engine::UploadUrl;
+use service_engine::gate::{Gate, Reason};
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
 use uuid::Uuid;
 
@@ -9,9 +10,23 @@ use super::aggregate::{Reply, ReplyCause, ReplyRow};
 use super::blob::Attachment;
 use super::presence::{CancelSignal, Typing, TypingKey, TypingValue};
 use super::wire::CancelTimedOut;
-use crate::kernel::{AppFault, AppPrincipal};
+use crate::kernel::{AppFault, AppPrincipal, BoardMemberships};
 
 const CANCEL_GRACE_SECONDS: i64 = 30;
+
+pub const NOT_A_MEMBER: Reason = Reason::new("not_a_board_member");
+
+pub fn typing_gate(principal: &AppPrincipal, board: Uuid) -> Gate {
+    let is_member = principal
+        .facts()
+        .get::<BoardMemberships>()
+        .is_some_and(|BoardMemberships(boards)| boards.contains(&board));
+    if principal.is_super_admin() || is_member {
+        Gate::allowed()
+    } else {
+        Gate::blocked(NOT_A_MEMBER)
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct StartReply {
@@ -55,6 +70,7 @@ pub fn set_typing<'m>(
     input: SetTyping,
 ) -> BoxFuture<'m, Result<(), AppFault>> {
     Box::pin(async move {
+        typing_gate(cx.principal(), input.board).require()?;
         let user = cx.principal().user();
         cx.present::<Typing>(
             &TypingKey {
