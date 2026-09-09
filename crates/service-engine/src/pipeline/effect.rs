@@ -49,7 +49,10 @@ impl<P: Principal> Clone for MutationServices<P> {
     }
 }
 
-fn mutation_outbound<P: Principal>(services: &MutationServices<P>, principal: &P) -> OutboundContext {
+fn mutation_outbound<P: Principal>(
+    services: &MutationServices<P>,
+    principal: &P,
+) -> OutboundContext {
     OutboundContext {
         actor: principal.passport().to_actor(),
         correlation_id: Uuid::now_v7(),

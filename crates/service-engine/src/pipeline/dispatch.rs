@@ -78,7 +78,10 @@ impl DirectPipeline {
         }
     }
 
-    async fn resolve_principal(&self, msg: &Incoming) -> Result<Option<ErasedPrincipal>, DispatchError> {
+    async fn resolve_principal(
+        &self,
+        msg: &Incoming,
+    ) -> Result<Option<ErasedPrincipal>, DispatchError> {
         let (Some(resolver), Some(actor)) = (&self.principal_resolver, msg.metadata.actor) else {
             return Ok(None);
         };

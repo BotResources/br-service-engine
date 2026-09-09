@@ -234,8 +234,7 @@ mod tests {
         let actor = Actor::Service(ServiceAccountId::from(Uuid::now_v7()));
         let correlation = Uuid::now_v7();
         let raw = enveloped(command_id, actor, correlation);
-        let msg =
-            Incoming::identify("r", Source::Command, "s".into(), None, raw, 1).unwrap();
+        let msg = Incoming::identify("r", Source::Command, "s".into(), None, raw, 1).unwrap();
         assert_eq!(msg.message_id, command_id);
         assert_eq!(msg.metadata.actor, Some(actor));
         assert_eq!(msg.metadata.correlation_id, Some(correlation));
@@ -249,8 +248,7 @@ mod tests {
         let actor = Actor::Service(ServiceAccountId::from(Uuid::now_v7()));
         let raw = enveloped(command_id, actor, Uuid::now_v7());
         let map = headers(&[(async_nats::header::NATS_MESSAGE_ID.as_ref(), "not-a-uuid")]);
-        let msg =
-            Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap();
+        let msg = Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap();
         assert_eq!(msg.message_id, command_id);
     }
 
@@ -259,15 +257,8 @@ mod tests {
         let id = Uuid::now_v7();
         let map = headers(&[(HEADER_MESSAGE_ID, &id.to_string())]);
         let raw = Bytes::from_static(br#"{"verdict":"ok"}"#);
-        let msg = Incoming::identify(
-            "r",
-            Source::Command,
-            "s".into(),
-            Some(&map),
-            raw.clone(),
-            1,
-        )
-        .unwrap();
+        let msg = Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw.clone(), 1)
+            .unwrap();
         assert_eq!(msg.body, raw);
         assert_eq!(msg.metadata, MessageMetadata::default());
     }

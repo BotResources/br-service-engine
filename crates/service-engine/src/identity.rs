@@ -23,8 +23,9 @@ mod tests {
 
     #[test]
     fn the_service_actor_id_is_frozen_to_the_shared_v5_namespace() {
-        let expected =
-            ServiceAccountId::from(Uuid::parse_str("9a350fca-0614-5e1a-8fde-c928e548ed7f").unwrap());
+        let expected = ServiceAccountId::from(
+            Uuid::parse_str("9a350fca-0614-5e1a-8fde-c928e548ed7f").unwrap(),
+        );
         assert_eq!(service_actor("project"), Actor::Service(expected));
     }
 }

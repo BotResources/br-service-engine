@@ -108,9 +108,10 @@ impl<P: Principal> Eraser<P> {
                 causation_id: None,
                 producer: Some(service.to_string()),
             };
-            staged
-                .outbox
-                .push(event_record(&PersonErased::new(service, person)?, &outbound)?);
+            staged.outbox.push(event_record(
+                &PersonErased::new(service, person)?,
+                &outbound,
+            )?);
         }
         flush_and_commit(tx, &staged, self.transport.as_ref()).await?;
 
