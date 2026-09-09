@@ -28,11 +28,15 @@ pub(super) async fn drain_listener(
     tokio::pin!(stopping);
     stopping.as_mut().enable();
     let mut owe_marker = false;
+    let mut stopped = false;
     loop {
         if owe_marker {
             tokio::select! {
                 biased;
-                () = &mut stopping => break,
+                () = &mut stopping => {
+                    stopped = true;
+                    break;
+                }
                 permit = sink.reserve() => match permit {
                     Ok(permit) => {
                         permit.send(Ok(TransportEvent::Reconnected));
@@ -49,7 +53,10 @@ pub(super) async fn drain_listener(
         }
         let item = tokio::select! {
             biased;
-            () = &mut stopping => break,
+            () = &mut stopping => {
+                stopped = true;
+                break;
+            }
             item = source.next() => item,
         };
         let Some(item) = item else { break };
@@ -59,8 +66,8 @@ pub(super) async fn drain_listener(
             Err(TrySendError::Closed(_)) => break,
         }
     }
-    if owe_marker {
-        let _ = sink.try_send(Ok(TransportEvent::Reconnected));
+    if owe_marker && !stopped {
+        let _ = sink.send(Ok(TransportEvent::Reconnected)).await;
     }
 }
 
