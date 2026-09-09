@@ -161,15 +161,13 @@ async fn commit_batch(
     let mut tx = pg.begin().await?;
     set_lock_timeout(&mut tx, lock_timeout).await?;
     let held = guard::try_hold(&mut tx, &streams).await?;
-    let acquired: BTreeMap<StreamKey, bool> = streams
-        .iter()
-        .cloned()
-        .zip(held.iter().copied())
-        .collect();
+    let acquired: BTreeMap<StreamKey, bool> =
+        streams.iter().cloned().zip(held.iter().copied()).collect();
     let acquired_streams: Vec<StreamKey> = streams
         .iter()
         .zip(held.iter().copied())
-        .filter_map(|(stream, held)| held.then(|| stream.clone()))
+        .filter(|&(_, held)| held)
+        .map(|(stream, _)| stream.clone())
         .collect();
     let stream_index: BTreeMap<&StreamKey, usize> = acquired_streams
         .iter()

@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::Assignment;
+use conformance_service_engine::sample::engine::SAMPLE_SERVICE;
 use conformance_service_engine::sample::render::{
     assignment, attach_request, drain, member, next_delta, reset_views, upserted,
 };
-use conformance_service_engine::sample::engine::SAMPLE_SERVICE;
 use conformance_service_engine::sample::{
     SAMPLE_JOB, SampleDirectory, boot_sample_engine, cron_runs, publish_roster,
 };

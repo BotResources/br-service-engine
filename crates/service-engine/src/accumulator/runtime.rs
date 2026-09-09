@@ -227,7 +227,15 @@ impl AccumulatorRuntime {
         };
         let stream = streaming_stream(&lane.service);
         for (accumulator, key) in sealed {
-            if let Err(error) = purge_one(&lane.nats, &lane.service, &stream, &self.pg, accumulator, key).await
+            if let Err(error) = purge_one(
+                &lane.nats,
+                &lane.service,
+                &stream,
+                &self.pg,
+                accumulator,
+                key,
+            )
+            .await
             {
                 tracing::warn!(
                     reason = %describe(&error),

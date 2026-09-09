@@ -70,10 +70,7 @@ pub async fn send_reply_finished(nats: &Nats, finished: &ReplyFinished) -> Resul
     Ok(())
 }
 
-pub async fn resend_reply_finished(
-    nats: &Nats,
-    finished: &ReplyFinished,
-) -> Result<(), NatsError> {
+pub async fn resend_reply_finished(nats: &Nats, finished: &ReplyFinished) -> Result<(), NatsError> {
     let subject = command_subject(&reply_finished_coords());
     let payload = serde_json::to_value(finished).map_err(NatsError::Encode)?;
     nats.publish_value_with_id(&subject, &payload, &Uuid::now_v7().to_string())

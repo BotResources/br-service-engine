@@ -5,7 +5,7 @@ use std::time::Duration;
 use accumulator_support::{rows, state};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::engine::engine_config;
-use conformance_service_engine::sample::stream::{text_for, token_for};
+use conformance_service_engine::sample::stream::token_for;
 use conformance_service_engine::sample::{
     NoteBody, NoteKey, StagingTransport, SyntheticSource, note_body_runtime,
 };
