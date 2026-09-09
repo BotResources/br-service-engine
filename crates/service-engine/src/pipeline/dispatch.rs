@@ -172,7 +172,9 @@ pub(crate) async fn flush_and_commit(
         let _ = tx.rollback().await;
         return Err(error);
     }
-    tx.commit().await.map_err(EngineError::from)
+    tx.commit().await.map_err(EngineError::from)?;
+    crate::observe::record_impacts_committed(staged.impacts.len());
+    Ok(())
 }
 
 pub(crate) fn classify(error: &sqlx::Error) -> DispatchError {

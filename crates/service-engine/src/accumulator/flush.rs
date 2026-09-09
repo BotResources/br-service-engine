@@ -227,6 +227,7 @@ async fn commit_batch(
     }
 
     tx.commit().await?;
+    crate::observe::record_impacts_committed(impacts.len());
 
     let verdicts: Vec<Verdict> = batch
         .iter()
