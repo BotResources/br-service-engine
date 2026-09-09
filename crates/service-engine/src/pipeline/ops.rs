@@ -61,6 +61,7 @@ impl<'a> Ops<'a> {
         &mut self,
         key: &<A::Store as Persistence>::Key,
     ) -> Result<Option<A>, EngineError> {
+        A::Store::lock(self.conn, key).await?;
         let loaded = A::Store::load(self.conn, key).await?;
         if let Some(aggregate) = &loaded {
             let reconcile_key = reconcile_key::<A>(aggregate)?;

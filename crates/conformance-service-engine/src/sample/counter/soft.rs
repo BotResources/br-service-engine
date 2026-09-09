@@ -35,8 +35,7 @@ impl Persistence for SoftCounterStore {
     ) -> BoxFuture<'a, Result<Option<SoftCounter>, EngineError>> {
         Box::pin(async move {
             let row = sqlx::query(
-                "SELECT id, tenant, total, closed, version FROM sample_counter_soft \
-                 WHERE id = $1 FOR UPDATE",
+                "SELECT id, tenant, total, closed, version FROM sample_counter_soft WHERE id = $1",
             )
             .bind(key)
             .fetch_optional(conn)
@@ -51,6 +50,19 @@ impl Persistence for SoftCounterStore {
                     row.get("version"),
                 ))
             }))
+        })
+    }
+
+    fn lock<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("SELECT id FROM sample_counter_soft WHERE id = $1 FOR UPDATE")
+                .bind(key)
+                .fetch_optional(conn)
+                .await?;
+            Ok(())
         })
     }
 

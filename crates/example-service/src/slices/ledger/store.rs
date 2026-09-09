@@ -35,6 +35,19 @@ impl Persistence for LedgerStore {
         })
     }
 
+    fn lock<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("SELECT id FROM ledger_snapshot WHERE id = $1 FOR UPDATE")
+                .bind(key)
+                .fetch_optional(conn)
+                .await?;
+            Ok(())
+        })
+    }
+
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Uuid],
@@ -91,8 +104,7 @@ async fn select_snapshot(
     key: &Uuid,
 ) -> Result<Option<LedgerState>, EngineError> {
     let row = sqlx::query(
-        "SELECT id, org_id, total, last_author, version FROM ledger_snapshot WHERE id = $1 \
-         FOR UPDATE",
+        "SELECT id, org_id, total, last_author, version FROM ledger_snapshot WHERE id = $1",
     )
     .bind(key)
     .fetch_optional(conn)

@@ -29,6 +29,13 @@ pub trait Persistence: Send + Sync + 'static {
         key: &'a Self::Key,
     ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>>;
 
+    fn lock<'a>(
+        _conn: &'a mut PgConnection,
+        _key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Self::Key],

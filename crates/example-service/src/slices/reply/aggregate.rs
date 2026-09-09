@@ -115,13 +115,25 @@ impl Persistence for ReplyStore {
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<Option<ReplyRow>, EngineError>> {
         Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, board_id, text, status, blob_ref FROM reply WHERE id = $1 FOR UPDATE",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
+            let row =
+                sqlx::query("SELECT id, board_id, text, status, blob_ref FROM reply WHERE id = $1")
+                    .bind(key)
+                    .fetch_optional(conn)
+                    .await?;
             Ok(row.as_ref().map(row_to_reply))
+        })
+    }
+
+    fn lock<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("SELECT id FROM reply WHERE id = $1 FOR UPDATE")
+                .bind(key)
+                .fetch_optional(conn)
+                .await?;
+            Ok(())
         })
     }
 

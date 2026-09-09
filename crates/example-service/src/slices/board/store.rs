@@ -44,13 +44,25 @@ impl Persistence for BoardStore {
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<Option<BoardRow>, EngineError>> {
         Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, org_id, name, is_public, state FROM board WHERE id = $1 FOR UPDATE",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
+            let row =
+                sqlx::query("SELECT id, org_id, name, is_public, state FROM board WHERE id = $1")
+                    .bind(key)
+                    .fetch_optional(conn)
+                    .await?;
             Ok(row.as_ref().map(row_to_board))
+        })
+    }
+
+    fn lock<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("SELECT id FROM board WHERE id = $1 FOR UPDATE")
+                .bind(key)
+                .fetch_optional(conn)
+                .await?;
+            Ok(())
         })
     }
 

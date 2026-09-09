@@ -47,6 +47,19 @@ impl Persistence for FullCounterStore {
         })
     }
 
+    fn lock<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("SELECT id FROM sample_counter_full_snapshot WHERE id = $1 FOR UPDATE")
+                .bind(key)
+                .fetch_optional(conn)
+                .await?;
+            Ok(())
+        })
+    }
+
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Uuid],
@@ -105,7 +118,7 @@ pub(crate) async fn select_snapshot(
 ) -> Result<Option<CounterState>, EngineError> {
     let row = sqlx::query(
         "SELECT id, tenant, total, closed, last_author, version \
-         FROM sample_counter_full_snapshot WHERE id = $1 FOR UPDATE",
+         FROM sample_counter_full_snapshot WHERE id = $1",
     )
     .bind(key)
     .fetch_optional(conn)
