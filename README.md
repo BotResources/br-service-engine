@@ -42,7 +42,7 @@ fills its part by adding module files and one method body.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish | U1 |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` | U2 (done) |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` | U3 (done) |
-| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) |
+| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create` plus `read_many` (the lock-free batched render read from the same committed store); log-style events reach `save` via `Aggregate::pending_events` | U3 (CRUD) / U4 (soft + full) / U13b (`read_many`) |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` | U5 (done) |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` | U6 (done) |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile | U7 (done) |
@@ -51,8 +51,10 @@ fills its part by adding module files and one method body.
 | `scopes` | `declare_scopes` handshake gating readiness | U10 (done) |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) | U11 |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) | U1 |
-| `view` | ergonomic projector surface: a `View` declares a typed `Query`, a bulk `rows` read, `populate(cx, q)` and `project(row, principal)`; the engine's `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch | U13b |
-| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot | U12 / U12b |
+| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many` and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch | U13b |
+| `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) | U13b |
+| `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) | U13b |
+| `graphql` | async-graphql kit; `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` | U12 / U12b / U13b |
 
 Every author-facing surface of the 0.1.0 rework is now filled; no `register_*`
 method or engine gesture returns `EngineError::NotYet`.
@@ -85,10 +87,10 @@ snapshot) and its events (or facts) in the one transaction the pipeline opened
 and never opens its own, so a foreign-key, unique or check-constraint failure on
 either table rolls the state row and its events back together. The reference
 stores take the row (or snapshot) lock at `load` with `SELECT … FOR UPDATE`, so
-concurrent commands on one key serialize in every style — the engine cannot
-inject that lock into author-owned load SQL, so the sample locks it and slices
-copied from it inherit it, while the render-side `Projector::load` stays
-lock-free. Full EDA hydrates
+concurrent commands on one key serialize in every style. The render side never
+takes that lock: the engine loads a projector's rows through the store's
+`Persistence::read_many`, a single batched lock-free read of the same committed
+table `load` writes, so the author writes no render load SQL in the view. Full EDA hydrates
 on `load` by replaying the events above the snapshot and running the aggregate's
 hydration check as the second barrier, and owns the log's two gestures —
 upcasting an older event version at read time, and erasure, which rewrites a
@@ -97,8 +99,8 @@ transaction. On the engine's own authority, an integrity (SQLSTATE class 23) or
 data (class 22) violation raised inside a handler's `cx.save` / `cx.create` is
 classified terminal whatever the handler's `Disposition` says, so a coarse
 `Retry` cannot nak a constraint violation forever; a raw `cx.connection()` write
-stays the handler's to classify. The render-side `Projector::load` and the
-write-side `Persistence` read one committed store — for full EDA the snapshot is
+stays the handler's to classify. The render-side `read_many` and the
+write-side `load`/`save` read one committed store — for full EDA the snapshot is
 the state row the projector reads — so a `fetch`, a session `Upsert` and a
 write-side `load` return the same committed truth.
 `register_presence` (U6) is filled: it binds the `EPHEMERAL_{service}` bucket at
@@ -224,20 +226,29 @@ Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `mutation_executor` and `blob_reader` are captured.
 
 The authoring ergonomics were then aligned to the intent (U13b). A projector is
-written as a `view::View` — a typed `Query`, a bulk lock-free `rows(conn, keys)`
-read of the noun's committed store, `populate(cx, q)` over a `Populate` context
-and `project(row, principal)` — and the engine owns the `Facts` type, the
-`LoadScope::{Bulk, PerPrincipal}` match and the derived `name`/`nouns`/`inverse`;
-the opaque `WindowParams` never reaches the author, who works in the typed
-`Query` through `register_view`, `Query::fetch_view` / `fetch_view_window`,
-`WindowSpec::view` and `Bulk::impact_all_view`. The low-level `Projector` stays
-as the escape hatch for a projector that joins nouns. The accumulated lane gained
-`Ops::seal_partial` and `Ops::seal_current` so a service can implement the
-intent's "Cancel work in flight": a direct-lane cancel decision (with the cancel
-gate as its affordance, a presence signal the producer watches and a scheduled
-deadline), a reaction that seals the producer's verified partial as cancelled,
-and a deadline reaction that seals whatever the stream holds when the producer
-never answers.
+written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
+names its `type Noun` and `type Store`, a typed `Query`, and writes only a native
+`async fn populate(cx, q)` over a `Populate` context and `project(row, principal)`.
+No hand-written future plumbing and no render load SQL live in the view: the engine
+loads the noun's rows through the store's `Persistence::read_many` and owns the
+`Facts` type, the `LoadScope::{Bulk, PerPrincipal}` match and the derived
+`name`/`nouns`/`inverse`; the opaque `WindowParams` never reaches the author, who
+works in the typed `Query` through `register_view`, `Query::fetch_view` /
+`fetch_view_window`, `WindowSpec::view` and `Bulk::impact_all_view`. `ViewProjector`
+is a zero-sized adapter, so a query resolver constructs no per-call state. The
+low-level `projector::Projector` stays as the escape hatch for a projector that
+joins nouns. The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
+so a service can implement the intent's "Cancel work in flight": a direct-lane
+cancel decision (with the cancel gate as its affordance, a presence signal the
+producer watches and a scheduled deadline), a reaction that seals the producer's
+verified partial as cancelled, and a deadline reaction that seals whatever the
+stream holds when the producer never answers.
+
+Also in U13b, a service depends on `br-rust-common` only for frontier types: the
+engine provides its own `connect_pool` / `validate_database_tls` (the
+secure-by-default Postgres connect) and its own `Readiness` / `ReadinessHandle` /
+`readiness_route`, so `br-util-postgres` and `br-util-axum-readiness` are gone from
+the engine, the example and the battery.
 
 ## Writing a service
 
@@ -246,12 +257,13 @@ bootable reference service built only on this crate's public authoring surface �
 no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
 `kernel/` (principal, scopes, error base), one folder per slice under `slices/`
 (each owning its aggregate, store, view, handlers, offer/mirror and SDL
-fragment), a `register.rs` with one line per slice, a `graphql.rs` that assembles
-the fragments, and a `src/bin/service.rs` that boots. Every slice is removable by
-deleting its folder and its one register line — each is a cargo feature
-(default = all), so the crate compiles with any slice removed; the `removability`
-CI job proves it by building the kernel with every slice removed and then each
-slice removed in turn. `crates/example-contract` holds what crosses the service
+fragment + its committed `schema.graphql`), a `register.rs` with one line per
+slice, a `graphql.rs` that assembles the fragments, and a `src/bin/service.rs` that
+boots. Each slice is a cargo feature (default = all): removing one deletes its
+folder and its `register.rs` line, its `slices/mod.rs` mod line (Rust requires the
+mod declaration) and its `#[cfg]`-gated fields in the `graphql.rs` roots. The
+`removability` CI job proves every configuration compiles — the kernel with every
+slice removed, then each slice removed in turn. `crates/example-contract` holds what crosses the service
 frontier (published types + integration coordinates), and `crates/example-twin`
 is the separate producer/runner that closes a real cross-service cycle over NATS,
 so the reference service itself never holds a NATS client. The slices between

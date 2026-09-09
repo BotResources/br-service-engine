@@ -877,38 +877,62 @@ skeleton; `conformance-service-engine` ships its black-box battery.
 
 ### Added (0.1.0 rework, unit U13b — authoring ergonomics)
 
-- **`view::View` — the ergonomic projector surface.** A service now writes a
-  view the way the intent's "Add a view with a query window" how-to shows: a
-  `type Query` (serde), a bulk lock-free `rows(conn, keys)` read of the noun's
-  committed store, `populate(cx, q) -> Population` over a `Populate` context
-  (`cx.pool()`, `cx.principal()`), and `project(row, principal) -> View`. The
-  engine's `ViewProjector` adapter owns everything the author previously
-  hand-wrote against the low-level `Projector`: the `Facts` associated type, the
-  `load` with its `LoadScope::{Bulk, PerPrincipal}` match, and the derived
-  `name` / `nouns` / `inverse`. The opaque `WindowParams` no longer appears on
-  the author surface — the engine decodes the typed `Query` (defaulting it when
-  the window is null). `Engine::register_view`, `Query::fetch_view` /
-  `Query::fetch_view_window` (typed query, no hand `WindowParams::encode`),
-  `WindowSpec::view::<V>(query, rls)` and `Bulk::impact_all_view::<V>` mirror the
-  projector gestures for a `View`. The low-level `Projector` trait is retained
-  unchanged as the **escape hatch for a projector that joins nouns** (the
-  reference `roster` mirror keeps using it). The `board`, `reply`, `card` and
-  `ledger` reference views were rewritten to `View`; `card`'s `BoardWindow` typed
-  query shows the typed `Query` replacing the former `window.get::<Uuid>` read.
+- **`view::Projector` (re-exported as `service_engine::Projector`) — the
+  snippet-shaped ergonomic projector surface.** A service now writes a view the
+  way the intent's "Add a view with a query window" how-to shows: it names its
+  `type Noun` and `type Store` (the noun's `Persistence`), a `type Query` (serde),
+  and writes only a native `async fn populate(cx, q) -> Population` over a
+  `Populate` context (`cx.pool()`, `cx.principal()`) and
+  `fn project(row, principal) -> Out`. No `BoxFuture`/`Box::pin` and no render
+  load SQL appear in the view. The former `view::View` trait, its author-written
+  `fn rows(conn, keys)` and the `RowsFuture` alias are removed.
+- **`Persistence::read_many(conn, keys) -> RowBatch` (new required trait method).**
+  The engine loads a projector's rows through the noun's store — one batched,
+  lock-free read of the same committed table `load`/`save` use — so the
+  render-side load and the write-side load are one truth. `ViewProjector` owns the
+  `Facts` type, the `LoadScope::{Bulk, PerPrincipal}` match and the derived
+  `name` / `nouns` / `inverse`; `project` receives the store's `Aggregate`. Every
+  `Persistence` impl gains `read_many`.
+- **`ViewProjector<V>` is now a zero-sized adapter.** The prior implementation
+  interned its noun list with a `Box::leak` on every `default()`, so each
+  `card`/`cards`/`fetch_view` query leaked one `Box<[NounName]>` unbounded over a
+  pod's uptime. The noun list is now interned once per projector type; the query
+  hot path constructs no per-call state and leaks nothing.
+- `Engine::register_view`, `Query::fetch_view` / `Query::fetch_view_window` (typed
+  query, no hand `WindowParams::encode`), `WindowSpec::view::<V>(query, rls)` and
+  `Bulk::impact_all_view::<V>` keep their names, now over `view::Projector`. The
+  low-level `projector::Projector` is retained unchanged as the **escape hatch for
+  a projector that joins nouns** (the reference `roster` mirror keeps using it) and
+  is reached at its full path (no longer re-exported at the crate root). The
+  `board`, `card`, `ledger` and `reply` reference views were rewritten to the new
+  surface.
+- **`service_engine::connect_pool` + `service_engine::validate_database_tls`, and
+  `service_engine::{Readiness, ReadinessHandle, readiness_route}`.** The engine
+  owns its own secure-by-default pooled Postgres connect (remote hosts require
+  `sslmode`; a `host=`/`hostaddr=` override is refused, even percent-encoded;
+  `TRUSTED_NETWORK_HOSTS` is the explicit per-host opt-out) and its own readiness
+  handle and `/readyz` route. `br-util-axum-readiness` and `br-util-postgres` are
+  dropped from the engine, the example and the conformance battery — a service
+  depends on `br-rust-common` only for frontier types.
 - **`Ops::seal_partial::<A>(key, last_seq, hash)` and `Ops::seal_current::<A>(key)`
   — the accumulated-lane cancel gestures.** `seal_partial` replays and verifies
-  exactly like `seal` but is the named gesture for a cancel: the reaction saves
-  what the stream held up to the cancel point and marks the record cancelled
-  rather than complete, so a short text is a decision, never a loss.
-  `seal_current` seals whatever the stream currently holds without a hash, for
-  the lost-producer deadline. The reference `reply` slice now implements the
-  intent's "Cancel work in flight" how-to: a `cancel_reply` mutation (direct-lane
-  decision with the cancel gate as its affordance, a `CancelSignal` presence
-  value the producer watches, and a scheduled `CancelTimedOut` deadline), a
-  `reply_cancelled` reaction that `seal_partial`s the producer's verified
-  partial, and a `cancel_timed_out` reaction that `seal_current`s on the
-  deadline. A new e2e scenario proves the partial is sealed as `cancelled` and
-  that the `cancel` affordance flips once it is.
+  exactly like `seal` but is the named gesture for a cancel (the aggregate's
+  `complete_cancelled`, not the engine, marks it cancelled). `seal_current` seals
+  whatever the stream currently holds without a hash, for the lost-producer
+  deadline. The reference `reply` slice implements the intent's "Cancel work in
+  flight" how-to: a `cancel_reply` mutation (direct-lane decision with the cancel
+  gate as its affordance, a `CancelSignal` presence value the producer watches, and
+  a scheduled `CancelTimedOut` deadline), a `reply_cancelled` reaction that
+  `seal_partial`s the producer's verified partial, and a `cancel_timed_out`
+  reaction that `seal_current`s on the deadline. Two e2e scenarios prove it: the
+  producer-answers path (partial sealed as `cancelled`, `cancel` affordance flips)
+  and the lost-producer path (the scheduled deadline seals through `seal_current`).
+- **Per-slice SDL is a committed, drift-guarded artifact.** Each slice emits its
+  own `schema.graphql` (rendered by that slice's async-graphql schema, so it cannot
+  drift from the code); a feature-gated test asserts every fragment still matches
+  (`BLESS_SCHEMA_FRAGMENTS=1` regenerates).
+- A subscriber on pod B receives the `Upsert` caused by a write on pod A — proven
+  by a two-pod e2e over the impact bus, not only a cross-pod query.
 
 ### Deployment constraint
 
