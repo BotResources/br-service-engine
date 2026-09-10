@@ -95,32 +95,6 @@ durable name, so a message is owned by one pod at a time.
   handler's disposition, so a coarse `Store(_) => Retry` cannot nak a constraint
   violation forever.
 - The `service_engine.dead_letter` table and `DeadLetters` store (`record`,
-  `list` by `DeadLetterSource`, `discard`, `retry` — retry re-publishes with a
-  fresh dedup token but the original logical id, so the claim and sequence guard
-  keep a replay on newer state a no-op). Dead-lettering stages an impact on the
-  ops noun in the same transaction, so an ops view updates like any other change.
-- The per-(producer, key) sequence guard (`service_engine.sequence_guard`) and
-  the idempotency claim (`service_engine.message_claim`), applied inside the
-  effect transaction; the claim is keyed `(message_id, reaction)`, so two
-  reactions of one service on the same coordinate each run once. The confirmation
-  the reaction emitted is stored on the claim row (`message_claim.confirmations`)
-  in the same transaction as the effect; a later command carrying an
-  already-claimed id re-emits that stored confirmation through the outbox instead
-  of acking a silent no-op, so a producer that lost its confirmation past the
-  broker's duplicate window is answered again without re-running the effect — the
-  aggregate does nothing, the engine replays. A command that reuses an
-  aggregate id under a *fresh* message id is a genuine duplicate the reaction
-  decides on (re-emit its confirmation, or a typed rejection), never a
-  dead-letter for a legitimate replay.
-||||||| db7912b
-  `list` by `DeadLetterSource`, `discard`, `retry` — retry re-publishes with a
-  fresh dedup token but the original logical id, so the claim and sequence guard
-  keep a replay on newer state a no-op). Dead-lettering stages an impact on the
-  ops noun in the same transaction, so an ops view updates like any other change.
-- The per-(producer, key) sequence guard (`service_engine.sequence_guard`) and
-  the idempotency claim (`service_engine.message_claim`), applied inside the
-  effect transaction; the claim is keyed `(message_id, reaction)`, so two
-  reactions of one service on the same coordinate each run once.
   `record_work`, `list` by `DeadLetterSource`, `discard`, `retry` — retry
   re-publishes with a fresh dedup token but the original logical id, so the claim
   and sequence guard keep a replay on newer state a no-op). It is the one table
@@ -134,7 +108,16 @@ durable name, so a message is owned by one pod at a time.
   (`service_engine.message_claim`), applied inside the effect transaction; the
   claim is keyed `(message_id, reaction)`, and the guard is scoped per reaction,
   so two reactions consuming different facts of one producer under one key keep
-  independent watermarks and never drop each other's messages.
+  independent watermarks and never drop each other's messages. The confirmation
+  the reaction emitted is stored on the claim row (`message_claim.confirmations`)
+  in the same transaction as the effect; a later command carrying an
+  already-claimed id re-emits that stored confirmation through the outbox instead
+  of acking a silent no-op, so a producer that lost its confirmation past the
+  broker's duplicate window is answered again without re-running the effect — the
+  aggregate does nothing, the engine replays. A command that reuses an
+  aggregate id under a *fresh* message id is a genuine duplicate the reaction
+  decides on (re-emit its confirmation, or a typed rejection), never a
+  dead-letter for a legitimate replay.
 - Inbound-consumer and lane-A ingress supervision: each runs under a supervisor
   that restarts it with bounded backoff (one log per step, never a hot spin) and,
   past a consecutive-failure threshold, lowers readiness (`REASON_INBOUND_STOPPED`,

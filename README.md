@@ -412,9 +412,12 @@ command whose actor is not a service. An `OutboundEvent`/`OutboundCommand` deriv
 its producer sequence from the aggregate's key and version at emit time
 (`sequence()`); the engine renders it as the three `Br-Producer` / `Br-Seq-Key` /
 `Br-Seq` headers and persists it on the outbox row, so engine→engine traffic is
-ordered and the per-`(producer, seq_key)` sequence guard on the receiver drops a
-stale message as an acked no-op — a view never walks backwards. The hosted outbox
-relay drains a backlog within one beat (its batch cap equals its drain bound, so
+ordered and the per-`(producer, reaction, seq_key)` sequence guard on the receiver
+drops a stale message as an acked no-op — a view never walks backwards. The guard
+is scoped per reaction, so two reactions consuming different facts of one producer
+under one key keep independent watermarks and never drop each other's messages.
+The hosted outbox relay drains a backlog within one beat (its batch cap equals its
+drain bound, so
 a full batch signals the beat to come back), and a periodic hygiene pass
 (`EngineConfig::with_message_retention`, swept on `HostedOutboxRelay::with_sweep_every`)
 deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
@@ -436,14 +439,6 @@ reuses an *aggregate* id under a fresh message id is not a claim duplicate — i
 reaches the reaction, which decides: the example's `create_card` finds the card
 already exists and re-emits `CardReady` rather than colliding on the unique
 constraint and dead-lettering a legitimate replay.
-||||||| db7912b
-ordered and the per-`(producer, seq_key)` sequence guard on the receiver drops a
-stale message as an acked no-op — a view never walks backwards.
-ordered and the per-`(producer, reaction, seq_key)` sequence guard on the
-receiver drops a stale message as an acked no-op — a view never walks backwards.
-The guard is scoped per reaction, so two reactions consuming different facts of
-one producer under one key keep independent watermarks and never drop each
-other's messages.
 
 A service depends on `br-rust-common` only for frontier types (the Passport, the
 integration envelope and coordinates, the scope declaration and its handshake, the
