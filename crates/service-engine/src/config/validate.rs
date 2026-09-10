@@ -17,10 +17,18 @@ impl EngineConfig {
             ("ack_wait", self.ack_wait),
             ("nats_grace", self.nats_grace),
             ("message_retention", self.message_retention),
+            ("publish_ack_timeout", self.publish_ack_timeout),
         ] {
             if value.is_zero() {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));
             }
+        }
+        if self.publish_ack_timeout > self.nats_grace {
+            return Err(EngineError::Config(
+                "publish_ack_timeout must not exceed nats_grace, otherwise a wedged JetStream \
+                 publish can hold the beat past the grace before readiness can fall to DOWN"
+                    .into(),
+            ));
         }
         if self.max_ack_pending <= 0 {
             return Err(EngineError::Config(

@@ -19,9 +19,10 @@ spec:
               service_engine_notification_queue_usage on {{ $labels.service }}/{{ $labels.pod }}
               has stayed above listener_queue_threshold. Past capacity every notifying commit on
               the whole Postgres cluster fails, so at that same threshold the beat closes the pod's
-              listener each tick, takes it DOWN and reconnects, resetting its sessions; a sustained
-              warning therefore means the brake has been engaging, and names the filling queue
-              behind the reconnects rather than only their consequence.
+              listener, takes it DOWN and reconnects it once usage falls back below the threshold,
+              resetting its sessions; a sustained warning therefore means the brake has been
+              engaging, and names the filling queue behind the reconnects rather than only their
+              consequence.
         - alert: ServiceEngineNotifyBudgetNearCeiling
           expr: >-
             sum by (postgres_cluster) (rate(service_engine_impacts_committed_total[1m])) > 2000
@@ -49,6 +50,21 @@ spec:
               the recovery path for a listener reconnect, a per-session lag or a window churn; a
               sustained rate means one of those is recurring rather than repairing, and clients are
               paying full re-snapshots instead of deltas.
+        - alert: ServiceEngineOutboxBacklogAging
+          expr: max by (service) (service_engine_outbox_oldest_age_seconds) > 120
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: A service's outbox has rows that are not draining
+            description: >-
+              service_engine_outbox_oldest_age_seconds on {{ $labels.service }} has stayed above
+              two minutes. The leader publishes committed outbox rows every beat and after every
+              render pass, and skips the relay while NATS is unreachable, so a persistently aging
+              oldest row means publishing is not keeping up: the broker is unreachable or wedged,
+              or the publish rate is below the commit rate. The state change already committed, so
+              nothing is lost, but the confirmation events and downstream commands it carries are
+              delayed; service_engine_outbox_pending shows the depth behind it.
         - alert: ServiceEngineDeadLettersPresent
           expr: sum by (service, source) (service_engine_dead_letters_total) > 0
           for: 1m
