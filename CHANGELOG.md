@@ -421,7 +421,8 @@ on the flush-and-commit of a reaction (or the replay of a stored confirmation)
 logs the same error chain server-side, so a database fault on a reaction is no
 longer opaque in the dead-letter row and ack path. Because that recovery is a
 server-side log, the `example-service` e2e harness installs a `tracing`
-subscriber (honouring `RUST_LOG`, defaulting to `warn`), so a fault raised by the
+subscriber (honouring `RUST_LOG`, defaulting to `error` so a green run stays
+quiet while a fault's cause still surfaces), so a fault raised by the
 in-process engine surfaces its cause in the captured test output rather than
 being discarded by a test process that installed no subscriber. Query resolvers
 take a typed `Query<'_, P>` context and read rendered views through
