@@ -77,6 +77,7 @@ impl World {
         options: WorldOptions,
         tweak: impl FnOnce(EngineConfig) -> EngineConfig,
     ) -> World {
+        install_log_capture();
         let db = TestDb::fresh().await;
         let nats_server = TestNats::spawn().await;
         nats_server.provision(example_contract::SERVICE).await;
@@ -195,6 +196,19 @@ impl World {
         self.service.shutdown().await;
         self.db.cleanup().await;
     }
+}
+
+fn install_log_capture() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        use tracing_subscriber::EnvFilter;
+        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .try_init();
+    });
 }
 
 fn base_config(pod: &str, addr: SocketAddr) -> EngineConfig {

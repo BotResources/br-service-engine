@@ -412,7 +412,22 @@ once (module, cargo feature, root objects on one line) and generates the merged
 `app` serves `POST /graphql`, the `graphql-transport-ws` subscription on
 `GET /graphql/ws`, and `/readyz`; `run_with` / `run_with_listener` own the engine
 loop and the HTTP server in one call. Mutation resolvers run on
-`Engine::mutation_executor` (`ack` / `execute` and bulk forms). Query resolvers
+`Engine::mutation_executor` (`ack` / `execute` and bulk forms). A domain refusal
+carries its `Reason` code to the caller; an internal fault the pipeline itself
+owns — the transaction begin, or the flush-and-commit of the staged impact /
+outbox / snapshot writes — surfaces as a generic `mutation failed: database` with
+no sqlx internals on the wire, while the full underlying error chain is logged at
+`error` level server-side (with the failing stage), so the cause the wire
+deliberately hides is still recoverable by an operator rather than discarded. The
+reaction pipeline gets the symmetric treatment: an internal `Db` fault classified
+on the flush-and-commit of a reaction (or the replay of a stored confirmation)
+logs the same error chain server-side, so a database fault on a reaction is no
+longer opaque in the dead-letter row and ack path. Because that recovery is a
+server-side log, the `example-service` e2e harness installs a `tracing`
+subscriber (honouring `RUST_LOG`, defaulting to `error` so a green run stays
+quiet while a fault's cause still surfaces), so a fault raised by the
+in-process engine surfaces its cause in the captured test output rather than
+being discarded by a test process that installed no subscriber. Query resolvers
 take a typed `Query<'_, P>` context and read rendered views through
 `cx.fetch::<Projector>` / `cx.fetch_window::<Projector>` (and `fetch_view` /
 `fetch_view_window` over the ergonomic `view::Projector`), never the database,

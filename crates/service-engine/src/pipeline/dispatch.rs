@@ -115,7 +115,10 @@ impl DirectPipeline {
         };
         match flush_and_commit(tx, &staged, self.transport.as_ref()).await {
             Ok(()) => DispatchOutcome::Applied(Applied::NoOp(NoOp::Duplicate)),
-            Err(error) => DispatchOutcome::Failed(classify_engine(&error)),
+            Err(error) => DispatchOutcome::Failed(classify_engine_logged(
+                "replay reaction confirmation",
+                &error,
+            )),
         }
     }
 
@@ -205,7 +208,9 @@ impl DirectPipeline {
                     .await;
                 DispatchOutcome::Applied(Applied::Committed)
             }
-            Err(error) => DispatchOutcome::Failed(classify_engine(&error)),
+            Err(error) => {
+                DispatchOutcome::Failed(classify_engine_logged("flush and commit reaction", &error))
+            }
         }
     }
 }
@@ -277,4 +282,16 @@ pub(crate) fn classify_engine(error: &EngineError) -> DispatchError {
         }
         _ => DispatchError::retry(error.to_string()),
     }
+}
+
+fn classify_engine_logged(context: &'static str, error: &EngineError) -> DispatchError {
+    if matches!(error, EngineError::Db(_)) {
+        tracing::error!(
+            context,
+            cause = %crate::chain::describe(error),
+            "a reaction aborted on an internal engine error; the dead-letter row and the ack \
+             carry a generic reason while the underlying cause is kept here"
+        );
+    }
+    classify_engine(error)
 }
