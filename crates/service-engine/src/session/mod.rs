@@ -26,6 +26,12 @@ impl SessionId {
     }
 }
 
+impl From<Uuid> for SessionId {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
 impl Default for SessionId {
     fn default() -> Self {
         Self::new()
