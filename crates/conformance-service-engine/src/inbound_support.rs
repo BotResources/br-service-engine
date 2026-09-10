@@ -61,6 +61,16 @@ pub async fn start_loop(
     pool: PgPool,
 ) -> InboundLoop {
     let (health, _health_rx) = InboundHealth::new();
+    start_loop_with_health(nats, subscriptions, dispatch, pool, health).await
+}
+
+pub async fn start_loop_with_health(
+    nats: &Nats,
+    subscriptions: Vec<Subscription>,
+    dispatch: Arc<dyn Dispatch>,
+    pool: PgPool,
+    health: InboundHealth,
+) -> InboundLoop {
     InboundLoop::start(
         nats.clone(),
         subscriptions,

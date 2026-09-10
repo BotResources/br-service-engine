@@ -90,3 +90,35 @@ pub async fn completed_slots(pool: &PgPool, job: &str) -> i64 {
     .await
     .expect("count the slots a job completed")
 }
+
+pub struct FailingCronJob {
+    name: JobName,
+    schedule: Schedule,
+}
+
+impl FailingCronJob {
+    pub fn new(name: &str, schedule: Schedule) -> Self {
+        Self {
+            name: JobName::new(name).expect("a valid job name"),
+            schedule,
+        }
+    }
+}
+
+impl CronJob for FailingCronJob {
+    fn name(&self) -> JobName {
+        self.name.clone()
+    }
+
+    fn schedule(&self) -> Schedule {
+        self.schedule.clone()
+    }
+
+    fn run<'a>(&'a self, _pg: &'a PgPool) -> BoxFuture<'a, Result<(), CronError>> {
+        Box::pin(async move {
+            Err(CronError::Job(
+                "the poison cron tick always fails".to_string().into(),
+            ))
+        })
+    }
+}
