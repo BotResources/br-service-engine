@@ -10,6 +10,11 @@ pub type BoxedError = Box<dyn StdError + Send + Sync>;
 mod codec;
 pub use codec::{CronError, DecodeError};
 
+mod attach;
+mod transport;
+pub use attach::AttachError;
+pub use transport::{RelayError, TransportError};
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum EngineError {
@@ -238,87 +243,4 @@ pub enum EngineError {
         "the composed schema exposes the graphql root field `{member}` that no slice fragment declared"
     )]
     UndeclaredSchemaMember { member: String },
-}
-
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum TransportError {
-    #[error("listener connection")]
-    Listen(#[source] sqlx::Error),
-
-    #[error("staging impacts")]
-    Stage(#[source] sqlx::Error),
-
-    #[error("impact payload")]
-    Payload(#[source] serde_json::Error),
-
-    #[error("a single impact renders to {size} bytes, over the {limit}-byte NOTIFY payload limit")]
-    PayloadTooLarge { size: usize, limit: usize },
-
-    #[error("malformed impact frame: {0}")]
-    Frame(String),
-
-    #[error(
-        "the impact listener was already taken; listen() is single-use so a second, unprobed \
-         listener never starts"
-    )]
-    ListenerConsumed,
-}
-
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum AttachError {
-    #[error("no projector is registered under {0}")]
-    UnknownProjector(ProjectorName),
-
-    #[error("the window on {projector} asks for RLS but no RlsApplier is registered")]
-    MissingRlsApplier { projector: ProjectorName },
-
-    #[error(
-        "the window on {projector} was attached with rls={requested} but the projector renders \
-         under rls={declared}; the render regime is the projector's, not the call's"
-    )]
-    RlsRegimeMismatch {
-        projector: ProjectorName,
-        declared: bool,
-        requested: bool,
-    },
-
-    #[error("attaching a window requires a registered PrincipalResolver")]
-    MissingPrincipalResolver,
-
-    #[error("the Query window on {projector} declares an empty Interest")]
-    EmptyInterest { projector: ProjectorName },
-
-    #[error("the snapshot of the window on {projector} could not be assembled")]
-    Snapshot {
-        projector: ProjectorName,
-        #[source]
-        source: EngineError,
-    },
-
-    #[error("the principal no longer exists, so the session it was attaching was ended")]
-    PrincipalRevoked,
-
-    #[error("the impacts held while the session was connecting could not be rendered")]
-    HeldImpacts(#[source] EngineError),
-
-    #[error("the connection did not assemble its snapshot within {after:?}")]
-    ConnectTimedOut { after: Duration },
-
-    #[error("the engine is shutting down")]
-    ShuttingDown,
-}
-
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum RelayError {
-    #[error("database")]
-    Db(#[from] sqlx::Error),
-
-    #[error("publishing a claimed row: {0}")]
-    Publish(String),
-
-    #[error("relay")]
-    Relay(#[source] BoxedError),
 }

@@ -1,5 +1,9 @@
+mod ttl;
+mod watch;
+
+pub use watch::{KvEvent, KvWatch};
+
 use std::marker::PhantomData;
-use std::time::Duration;
 
 use async_nats::jetstream::Context;
 use async_nats::jetstream::kv::{Operation, Store};
@@ -16,80 +20,9 @@ impl Revision {
     pub fn get(&self) -> u64 {
         self.0
     }
-}
 
-pub struct KvWatch {
-    inner: async_nats::jetstream::kv::Watch,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KvEvent<V> {
-    Put {
-        key: KvKey,
-        value: V,
-        revision: Revision,
-    },
-    Delete {
-        key: KvKey,
-        revision: Revision,
-    },
-}
-
-impl KvWatch {
-    pub async fn next<V: DeserializeOwned>(&mut self) -> Option<Result<KvEvent<V>, NatsError>> {
-        use futures_util::StreamExt;
-        loop {
-            let entry = match self.inner.next().await {
-                Some(Ok(entry)) => entry,
-                Some(Err(error)) => return Some(Err(watch_error(&error))),
-                None => return None,
-            };
-            if let Some(event) = entry_to_event::<V>(entry) {
-                return Some(event);
-            }
-        }
-    }
-
-    pub async fn next_under<V: DeserializeOwned>(
-        &mut self,
-        prefix: &KvPrefix,
-    ) -> Option<Result<KvEvent<V>, NatsError>> {
-        use futures_util::StreamExt;
-        loop {
-            let entry = match self.inner.next().await {
-                Some(Ok(entry)) => entry,
-                Some(Err(error)) => return Some(Err(watch_error(&error))),
-                None => return None,
-            };
-            if !prefix.matches(&entry.key) {
-                continue;
-            }
-            if let Some(event) = entry_to_event::<V>(entry) {
-                return Some(event);
-            }
-        }
-    }
-}
-
-fn entry_to_event<V: DeserializeOwned>(
-    entry: async_nats::jetstream::kv::Entry,
-) -> Option<Result<KvEvent<V>, NatsError>> {
-    let key = KvKey::new(entry.key.clone()).ok()?;
-    let revision = Revision(entry.revision);
-    Some(match entry.operation {
-        Operation::Delete | Operation::Purge => Ok(KvEvent::Delete { key, revision }),
-        Operation::Put => decode::<V>(&key, &entry.value).map(|value| KvEvent::Put {
-            key,
-            value,
-            revision,
-        }),
-    })
-}
-
-fn watch_error(detail: &dyn std::fmt::Display) -> NatsError {
-    NatsError::Kv {
-        key: "watch".to_string(),
-        detail: detail.to_string(),
+    fn new(revision: u64) -> Self {
+        Self(revision)
     }
 }
 
@@ -118,6 +51,14 @@ impl<V> KvBucket<V> {
         }
     }
 
+    fn store(&self) -> &Store {
+        &self.store
+    }
+
+    fn context(&self) -> &Context {
+        &self.context
+    }
+
     pub async fn max_age(&self) -> Result<std::time::Duration, NatsError> {
         self.store
             .status()
@@ -136,29 +77,6 @@ impl<V> KvBucket<V> {
             .map_err(|e| kv_error(key, &e))?;
         Ok(())
     }
-
-    pub async fn watch_all(&self) -> Result<KvWatch, NatsError> {
-        let inner = self.store.watch_all().await.map_err(|e| NatsError::Kv {
-            key: "watch".to_string(),
-            detail: e.to_string(),
-        })?;
-        Ok(KvWatch { inner })
-    }
-
-    pub async fn watch_all_from(&self, revision: u64) -> Result<KvWatch, NatsError> {
-        if revision == 0 {
-            return self.watch_all().await;
-        }
-        let inner = self
-            .store
-            .watch_all_from_revision(revision)
-            .await
-            .map_err(|e| NatsError::Kv {
-                key: "watch".to_string(),
-                detail: e.to_string(),
-            })?;
-        Ok(KvWatch { inner })
-    }
 }
 
 impl<V> KvBucket<V>
@@ -171,43 +89,6 @@ where
             .put(key.as_str(), bytes.into())
             .await
             .map_err(|e| kv_error(key, &e))?;
-        Ok(())
-    }
-
-    pub async fn put_with_ttl(
-        &self,
-        key: &KvKey,
-        value: &V,
-        ttl: Duration,
-    ) -> Result<(), NatsError> {
-        if self.store.use_jetstream_prefix {
-            return Err(NatsError::Kv {
-                key: key.as_str().to_string(),
-                detail: "a jetstream domain prefix is configured, which the per-key TTL put path \
-                         does not build a subject for"
-                    .to_string(),
-            });
-        }
-        let subject = format!(
-            "{}{}",
-            self.store
-                .put_prefix
-                .as_deref()
-                .unwrap_or(&self.store.prefix),
-            key.as_str()
-        );
-        let bytes = encode(value)?;
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert(
-            async_nats::header::NATS_MESSAGE_TTL,
-            async_nats::HeaderValue::from(ttl.as_secs()),
-        );
-        let ack = self
-            .context
-            .publish_with_headers(subject, headers, bytes.into())
-            .await
-            .map_err(|e| kv_error(key, &e))?;
-        ack.await.map_err(|e| kv_error(key, &e))?;
         Ok(())
     }
 
@@ -228,7 +109,7 @@ where
             return Ok(None);
         }
         let value = decode::<V>(key, &entry.value)?;
-        Ok(Some((value, Revision(entry.revision))))
+        Ok(Some((value, Revision::new(entry.revision))))
     }
 
     pub async fn update_if(
@@ -243,7 +124,7 @@ where
             .update(key.as_str(), bytes.into(), expected.0)
             .await
         {
-            Ok(revision) => Ok(Revision(revision)),
+            Ok(revision) => Ok(Revision::new(revision)),
             Err(error) => Err(revision_error(key, expected, error.kind(), &error)),
         }
     }
