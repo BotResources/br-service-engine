@@ -37,7 +37,8 @@ pub(super) fn wire_beat<P: Principal>(
     beat.relays().register_erased(Arc::new(
         crate::relays::outbox::HostedOutboxRelay::hosting(
             crate::name::RelayName::from_static("integration_outbox"),
-            crate::relays::outbox::OutboxRelay::new(pg.clone(), nats.clone()),
+            crate::relays::outbox::OutboxRelay::new(pg.clone(), nats.clone())
+                .with_dead_letters(dead_letters.clone()),
         )
         .with_message_retention(config.message_retention),
     ))?;

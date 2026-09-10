@@ -20,6 +20,7 @@ pub enum DeadLetterSource {
     Scheduled,
     Cron,
     Mirror,
+    Outbox,
 }
 
 impl DeadLetterSource {
@@ -29,6 +30,7 @@ impl DeadLetterSource {
             Self::Scheduled => "scheduled",
             Self::Cron => "cron",
             Self::Mirror => "mirror",
+            Self::Outbox => "outbox",
         }
     }
 }

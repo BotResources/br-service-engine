@@ -59,6 +59,9 @@ spec:
             description: >-
               service_engine_dead_letters_total on {{ $labels.service }} for source
               {{ $labels.source }} is above zero. A poison message, a failing scheduled row, a
-              failing cron tick or a mirror stuck past its restart threshold has been parked for a
-              human to retry or discard from the ops view. The counter is emitted for every source
-              of work the engine runs, labelled by source.
+              failing cron tick, a mirror stuck past its restart threshold or an outbox row that
+              kept failing to publish against a reachable broker has been parked for a human to
+              retry or discard from the ops view. The counter is emitted for every source of work
+              the engine runs, labelled by source; service_engine_outbox_pending and
+              service_engine_outbox_oldest_age_seconds show a backlog that is still draining before
+              any of it is parked.

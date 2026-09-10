@@ -110,7 +110,17 @@ impl HostedOutboxRelay {
         self.maybe_sweep().await;
         let pass = self.hosted.run_once_detailed().await?;
         self.record(pass);
+        self.record_depth().await;
         verdict(&self.name, pass.picked, pass.structural, self.cap)
+    }
+
+    async fn record_depth(&self) {
+        match self.hosted.pending_stats().await {
+            Ok((depth, oldest_age)) => crate::observe::record_outbox_depth(depth, oldest_age),
+            Err(error) => {
+                tracing::warn!(reason = %error, "outbox depth gauge could not be sampled");
+            }
+        }
     }
 }
 
