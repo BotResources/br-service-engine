@@ -56,8 +56,8 @@ impl<P: Principal> Engine<P> {
             crate::relays::outbox::HostedOutboxRelay::hosting(
                 crate::name::RelayName::from_static("integration_outbox"),
                 crate::relays::outbox::OutboxRelay::new(pg.clone(), nats.clone()),
-                config.impacts_per_commit.max(1),
-            ),
+            )
+            .with_message_retention(config.message_retention),
         ))?;
 
         let readiness_guard = readiness.clone();

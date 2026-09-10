@@ -15,6 +15,7 @@ impl EngineConfig {
             ("session_max_age", self.session_max_age),
             ("lock_timeout", self.lock_timeout),
             ("nats_grace", self.nats_grace),
+            ("message_retention", self.message_retention),
         ] {
             if value.is_zero() {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));

@@ -19,16 +19,6 @@ pub(crate) async fn drain_one(
 ) -> Result<Option<Drained>, RelayError> {
     let claim = Claim::new(pod.clone(), batch);
     if let Some(hosted) = relay.hosted_drain(pg, &claim) {
-        if discipline == Discipline::Leader {
-            return Err(engine(EngineError::Service(
-                format!(
-                    "{} drains through a hosted relay, which the Leader discipline cannot serve: \
-                     the slot claim and its completion must ride the drain's own transaction",
-                    relay.name()
-                )
-                .into(),
-            )));
-        }
         return hosted.await.map(Some);
     }
     let mut tx = pg.begin().await?;

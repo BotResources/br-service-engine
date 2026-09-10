@@ -10,17 +10,27 @@ pub use stage::{OutboundSequence, OutboxRecord, event_subject, stage};
 pub use store::{OUTBOX_NOTIFY_CHANNEL, OUTBOX_TABLE, OutboxStore, PendingOutbox};
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use br_core_integration::{OutboxStatus, Transition, next_after_attempt};
 use futures_util::future::BoxFuture;
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
+use crate::config::DEFAULT_MESSAGE_RETENTION;
 use crate::error::RelayError;
 use crate::name::RelayName;
 use crate::nats::{Nats, RelayHealthChannel, RelayHealthReceiver};
 use crate::relay::{Claim, Discipline, Drained, Relay};
 use crate::relays::outbox::report::{MessageIdSource, classify_pass, message_id_for};
+
+pub const DEFAULT_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Swept {
+    pub published: u64,
+    pub claims: u64,
+}
 
 pub struct OutboxRelay {
     pool: PgPool,
@@ -47,6 +57,13 @@ impl OutboxRelay {
 
     pub fn health(&self) -> RelayHealthReceiver {
         self.health.receiver()
+    }
+
+    pub async fn sweep(&self, older_than: Duration) -> Result<Swept, sqlx::Error> {
+        let mut conn = self.pool.acquire().await?;
+        let published = self.store.sweep_published(&mut *conn, older_than).await?;
+        let claims = self.store.sweep_claims(&mut *conn, older_than).await?;
+        Ok(Swept { published, claims })
     }
 
     pub async fn run_once_detailed(&self) -> Result<RelayPass, sqlx::Error> {
@@ -126,16 +143,35 @@ pub struct HostedOutboxRelay {
     hosted: OutboxRelay,
     cap: usize,
     last: Mutex<Option<RelayPass>>,
+    retention: Duration,
+    sweep_every: Duration,
+    last_sweep: Mutex<Option<Instant>>,
+    swept: Mutex<Swept>,
 }
 
 impl HostedOutboxRelay {
-    pub fn hosting(name: RelayName, hosted: OutboxRelay, cap: usize) -> Self {
+    pub fn hosting(name: RelayName, hosted: OutboxRelay) -> Self {
+        let cap = hosted.policy.max_messages.max(1);
         Self {
             name,
             hosted,
-            cap: cap.max(1),
+            cap,
             last: Mutex::new(None),
+            retention: DEFAULT_MESSAGE_RETENTION,
+            sweep_every: DEFAULT_SWEEP_INTERVAL,
+            last_sweep: Mutex::new(None),
+            swept: Mutex::new(Swept::default()),
         }
+    }
+
+    pub fn with_message_retention(mut self, retention: Duration) -> Self {
+        self.retention = retention;
+        self
+    }
+
+    pub fn with_sweep_every(mut self, sweep_every: Duration) -> Self {
+        self.sweep_every = sweep_every;
+        self
     }
 
     pub fn health(&self) -> RelayHealthReceiver {
@@ -149,6 +185,13 @@ impl HostedOutboxRelay {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    pub fn swept(&self) -> Swept {
+        *self
+            .swept
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn record(&self, pass: RelayPass) {
         *self
             .last
@@ -156,7 +199,39 @@ impl HostedOutboxRelay {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(pass);
     }
 
+    fn sweep_due(&self) -> bool {
+        let guard = self
+            .last_sweep
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.is_none_or(|at| at.elapsed() >= self.sweep_every)
+    }
+
+    async fn maybe_sweep(&self) {
+        if !self.sweep_due() {
+            return;
+        }
+        match self.hosted.sweep(self.retention).await {
+            Ok(swept) => {
+                let mut total = self
+                    .swept
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                total.published += swept.published;
+                total.claims += swept.claims;
+                *self
+                    .last_sweep
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
+            }
+            Err(error) => {
+                tracing::warn!(reason = %error, "outbox hygiene sweep failed");
+            }
+        }
+    }
+
     async fn run(&self) -> Result<Drained, RelayError> {
+        self.maybe_sweep().await;
         let pass = self.hosted.run_once_detailed().await?;
         self.record(pass);
         verdict(&self.name, pass.picked, pass.structural, self.cap)

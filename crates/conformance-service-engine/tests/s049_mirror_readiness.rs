@@ -16,7 +16,7 @@ use service_engine::impact::Impact;
 use service_engine::name::{PodId, RelayName};
 use service_engine::nats::RelayHealth;
 use service_engine::relays::outbox::HostedOutboxRelay;
-use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
+use service_engine::relays::outbox::OutboxRelay;
 use service_engine::{Readiness, ReadinessHandle};
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -121,7 +121,6 @@ async fn s049_a_fabric_relay_that_cannot_publish_takes_a_converged_service_out_o
     let hosted = HostedOutboxRelay::hosting(
         RelayName::from_static("integration_outbox"),
         OutboxRelay::new(db.app_pool().clone(), fabric.clone()),
-        DEFAULT_MAX_MESSAGES,
     );
     let hosted_board = hosted.health();
     let mut relays = RelayRuntime::new(PodId::new("se-mirror-0").expect("a valid pod id"));

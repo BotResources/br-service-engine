@@ -107,11 +107,11 @@ where
             }
             match &change.write {
                 KvWrite::Put(value) => match observed {
-                    None => self
-                        .bucket
-                        .put(&change.key, value)
-                        .await
-                        .map_err(published_language)?,
+                    None => match self.bucket.create(&change.key, value).await {
+                        Ok(_) => {}
+                        Err(NatsError::RevisionConflict { .. }) => continue,
+                        Err(error) => return Err(published_language(error)),
+                    },
                     Some((_, revision)) => {
                         match self.bucket.update_if(&change.key, value, revision).await {
                             Ok(_) => {}

@@ -27,6 +27,7 @@ pub const DEFAULT_LISTENER_CHANNEL_CAPACITY: usize = 1_024;
 pub const DEFAULT_NATS_GRACE: Duration = Duration::from_secs(10);
 pub const DEFAULT_WINDOW_CAPACITY: usize = 10_000;
 pub const DEFAULT_IMPACTS_PER_COMMIT: usize = 1_000;
+pub const DEFAULT_MESSAGE_RETENTION: Duration = Duration::from_secs(60 * 60);
 pub const DEFAULT_BLOB_REAPER_INTERVAL: Duration = Duration::from_secs(60);
 pub const DEFAULT_SCHEMA_VERSION_LIVENESS: Duration = Duration::from_secs(30);
 pub const DEFAULT_HTTP_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8080);
@@ -55,6 +56,7 @@ pub struct EngineConfig {
     pub nats_grace: Duration,
     pub window_capacity: usize,
     pub impacts_per_commit: usize,
+    pub message_retention: Duration,
     pub blob_reaper_interval: Duration,
     pub schema_version_liveness: Duration,
     pub http_addr: SocketAddr,
@@ -89,6 +91,7 @@ impl EngineConfig {
             nats_grace: DEFAULT_NATS_GRACE,
             window_capacity: DEFAULT_WINDOW_CAPACITY,
             impacts_per_commit: DEFAULT_IMPACTS_PER_COMMIT,
+            message_retention: DEFAULT_MESSAGE_RETENTION,
             blob_reaper_interval: DEFAULT_BLOB_REAPER_INTERVAL,
             schema_version_liveness: DEFAULT_SCHEMA_VERSION_LIVENESS,
             http_addr: DEFAULT_HTTP_ADDR,
@@ -238,6 +241,11 @@ impl EngineConfig {
 
     pub fn with_impacts_per_commit(mut self, impacts_per_commit: usize) -> Self {
         self.impacts_per_commit = impacts_per_commit;
+        self
+    }
+
+    pub fn with_message_retention(mut self, message_retention: Duration) -> Self {
+        self.message_retention = message_retention;
         self
     }
 
