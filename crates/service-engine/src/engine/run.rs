@@ -203,7 +203,13 @@ impl<P: Principal> Engine<P> {
             match started {
                 Ok(loop_handle) => Some(loop_handle),
                 Err(error) => {
-                    readiness_guard.set_not_ready(crate::nats::REASON_NO_STREAM);
+                    let reason = match &error {
+                        EngineError::Config(_) => {
+                            crate::inbound::REASON_MESSAGE_RETENTION
+                        }
+                        _ => crate::nats::REASON_NO_STREAM,
+                    };
+                    readiness_guard.set_not_ready(reason);
                     stop_mirrors.notify_waiters();
                     stop_presence.notify_waiters();
                     join_presence(presence_task.take()).await;

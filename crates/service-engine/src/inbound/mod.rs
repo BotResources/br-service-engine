@@ -32,6 +32,7 @@ pub use message::{
     SequenceKey, Sequenced, Source, Unidentified,
 };
 pub use reaction::{ReactionEntry, ReactionInvoker, ReactionMessage, ReactionRegistry};
+pub use retention::REASON_MESSAGE_RETENTION;
 pub(crate) use retention::validate_message_retention;
 pub use runtime::InboundLoop;
 pub use subscription::{

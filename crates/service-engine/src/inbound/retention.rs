@@ -5,6 +5,8 @@ use crate::error::EngineError;
 use crate::inbound::subscription::Subscription;
 use crate::nats::Nats;
 
+pub const REASON_MESSAGE_RETENTION: &str = "inbound.message_retention.uncovered";
+
 pub(crate) async fn validate_message_retention(
     nats: &Nats,
     subscriptions: &[Subscription],

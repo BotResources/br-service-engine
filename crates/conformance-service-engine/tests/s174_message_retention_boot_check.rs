@@ -44,11 +44,16 @@ async fn s174_a_message_retention_shorter_than_the_stream_max_age_is_refused_at_
         matches!(error, EngineError::Config(_)),
         "the refusal is a configuration error, got {error:?}"
     );
-    assert_ne!(
-        readiness.snapshot(),
-        service_engine::Readiness::Ready,
-        "a pod that refused its retention bound never reports ready"
-    );
+    match readiness.snapshot() {
+        service_engine::Readiness::Ready => {
+            panic!("a pod that refused its retention bound never reports ready")
+        }
+        service_engine::Readiness::NotReady { reason } => assert_eq!(
+            reason,
+            service_engine::inbound::REASON_MESSAGE_RETENTION,
+            "the retention refusal carries its own reason, not the no-stream label"
+        ),
+    }
 
     drop(nats);
     db.cleanup().await;
