@@ -9,7 +9,7 @@ use crate::inbound::dispatch::{DispatchError, DispatchOutcome};
 use crate::inbound::message::{Incoming, Source};
 
 impl InboundConsumer {
-    async fn handle(&self, message: &async_nats::jetstream::Message) {
+    pub(crate) async fn handle(&self, message: &async_nats::jetstream::Message) {
         let delivered = message
             .info()
             .map(|info| info.delivered.max(1) as u32)

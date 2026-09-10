@@ -39,7 +39,7 @@ impl<P: Principal> Engine<P> {
             transport,
             readiness,
             accumulators,
-            mut beat,
+            beat,
             mut mirrors,
             inbound_reactions,
             offers,
