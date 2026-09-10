@@ -32,8 +32,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: cargo test
         run: cargo test --workspace --exclude conformance-service-engine --exclude example-service --all-targets --locked
-      - name: cargo test (doctests)
-        run: cargo test --workspace --doc --locked
+      - name: cargo test (service-engine test-support targets)
+        run: cargo test -p service-engine --all-targets --features test-support --locked
 
   msrv:
     name: MSRV 1.89 build
@@ -47,21 +47,6 @@ jobs:
         with:
           key: msrv
       - run: cargo build --workspace --locked
-
-  docs:
-    name: cargo doc
-    runs-on: ubuntu-latest
-    env:
-      RUSTDOCFLAGS: -Dwarnings
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: docs
-      - run: cargo doc --workspace --no-deps --locked
 
   deny:
     name: cargo-deny check

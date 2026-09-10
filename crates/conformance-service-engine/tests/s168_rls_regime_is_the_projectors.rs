@@ -5,7 +5,7 @@ use service_engine::error::AttachError;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s135_a_window_asking_for_rls_on_a_non_rls_projector_is_refused() {
+async fn s168_a_window_asking_for_rls_on_a_non_rls_projector_is_refused() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -41,7 +41,7 @@ async fn s135_a_window_asking_for_rls_on_a_non_rls_projector_is_refused() {
 }
 
 #[tokio::test]
-async fn s135_a_window_asking_for_no_rls_on_an_rls_projector_is_refused() {
+async fn s168_a_window_asking_for_no_rls_on_an_rls_projector_is_refused() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
