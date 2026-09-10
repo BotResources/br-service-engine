@@ -88,17 +88,15 @@ pub(crate) fn notices(
                     return Some((LaneNotice::Paused(lanes.clone()), (receiver, lanes, true)));
                 }
             }
-            loop {
-                if receiver.changed().await.is_err() {
-                    return None;
-                }
-                let phase = *receiver.borrow_and_update();
-                let notice = match phase {
-                    LanePhase::Paused => LaneNotice::Paused(lanes.clone()),
-                    LanePhase::Running => LaneNotice::Resumed(lanes.clone()),
-                };
-                return Some((notice, (receiver, lanes, true)));
+            if receiver.changed().await.is_err() {
+                return None;
             }
+            let phase = *receiver.borrow_and_update();
+            let notice = match phase {
+                LanePhase::Paused => LaneNotice::Paused(lanes.clone()),
+                LanePhase::Running => LaneNotice::Resumed(lanes.clone()),
+            };
+            Some((notice, (receiver, lanes, true)))
         },
     )
 }
