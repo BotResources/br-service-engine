@@ -116,7 +116,10 @@ pub(crate) fn outgoing_for<P: Principal>(
             .into_iter()
             .flatten()
             .copied()
-            .filter(|index| erased.emission(&impacts[*index]) == Emission::PerImpact)
+            .filter(|index| {
+                erased.emission(&impacts[*index]) == Emission::PerImpact
+                    && impacts[*index].cause().is_some()
+            })
             .collect();
         if per_impact.is_empty() {
             let step = transition(last, next.as_ref());

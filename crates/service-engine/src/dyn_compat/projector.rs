@@ -96,6 +96,8 @@ pub trait ErasedProjector<P: Principal>: Send + Sync + 'static {
 
     fn cohort(&self, principal: &P) -> CohortKey;
 
+    fn reset_threshold(&self) -> Option<usize>;
+
     fn emission(&self, impact: &Impact) -> Emission;
 
     fn populate<'a>(
@@ -178,6 +180,10 @@ impl<Pr: Projector> ErasedProjector<Pr::Principal> for ProjectorAdapter<Pr> {
 
     fn cohort(&self, principal: &Pr::Principal) -> CohortKey {
         self.0.cohort(principal)
+    }
+
+    fn reset_threshold(&self) -> Option<usize> {
+        self.0.reset_threshold()
     }
 
     fn emission(&self, impact: &Impact) -> Emission {

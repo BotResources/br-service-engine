@@ -80,6 +80,31 @@ pub(crate) struct WindowState {
     pub(crate) params: WindowParams,
     pub(crate) members: BTreeSet<KeyBytes>,
     pub(crate) shape: WindowShape,
+    pub(crate) pages: Vec<BTreeSet<KeyBytes>>,
+}
+
+impl WindowState {
+    pub(crate) fn evict_to_capacity(&mut self, capacity: usize) -> Vec<KeyBytes> {
+        let mut dropped = Vec::new();
+        if self.members.len() <= capacity {
+            return dropped;
+        }
+        let all_pages: BTreeSet<KeyBytes> = self.pages.iter().flatten().cloned().collect();
+        let head: BTreeSet<KeyBytes> = self.members.difference(&all_pages).cloned().collect();
+        while self.members.len() > capacity && !self.pages.is_empty() {
+            let page = self.pages.remove(0);
+            let retained: BTreeSet<KeyBytes> = self.pages.iter().flatten().cloned().collect();
+            for key in page {
+                if head.contains(&key) || retained.contains(&key) {
+                    continue;
+                }
+                if self.members.remove(&key) {
+                    dropped.push(key);
+                }
+            }
+        }
+        dropped
+    }
 }
 
 pub(crate) enum Phase {

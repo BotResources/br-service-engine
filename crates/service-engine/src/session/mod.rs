@@ -102,11 +102,21 @@ impl WindowSpec {
 pub struct AttachRequest<P: Principal> {
     pub principal: P,
     pub windows: Vec<WindowSpec>,
+    pub session: Option<SessionId>,
 }
 
 impl<P: Principal> AttachRequest<P> {
     pub fn new(principal: P, windows: Vec<WindowSpec>) -> Self {
-        Self { principal, windows }
+        Self {
+            principal,
+            windows,
+            session: None,
+        }
+    }
+
+    pub fn with_session(mut self, session: SessionId) -> Self {
+        self.session = Some(session);
+        self
     }
 }
 

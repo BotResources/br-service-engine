@@ -24,6 +24,7 @@ struct WindowSpecShot {
     params: WindowParams,
     members: BTreeSet<KeyBytes>,
     shape: WindowShape,
+    paged: BTreeSet<KeyBytes>,
 }
 
 struct WindowShot {
@@ -49,6 +50,7 @@ pub(crate) async fn resnapshot<P: Principal>(
             params: window.params.clone(),
             members: window.members.clone(),
             shape: window.shape.clone(),
+            paged: window.pages.iter().flatten().cloned().collect(),
         })
         .collect();
 
@@ -74,7 +76,8 @@ pub(crate) async fn resnapshot<P: Principal>(
                 projector: name.clone(),
             });
         }
-        let members = refreshed_members(&spec.members, &BTreeSet::new(), &population);
+        let mut members = refreshed_members(&spec.members, &BTreeSet::new(), &population);
+        members.extend(spec.paged.iter().cloned());
         let shape = spec.shape.refreshed(&population);
         let under_rls = projector.renders_under_rls();
         let cohort = if under_rls {

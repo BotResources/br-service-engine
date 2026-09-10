@@ -1,6 +1,7 @@
 mod connect;
 mod counters;
 mod drain;
+mod paging;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +23,7 @@ use crate::session::store::SessionTable;
 use crate::session::stream::DropList;
 
 pub use counters::RenderMetrics;
+pub use paging::PageReport;
 
 use counters::Counters;
 

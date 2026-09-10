@@ -96,6 +96,7 @@ pub(crate) async fn repopulate<P: Principal>(
         let name = window.projector.clone();
         let previous = window.members.clone();
         let previous_shape = window.shape.clone();
+        let paged: BTreeSet<KeyBytes> = window.pages.iter().flatten().cloned().collect();
         let projector = ctx
             .registry
             .projector(&name)
@@ -131,6 +132,7 @@ pub(crate) async fn repopulate<P: Principal>(
                 continue;
             }
             next = refreshed_members(&previous, &discovered, &population);
+            next.extend(paged.iter().cloned());
             shape = Some(previous_shape.refreshed(&population));
         }
         for key in next.difference(&previous) {
@@ -153,7 +155,10 @@ pub(crate) async fn repopulate<P: Principal>(
         if let Some(shape) = shape {
             window.shape = shape;
         }
-        if churn > ctx.config.reset_threshold {
+        let threshold = projector
+            .reset_threshold()
+            .unwrap_or(ctx.config.reset_threshold);
+        if churn > threshold {
             session.reset_pending = true;
         }
     }
