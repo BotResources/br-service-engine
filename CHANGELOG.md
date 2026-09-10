@@ -545,7 +545,8 @@ event so the runner resends a corrected finish, rather than nak-ing forever into
 a silent dead letter — a finish whose `last_seq` sits below an already-durable
 chunk fails at once, and a truncated stream is retried a bounded number of times
 (`cx.delivered`) so an in-flight fold can heal and, once the truncation is
-permanent, is answered with `SealFailed`; a hash mismatch stays terminal) and
+permanent, is answered with `SealFailed`; a hash mismatch is answered with
+`SealFailed` the same way, so the runner republishes a corrected finish) and
 `roster` (a
 KV mirror into `known_persons`). `example-twin` is a **separate**
 crate (the producer/runner that closes the cross-service cycle over NATS), so the

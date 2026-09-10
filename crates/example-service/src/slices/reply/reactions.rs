@@ -91,7 +91,7 @@ fn on_seal_error(
     error: EngineError,
 ) -> Result<(), ReactionFault> {
     match error {
-        EngineError::SealHashMismatch { .. } => Err(ReactionFault::Terminal(error.to_string())),
+        EngineError::SealHashMismatch { .. } => answer_seal_failed(cx, reply_id, board_id, error),
         EngineError::SealChunkBeyondLastSeq { .. } => {
             answer_seal_failed(cx, reply_id, board_id, error)
         }

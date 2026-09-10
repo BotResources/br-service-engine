@@ -109,6 +109,10 @@ where
     flush_and_commit(tx, &staged, services.transport.as_ref())
         .await
         .map_err(|error| MutationError::internal(error.to_string()))?;
+    services
+        .accumulators
+        .purge_committed_seals(&staged.sealed_keys)
+        .await;
     for put in presence_puts {
         if let Err(error) = put().await {
             tracing::warn!(
@@ -160,5 +164,9 @@ where
     flush_and_commit(tx, &staged, services.transport.as_ref())
         .await
         .map_err(|error| MutationError::internal(error.to_string()))?;
+    services
+        .accumulators
+        .purge_committed_seals(&staged.sealed_keys)
+        .await;
     Ok(output)
 }

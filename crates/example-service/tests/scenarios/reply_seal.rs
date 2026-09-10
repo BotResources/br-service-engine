@@ -144,7 +144,7 @@ async fn a_permanently_truncated_stream_is_answered_with_seal_failed_after_the_r
 }
 
 #[tokio::test]
-async fn a_reply_whose_finish_declares_the_wrong_hash_is_never_sealed() {
+async fn a_reply_whose_finish_declares_the_wrong_hash_is_answered_with_seal_failed() {
     let world = World::start("pod-reply-integrity").await;
     let org = Uuid::now_v7();
     let pass = passport(Uuid::now_v7(), org, &[], false);
@@ -164,31 +164,21 @@ async fn a_reply_whose_finish_declares_the_wrong_hash_is_never_sealed() {
     .await
     .unwrap();
 
-    let control = start_and_stream(&world, &pass, board, &chunks).await;
-    example_twin::send_reply_finished(
-        &world.nats,
-        &ReplyFinished {
-            reply_id: control,
-            board_id: board,
-            last_seq: (chunks.len() - 1) as u64,
-            hash: hash_of(&chunks),
-        },
-    )
-    .await
-    .unwrap();
-
-    poll_until!(Duration::from_secs(5), {
-        let view = world
-            .gql(
-                &pass,
-                "query($id:UUID!){reply(id:$id){status}}",
-                serde_json::json!({ "id": control }),
-            )
-            .await;
-        (view["data"]["reply"]["status"] == "complete").then_some(())
+    let failed = poll_until!(Duration::from_secs(10), {
+        example_twin::seal_failed_from_stream(&world.nats)
+            .await
+            .expect("reading the seal-failed subject")
     });
+    assert_eq!(
+        failed.reply_id, tampered,
+        "a finish whose hash does not match the stream is answered with SealFailed so the runner \
+         republishes, never nak'd forever into a silent dead letter"
+    );
+    assert!(
+        !failed.reason.is_empty(),
+        "the SealFailed confirmation carries the reason the runner needs to resend"
+    );
 
-    world.service.settle().await;
     let tampered_view = world
         .gql(
             &pass,
@@ -199,7 +189,7 @@ async fn a_reply_whose_finish_declares_the_wrong_hash_is_never_sealed() {
     assert_eq!(
         ok(&tampered_view)["reply"]["status"],
         "streaming",
-        "an altered stream is refused by the hash and never sealed silently"
+        "an altered stream is refused by the hash and never sealed silently; the reply stays open"
     );
     assert_eq!(ok(&tampered_view)["reply"]["text"], "");
 

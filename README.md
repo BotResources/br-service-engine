@@ -153,7 +153,8 @@ with `SealTruncated`; whether that is transient fold-lag worth retrying or a
 permanent loss to report is the reaction's call, informed by `cx.delivered` — the
 reference reply slice retries a bounded number of deliveries and then answers the
 runner with a `SealFailed` event so it resends the finish, never nak-ing forever
-into a silent dead letter (a hash mismatch stays terminal). After the commit the
+into a silent dead letter (a hash mismatch is answered the same way, so the runner
+republishes a corrected finish rather than dead-lettering silently). After the commit the
 sealing pod purges the key's NATS subject
 synchronously; the beat is the backstop that purges any sealed key still in the
 stream if the pod died first. Name the stream with `EngineConfig::with_service`;
