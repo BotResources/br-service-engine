@@ -81,7 +81,6 @@ enum Cohort {
     Org(Uuid),
     Member(Uuid),
     Public,
-    Super,
 }
 
 impl Visibility for Board {
@@ -108,9 +107,6 @@ impl Visibility for Board {
             for board in boards {
                 cohorts.push(CohortKey::of(&[Cohort::Member(*board)]));
             }
-        }
-        if principal.is_super_admin() {
-            cohorts.push(CohortKey::of(&[Cohort::Super]));
         }
         cohorts
     }
