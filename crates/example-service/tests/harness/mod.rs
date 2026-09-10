@@ -206,7 +206,7 @@ fn install_log_capture() {
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("error"));
         let _ = tracing_subscriber::fmt()
             .with_env_filter(filter)
-            .with_test_writer()
+            .with_writer(std::io::stderr)
             .try_init();
     });
 }

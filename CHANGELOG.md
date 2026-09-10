@@ -419,12 +419,15 @@ deliberately hides is still recoverable by an operator rather than discarded. Th
 reaction pipeline gets the symmetric treatment: an internal `Db` fault classified
 on the flush-and-commit of a reaction (or the replay of a stored confirmation)
 logs the same error chain server-side, so a database fault on a reaction is no
-longer opaque in the dead-letter row and ack path. Because that recovery is a
-server-side log, the `example-service` e2e harness installs a `tracing`
-subscriber (honouring `RUST_LOG`, defaulting to `error` so a green run stays
-quiet while a fault's cause still surfaces), so a fault raised by the
-in-process engine surfaces its cause in the captured test output rather than
-being discarded by a test process that installed no subscriber. Query resolvers
+longer opaque in the dead-letter row and ack path — a *terminal* fault at `error`,
+a *retryable* one (redelivered) at `warn`, so a transient blip does not read as a
+hard error on every redelivery. Because that recovery is a server-side log, the
+`example-service` e2e harness installs a `tracing` subscriber (honouring
+`RUST_LOG`, defaulting to `error` so a green run stays quiet while a fault's cause
+still surfaces) that writes to process stderr — not the per-test capture, whose
+thread-local buffer would miss a cause emitted from a Tokio worker thread — so a
+fault raised by the in-process engine reaches the CI job log rather than being
+discarded by a test process that installed no subscriber. Query resolvers
 take a typed `Query<'_, P>` context and read rendered views through
 `cx.fetch::<Projector>` / `cx.fetch_window::<Projector>` (and `fetch_view` /
 `fetch_view_window` over the ergonomic `view::Projector`), never the database,
