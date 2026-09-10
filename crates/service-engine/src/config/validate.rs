@@ -23,10 +23,10 @@ impl EngineConfig {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));
             }
         }
-        if self.publish_ack_timeout > self.nats_grace {
+        if self.publish_ack_timeout >= self.ack_wait {
             return Err(EngineError::Config(
-                "publish_ack_timeout must not exceed nats_grace, otherwise a wedged JetStream \
-                 publish can hold the beat past the grace before readiness can fall to DOWN"
+                "publish_ack_timeout must stay below ack_wait, otherwise a single wedged JetStream \
+                 publish can outlast the consumer's redelivery grace and stall the beat past it"
                     .into(),
             ));
         }
@@ -143,19 +143,17 @@ mod tests {
     }
 
     #[test]
-    fn a_publish_ack_timeout_above_the_nats_grace_is_refused() {
+    fn a_publish_ack_timeout_at_or_above_ack_wait_is_refused() {
         assert!(
             config()
-                .with_nats_grace(Duration::from_secs(3))
-                .with_publish_ack_timeout(Duration::from_secs(5))
+                .with_publish_ack_timeout(Duration::from_secs(30))
                 .validate()
                 .is_err()
         );
         config()
-            .with_nats_grace(Duration::from_secs(10))
-            .with_publish_ack_timeout(Duration::from_secs(10))
+            .with_publish_ack_timeout(Duration::from_secs(29))
             .validate()
-            .expect("a publish ack timeout equal to the grace is accepted");
+            .expect("a publish ack timeout below ack_wait is accepted");
     }
 
     #[test]
