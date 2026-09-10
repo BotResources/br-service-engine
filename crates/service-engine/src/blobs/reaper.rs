@@ -79,8 +79,14 @@ impl BlobReaper {
         policy: &BlobPolicy,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
-        let cutoff = chrono::Utc::now()
-            - chrono::Duration::from_std(policy.orphan_after).unwrap_or(chrono::Duration::zero());
+        let orphan_after =
+            chrono::Duration::from_std(policy.orphan_after).map_err(|_| {
+                EngineError::Config(format!(
+                    "the blob policy orphan_after {:?} does not fit a timestamp cutoff",
+                    policy.orphan_after
+                ))
+            })?;
+        let cutoff = chrono::Utc::now() - orphan_after;
         self.promote_and_reap_incomplete(pg, store, kind, cutoff, round)
             .await?;
         self.reap_orphans(pg, store, kind, cutoff, round).await
@@ -94,15 +100,13 @@ impl BlobReaper {
         cutoff: chrono::DateTime<chrono::Utc>,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
-        let mut tx = pg.begin().await?;
         let rows = sqlx::query(&format!(
             "SELECT id, object_key, created_at FROM {TABLE_BLOB} \
-             WHERE kind = $1 AND state = 'pending' \
-             FOR UPDATE SKIP LOCKED LIMIT $2"
+             WHERE kind = $1 AND state = 'pending' LIMIT $2"
         ))
         .bind(kind)
         .bind(BATCH)
-        .fetch_all(&mut *tx)
+        .fetch_all(pg)
         .await?;
         for row in &rows {
             let id: Uuid = row.get("id");
@@ -110,27 +114,29 @@ impl BlobReaper {
             let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
             match store.object().head_size(&object_key).await? {
                 Some(size) => {
-                    sqlx::query(&format!(
+                    let done = sqlx::query(&format!(
                         "UPDATE {TABLE_BLOB} \
-                         SET state = 'uploaded', uploaded_at = now(), size = $2 WHERE id = $1"
+                         SET state = 'uploaded', uploaded_at = now(), size = $2 \
+                         WHERE id = $1 AND state = 'pending'"
                     ))
                     .bind(id)
                     .bind(size as i64)
-                    .execute(&mut *tx)
+                    .execute(pg)
                     .await?;
-                    round.promoted += 1;
+                    round.promoted += done.rows_affected();
                 }
                 None if created_at < cutoff => {
-                    sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
-                        .bind(id)
-                        .execute(&mut *tx)
-                        .await?;
-                    round.reaped_incomplete += 1;
+                    let done = sqlx::query(&format!(
+                        "DELETE FROM {TABLE_BLOB} WHERE id = $1 AND state = 'pending'"
+                    ))
+                    .bind(id)
+                    .execute(pg)
+                    .await?;
+                    round.reaped_incomplete += done.rows_affected();
                 }
                 None => {}
             }
         }
-        tx.commit().await?;
         Ok(())
     }
 
@@ -142,28 +148,27 @@ impl BlobReaper {
         cutoff: chrono::DateTime<chrono::Utc>,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
-        let mut tx = pg.begin().await?;
         let rows = sqlx::query(&format!(
             "SELECT id, object_key FROM {TABLE_BLOB} \
-             WHERE kind = $1 AND state = 'orphaned' AND detached_at < $2 \
-             FOR UPDATE SKIP LOCKED LIMIT $3"
+             WHERE kind = $1 AND state = 'orphaned' AND detached_at < $2 LIMIT $3"
         ))
         .bind(kind)
         .bind(cutoff)
         .bind(BATCH)
-        .fetch_all(&mut *tx)
+        .fetch_all(pg)
         .await?;
         for row in &rows {
             let id: Uuid = row.get("id");
             let object_key: String = row.get("object_key");
             store.object().delete_object(&object_key).await?;
-            sqlx::query(&format!("DELETE FROM {TABLE_BLOB} WHERE id = $1"))
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-            round.reaped_orphan += 1;
+            let done = sqlx::query(&format!(
+                "DELETE FROM {TABLE_BLOB} WHERE id = $1 AND state = 'orphaned'"
+            ))
+            .bind(id)
+            .execute(pg)
+            .await?;
+            round.reaped_orphan += done.rows_affected();
         }
-        tx.commit().await?;
         Ok(())
     }
 }

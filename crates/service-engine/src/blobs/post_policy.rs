@@ -19,6 +19,7 @@ pub(crate) struct PostPolicyInput<'a> {
     pub access_key: &'a str,
     pub secret_key: &'a str,
     pub object_key: &'a str,
+    pub content_type: &'a str,
     pub max_bytes: u64,
     pub ttl: Duration,
     pub now: DateTime<Utc>,
@@ -27,8 +28,12 @@ pub(crate) struct PostPolicyInput<'a> {
 pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, EngineError> {
     let amz_date = input.now.format("%Y%m%dT%H%M%SZ").to_string();
     let yyyymmdd = input.now.format("%Y%m%d").to_string();
-    let ttl =
-        chrono::Duration::from_std(input.ttl).unwrap_or_else(|_| chrono::Duration::minutes(15));
+    let ttl = chrono::Duration::from_std(input.ttl).map_err(|_| {
+        EngineError::Config(format!(
+            "the blob upload TTL {:?} does not fit a signed POST-policy expiry",
+            input.ttl
+        ))
+    })?;
     let expiration = (input.now + ttl).to_rfc3339_opts(SecondsFormat::Millis, true);
     let credential = format!(
         "{}/{}/{}/s3/aws4_request",
@@ -41,6 +46,7 @@ pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, Engi
         "conditions": [
             { "bucket": input.bucket },
             { "key": input.object_key },
+            { "Content-Type": input.content_type },
             { "x-amz-algorithm": "AWS4-HMAC-SHA256" },
             { "x-amz-credential": credential },
             { "x-amz-date": amz_date },
@@ -62,6 +68,7 @@ pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, Engi
     let url = format!("{}/{}", input.endpoint.trim_end_matches('/'), input.bucket);
     let fields = vec![
         ("key".to_string(), input.object_key.to_string()),
+        ("Content-Type".to_string(), input.content_type.to_string()),
         (
             "x-amz-algorithm".to_string(),
             "AWS4-HMAC-SHA256".to_string(),
@@ -96,4 +103,67 @@ fn hex_lower(bytes: &[u8]) -> String {
         let _ = write!(out, "{byte:02x}");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(ttl: Duration) -> PostPolicyInput<'static> {
+        PostPolicyInput {
+            endpoint: "https://s3.example",
+            bucket: "blobs",
+            region: "eu-west",
+            access_key: "AKIA",
+            secret_key: "secret",
+            object_key: "svc/card/abc",
+            content_type: "image/png",
+            max_bytes: 1024,
+            ttl,
+            now: Utc::now(),
+        }
+    }
+
+    fn decoded_policy(url: &UploadUrl) -> serde_json::Value {
+        let (_, field) = url
+            .fields()
+            .iter()
+            .find(|(name, _)| name == "policy")
+            .expect("the form carries the base64 policy");
+        let bytes = BASE64_STANDARD.decode(field).expect("the policy is base64");
+        serde_json::from_slice(&bytes).expect("the policy is json")
+    }
+
+    #[test]
+    fn the_policy_pins_the_recorded_content_type() {
+        let url = input(Duration::from_secs(900)).pipe_presign();
+        let policy = decoded_policy(&url);
+        let conditions = policy["conditions"].as_array().expect("conditions array");
+        assert!(
+            conditions
+                .iter()
+                .any(|c| c.get("Content-Type").and_then(|v| v.as_str()) == Some("image/png")),
+            "the POST policy must condition the recorded Content-Type so the stored type is \
+             enforced at upload"
+        );
+        assert!(
+            url.fields()
+                .iter()
+                .any(|(name, value)| name == "Content-Type" && value == "image/png"),
+            "the form must carry the Content-Type field the policy conditions"
+        );
+    }
+
+    #[test]
+    fn an_unrepresentable_ttl_fails_loud_instead_of_substituting_a_default() {
+        let error = presign_post(input(Duration::from_secs(u64::MAX)))
+            .expect_err("a TTL that does not fit a signed expiry must fail loud");
+        assert!(matches!(error, EngineError::Config(_)));
+    }
+
+    impl PostPolicyInput<'_> {
+        fn pipe_presign(self) -> UploadUrl {
+            presign_post(self).expect("a representable TTL signs a policy")
+        }
+    }
 }

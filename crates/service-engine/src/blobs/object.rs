@@ -58,6 +58,7 @@ impl ObjectStore {
         &self,
         object_key: &str,
         max_bytes: u64,
+        content_type: &str,
     ) -> Result<UploadUrl, EngineError> {
         presign_post(PostPolicyInput {
             endpoint: &self.endpoint,
@@ -66,17 +67,29 @@ impl ObjectStore {
             access_key: &self.access_key,
             secret_key: &self.secret_key,
             object_key,
+            content_type,
             max_bytes,
             ttl: self.upload_ttl,
             now: chrono::Utc::now(),
         })
     }
 
-    pub(crate) fn presign_download(&self, object_key: &str) -> DownloadUrl {
-        let url = self
-            .bucket
-            .get_object(Some(&self.credentials), object_key)
-            .sign(self.download_ttl);
+    pub(crate) fn presign_download(
+        &self,
+        object_key: &str,
+        content_type: &str,
+        file_name: &str,
+    ) -> DownloadUrl {
+        let mut action = self.bucket.get_object(Some(&self.credentials), object_key);
+        action
+            .query_mut()
+            .insert("response-content-disposition", content_disposition(file_name));
+        if !content_type.is_empty() {
+            action
+                .query_mut()
+                .insert("response-content-type", content_type.to_string());
+        }
+        let url = action.sign(self.download_ttl);
         DownloadUrl::new(url.to_string())
     }
 
@@ -155,6 +168,15 @@ impl ObjectStore {
             )))
         }
     }
+}
+
+fn content_disposition(file_name: &str) -> String {
+    let sanitized: String = file_name
+        .chars()
+        .filter(|c| !c.is_control())
+        .map(|c| if c == '"' || c == '\\' { '_' } else { c })
+        .collect();
+    format!("attachment; filename=\"{sanitized}\"")
 }
 
 impl std::fmt::Debug for ObjectStore {
