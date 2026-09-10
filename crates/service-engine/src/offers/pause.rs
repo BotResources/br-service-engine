@@ -38,7 +38,9 @@ pub fn arm_offer_drain() -> OfferDrainGate {
 
 pub(crate) async fn wait() {
     let hit = {
-        let guard = GATES.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = GATES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         guard
             .iter()
             .find(|gate| gate.armed.swap(false, Ordering::SeqCst))

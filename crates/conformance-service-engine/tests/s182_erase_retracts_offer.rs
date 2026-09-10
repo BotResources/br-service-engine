@@ -30,8 +30,13 @@ async fn s182_erasing_a_person_retracts_their_offered_row_through_cx_delete() {
     let eraser = engine.eraser();
     let running = tokio::spawn(engine.run());
 
-    await_note(&fabric, id, true, "the boot reconcile never published the person's note offer")
-        .await;
+    await_note(
+        &fabric,
+        id,
+        true,
+        "the boot reconcile never published the person's note offer",
+    )
+    .await;
 
     let outcome = eraser
         .erase(PersonId(person))

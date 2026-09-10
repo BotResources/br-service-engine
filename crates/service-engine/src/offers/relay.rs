@@ -129,8 +129,15 @@ impl<O: Offer> OfferRelay<O> {
         pg: &PgPool,
         lease: &mut Lease,
         batch: usize,
-    ) -> Result<Vec<(Marker, Option<u64>, Write<O::Published>, Observed<O::Published>)>, RelayError>
-    {
+    ) -> Result<
+        Vec<(
+            Marker,
+            Option<u64>,
+            Write<O::Published>,
+            Observed<O::Published>,
+        )>,
+        RelayError,
+    > {
         let mut tx = pg.begin().await?;
         if !self.leader.still_leader(&mut tx, lease).await? {
             let _ = tx.rollback().await;
