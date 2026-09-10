@@ -210,7 +210,9 @@ pub async fn seal_failed_from_stream(nats: &Nats) -> Result<Option<SealFailed>, 
         .map_err(|error| NatsError::Connect(error.to_string()))?;
     match batch.next().await {
         Some(Ok(message)) => {
-            let failed = serde_json::from_slice::<SealFailed>(&message.payload).ok();
+            let failed = serde_json::from_slice::<IntegrationEvent<SealFailed>>(&message.payload)
+                .ok()
+                .map(|envelope| envelope.payload);
             let _ = message.ack().await;
             Ok(failed)
         }
