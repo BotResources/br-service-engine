@@ -240,17 +240,30 @@ path with no stream. The marker must outlive the stream: boot fails loud unless
 `max_age`.
 
 **Leader work — offers and mirrors.** Outbox relays with `RowClaim` and `Leader`
-disciplines (a fenced lease over `leader_slot`), the hosted `FabricOutboxRelay`
+disciplines (a fenced lease over `leader_slot`), the hosted `HostedOutboxRelay`
 and `KvDrainRelay` publishing the published language monotonically by key and
 version (a per-key watermark in the engine's own schema survives restarts, so a
-stale `Put` after a newer `Retract` is a no-op). `Offer` (`Row`, `Published`,
-`NAME`, `PREFIX`, `key`, `publish`) and `register_offer::<O>()`: a saved noun
-that carries an offer stages its dirty key (`service_engine.offer_dirty`) in the
-same transaction as the write; the leader drains dirty keys (re-read, `publish`,
-put/retract under a per-key watermark and a bucket-revision compare-and-swap) and
-reconciles the bucket against the store on its first drain after boot and every
-`with_offer_reconcile` period, so a rebuilt or drifted bucket is repaired even
-under a stable leader. `Mirror::new(name).consume::<C>()…consume::<D>().keyed_by(f).project(p)`
+stale `Put` after a newer `Retract` is a no-op). The hosted outbox relay drains
+in batches whose cap equals its drain bound, so a backlog bursts within one beat
+instead of one batch per beat, and a periodic hygiene pass (`with_sweep_every`)
+deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
+`with_message_retention` — a bound the operator sets to at least the outbox
+stream's retention plus its dedup window; the sweep is best-effort and never
+lowers readiness. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
+`publish`) and `register_offer::<O>()`: a saved noun that carries an offer stages
+its dirty key (`service_engine.offer_dirty`) in the same transaction as the
+write; the leader drains dirty keys by claiming and resolving them in a short
+transaction, then doing the KV round-trips outside any transaction — a `create`
+for an absent key or a compare-and-set on the revision the leader read, a failed
+set leaving the key dirty for the next drain — and finally raising the per-key
+watermark and deleting the marker in a small fenced transaction that asserts the
+lease. So a concurrent mutation on an offered noun never waits on the drain, and
+a leader frozen past its lease fails its writes instead of regressing the bucket.
+It reconciles the bucket against the store on its first drain after boot and
+every `with_offer_reconcile` period, so a rebuilt or drifted bucket is repaired
+even under a stable leader; a `KvDrainRelay` over a truncated-and-rebuilt bucket
+is repaired by `reset_watermarks` before its source re-stages its set.
+`Mirror::new(name).consume::<C>()…consume::<D>().keyed_by(f).project(p)`
 and `register_mirror`: a per-pod typed `Shadow<C>` of each consumed offer merged
 by `keyed_by`, a full read of every consumed prefix at boot before readiness
 reports converged, and leader-gated projection into `known_*` through the direct

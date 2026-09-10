@@ -16,7 +16,6 @@ use crate::offers::leader::OfferLeader;
 use crate::offers::marker::{self, Marker};
 use crate::offers::reconcile;
 use crate::relay::{Claim, Discipline, Drained, Relay};
-use crate::relays::kv::DEFAULT_CAS_RETRIES;
 use crate::relays::kv_watermark;
 
 pub(crate) struct OfferRelay<O: Offer> {
@@ -111,7 +110,11 @@ impl<O: Offer> OfferRelay<O> {
                 applied.push(marker);
                 continue;
             }
-            match apply::apply_kv(bucket, &marker.kv_key, &write, DEFAULT_CAS_RETRIES).await? {
+            let observed = bucket
+                .get_with_revision(&marker.kv_key)
+                .await
+                .map_err(published_language)?;
+            match apply::apply_cas(bucket, &marker.kv_key, &write, observed).await? {
                 KvOutcome::Applied => applied.push(marker),
                 KvOutcome::Conflict => {}
             }

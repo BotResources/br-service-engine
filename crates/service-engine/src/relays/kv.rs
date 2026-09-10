@@ -92,6 +92,10 @@ where
         self
     }
 
+    pub async fn reset_watermarks(&self, conn: &mut PgConnection) -> Result<u64, RelayError> {
+        kv_watermark::clear(conn, &self.name).await
+    }
+
     async fn apply(&self, conn: &mut PgConnection, change: &KvChange<V>) -> Result<(), RelayError> {
         let watermark = kv_watermark::read(conn, &self.name, &change.key).await?;
         for _ in 0..=self.cas_retries {

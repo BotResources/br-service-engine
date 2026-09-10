@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::error::RelayError;
-use crate::nats::{KvBucket, KvKey, NatsError};
+use crate::nats::{KvBucket, KvKey, NatsError, Revision};
 use crate::offer::Offer;
 use crate::offers::marker::Marker;
 use crate::persistence::{Aggregate, Persistence};
@@ -40,45 +40,38 @@ pub(crate) async fn resolve<O: Offer>(
     }
 }
 
-pub(crate) async fn apply_kv<V>(
+pub(crate) async fn apply_cas<V>(
     bucket: &KvBucket<V>,
     key: &KvKey,
     write: &Write<V>,
-    retries: usize,
+    observed: Option<(V, Revision)>,
 ) -> Result<KvOutcome, RelayError>
 where
     V: Serialize + DeserializeOwned + PartialEq,
 {
-    for _ in 0..=retries {
-        let observed = bucket
-            .get_with_revision(key)
-            .await
-            .map_err(published_language)?;
-        match (write, observed) {
-            (Write::Put(value), None) => match bucket.create(key, value).await {
-                Ok(_) => return Ok(KvOutcome::Applied),
-                Err(NatsError::RevisionConflict { .. }) => continue,
-                Err(error) => return Err(published_language(error)),
-            },
-            (Write::Put(value), Some((observed, revision))) => {
-                if observed == *value {
-                    return Ok(KvOutcome::Applied);
-                }
-                match bucket.update_if(key, value, revision).await {
-                    Ok(_) => return Ok(KvOutcome::Applied),
-                    Err(NatsError::RevisionConflict { .. }) => continue,
-                    Err(error) => return Err(published_language(error)),
-                }
+    match (write, observed) {
+        (Write::Put(value), None) => match bucket.create(key, value).await {
+            Ok(_) => Ok(KvOutcome::Applied),
+            Err(NatsError::RevisionConflict { .. }) => Ok(KvOutcome::Conflict),
+            Err(error) => Err(published_language(error)),
+        },
+        (Write::Put(value), Some((current, revision))) => {
+            if current == *value {
+                return Ok(KvOutcome::Applied);
             }
-            (Write::Retract, None) => return Ok(KvOutcome::Applied),
-            (Write::Retract, Some((_, revision))) => match bucket.delete_if(key, revision).await {
-                Ok(()) => return Ok(KvOutcome::Applied),
-                Err(NatsError::RevisionConflict { .. }) => continue,
-                Err(error) => return Err(published_language(error)),
-            },
+            match bucket.update_if(key, value, revision).await {
+                Ok(_) => Ok(KvOutcome::Applied),
+                Err(NatsError::RevisionConflict { .. }) => Ok(KvOutcome::Conflict),
+                Err(error) => Err(published_language(error)),
+            }
         }
+        (Write::Retract, None) => Ok(KvOutcome::Applied),
+        (Write::Retract, Some((_, revision))) => match bucket.delete_if(key, revision).await {
+            Ok(()) => Ok(KvOutcome::Applied),
+            Err(NatsError::RevisionConflict { .. }) => Ok(KvOutcome::Conflict),
+            Err(error) => Err(published_language(error)),
+        },
     }
-    Ok(KvOutcome::Conflict)
 }
 
 fn published_language(error: NatsError) -> RelayError {
