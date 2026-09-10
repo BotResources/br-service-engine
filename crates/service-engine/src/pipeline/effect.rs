@@ -6,6 +6,7 @@ use sqlx::PgPool;
 
 use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::BlobHandle;
+use crate::error::EngineError;
 use crate::offers::OfferStagers;
 use uuid::Uuid;
 
@@ -49,6 +50,16 @@ impl<P: Principal> Clone for MutationServices<P> {
     }
 }
 
+fn internal_engine_failure(context: &'static str, error: EngineError) -> MutationError {
+    tracing::error!(
+        context,
+        cause = %crate::chain::describe(&error),
+        "the mutation pipeline aborted on an internal engine error; the wire carries a generic \
+         reason while the underlying cause is kept here"
+    );
+    MutationError::internal(error.to_string())
+}
+
 fn mutation_outbound<P: Principal>(
     services: &MutationServices<P>,
     principal: &P,
@@ -74,7 +85,7 @@ where
 {
     let mut tx = begin_scoped(&services.pool, services.lock_timeout)
         .await
-        .map_err(|error| MutationError::internal(error.to_string()))?;
+        .map_err(|error| internal_engine_failure("begin mutation transaction", error.into()))?;
     let mut staged = Staged::default();
     let mut presence_puts = Vec::new();
     let result = {
@@ -108,7 +119,7 @@ where
     }
     flush_and_commit(tx, &staged, services.transport.as_ref())
         .await
-        .map_err(|error| MutationError::internal(error.to_string()))?;
+        .map_err(|error| internal_engine_failure("flush and commit mutation", error))?;
     services
         .accumulators
         .purge_committed_seals(&staged.sealed_keys)
@@ -139,7 +150,7 @@ where
 {
     let mut tx = begin_scoped(&services.pool, services.lock_timeout)
         .await
-        .map_err(|error| MutationError::internal(error.to_string()))?;
+        .map_err(|error| internal_engine_failure("begin bulk transaction", error.into()))?;
     let mut staged = Staged::default();
     let result = {
         let ops = Ops::new(
@@ -163,7 +174,7 @@ where
     };
     flush_and_commit(tx, &staged, services.transport.as_ref())
         .await
-        .map_err(|error| MutationError::internal(error.to_string()))?;
+        .map_err(|error| internal_engine_failure("flush and commit bulk", error))?;
     services
         .accumulators
         .purge_committed_seals(&staged.sealed_keys)
