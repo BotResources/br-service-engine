@@ -102,9 +102,16 @@ impl<P: Principal> Eraser<P> {
                         .into(),
                 )
             })?;
-            staged
-                .outbox
-                .push(event_record(&PersonErased::new(service, person)?)?);
+            let outbound = crate::pipeline::OutboundContext {
+                actor: crate::identity::service_actor(service),
+                correlation_id: uuid::Uuid::now_v7(),
+                causation_id: None,
+                producer: Some(service.to_string()),
+            };
+            staged.outbox.push(event_record(
+                &PersonErased::new(service, person)?,
+                &outbound,
+            )?);
         }
         flush_and_commit(tx, &staged, self.transport.as_ref()).await?;
 

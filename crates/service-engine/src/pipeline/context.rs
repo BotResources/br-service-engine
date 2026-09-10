@@ -1,12 +1,15 @@
 use std::ops::{Deref, DerefMut};
 
+use br_core_integration::Actor;
 use futures_util::future::BoxFuture;
+use uuid::Uuid;
 
 use crate::error::EngineError;
 use crate::impact::Impact;
+use crate::inbound::MessageMetadata;
 use crate::pipeline::ops::Ops;
 use crate::presence::{Presence, PresenceHandle, PresenceKey};
-use crate::principal::Principal;
+use crate::principal::{ErasedPrincipal, Principal};
 use crate::projector::Projector;
 
 pub(crate) type PresencePut =
@@ -14,11 +17,49 @@ pub(crate) type PresencePut =
 
 pub struct Reaction<'a> {
     ops: Ops<'a>,
+    principal: Option<ErasedPrincipal>,
+    metadata: MessageMetadata,
 }
 
 impl<'a> Reaction<'a> {
-    pub(crate) fn new(ops: Ops<'a>) -> Self {
-        Self { ops }
+    pub(crate) fn new(
+        ops: Ops<'a>,
+        principal: Option<ErasedPrincipal>,
+        metadata: MessageMetadata,
+    ) -> Self {
+        Self {
+            ops,
+            principal,
+            metadata,
+        }
+    }
+
+    pub fn metadata(&self) -> &MessageMetadata {
+        &self.metadata
+    }
+
+    pub fn actor(&self) -> Option<&Actor> {
+        self.metadata.actor.as_ref()
+    }
+
+    pub fn correlation_id(&self) -> Option<Uuid> {
+        self.metadata.correlation_id
+    }
+
+    pub fn causation_id(&self) -> Option<Uuid> {
+        self.metadata.causation_id
+    }
+
+    pub fn try_principal<P: Principal>(&self) -> Option<&P> {
+        self.principal.as_ref().and_then(|p| p.downcast_ref::<P>())
+    }
+
+    pub fn principal<P: Principal>(&self) -> &P {
+        self.try_principal::<P>().expect(
+            "the reaction has no resolved sender principal; register a reaction-principal \
+             resolver with Engine::register_reaction_principal and ensure the inbound message \
+             carries an integration envelope with an actor",
+        )
     }
 }
 

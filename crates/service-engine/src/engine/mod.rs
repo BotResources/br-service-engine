@@ -71,6 +71,7 @@ pub struct Engine<P: Principal> {
     shutdown: Arc<tokio::sync::Notify>,
     declared_scopes: Option<ScopeDeclaration>,
     contributed_scopes: Vec<&'static str>,
+    reaction_principal: Option<Arc<dyn crate::principal::ReactionPrincipalResolver>>,
 }
 
 impl<P: Principal> Engine<P> {
@@ -126,6 +127,7 @@ impl<P: Principal> Engine<P> {
             shutdown: Arc::new(tokio::sync::Notify::new()),
             declared_scopes: None,
             contributed_scopes: Vec::new(),
+            reaction_principal: None,
         })
     }
 

@@ -14,7 +14,9 @@ use crate::impact::{Deps, Dims, Impact};
 use crate::inbound::ReactionMessage;
 use crate::offers::OfferStagers;
 use crate::persistence::{Aggregate, Persistence};
-use crate::pipeline::outbound::{OutboundCommand, OutboundEvent, command_record, event_record};
+use crate::pipeline::outbound::{
+    OutboundCommand, OutboundContext, OutboundEvent, command_record, event_record,
+};
 use crate::pipeline::staged::{ScheduledMessage, Staged};
 use crate::principal::PrincipalId;
 use crate::time::Timestamp;
@@ -27,6 +29,7 @@ pub struct Ops<'a> {
     pub(crate) offers: Arc<OfferStagers>,
     pub(crate) blobs: Option<&'a BlobHandle>,
     pub(crate) now: Timestamp,
+    outbound: Option<OutboundContext>,
     blob_seen: HashMap<(TypeId, Vec<u8>), Vec<BlobRef>>,
 }
 
@@ -46,8 +49,24 @@ impl<'a> Ops<'a> {
             offers,
             blobs,
             now,
+            outbound: None,
             blob_seen: HashMap::new(),
         }
+    }
+
+    pub(crate) fn with_outbound(mut self, outbound: OutboundContext) -> Self {
+        self.outbound = Some(outbound);
+        self
+    }
+
+    fn outbound(&self) -> Result<&OutboundContext, EngineError> {
+        self.outbound.as_ref().ok_or_else(|| {
+            EngineError::Config(
+                "this pipeline has no outbound identity, so it cannot emit an integration event \
+                 or command onto the frontier"
+                    .into(),
+            )
+        })
     }
 
     pub fn now(&self) -> Timestamp {
@@ -168,12 +187,14 @@ impl<'a> Ops<'a> {
     }
 
     pub fn emit<E: OutboundEvent>(&mut self, event: E) -> Result<(), EngineError> {
-        self.staged.outbox.push(event_record(&event)?);
+        let record = event_record(&event, self.outbound()?)?;
+        self.staged.outbox.push(record);
         Ok(())
     }
 
     pub fn command<C: OutboundCommand>(&mut self, command: C) -> Result<(), EngineError> {
-        self.staged.outbox.push(command_record(&command)?);
+        let record = command_record(&command, self.outbound()?)?;
+        self.staged.outbox.push(record);
         Ok(())
     }
 
@@ -183,7 +204,14 @@ impl<'a> Ops<'a> {
         message: M,
     ) -> Result<(), EngineError> {
         let coordinates = M::coordinates();
-        let payload = serde_json::to_vec(&message).map_err(|source| EngineError::Encode {
+        let id = Uuid::now_v7();
+        let envelope = crate::pipeline::outbound::scheduled_payload(
+            &coordinates,
+            id,
+            self.outbound()?,
+            &message,
+        )?;
+        let payload = serde_json::to_vec(&envelope).map_err(|source| EngineError::Encode {
             what: "scheduled message",
             source,
         })?;
@@ -191,7 +219,7 @@ impl<'a> Ops<'a> {
             at,
             source: coordinates.source(),
             subject: coordinates.subject(),
-            message_id: Uuid::now_v7(),
+            message_id: id,
             payload,
         });
         Ok(())

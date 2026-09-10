@@ -147,6 +147,8 @@ impl InboundConsumer {
             subject,
             message_id: Uuid::now_v7(),
             sequence: None,
+            metadata: crate::inbound::MessageMetadata::default(),
+            body: payload.clone(),
             payload,
             delivered,
         }

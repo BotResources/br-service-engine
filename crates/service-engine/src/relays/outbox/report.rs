@@ -86,11 +86,13 @@ pub(super) enum MessageIdSource {
 }
 
 pub(super) fn message_id_for(row_id: Uuid, payload: &serde_json::Value) -> (Uuid, MessageIdSource) {
-    match payload.get("event_id").and_then(serde_json::Value::as_str) {
-        Some(raw) => match Uuid::parse_str(raw) {
-            Ok(event_id) => (event_id, MessageIdSource::Envelope),
-            Err(_) => (row_id, MessageIdSource::Row),
-        },
+    let envelope_id = payload
+        .get("event_id")
+        .or_else(|| payload.get("command_id"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok());
+    match envelope_id {
+        Some(id) => (id, MessageIdSource::Envelope),
         None => (row_id, MessageIdSource::Row),
     }
 }
@@ -177,6 +179,16 @@ mod tests {
         assert_eq!(
             message_id_for(Uuid::nil(), &payload),
             (event_id, MessageIdSource::Envelope)
+        );
+    }
+
+    #[test]
+    fn a_command_envelope_dedups_on_its_command_id() {
+        let command_id = Uuid::now_v7();
+        let payload = serde_json::json!({ "command_id": command_id.to_string() });
+        assert_eq!(
+            message_id_for(Uuid::nil(), &payload),
+            (command_id, MessageIdSource::Envelope)
         );
     }
 

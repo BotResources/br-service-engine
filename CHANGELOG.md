@@ -122,6 +122,33 @@ and named the bulk path. The synchronous channel answers `{ success }`, a typed
 that can only reach the caller — never a view, impact, offer, event or outbox row.
 `register_projector` auto-binds the projector's noun to its key type.
 
+**Frontier envelope, producer sequence and reaction principal.** Everything the
+engine puts on the integration bus is wrapped in the `br-core-integration`
+envelope. `cx.emit` / `cx.command` build an `IntegrationEvent<T>` /
+`IntegrationCommand<T>` (`event_id`/`command_id`, a `{aggregate}.{fact|verb}`
+type, the coordinate version, `occurred_at`, and `EventMetadata { actor,
+correlation_id, causation_id }`); `cx.schedule_at`, the dead-letter republish and
+the scope-declaration handshake carry the same shape. The actor is the acting
+principal's passport actor for a mutation and the engine's own v5 service identity
+for a reaction, cron or erasure; the correlation and causation ids propagate from
+the inbound message that caused the effect (its envelope id is the causation).
+`OutboundEvent` / `OutboundCommand` gained `sequence()`, which derives the
+producer sequence `(producer = service, seq_key = aggregate key, seq = aggregate
+version)` at emit time; the engine persists it on the outbox row
+(`integration_outbox.producer` / `seq_key` / `seq`) and renders the three
+`Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
+traffic is ordered and the per-`(producer, seq_key)` sequence guard is reachable.
+The inbound loop decodes the envelope, dedups on the `Br-Message-Id`/envelope id
+(tolerating a non-uuid `Nats-Msg-Id` — a foreign fabric producer no longer
+dead-letters), hands the reaction the inner payload, and exposes the sender's
+metadata on `Reaction` (`cx.metadata`, `cx.actor`). `Reaction` gained
+`cx.principal` / `cx.try_principal`: the sender's `EventMetadata.actor` is resolved
+into the service's own `Principal` through a resolver registered with
+`Engine::register_reaction_principal`, so a reaction can gate on who sent the
+command (the reference `create_card` refuses a command whose actor is not a
+service). A bare (non-enveloped) message is still tolerated for internal/plumbing
+producers: it flows with the whole payload as the body and no sender metadata.
+
 **Persistence — CRUD, soft EDA, full EDA behind one trait.** `Persistence`
 (`type Aggregate` / `type Key` / `type Event`, `const STYLE`, `load` / `save` /
 `create` / `read_many` / `lock`) plus an `Aggregate` trait naming a `Store`, so

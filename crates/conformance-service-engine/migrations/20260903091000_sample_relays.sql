@@ -4,6 +4,9 @@ CREATE TABLE integration_outbox (
     payload      jsonb       NOT NULL,
     status       text        NOT NULL,
     attempts     bigint      NOT NULL DEFAULT 0,
+    producer     text,
+    seq_key      text,
+    seq          bigint,
     last_error   text,
     published_at timestamptz,
     created_at   timestamptz NOT NULL DEFAULT now()

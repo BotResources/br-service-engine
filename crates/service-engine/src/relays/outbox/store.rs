@@ -12,6 +12,9 @@ pub struct PendingOutbox {
     pub subject: String,
     pub payload: serde_json::Value,
     pub attempts: u32,
+    pub producer: Option<String>,
+    pub seq_key: Option<String>,
+    pub seq: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -31,7 +34,7 @@ impl OutboxStore {
         E: Executor<'e, Database = Postgres>,
     {
         let row: Option<OutboxRow> = sqlx::query_as(
-            "SELECT id, subject, payload, attempts \
+            "SELECT id, subject, payload, attempts, producer, seq_key, seq \
              FROM integration_outbox \
              WHERE status = 'PENDING' AND id > $1 \
              ORDER BY id \
@@ -81,6 +84,9 @@ struct OutboxRow {
     subject: String,
     payload: serde_json::Value,
     attempts: i64,
+    producer: Option<String>,
+    seq_key: Option<String>,
+    seq: Option<i64>,
 }
 
 impl OutboxRow {
@@ -90,6 +96,9 @@ impl OutboxRow {
             subject: self.subject,
             payload: self.payload,
             attempts: self.attempts.max(0) as u32,
+            producer: self.producer,
+            seq_key: self.seq_key,
+            seq: self.seq,
         }
     }
 }

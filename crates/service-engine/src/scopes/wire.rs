@@ -1,6 +1,4 @@
-use br_core_integration::{
-    Actor, CommandCoords, EventMetadata, IntegrationCommand, ServiceAccountId,
-};
+use br_core_integration::{Actor, CommandCoords, EventMetadata, IntegrationCommand};
 use br_core_scope::{DeclareServiceScopes, ScopeDeclaration, ServiceKey};
 use br_scope_declaration_contract::{
     VERSION, accepted_event_coords, command_type, declare_command_coords, rejected_event_coords,
@@ -8,10 +6,8 @@ use br_scope_declaration_contract::{
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::identity::service_actor;
 use crate::nats::event_subject;
-
-const DECLARING_SERVICE_NAMESPACE: Uuid =
-    Uuid::from_u128(0x6f3a_1c8e_4b27_4d59_9e10_a3f2_77c5_8d41);
 
 const CONTRACT: &str = "the frozen scope-declaration contract renders valid coordinates";
 
@@ -49,8 +45,7 @@ pub(super) fn build_command(
 }
 
 pub(super) fn declaring_actor(service: &ServiceKey) -> Actor {
-    let id = Uuid::new_v5(&DECLARING_SERVICE_NAMESPACE, service.as_str().as_bytes());
-    Actor::Service(ServiceAccountId::from(id))
+    service_actor(service.as_str())
 }
 
 fn render_command_subject(coords: &CommandCoords) -> String {
@@ -66,6 +61,7 @@ fn render_command_subject(coords: &CommandCoords) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use br_core_integration::ServiceAccountId;
 
     #[test]
     fn the_confirmation_subjects_are_the_two_frozen_event_subjects() {

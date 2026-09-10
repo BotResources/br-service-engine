@@ -5,7 +5,9 @@ use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::boot_pipeline_engine;
 use futures_util::StreamExt;
 use service_engine::impact::{Impact, TransportEvent};
-use service_engine::inbound::{DEAD_LETTER_NOUN, DeadLetterSource, DeadLetters, Incoming, Source};
+use service_engine::inbound::{
+    DEAD_LETTER_NOUN, DeadLetterSource, DeadLetters, Incoming, MessageMetadata, Source,
+};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -26,6 +28,8 @@ async fn s091_dead_lettering_stages_an_impact_on_the_ops_view() {
         subject: "integration.cmd.sample.widget.create.v1".to_string(),
         message_id: Uuid::now_v7(),
         sequence: None,
+        metadata: MessageMetadata::default(),
+        body: Bytes::from_static(b"{}"),
         payload: Bytes::from_static(b"{}"),
         delivered: 9,
     };

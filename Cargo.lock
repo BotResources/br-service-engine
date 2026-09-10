@@ -960,6 +960,8 @@ name = "example-twin"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "br-core-integration",
+ "chrono",
  "example-contract",
  "futures-util",
  "serde_json",

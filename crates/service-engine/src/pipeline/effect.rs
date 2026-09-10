@@ -7,10 +7,13 @@ use sqlx::PgPool;
 use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::BlobHandle;
 use crate::offers::OfferStagers;
+use uuid::Uuid;
+
 use crate::pipeline::context::{Bulk, Mutation};
 use crate::pipeline::dispatch::{begin_scoped, flush_and_commit};
 use crate::pipeline::mutation::MutationInput;
 use crate::pipeline::ops::Ops;
+use crate::pipeline::outbound::OutboundContext;
 use crate::pipeline::staged::Staged;
 use crate::pipeline::{MutationError, MutationFault};
 use crate::presence::PresenceHandle;
@@ -27,6 +30,7 @@ pub(crate) struct MutationServices<P: Principal> {
     pub(crate) blobs: Option<BlobHandle>,
     pub(crate) lock_timeout: Duration,
     pub(crate) impacts_per_commit: usize,
+    pub(crate) service: Option<String>,
 }
 
 impl<P: Principal> Clone for MutationServices<P> {
@@ -40,7 +44,20 @@ impl<P: Principal> Clone for MutationServices<P> {
             blobs: self.blobs.clone(),
             lock_timeout: self.lock_timeout,
             impacts_per_commit: self.impacts_per_commit,
+            service: self.service.clone(),
         }
+    }
+}
+
+fn mutation_outbound<P: Principal>(
+    services: &MutationServices<P>,
+    principal: &P,
+) -> OutboundContext {
+    OutboundContext {
+        actor: principal.passport().to_actor(),
+        correlation_id: Uuid::now_v7(),
+        causation_id: None,
+        producer: services.service.clone(),
     }
 }
 
@@ -68,7 +85,8 @@ where
             services.offers.clone(),
             services.blobs.as_ref(),
             time::now(),
-        );
+        )
+        .with_outbound(mutation_outbound(services, &principal));
         let mut cx = Mutation::new(ops, &principal, &services.presence, &mut presence_puts);
         handler(&mut cx, input).await
     };
@@ -127,7 +145,8 @@ where
             services.offers.clone(),
             services.blobs.as_ref(),
             time::now(),
-        );
+        )
+        .with_outbound(mutation_outbound(services, &principal));
         let mut cx = Bulk::new(ops, &principal);
         handler(&mut cx, input).await
     };

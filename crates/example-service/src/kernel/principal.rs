@@ -1,6 +1,7 @@
 use std::any::Any;
 
 use br_core_auth::{Passport, PassportClaims};
+use br_core_integration::Actor;
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
 use service_engine::principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
@@ -58,6 +59,32 @@ impl AppPrincipal {
             ),
             facts: PrincipalFacts::new(),
         }
+    }
+
+    pub fn from_actor(actor: Actor) -> Self {
+        let passport = match actor {
+            Actor::Service(id) => Passport::service(id.as_uuid(), PassportClaims::new()),
+            Actor::Human(id) => Passport::human(
+                id.as_uuid(),
+                false,
+                true,
+                br_core_auth::AuthMethod::Jwt,
+                None,
+                PassportClaims::new(),
+            ),
+        };
+        Self {
+            id: PrincipalId::from(actor.id()),
+            org: Uuid::nil(),
+            scopes: Vec::new(),
+            super_admin: false,
+            passport,
+            facts: PrincipalFacts::new(),
+        }
+    }
+
+    pub fn is_service_sender(&self) -> bool {
+        self.passport.service_account_id().is_some()
     }
 
     pub fn with_fact<F: Any + Send + Sync>(mut self, fact: F) -> Self {

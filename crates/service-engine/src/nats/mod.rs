@@ -232,9 +232,26 @@ impl Nats {
         payload: &serde_json::Value,
         message_id: &str,
     ) -> Result<PublishOutcome, NatsError> {
+        self.publish_value_sequenced(subject, payload, message_id, None)
+            .await
+    }
+
+    pub async fn publish_value_sequenced(
+        &self,
+        subject: &str,
+        payload: &serde_json::Value,
+        message_id: &str,
+        sequence: Option<(&str, &str, i64)>,
+    ) -> Result<PublishOutcome, NatsError> {
         let bytes = serde_json::to_vec(payload).map_err(NatsError::Encode)?;
         let mut headers = async_nats::HeaderMap::new();
         headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id);
+        headers.insert(crate::inbound::HEADER_MESSAGE_ID, message_id);
+        if let Some((producer, seq_key, seq)) = sequence {
+            headers.insert(crate::inbound::HEADER_PRODUCER, producer);
+            headers.insert(crate::inbound::HEADER_SEQ_KEY, seq_key);
+            headers.insert(crate::inbound::HEADER_SEQ, seq.to_string().as_str());
+        }
         let ack_future = self
             .jetstream
             .publish_with_headers(subject.to_string(), headers, bytes.into())

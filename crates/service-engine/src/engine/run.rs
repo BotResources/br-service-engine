@@ -47,6 +47,7 @@ impl<P: Principal> Engine<P> {
             blobs,
             shutdown,
             declared_scopes,
+            reaction_principal,
             ..
         } = self;
         let offers = Arc::new(offers);
@@ -188,6 +189,8 @@ impl<P: Principal> Engine<P> {
                 blob_handle.clone(),
                 config.lock_timeout,
                 config.impacts_per_commit,
+                config.service.clone(),
+                reaction_principal.clone(),
             ));
             match InboundLoop::start(
                 nats.clone(),

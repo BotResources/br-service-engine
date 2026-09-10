@@ -10,8 +10,8 @@ pub use context::{Bulk, Mutation, Reaction};
 pub(crate) use dispatch::{DirectPipeline, begin_scoped, flush_and_commit};
 pub use mutation::{MutationExecutor, MutationInput, MutationRegistry};
 pub use ops::Ops;
-pub(crate) use outbound::event_record;
-pub use outbound::{OutboundCommand, OutboundEvent};
+pub use outbound::{OutboundCommand, OutboundEvent, ProducerSequence};
+pub(crate) use outbound::{OutboundContext, event_record};
 pub(crate) use staged::Staged;
 
 use crate::gate::Reason;
