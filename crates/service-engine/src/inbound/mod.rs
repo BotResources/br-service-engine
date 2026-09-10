@@ -33,7 +33,7 @@ pub use message::{
 };
 pub use reaction::{ReactionEntry, ReactionInvoker, ReactionMessage, ReactionRegistry};
 pub use retention::REASON_MESSAGE_RETENTION;
-pub(crate) use retention::validate_message_retention;
+pub(crate) use retention::{inbound_start_reason, validate_message_retention};
 pub use runtime::InboundLoop;
 pub use subscription::{
     DEFAULT_ACK_WAIT, DEFAULT_MAX_ACK_PENDING, InboundConfig, ReactionCoordinates, Subscription,

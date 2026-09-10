@@ -7,6 +7,13 @@ use crate::nats::Nats;
 
 pub const REASON_MESSAGE_RETENTION: &str = "inbound.message_retention.uncovered";
 
+pub(crate) fn inbound_start_reason(error: &EngineError) -> &'static str {
+    match error {
+        EngineError::Config(_) => REASON_MESSAGE_RETENTION,
+        _ => crate::nats::REASON_NO_STREAM,
+    }
+}
+
 pub(crate) async fn validate_message_retention(
     nats: &Nats,
     subscriptions: &[Subscription],
