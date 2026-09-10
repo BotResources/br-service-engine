@@ -14,7 +14,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 const CHANNEL: &str = "se_s160_reaction";
-const SERVICE: &str = "s151reaction";
+const SERVICE: &str = "s160reaction";
 
 async fn claimed(pool: &PgPool, id: Uuid) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM service_engine.message_claim WHERE message_id = $1")
@@ -58,7 +58,7 @@ async fn s160_a_supervised_reaction_consumer_falls_deaf_then_recovers_across_a_b
     let mut nats = TestNats::spawn().await;
     nats.provision().await;
 
-    let config = engine_config(CHANNEL, "pod-s151")
+    let config = engine_config(CHANNEL, "pod-s160")
         .with_service(SERVICE)
         .with_nats_grace(Duration::from_secs(1))
         .with_beat(Duration::from_millis(200));
@@ -71,7 +71,7 @@ async fn s160_a_supervised_reaction_consumer_falls_deaf_then_recovers_across_a_b
     .await
     .expect("the pod boots under the low-privilege app role");
     engine
-        .register_reaction::<SampleCommand, _, _>("s151-work", sample_handler)
+        .register_reaction::<SampleCommand, _, _>("s160-work", sample_handler)
         .expect("register_reaction records the reaction and derives its subscription");
     let readiness = engine.readiness();
     let shutdown = engine.shutdown_handle();

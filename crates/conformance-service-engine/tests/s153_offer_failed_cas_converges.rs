@@ -29,8 +29,8 @@ async fn s153_a_leader_that_loses_the_cas_re_marks_the_key_and_converges_once_co
     let engine = boot_offer_engine_reconciling(
         &db,
         nats.nats().await,
-        "se_s148",
-        "pod-s148",
+        "se_s153",
+        "pod-s153",
         Duration::from_millis(120),
     )
     .await;

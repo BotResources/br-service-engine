@@ -4,8 +4,8 @@ use service_engine::inbound::{DeadLetterSource, DeadLetters};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-const POISON_SUBJECT: &str = "nostream.s150.poison";
-const GOOD_SUBJECT: &str = "integration.cmd.s150.work.do.v1";
+const POISON_SUBJECT: &str = "nostream.s159.poison";
+const GOOD_SUBJECT: &str = "integration.cmd.s159.work.do.v1";
 
 async fn schedule(pool: &PgPool, subject: &str) -> Uuid {
     let id = Uuid::now_v7();

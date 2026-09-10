@@ -31,8 +31,8 @@ async fn s152_a_rebuilt_bucket_is_repopulated_from_the_store_by_the_reconcile() 
     let engine = boot_offer_engine_reconciling(
         &db,
         nats.nats().await,
-        "se_s147",
-        "pod-s147",
+        "se_s152",
+        "pod-s152",
         Duration::from_millis(150),
     )
     .await;

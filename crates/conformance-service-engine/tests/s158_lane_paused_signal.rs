@@ -14,7 +14,7 @@ use service_engine::{Delta, Engine, Lane, LaneNotice, Readiness, ReadinessHandle
 use uuid::Uuid;
 
 const CHANNEL: &str = "se_s158_lane_signal";
-const SERVICE: &str = "s149lane";
+const SERVICE: &str = "s158lane";
 
 async fn await_not_ready(readiness: &ReadinessHandle) {
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -47,7 +47,7 @@ async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
     nats.provision_presence(SERVICE, Duration::from_secs(30))
         .await;
 
-    let config = engine_config(CHANNEL, "pod-s149")
+    let config = engine_config(CHANNEL, "pod-s158")
         .with_service(SERVICE)
         .with_nats_grace(Duration::from_secs(1))
         .with_beat(Duration::from_millis(200));

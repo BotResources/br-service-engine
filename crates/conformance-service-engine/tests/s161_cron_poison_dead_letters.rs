@@ -15,7 +15,7 @@ async fn s161_a_failing_cron_tick_dead_letters_and_a_healthy_job_beside_it_keeps
     let pool = db.app_pool().clone();
     let dead_letters = DeadLetters::new(pool.clone());
 
-    let mut cron = CronRuntime::new(PodId::new("se-cron-s152").expect("a valid pod id"))
+    let mut cron = CronRuntime::new(PodId::new("se-cron-s161").expect("a valid pod id"))
         .with_beat(BEAT)
         .with_lease(Duration::from_millis(600));
     cron.set_dead_letters(dead_letters.clone());
@@ -24,7 +24,7 @@ async fn s161_a_failing_cron_tick_dead_letters_and_a_healthy_job_beside_it_keeps
     cron.register(SampleCronJob::new(
         "healthy",
         Schedule::EveryBeats(1),
-        "se-cron-s152",
+        "se-cron-s161",
     ))
     .expect("the healthy job registers");
 

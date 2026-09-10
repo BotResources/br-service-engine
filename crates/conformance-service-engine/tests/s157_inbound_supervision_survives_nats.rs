@@ -15,7 +15,7 @@ use service_engine::{Engine, Readiness, ReadinessHandle};
 use uuid::Uuid;
 
 const CHANNEL: &str = "se_s157_supervision";
-const SERVICE: &str = "s148supervision";
+const SERVICE: &str = "s157supervision";
 
 async fn publish_chunk(producer: &Nats, key: &NoteKey, seq: u64, token: &str) {
     let frame = StreamFrame {
@@ -76,7 +76,7 @@ async fn s157_a_supervised_lane_a_consumer_recovers_after_the_broker_is_killed_a
     nats.provision_streaming(SERVICE, Duration::from_secs(300))
         .await;
 
-    let config = engine_config(CHANNEL, "pod-s148")
+    let config = engine_config(CHANNEL, "pod-s157")
         .with_service(SERVICE)
         .with_nats_grace(Duration::from_secs(1))
         .with_beat(Duration::from_millis(200));

@@ -17,8 +17,8 @@ async fn s151_a_mutation_on_an_offered_noun_commits_while_a_large_drain_is_in_fl
     let tenant = Uuid::now_v7();
     let ids = seed_backlog(&pool, tenant, BACKLOG).await;
 
-    let leader = boot_offer_engine(&db, nats.nats().await, "se_s146", "pod-s146a").await;
-    let standby = boot_offer_engine(&db, nats.nats().await, "se_s146", "pod-s146b").await;
+    let leader = boot_offer_engine(&db, nats.nats().await, "se_s151", "pod-s151a").await;
+    let standby = boot_offer_engine(&db, nats.nats().await, "se_s151", "pod-s151b").await;
     let leader_shutdown = leader.shutdown_handle();
     let standby_shutdown = standby.shutdown_handle();
     let executor = leader.mutation_executor();
