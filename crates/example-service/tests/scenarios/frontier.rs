@@ -29,6 +29,16 @@ async fn total_dead_letters(world: &World) -> i64 {
         .unwrap()
 }
 
+async fn claimed(world: &World, message_id: Uuid) -> bool {
+    let n: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM service_engine.message_claim WHERE message_id = $1")
+            .bind(message_id)
+            .fetch_one(&world.db.app)
+            .await
+            .unwrap();
+    n > 0
+}
+
 #[tokio::test]
 async fn a_fabric_shaped_producer_completes_a_full_cycle_through_the_envelope() {
     let world = World::start("pod-frontier").await;
@@ -127,6 +137,56 @@ async fn an_out_of_order_event_is_a_stale_no_op_not_a_regression() {
         0,
         "a stale producer sequence is an acked no-op, never a poison message"
     );
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
+async fn an_aggregate_id_replay_is_answered_by_the_reaction_never_dead_lettered() {
+    let world = World::start("pod-agg-replay").await;
+    let board = Uuid::now_v7();
+    let card_id = Uuid::now_v7();
+    let cmd = CreateCard {
+        card_id,
+        board_id: board,
+        title: "First".to_string(),
+    };
+
+    example_twin::send_create_card(&world.nats, &cmd).await.unwrap();
+    poll_until!(Duration::from_secs(5), {
+        (card_count_on_board(&world, board).await > 0).then_some(())
+    });
+
+    let replay_id = Uuid::now_v7();
+    example_twin::send_create_card_with_id(
+        &world.nats,
+        &cmd,
+        example_twin::twin_actor(),
+        replay_id,
+    )
+    .await
+    .unwrap();
+
+    poll_until!(Duration::from_secs(5), {
+        claimed(&world, replay_id).await.then_some(())
+    });
+    assert_eq!(
+        dead_letters_for(&world, replay_id).await,
+        0,
+        "a second command for a card that already exists is a legitimate duplicate; the reaction \
+         re-emits the confirmation instead of hitting the unique constraint and dead-lettering"
+    );
+    assert_eq!(
+        card_count_on_board(&world, board).await,
+        1,
+        "the aggregate-id replay created no second card"
+    );
+    let title: String = sqlx::query_scalar("SELECT title FROM card WHERE id = $1")
+        .bind(card_id)
+        .fetch_one(&world.db.app)
+        .await
+        .unwrap();
+    assert_eq!(title, "First", "the replay did not overwrite the existing card");
 
     world.cleanup().await;
 }

@@ -76,6 +76,9 @@ pub fn person_created<'r>(
     Box::pin(async move {
         let event = msg.0;
         let card_id = welcome_card_id(event.person_id);
+        if cx.load::<CardAggregate>(&card_id).await?.is_some() {
+            return Ok(());
+        }
         let title = format!("Welcome {}", event.display_name);
         let cause = CardEvent::Created {
             board_id: event.board_id,

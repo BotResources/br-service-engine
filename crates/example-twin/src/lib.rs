@@ -118,19 +118,28 @@ pub async fn send_create_card_as(
     cmd: &CreateCard,
     actor: Actor,
 ) -> Result<(), NatsError> {
+    send_create_card_with_id(nats, cmd, actor, cmd.card_id).await
+}
+
+pub async fn send_create_card_with_id(
+    nats: &Nats,
+    cmd: &CreateCard,
+    actor: Actor,
+    message_id: Uuid,
+) -> Result<(), NatsError> {
     let coords = create_card_coords();
     let subject = command_subject(&coords);
     let body = serde_json::to_value(cmd).map_err(NatsError::Encode)?;
     let envelope = IntegrationCommand::new(
-        cmd.card_id,
+        message_id,
         command_type(&coords),
         coords.version,
         Utc::now(),
-        metadata_as(actor, cmd.card_id),
+        metadata_as(actor, message_id),
         body,
     );
     let payload = serde_json::to_value(&envelope).map_err(NatsError::Encode)?;
-    nats.publish_value_with_id(&subject, &payload, &cmd.card_id.to_string())
+    nats.publish_value_with_id(&subject, &payload, &message_id.to_string())
         .await?;
     Ok(())
 }
