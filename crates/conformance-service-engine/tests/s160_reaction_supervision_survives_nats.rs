@@ -53,7 +53,7 @@ async fn await_not_ready(readiness: &ReadinessHandle) {
 }
 
 #[tokio::test]
-async fn s151_a_supervised_reaction_consumer_falls_deaf_then_recovers_across_a_broker_restart() {
+async fn s160_a_supervised_reaction_consumer_falls_deaf_then_recovers_across_a_broker_restart() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;

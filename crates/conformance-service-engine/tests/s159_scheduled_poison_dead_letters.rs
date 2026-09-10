@@ -32,7 +32,7 @@ async fn pending(pool: &PgPool) -> i64 {
 }
 
 #[tokio::test]
-async fn s150_a_poison_scheduled_row_dead_letters_and_the_next_row_still_fires() {
+async fn s159_a_poison_scheduled_row_dead_letters_and_the_next_row_still_fires() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

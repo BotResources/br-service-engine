@@ -69,7 +69,7 @@ async fn await_not_ready(readiness: &ReadinessHandle) {
 }
 
 #[tokio::test]
-async fn s148_a_supervised_lane_a_consumer_recovers_after_the_broker_is_killed_and_restarted() {
+async fn s157_a_supervised_lane_a_consumer_recovers_after_the_broker_is_killed_and_restarted() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;

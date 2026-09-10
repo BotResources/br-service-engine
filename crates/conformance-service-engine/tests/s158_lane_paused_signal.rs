@@ -40,7 +40,7 @@ async fn next_notice(
 }
 
 #[tokio::test]
-async fn s149_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
+async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;

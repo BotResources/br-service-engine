@@ -10,7 +10,7 @@ use service_engine::name::PodId;
 const BEAT: Duration = Duration::from_millis(80);
 
 #[tokio::test]
-async fn s152_a_failing_cron_tick_dead_letters_and_a_healthy_job_beside_it_keeps_running() {
+async fn s161_a_failing_cron_tick_dead_letters_and_a_healthy_job_beside_it_keeps_running() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let dead_letters = DeadLetters::new(pool.clone());

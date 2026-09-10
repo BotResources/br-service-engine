@@ -9,7 +9,7 @@ fn key() -> SequenceKey {
 }
 
 #[tokio::test]
-async fn s147_two_reactions_of_one_producer_keep_independent_watermarks() {
+async fn s156_two_reactions_of_one_producer_keep_independent_watermarks() {
     let db = TestDb::fresh().await;
     let mut conn = db
         .app_pool()
