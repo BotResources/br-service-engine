@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use service_engine::{Delta, Engine, Lane, LaneNotice, Readiness, ReadinessHandle};
 use uuid::Uuid;
 
-const CHANNEL: &str = "se_s149_lane_signal";
+const CHANNEL: &str = "se_s158_lane_signal";
 const SERVICE: &str = "s149lane";
 
 async fn await_not_ready(readiness: &ReadinessHandle) {

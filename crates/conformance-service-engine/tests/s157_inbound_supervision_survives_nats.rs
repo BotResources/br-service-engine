@@ -14,7 +14,7 @@ use service_engine::nats::{Nats, StreamFrame};
 use service_engine::{Engine, Readiness, ReadinessHandle};
 use uuid::Uuid;
 
-const CHANNEL: &str = "se_s148_supervision";
+const CHANNEL: &str = "se_s157_supervision";
 const SERVICE: &str = "s148supervision";
 
 async fn publish_chunk(producer: &Nats, key: &NoteKey, seq: u64, token: &str) {

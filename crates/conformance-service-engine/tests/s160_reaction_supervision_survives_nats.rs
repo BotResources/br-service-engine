@@ -13,7 +13,7 @@ use service_engine::{Engine, Readiness, ReadinessHandle};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-const CHANNEL: &str = "se_s151_reaction";
+const CHANNEL: &str = "se_s160_reaction";
 const SERVICE: &str = "s151reaction";
 
 async fn claimed(pool: &PgPool, id: Uuid) -> i64 {
