@@ -71,7 +71,7 @@ async fn s012_emission() {
 }
 
 #[tokio::test]
-async fn s012_per_impact_emits_one_delta_per_cause_and_refuses_an_impact_that_carries_none() {
+async fn s012_per_impact_emits_one_delta_per_cause_and_folds_a_causeless_impact() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -136,37 +136,38 @@ async fn s012_per_impact_emits_one_delta_per_cause_and_refuses_an_impact_that_ca
     let report = engine
         .render(vec![resource(&subject, Dims::EMPTY)])
         .await
-        .expect("a refusal on one session does not abort the pass");
-    assert_eq!(
-        report.faults.len(),
-        1,
-        "PerImpact without a cause faults exactly the session that asked for it"
-    );
-    let fault = &report.faults[0];
+        .expect("a causeless impact on a PerImpact projector never faults");
     assert!(
-        fault.reason.contains("PerImpact") && fault.reason.contains(SpyAssignments::NAME.as_str()),
-        "the fault names the projector that could not emit, got {}",
-        fault.reason
-    );
-    assert!(
-        fault.repaired,
-        "a faulted session is re-snapshotted inside the pass instead of being left stale"
+        report.faults.is_empty(),
+        "a PerImpact projector folds a causeless impact coalesced instead of faulting"
     );
     assert_eq!(
-        report.deltas, 1,
-        "the session on another projector still receives its delta"
+        report.deltas, 2,
+        "the PerImpact session and the coalescing session each receive one Upsert"
     );
+
+    let folded = next_delta(&mut stream, SOON)
+        .await
+        .expect("the PerImpact session receives the causeless change coalesced");
+    assert!(
+        matches!(folded, Delta::Upsert { .. }),
+        "a causeless impact is a coalesced Upsert, never a fault-driven Reset, got {folded:?}"
+    );
+    assert_eq!(
+        upsert_cause(&folded),
+        None,
+        "a coalesced fold of a causeless impact carries no cause"
+    );
+    assert_eq!(
+        folded.revision().get(),
+        5,
+        "the revision stays contiguous; a causeless impact is no Reset"
+    );
+
     let delta = next_delta(&mut coalescing, SOON)
         .await
-        .expect("the coalescing session is untouched by the other session's refusal");
+        .expect("the coalescing session receives its Upsert too");
     assert!(matches!(delta, Delta::Upsert { .. }));
-    let repair = next_delta(&mut stream, SOON)
-        .await
-        .expect("the faulted session is reset, never silently starved");
-    assert!(
-        matches!(repair, Delta::Reset { .. }),
-        "the repair of a faulted session is a Reset, got {repair:?}"
-    );
 
     db.cleanup().await;
 }
