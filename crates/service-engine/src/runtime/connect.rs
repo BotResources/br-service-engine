@@ -47,7 +47,7 @@ impl<P: Principal> SessionRuntime<P> {
                 });
             }
         }
-        let id = request.session.unwrap_or_else(SessionId::new);
+        let id = request.session.unwrap_or_default();
         let outbox = Arc::new(Outbox::new(self.config.session_buffer));
         let windows = request
             .windows
