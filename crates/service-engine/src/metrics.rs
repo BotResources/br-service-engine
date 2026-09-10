@@ -23,6 +23,7 @@ pub const NOTIFICATION_QUEUE_USAGE: &str = "service_engine_notification_queue_us
 pub const TRANSPORT_RECONNECTS_TOTAL: &str = "service_engine_transport_reconnects_total";
 pub const MIRROR_RESTARTS_TOTAL: &str = "service_engine_mirror_restarts_total";
 pub const BLOBS_REAPED_TOTAL: &str = "service_engine_blobs_reaped_total";
+pub const DEAD_LETTERS_TOTAL: &str = "service_engine_dead_letters_total";
 pub const DEPENDENCY_UP: &str = "service_engine_dependency_up";
 
 pub const ALL: &[&str] = &[
@@ -49,6 +50,7 @@ pub const ALL: &[&str] = &[
     TRANSPORT_RECONNECTS_TOTAL,
     MIRROR_RESTARTS_TOTAL,
     BLOBS_REAPED_TOTAL,
+    DEAD_LETTERS_TOTAL,
     DEPENDENCY_UP,
 ];
 
@@ -59,6 +61,7 @@ pub const LABEL_MIRROR: &str = "mirror";
 pub const LABEL_OUTCOME: &str = "outcome";
 pub const LABEL_REASON: &str = "reason";
 pub const LABEL_DEPENDENCY: &str = "dependency";
+pub const LABEL_SOURCE: &str = "source";
 
 #[cfg(test)]
 mod tests {

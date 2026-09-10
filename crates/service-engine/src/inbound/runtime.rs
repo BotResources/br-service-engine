@@ -6,12 +6,13 @@ use crate::inbound::consumer::InboundConsumer;
 use crate::inbound::deadletter::DeadLetters;
 use crate::inbound::dispatch::Dispatch;
 use crate::inbound::subscription::{InboundConfig, Subscription};
+use crate::inbound::supervisor::{InboundHealth, SupervisorConfig};
 use crate::nats::Nats;
 use std::sync::Arc;
 
 pub struct InboundLoop {
     cancel: watch::Sender<bool>,
-    tasks: Vec<JoinHandle<Result<(), EngineError>>>,
+    tasks: Vec<JoinHandle<()>>,
 }
 
 impl InboundLoop {
@@ -21,8 +22,10 @@ impl InboundLoop {
         dispatch: Arc<dyn Dispatch>,
         dead_letters: DeadLetters,
         config: InboundConfig,
+        health: InboundHealth,
     ) -> Result<Self, EngineError> {
         let (cancel, _) = watch::channel(false);
+        let supervision = SupervisorConfig::default();
         let mut tasks = Vec::with_capacity(subscriptions.len());
         for subscription in subscriptions {
             let consumer = InboundConsumer::new(
@@ -32,9 +35,13 @@ impl InboundLoop {
                 dead_letters.clone(),
                 config.clone(),
             );
-            let opened = consumer.open().await?;
+            consumer.open().await?;
             let stop = cancel.subscribe();
-            tasks.push(tokio::spawn(consumer.serve(opened, stop)));
+            tasks.push(tokio::spawn(consumer.run_supervised(
+                stop,
+                health.clone(),
+                supervision,
+            )));
         }
         Ok(Self { cancel, tasks })
     }

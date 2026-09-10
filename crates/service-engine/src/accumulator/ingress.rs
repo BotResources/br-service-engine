@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull::Config as PullConfig;
@@ -12,6 +12,7 @@ use crate::accumulator::runtime::AccumulatorRuntime;
 use crate::accumulator::{ChunkSeq, seal};
 use crate::chain::describe;
 use crate::error::EngineError;
+use crate::inbound::{HealthTracker, InboundHealth, ServeExit, SupervisorConfig};
 use crate::name::AccumulatorName;
 use crate::nats::{Nats, StreamFrame, streaming_filter, streaming_stream, subject_token};
 
@@ -71,31 +72,56 @@ impl StreamingIngress {
             })
     }
 
-    pub async fn serve(
-        self,
+    async fn serve(
+        &self,
         consumer: Consumer<PullConfig>,
-        shutdown: Arc<Notify>,
-    ) -> Result<(), EngineError> {
+        stop: &Arc<Notify>,
+    ) -> Result<ServeExit, EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
                 "the lane-A ingress could not open its message stream: {error}"
             ))
         })?;
-        let stopping = shutdown.notified();
+        let stopping = stop.notified();
         tokio::pin!(stopping);
         loop {
             let message = tokio::select! {
                 biased;
-                () = &mut stopping => return Ok(()),
+                () = &mut stopping => return Ok(ServeExit::Cancelled),
                 next = messages.next() => next,
             };
             match message {
                 Some(Ok(message)) => self.fold(&message).await,
-                Some(Err(error)) => tracing::warn!(
-                    reason = %error,
-                    "the lane-A ingress stream yielded an error; the consumer continues"
-                ),
-                None => return Ok(()),
+                Some(Err(error)) => {
+                    return Err(EngineError::Config(format!(
+                        "the lane-A ingress lost its message stream: {error}"
+                    )));
+                }
+                None => return Ok(ServeExit::Ended),
+            }
+        }
+    }
+
+    async fn serve_with_promotion(
+        &self,
+        consumer: Consumer<PullConfig>,
+        stop: &Arc<Notify>,
+        tracker: &mut HealthTracker,
+        uptime: Duration,
+    ) -> Result<ServeExit, EngineError> {
+        let served = self.serve(consumer, stop);
+        tokio::pin!(served);
+        let promote = tokio::time::sleep(uptime);
+        tokio::pin!(promote);
+        let mut promoted = false;
+        loop {
+            tokio::select! {
+                biased;
+                exit = &mut served => return exit,
+                () = &mut promote, if !promoted => {
+                    tracker.promote();
+                    promoted = true;
+                }
             }
         }
     }
@@ -191,10 +217,11 @@ pub(crate) async fn spawn_lane_a(
     beat: Duration,
     ack_wait: Duration,
     max_ack_pending: i64,
+    health: InboundHealth,
     stop_ingress: Arc<Notify>,
     stop_purge: Arc<Notify>,
-) -> Result<(JoinHandle<Result<(), EngineError>>, JoinHandle<()>), EngineError> {
-    let (ingress, consumer) = establish(
+) -> Result<(JoinHandle<()>, JoinHandle<()>), EngineError> {
+    let (_ingress, _consumer) = establish(
         nats,
         &service,
         seal_retention,
@@ -203,7 +230,16 @@ pub(crate) async fn spawn_lane_a(
         max_ack_pending,
     )
     .await?;
-    let ingress_task = tokio::spawn(ingress.serve(consumer, stop_ingress));
+    let ingress_task = tokio::spawn(run_lane_a_supervised(
+        nats.clone(),
+        service.clone(),
+        seal_retention,
+        accumulators.clone(),
+        ack_wait,
+        max_ack_pending,
+        health,
+        stop_ingress,
+    ));
     let purge_task = tokio::spawn(run_purge(
         nats.clone(),
         accumulators,
@@ -212,6 +248,75 @@ pub(crate) async fn spawn_lane_a(
         stop_purge,
     ));
     Ok((ingress_task, purge_task))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_lane_a_supervised(
+    nats: Nats,
+    service: String,
+    seal_retention: Duration,
+    accumulators: Arc<AccumulatorRuntime>,
+    ack_wait: Duration,
+    max_ack_pending: i64,
+    health: InboundHealth,
+    stop: Arc<Notify>,
+) {
+    let cfg = SupervisorConfig::default();
+    let mut tracker =
+        HealthTracker::new(format!("streaming:{service}"), health, cfg.failure_threshold);
+    loop {
+        let established = establish(
+            &nats,
+            &service,
+            seal_retention,
+            accumulators.clone(),
+            ack_wait,
+            max_ack_pending,
+        )
+        .await;
+        let (ingress, consumer) = match established {
+            Ok(pair) => pair,
+            Err(error) => {
+                let delay = tracker.failed(Duration::ZERO, cfg.healthy_uptime, &describe(&error));
+                if sleep_or_notified(delay, &stop).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        tracker.connected();
+        let started = Instant::now();
+        let exit = ingress
+            .serve_with_promotion(consumer, &stop, &mut tracker, cfg.healthy_uptime)
+            .await;
+        match exit {
+            Ok(ServeExit::Cancelled) => return,
+            Ok(ServeExit::Ended) => {
+                let delay = tracker.failed(
+                    started.elapsed(),
+                    cfg.healthy_uptime,
+                    "the lane-A ingress stream ended",
+                );
+                if sleep_or_notified(delay, &stop).await {
+                    return;
+                }
+            }
+            Err(error) => {
+                let delay = tracker.failed(started.elapsed(), cfg.healthy_uptime, &describe(&error));
+                if sleep_or_notified(delay, &stop).await {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+async fn sleep_or_notified(delay: Duration, stop: &Arc<Notify>) -> bool {
+    tokio::select! {
+        biased;
+        () = stop.notified() => true,
+        () = tokio::time::sleep(delay) => false,
+    }
 }
 
 pub(crate) async fn run_purge(

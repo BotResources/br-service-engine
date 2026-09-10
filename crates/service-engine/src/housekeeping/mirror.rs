@@ -14,9 +14,12 @@ use futures_util::FutureExt;
 use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 
+use uuid::Uuid;
+
 use crate::chain::describe;
 use crate::error::EngineError;
 use crate::housekeeping::backoff::Backoff;
+use crate::inbound::{DeadLetterSource, DeadLetters};
 use crate::mirror::MirrorHandle;
 use crate::name::MirrorName;
 
@@ -24,11 +27,15 @@ pub use health::{MirrorCondition, MirrorsHealth, MirrorsHealthReceiver};
 
 type Board = Arc<watch::Sender<MirrorsHealth>>;
 
+const MIRROR_DEAD_LETTER_THRESHOLD: u32 = 5;
+const MIRROR_DEAD_LETTER_NAMESPACE: Uuid = Uuid::from_u128(0x91130000_c0c07100_b0000000_dead1e77u128);
+
 pub struct MirrorSupervisor {
     mirrors: Vec<MirrorHandle>,
     board: Board,
     subscription: MirrorsHealthReceiver,
     restarts: Arc<AtomicU64>,
+    dead_letters: Option<DeadLetters>,
 }
 
 impl Default for MirrorSupervisor {
@@ -45,7 +52,12 @@ impl MirrorSupervisor {
             board: Arc::new(board),
             subscription,
             restarts: Arc::new(AtomicU64::new(0)),
+            dead_letters: None,
         }
+    }
+
+    pub fn set_dead_letters(&mut self, dead_letters: DeadLetters) {
+        self.dead_letters = Some(dead_letters);
     }
 
     pub fn register(&mut self, mirror: MirrorHandle) -> Result<(), EngineError> {
@@ -79,6 +91,7 @@ impl MirrorSupervisor {
                     mirror.clone(),
                     self.board.clone(),
                     self.restarts.clone(),
+                    self.dead_letters.clone(),
                     shutdown.clone(),
                 ))
             })
@@ -149,6 +162,7 @@ async fn supervise(
     mirror: MirrorHandle,
     board: Board,
     restarts: Arc<AtomicU64>,
+    dead_letters: Option<DeadLetters>,
     shutdown: Arc<Notify>,
 ) {
     let name = mirror.name().clone();
@@ -191,6 +205,9 @@ async fn supervise(
             reason = %reason,
             "a mirror stopped and is being restarted",
         );
+        if backoff.attempts() >= MIRROR_DEAD_LETTER_THRESHOLD {
+            record_mirror_dead_letter(dead_letters.as_ref(), &name, &reason).await;
+        }
         set(
             &board,
             &name,
@@ -205,6 +222,33 @@ async fn supervise(
             () = &mut stopping => return,
             () = tokio::time::sleep(retry_in) => {}
         }
+    }
+}
+
+async fn record_mirror_dead_letter(
+    dead_letters: Option<&DeadLetters>,
+    name: &MirrorName,
+    reason: &str,
+) {
+    let Some(dead_letters) = dead_letters else {
+        return;
+    };
+    let message_id = Uuid::new_v5(&MIRROR_DEAD_LETTER_NAMESPACE, name.as_str().as_bytes());
+    if let Err(error) = dead_letters
+        .record_work(
+            DeadLetterSource::Mirror,
+            name.as_str(),
+            name.as_str(),
+            message_id,
+            reason,
+        )
+        .await
+    {
+        tracing::warn!(
+            mirror = %name,
+            reason = %describe(&error),
+            "a stuck mirror could not be written to the dead-letter table",
+        );
     }
 }
 

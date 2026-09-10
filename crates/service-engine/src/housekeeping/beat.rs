@@ -118,6 +118,11 @@ impl Beat {
         self
     }
 
+    pub fn with_dead_letters(mut self, dead_letters: crate::inbound::DeadLetters) -> Self {
+        self.cron.set_dead_letters(dead_letters);
+        self
+    }
+
     pub fn with_readiness(mut self, readiness: ReadinessAssembly) -> Self {
         self.readiness = Some(readiness);
         self

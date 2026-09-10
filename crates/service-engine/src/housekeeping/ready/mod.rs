@@ -10,10 +10,14 @@ use tokio::sync::watch;
 use crate::boot::REASON_MIRRORS;
 use crate::housekeeping::health::RelaysHealthReceiver;
 use crate::housekeeping::mirror::MirrorsHealthReceiver;
-use crate::observe::{DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency};
+use crate::observe::{
+    DEP_INBOUND, DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency,
+};
 
 use verdict::verdict;
-pub use verdict::{REASON_NATS_UNREACHABLE, REASON_RELAY_DEGRADED, REASON_WORKER_STOPPED};
+pub use verdict::{
+    REASON_INBOUND_STOPPED, REASON_NATS_UNREACHABLE, REASON_RELAY_DEGRADED, REASON_WORKER_STOPPED,
+};
 
 struct NatsProbe {
     nats: Nats,
@@ -36,6 +40,7 @@ pub struct ReadinessAssembly {
     relays: Option<RelaysHealthReceiver>,
     fabric: Vec<RelayHealthReceiver>,
     listener: Option<watch::Receiver<bool>>,
+    inbound: Option<watch::Receiver<bool>>,
     nats: Option<NatsProbe>,
 }
 
@@ -48,6 +53,7 @@ impl ReadinessAssembly {
             relays: None,
             fabric: Vec::new(),
             listener: None,
+            inbound: None,
             nats: None,
         }
     }
@@ -59,6 +65,11 @@ impl ReadinessAssembly {
 
     pub fn with_listener(mut self, listener: watch::Receiver<bool>) -> Self {
         self.listener = Some(listener);
+        self
+    }
+
+    pub fn with_inbound_health(mut self, inbound: watch::Receiver<bool>) -> Self {
+        self.inbound = Some(inbound);
         self
     }
 
@@ -86,17 +97,22 @@ impl ReadinessAssembly {
             .map(|health| health.borrow().clone())
             .collect();
         let listener_up = self.listener.as_ref().map(|rx| *rx.borrow());
+        let inbound_up = self.inbound.as_ref().map(|rx| *rx.borrow()).unwrap_or(true);
         let nats = self.nats.as_ref().map(NatsProbe::sample);
         let mirrors = self.mirrors.borrow().clone();
         record_dependency(DEP_POSTGRES, true);
         record_dependency(DEP_LISTENER, listener_up != Some(false));
         record_dependency(DEP_MIRRORS, mirrors.converged());
+        if self.inbound.is_some() {
+            record_dependency(DEP_INBOUND, inbound_up);
+        }
         if let Some(nats) = nats {
             record_dependency(DEP_NATS, nats.is_up());
         }
         verdict(
             listener_up,
             nats,
+            inbound_up,
             &mirrors,
             self.relays.as_ref().map(|r| r.borrow().clone()).as_ref(),
             &fabric,

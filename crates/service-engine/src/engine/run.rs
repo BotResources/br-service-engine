@@ -7,7 +7,7 @@ use crate::engine::Engine;
 use crate::engine::loops::{RenderGc, RenderRepairs, join_presence, run_scheduled_messages};
 use crate::error::EngineError;
 use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
-use crate::inbound::{DeadLetters, InboundConfig, InboundLoop};
+use crate::inbound::{DeadLetters, InboundLoop};
 use crate::pipeline::DirectPipeline;
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
@@ -40,7 +40,7 @@ impl<P: Principal> Engine<P> {
             readiness,
             accumulators,
             mut beat,
-            mirrors,
+            mut mirrors,
             inbound_reactions,
             offers,
             presence,
@@ -51,6 +51,10 @@ impl<P: Principal> Engine<P> {
             ..
         } = self;
         let offers = Arc::new(offers);
+        let dead_letters = DeadLetters::new(pg.clone())
+            .with_transport(transport.clone() as Arc<dyn ImpactTransport>);
+        mirrors.set_dead_letters(dead_letters.clone());
+        let (inbound_health, inbound_health_rx) = crate::inbound::InboundHealth::new();
 
         beat.relays().register_erased(Arc::new(
             crate::relays::outbox::HostedOutboxRelay::hosting(
@@ -64,10 +68,12 @@ impl<P: Principal> Engine<P> {
         let assembly = ReadinessAssembly::new(readiness, mirrors.health())
             .with_relays(beat.relays().health())
             .with_listener(transport.listener_health())
+            .with_inbound_health(inbound_health_rx)
             .with_nats(nats.clone(), config.nats_grace);
         beat = beat
             .with_transport(transport.clone())
             .with_accumulators(accumulators.clone())
+            .with_dead_letters(dead_letters.clone())
             .with_readiness(assembly)
             .with_repairs(Arc::new(RenderRepairs(render.clone())));
         if let Some(drain) = erasure_drain {
@@ -196,9 +202,9 @@ impl<P: Principal> Engine<P> {
                 nats.clone(),
                 subscriptions,
                 pipeline,
-                DeadLetters::new(pg.clone())
-                    .with_transport(transport.clone() as Arc<dyn ImpactTransport>),
-                InboundConfig::default(),
+                dead_letters.clone(),
+                config.inbound_config(),
+                inbound_health.clone(),
             )
             .await
             {
@@ -215,7 +221,14 @@ impl<P: Principal> Engine<P> {
         };
 
         let lane_a =
-            match crate::engine::lane_a::spawn_if_registered(&nats, &config, &accumulators).await {
+            match crate::engine::lane_a::spawn_if_registered(
+                &nats,
+                &config,
+                &accumulators,
+                inbound_health.clone(),
+            )
+            .await
+            {
                 Ok(tasks) => tasks,
                 Err(error) => {
                     readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
@@ -240,6 +253,7 @@ impl<P: Principal> Engine<P> {
         let sched_task = tokio::spawn(run_scheduled_messages(
             pg.clone(),
             nats.clone(),
+            dead_letters.clone(),
             config.beat,
             stop_sched.clone(),
         ));

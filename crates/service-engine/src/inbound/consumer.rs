@@ -1,19 +1,25 @@
 use std::sync::Arc;
 
+use std::time::{Duration, Instant};
+
 use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull::Config as PullConfig;
 use async_nats::jetstream::consumer::{AckPolicy, Consumer, DeliverPolicy, ReplayPolicy};
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use tokio::sync::watch;
 use uuid::Uuid;
 
+use crate::chain::describe;
 use crate::error::EngineError;
 use crate::inbound::budget::{Route, route};
 use crate::inbound::deadletter::{DeadLetterSource, DeadLetters};
 use crate::inbound::dispatch::{Dispatch, DispatchError, DispatchOutcome};
 use crate::inbound::message::{Incoming, Source};
 use crate::inbound::subscription::{InboundConfig, Subscription};
+use crate::inbound::supervisor::{
+    HealthTracker, InboundHealth, ServeExit, SupervisorConfig, sleep_or_cancel,
+};
 use crate::nats::Nats;
 
 pub struct InboundConsumer {
@@ -68,11 +74,85 @@ impl InboundConsumer {
         Ok(consumer)
     }
 
-    pub async fn serve(
+    pub(crate) async fn run_supervised(
         self,
-        consumer: Consumer<PullConfig>,
         mut cancel: watch::Receiver<bool>,
-    ) -> Result<(), EngineError> {
+        health: InboundHealth,
+        cfg: SupervisorConfig,
+    ) {
+        let mut tracker =
+            HealthTracker::new(self.subscription.reaction.clone(), health, cfg.failure_threshold);
+        loop {
+            if *cancel.borrow() {
+                break;
+            }
+            let consumer = match self.open().await {
+                Ok(consumer) => consumer,
+                Err(error) => {
+                    let delay = tracker.failed(Duration::ZERO, cfg.healthy_uptime, &describe(&error));
+                    if sleep_or_cancel(delay, &mut cancel).await {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            tracker.connected();
+            let started = Instant::now();
+            let exit = self
+                .serve_with_promotion(consumer, &mut cancel, &mut tracker, cfg.healthy_uptime)
+                .await;
+            match exit {
+                Ok(ServeExit::Cancelled) => break,
+                Ok(ServeExit::Ended) => {
+                    let delay = tracker.failed(
+                        started.elapsed(),
+                        cfg.healthy_uptime,
+                        "the inbound message stream ended",
+                    );
+                    if sleep_or_cancel(delay, &mut cancel).await {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let delay =
+                        tracker.failed(started.elapsed(), cfg.healthy_uptime, &describe(&error));
+                    if sleep_or_cancel(delay, &mut cancel).await {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn serve_with_promotion(
+        &self,
+        consumer: Consumer<PullConfig>,
+        cancel: &mut watch::Receiver<bool>,
+        tracker: &mut HealthTracker,
+        uptime: Duration,
+    ) -> Result<ServeExit, EngineError> {
+        let served = self.serve(consumer, cancel);
+        tokio::pin!(served);
+        let promote = tokio::time::sleep(uptime);
+        tokio::pin!(promote);
+        let mut promoted = false;
+        loop {
+            tokio::select! {
+                biased;
+                exit = &mut served => return exit,
+                () = &mut promote, if !promoted => {
+                    tracker.promote();
+                    promoted = true;
+                }
+            }
+        }
+    }
+
+    async fn serve(
+        &self,
+        consumer: Consumer<PullConfig>,
+        cancel: &mut watch::Receiver<bool>,
+    ) -> Result<ServeExit, EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
                 "the inbound durable {} could not open its message stream: {error}",
@@ -82,22 +162,40 @@ impl InboundConsumer {
         loop {
             let message = tokio::select! {
                 biased;
-                _ = cancel.changed() => return Ok(()),
+                _ = cancel.changed() => {
+                    self.drain_naks(&mut messages).await;
+                    return Ok(ServeExit::Cancelled);
+                }
                 next = messages.next() => next,
             };
-            let message = match message {
-                Some(Ok(message)) => message,
+            match message {
+                Some(Ok(message)) => self.handle(&message).await,
                 Some(Err(error)) => {
-                    tracing::warn!(
-                        reaction = %self.subscription.reaction,
-                        %error,
-                        "the inbound message stream yielded an error; the consumer continues"
-                    );
-                    continue;
+                    return Err(EngineError::Config(format!(
+                        "the inbound durable {} lost its message stream: {error}",
+                        self.subscription.reaction
+                    )));
                 }
-                None => return Ok(()),
-            };
-            self.handle(&message).await;
+                None => return Ok(ServeExit::Ended),
+            }
+        }
+    }
+
+    async fn drain_naks(&self, messages: &mut async_nats::jetstream::consumer::pull::Stream) {
+        for _ in 0..self.config.max_ack_pending.max(0) {
+            match messages.next().now_or_never() {
+                Some(Some(Ok(message))) => {
+                    if let Err(error) = message.ack_with(AckKind::Nak(None)).await {
+                        tracing::warn!(
+                            reaction = %self.subscription.reaction,
+                            %error,
+                            "naking a pulled-but-unprocessed frame on shutdown failed; it \
+                             redelivers to a live pod"
+                        );
+                    }
+                }
+                _ => break,
+            }
         }
     }
 

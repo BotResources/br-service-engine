@@ -4,6 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use crate::blobs::BlobConfig;
+use crate::inbound::{DEFAULT_ACK_WAIT, DEFAULT_MAX_ACK_PENDING};
 use crate::name::{ChannelName, PodId};
 
 pub const DEFAULT_WINDOW: Duration = Duration::from_millis(100);
@@ -50,6 +51,8 @@ pub struct EngineConfig {
     pub repair_attempts: u32,
     pub session_max_age: Duration,
     pub lock_timeout: Duration,
+    pub ack_wait: Duration,
+    pub max_ack_pending: i64,
     pub listener_queue_threshold: f64,
     pub listener_channel_capacity: usize,
     pub nats_grace: Duration,
@@ -84,6 +87,8 @@ impl EngineConfig {
             repair_attempts: DEFAULT_REPAIR_ATTEMPTS,
             session_max_age: DEFAULT_SESSION_MAX_AGE,
             lock_timeout: DEFAULT_LOCK_TIMEOUT,
+            ack_wait: DEFAULT_ACK_WAIT,
+            max_ack_pending: DEFAULT_MAX_ACK_PENDING,
             listener_queue_threshold: DEFAULT_LISTENER_QUEUE_THRESHOLD,
             listener_channel_capacity: DEFAULT_LISTENER_CHANNEL_CAPACITY,
             nats_grace: DEFAULT_NATS_GRACE,
@@ -214,6 +219,24 @@ impl EngineConfig {
     pub fn with_lock_timeout(mut self, lock_timeout: Duration) -> Self {
         self.lock_timeout = lock_timeout;
         self
+    }
+
+    pub fn with_ack_wait(mut self, ack_wait: Duration) -> Self {
+        self.ack_wait = ack_wait;
+        self
+    }
+
+    pub fn with_max_ack_pending(mut self, max_ack_pending: i64) -> Self {
+        self.max_ack_pending = max_ack_pending;
+        self
+    }
+
+    pub fn inbound_config(&self) -> crate::inbound::InboundConfig {
+        crate::inbound::InboundConfig {
+            ack_wait: self.ack_wait,
+            max_ack_pending: self.max_ack_pending,
+            ..crate::inbound::InboundConfig::default()
+        }
     }
 
     pub fn with_listener_queue_threshold(mut self, listener_queue_threshold: f64) -> Self {

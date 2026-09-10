@@ -11,7 +11,10 @@ use crate::config::EngineConfig;
 use crate::error::{EngineError, TransportError};
 use crate::housekeeping::beat::RepairRetry;
 use crate::housekeeping::gc::SessionGc;
-use crate::housekeeping::scheduled_message::{DEFAULT_SCHEDULED_MESSAGE_BATCH, fire_due};
+use crate::housekeeping::scheduled_message::{
+    DEFAULT_SCHEDULED_MESSAGE_BATCH, DEFAULT_SCHEDULED_MESSAGE_BUDGET, fire_due,
+};
+use crate::inbound::DeadLetters;
 use crate::impact::TransportEvent;
 use crate::nats::Nats;
 use crate::presence::PresenceRegistry;
@@ -39,6 +42,7 @@ impl<P: Principal> RepairRetry for RenderRepairs<P> {
 pub(super) async fn run_scheduled_messages(
     pg: sqlx::PgPool,
     nats: Nats,
+    dead_letters: DeadLetters,
     interval: Duration,
     stop: Arc<Notify>,
 ) {
@@ -46,7 +50,15 @@ pub(super) async fn run_scheduled_messages(
     tokio::pin!(stopping);
     stopping.as_mut().enable();
     loop {
-        if let Err(error) = fire_due(&pg, &nats, DEFAULT_SCHEDULED_MESSAGE_BATCH).await {
+        if let Err(error) = fire_due(
+            &pg,
+            &nats,
+            &dead_letters,
+            DEFAULT_SCHEDULED_MESSAGE_BATCH,
+            DEFAULT_SCHEDULED_MESSAGE_BUDGET,
+        )
+        .await
+        {
             tracing::warn!(
                 reason = %crate::chain::describe(&error),
                 "the beat could not fire the scheduled messages whose time has passed",

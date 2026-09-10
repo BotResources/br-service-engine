@@ -6,10 +6,12 @@ use crate::nats::{NatsCondition, RelayHealth};
 pub const REASON_RELAY_DEGRADED: &str = "a relay is not draining";
 pub const REASON_WORKER_STOPPED: &str = "a background worker stopped";
 pub const REASON_NATS_UNREACHABLE: &str = "nats has been unreachable past its grace window";
+pub const REASON_INBOUND_STOPPED: &str = "an inbound or streaming consumer stopped consuming";
 
 pub(crate) fn verdict(
     listener_up: Option<bool>,
     nats: Option<NatsCondition>,
+    inbound_up: bool,
     mirrors: &MirrorsHealth,
     relays: Option<&RelaysHealth>,
     fabric: &[RelayHealth],
@@ -19,6 +21,9 @@ pub(crate) fn verdict(
     }
     if nats.is_some_and(NatsCondition::holds_readiness) {
         return Some(REASON_NATS_UNREACHABLE);
+    }
+    if nats.map(NatsCondition::is_up).unwrap_or(true) && !inbound_up {
+        return Some(REASON_INBOUND_STOPPED);
     }
     if !mirrors.converged() {
         return Some(REASON_MIRRORS);
@@ -70,11 +75,11 @@ mod tests {
     #[test]
     fn a_service_that_mirrors_nothing_and_relays_nothing_is_ready() {
         assert_eq!(
-            verdict(None, None, &MirrorsHealth::default(), None, &[]),
+            verdict(None, None, true, &MirrorsHealth::default(), None, &[]),
             None
         );
         assert_eq!(
-            verdict(Some(true), None, &MirrorsHealth::default(), None, &[]),
+            verdict(Some(true), None, true, &MirrorsHealth::default(), None, &[]),
             None
         );
     }
@@ -85,6 +90,7 @@ mod tests {
             verdict(
                 Some(false),
                 Some(NatsCondition::PastGrace),
+                false,
                 &converged(),
                 Some(&backing_off()),
                 &[]
@@ -100,6 +106,7 @@ mod tests {
             verdict(
                 Some(true),
                 Some(NatsCondition::WithinGrace),
+                true,
                 &converged(),
                 None,
                 &[]
@@ -115,12 +122,45 @@ mod tests {
             verdict(
                 Some(true),
                 Some(NatsCondition::PastGrace),
+                false,
                 &converging(),
                 None,
                 &[]
             ),
             Some(REASON_NATS_UNREACHABLE),
             "a real nats outage goes DOWN loudly, and before the mirrors it also feeds"
+        );
+    }
+
+    #[test]
+    fn a_dead_inbound_consumer_while_nats_is_up_takes_the_pod_out_of_rotation() {
+        assert_eq!(
+            verdict(Some(true), Some(NatsCondition::Up), false, &converged(), None, &[]),
+            Some(REASON_INBOUND_STOPPED),
+            "a consumer that stopped while the broker is reachable leaves the pod deaf, so it must \
+             not report ready"
+        );
+        assert_eq!(
+            verdict(Some(true), None, false, &converged(), None, &[]),
+            Some(REASON_INBOUND_STOPPED),
+            "with no nats probe a dead inbound loop still lowers readiness"
+        );
+    }
+
+    #[test]
+    fn a_dead_inbound_consumer_within_nats_grace_defers_to_the_nats_probe() {
+        assert_eq!(
+            verdict(
+                Some(true),
+                Some(NatsCondition::WithinGrace),
+                false,
+                &converged(),
+                None,
+                &[]
+            ),
+            None,
+            "a brief broker blink is owned by nats_grace, so a consumer reconnecting under it does \
+             not flip readiness before the grace window elapses"
         );
     }
 
@@ -139,7 +179,7 @@ mod tests {
     #[test]
     fn a_mirror_that_has_not_converged_holds_readiness_down_before_any_relay_is_considered() {
         assert_eq!(
-            verdict(None, None, &converging(), Some(&backing_off()), &[]),
+            verdict(None, None, true, &converging(), Some(&backing_off()), &[]),
             Some(REASON_MIRRORS),
             "the boot order is mirrors first, so the reason names the earliest unmet condition"
         );
@@ -148,10 +188,10 @@ mod tests {
     #[test]
     fn a_relay_backing_off_takes_a_converged_service_back_out_of_rotation() {
         assert_eq!(
-            verdict(None, None, &converged(), Some(&backing_off()), &[]),
+            verdict(None, None, true, &converged(), Some(&backing_off()), &[]),
             Some(REASON_RELAY_DEGRADED)
         );
-        assert_eq!(verdict(None, None, &converged(), None, &[]), None);
+        assert_eq!(verdict(None, None, true, &converged(), None, &[]), None);
     }
 
     #[test]
@@ -163,6 +203,7 @@ mod tests {
             verdict(
                 None,
                 None,
+                true,
                 &converged(),
                 Some(&RelaysHealth::default()),
                 &[degraded]
@@ -174,6 +215,7 @@ mod tests {
             verdict(
                 None,
                 None,
+                true,
                 &converged(),
                 Some(&RelaysHealth::default()),
                 &[RelayHealth::Healthy]
@@ -188,10 +230,12 @@ mod tests {
             REASON_MIRRORS,
             REASON_RELAY_DEGRADED,
             REASON_NATS_UNREACHABLE,
+            REASON_INBOUND_STOPPED,
         ] {
             assert!(!reason.contains("directory"));
             assert!(!reason.contains("integration_outbox"));
             assert!(!reason.contains("no such stream"));
+            assert!(!reason.contains("commands"));
         }
     }
 }

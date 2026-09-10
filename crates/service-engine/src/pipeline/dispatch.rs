@@ -115,7 +115,7 @@ impl DirectPipeline {
             }
         }
         if let Some(sequence) = &msg.sequence {
-            match advance_sequence(&mut tx, &sequence.key, sequence.seq).await {
+            match advance_sequence(&mut tx, &msg.reaction, &sequence.key, sequence.seq).await {
                 Ok(Ordering::Stale) => {
                     let _ = tx.rollback().await;
                     return DispatchOutcome::Applied(Applied::NoOp(NoOp::Stale));
