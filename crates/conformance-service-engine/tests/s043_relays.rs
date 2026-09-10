@@ -11,7 +11,7 @@ use service_engine::housekeeping::relay::RelayRuntime;
 use service_engine::impact::{Dims, Impact};
 use service_engine::name::{PodId, RelayName};
 use service_engine::relays::outbox::HostedOutboxRelay;
-use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
+use service_engine::relays::outbox::OutboxRelay;
 use service_engine::transport::ImpactTransport;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -90,7 +90,6 @@ async fn s043_a_row_staged_with_an_impact_is_published_within_one_window() {
     let relay = Arc::new(HostedOutboxRelay::hosting(
         OUTBOX,
         OutboxRelay::new(db.app_pool().clone(), fabric.clone()),
-        DEFAULT_MAX_MESSAGES,
     ));
     let mut engine = runtime("se-relay-0");
     engine
@@ -136,7 +135,6 @@ async fn s043_a_crash_between_publish_and_status_transition_republishes_once() {
     let relay = Arc::new(HostedOutboxRelay::hosting(
         OUTBOX,
         OutboxRelay::new(db.app_pool().clone(), fabric.clone()),
-        DEFAULT_MAX_MESSAGES,
     ));
     let mut engine = runtime("se-relay-0");
     engine

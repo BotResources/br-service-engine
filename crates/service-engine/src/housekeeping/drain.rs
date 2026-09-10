@@ -19,11 +19,12 @@ pub(crate) async fn drain_one(
 ) -> Result<Option<Drained>, RelayError> {
     let claim = Claim::new(pod.clone(), batch);
     if let Some(hosted) = relay.hosted_drain(pg, &claim) {
-        if discipline == Discipline::Leader {
+        if discipline == Discipline::Leader && !relay.self_fenced() {
             return Err(engine(EngineError::Service(
                 format!(
-                    "{} drains through a hosted relay, which the Leader discipline cannot serve: \
-                     the slot claim and its completion must ride the drain's own transaction",
+                    "{} is a Leader hosted relay that does not fence itself: a hosted drain \
+                     rides no slot transaction, so the relay must assert the lease inside its \
+                     own short transactions (self_fenced) or run through the tx-based leader path",
                     relay.name()
                 )
                 .into(),

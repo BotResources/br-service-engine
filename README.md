@@ -167,13 +167,19 @@ as `Upsert`/`Remove` through the same session/render machinery as every other
 lane; name the bucket with `EngineConfig::with_service`. With `register_offer`,
 a saved noun that carries an offer stages the offer's dirty key in
 the same transaction as the write (`service_engine.offer_dirty`), the pod that
-holds the offer's leader lease drains those keys — re-reading the row, then
-putting or retracting the published value on the `PUBLISHED_LANGUAGE` bucket
-under a per-key watermark and a revision compare-and-swap — and reconciles the
+holds the offer's leader lease drains those keys — claiming and resolving them in
+a short transaction, then putting or retracting the published value on the
+`PUBLISHED_LANGUAGE` bucket outside any transaction (a `create` for an absent key
+or a compare-and-set on the revision it read, a failed set left dirty for the
+next drain), and finally raising the per-key watermark and deleting the marker in
+a small fenced transaction that asserts the lease — so a concurrent write to an
+offered noun never waits on the drain and a leader frozen past its lease fails its
+writes rather than regressing the bucket. It reconciles the
 bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
-drift; the version lives in the offer's key for a breaking change (register a
+drift and an emptied or rebuilt bucket is repopulated from the store; the version
+lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
 `known_*` through the direct lane, joined by a `keyed_by` function and written
 with the `Projection` helpers (`replace_one`, `replace`, `remove`, over the
@@ -386,7 +392,18 @@ its producer sequence from the aggregate's key and version at emit time
 (`sequence()`); the engine renders it as the three `Br-Producer` / `Br-Seq-Key` /
 `Br-Seq` headers and persists it on the outbox row, so engine→engine traffic is
 ordered and the per-`(producer, seq_key)` sequence guard on the receiver drops a
-stale message as an acked no-op — a view never walks backwards.
+stale message as an acked no-op — a view never walks backwards. The hosted outbox
+relay drains a backlog within one beat (its batch cap equals its drain bound, so
+a full batch signals the beat to come back), and a periodic hygiene pass
+(`EngineConfig::with_message_retention`, swept on `HostedOutboxRelay::with_sweep_every`)
+deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
+the retention — a bound the operator sets to at least the outbox stream's
+retention plus its dedup window, since a claim swept while the broker still
+dedups its id could let a redelivery re-run the effect; the sweep is best-effort
+and never lowers readiness. To recover a `KvDrainRelay`'s published-language
+bucket that an operator truncated and rebuilt, call `reset_watermarks` and have
+the relay's source re-stage its set, so the version guard does not refuse the
+unchanged keys the rebuilt bucket lost.
 
 Every command gets exactly one confirmation, and a duplicate re-emits it. The
 confirmation a reaction emits is stored on its idempotency claim in the same

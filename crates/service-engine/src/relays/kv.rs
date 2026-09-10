@@ -92,6 +92,10 @@ where
         self
     }
 
+    pub async fn reset_watermarks(&self, conn: &mut PgConnection) -> Result<u64, RelayError> {
+        kv_watermark::clear(conn, &self.name).await
+    }
+
     async fn apply(&self, conn: &mut PgConnection, change: &KvChange<V>) -> Result<(), RelayError> {
         let watermark = kv_watermark::read(conn, &self.name, &change.key).await?;
         for _ in 0..=self.cas_retries {
@@ -107,11 +111,11 @@ where
             }
             match &change.write {
                 KvWrite::Put(value) => match observed {
-                    None => self
-                        .bucket
-                        .put(&change.key, value)
-                        .await
-                        .map_err(published_language)?,
+                    None => match self.bucket.create(&change.key, value).await {
+                        Ok(_) => {}
+                        Err(NatsError::RevisionConflict { .. }) => continue,
+                        Err(error) => return Err(published_language(error)),
+                    },
                     Some((_, revision)) => {
                         match self.bucket.update_if(&change.key, value, revision).await {
                             Ok(_) => {}

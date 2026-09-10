@@ -6,7 +6,7 @@ use conformance_service_engine::sample::{delivered_event_ids, stage_outbox_row};
 use service_engine::housekeeping::relay::RelayRuntime;
 use service_engine::name::{PodId, RelayName};
 use service_engine::relays::outbox::HostedOutboxRelay;
-use service_engine::relays::outbox::{DEFAULT_MAX_MESSAGES, OutboxRelay};
+use service_engine::relays::outbox::OutboxRelay;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -27,7 +27,6 @@ async fn s039_a_hosted_relay_drains_on_a_pool_the_runtime_never_holds() {
     let relay = Arc::new(HostedOutboxRelay::hosting(
         OUTBOX,
         OutboxRelay::new(single.clone(), fabric.clone()),
-        DEFAULT_MAX_MESSAGES,
     ));
     let mut engine = RelayRuntime::new(PodId::new("se-relay-0").expect("a valid pod id"));
     engine

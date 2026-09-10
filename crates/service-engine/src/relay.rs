@@ -66,6 +66,10 @@ pub trait Relay: Send + Sync + 'static {
         Discipline::RowClaim
     }
 
+    fn self_fenced(&self) -> bool {
+        false
+    }
+
     fn hosted_drain<'a>(
         &'a self,
         _pg: &'a PgPool,

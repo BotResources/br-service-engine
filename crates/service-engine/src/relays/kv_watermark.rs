@@ -19,6 +19,14 @@ pub(crate) async fn read(
     Ok(row.and_then(|row| u64::try_from(row.get::<i64, _>("version")).ok()))
 }
 
+pub(crate) async fn clear(conn: &mut PgConnection, relay: &RelayName) -> Result<u64, RelayError> {
+    let done = sqlx::query("DELETE FROM service_engine.kv_relay_watermark WHERE relay = $1")
+        .bind(relay.as_str())
+        .execute(&mut *conn)
+        .await?;
+    Ok(done.rows_affected())
+}
+
 pub(crate) async fn raise(
     conn: &mut PgConnection,
     relay: &RelayName,

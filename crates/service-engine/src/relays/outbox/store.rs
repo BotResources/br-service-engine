@@ -1,7 +1,11 @@
+use std::time::Duration;
+
 use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
 use br_core_integration::{OutboxStatus, Transition};
+
+use crate::schema::TABLE_MESSAGE_CLAIM;
 
 pub const OUTBOX_TABLE: &str = "integration_outbox";
 pub const OUTBOX_NOTIFY_CHANNEL: &str = "integration_outbox";
@@ -75,6 +79,44 @@ impl OutboxStore {
             .execute(executor)
             .await?;
         Ok(())
+    }
+
+    pub async fn sweep_published<'e, E>(
+        &self,
+        executor: E,
+        older_than: Duration,
+    ) -> Result<u64, sqlx::Error>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let done = sqlx::query(
+            "DELETE FROM integration_outbox \
+             WHERE status = 'PUBLISHED' \
+               AND published_at IS NOT NULL \
+               AND published_at < now() - make_interval(secs => $1)",
+        )
+        .bind(older_than.as_secs_f64())
+        .execute(executor)
+        .await?;
+        Ok(done.rows_affected())
+    }
+
+    pub async fn sweep_claims<'e, E>(
+        &self,
+        executor: E,
+        older_than: Duration,
+    ) -> Result<u64, sqlx::Error>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let done = sqlx::query(&format!(
+            "DELETE FROM {TABLE_MESSAGE_CLAIM} \
+             WHERE claimed_at < now() - make_interval(secs => $1)"
+        ))
+        .bind(older_than.as_secs_f64())
+        .execute(executor)
+        .await?;
+        Ok(done.rows_affected())
     }
 }
 
