@@ -57,7 +57,6 @@ pub(crate) type Vanished = BTreeMap<SessionId, BTreeSet<(ProjectorName, KeyBytes
 struct Group<P> {
     keys: BTreeSet<KeyBytes>,
     representative: P,
-    witness: Option<P>,
 }
 
 pub(crate) async fn run_pass_focused<P: Principal>(
@@ -111,15 +110,12 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     let mut groups: BTreeMap<GroupKey, Group<P>> = BTreeMap::new();
     for windows in plans.values() {
         for window in windows {
+            debug_assert_group_totality(ctx, window);
             let entry = groups.entry(window.group()).or_insert_with(|| Group {
                 keys: BTreeSet::new(),
                 representative: window.representative.clone(),
-                witness: None,
             });
             entry.keys.extend(window.dirty.keys().cloned());
-            if entry.witness.is_none() && entry.representative.id() != window.representative.id() {
-                entry.witness = Some(window.representative.clone());
-            }
         }
     }
     report.cohorts = groups.len();
@@ -137,13 +133,12 @@ pub(crate) async fn run_pass_focused<P: Principal>(
             .ok_or_else(|| EngineError::UnboundProjector(group_key.0.clone()))?;
         let keys: Vec<KeyBytes> = group.keys.iter().cloned().collect();
         match renderer
-            .render_checked(
+            .render(
                 projector,
                 group_key.1,
                 group_key.2.clone(),
                 &group.representative,
                 &keys,
-                group.witness.as_ref(),
             )
             .await
         {
@@ -171,6 +166,31 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     deliver_pass(ctx, table, &delivery, &mut report, &mut faults, focus);
     repair_faulted(ctx, table, faults, &mut report).await;
     Ok(report)
+}
+
+#[cfg(debug_assertions)]
+fn debug_assert_group_totality<P: Principal>(ctx: &PassContext<'_, P>, window: &PlannedWindow<P>) {
+    let Some(projector) = ctx.registry.projector(&window.projector) else {
+        return;
+    };
+    let expected = if window.rls {
+        CohortKey::principal(window.representative.id())
+    } else {
+        projector.cohort(&window.representative)
+    };
+    debug_assert!(
+        expected == window.cohort,
+        "a session must land in exactly one cohort: the cohort recomputed for a principal \
+         differs from the one it was planned under, so cohort() is not a pure function of the \
+         principal and grouping would split or merge sessions wrongly"
+    );
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_assert_group_totality<P: Principal>(
+    _ctx: &PassContext<'_, P>,
+    _window: &PlannedWindow<P>,
+) {
 }
 
 struct Delivery<'a, P: Principal> {
