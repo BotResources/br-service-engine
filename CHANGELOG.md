@@ -180,8 +180,9 @@ version)` at emit time; the engine persists it on the outbox row
 `Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
 traffic is ordered and the per-`(producer, reaction, seq_key)` sequence guard is
 reachable. A declared sequence with no configured service (`producer`) is refused
-with a configuration error at emit rather than silently dropped, so a sequence a
-consumer would order or dedup on can never vanish.
+with a configuration error at emit and recorded as a terminal violation, so the
+frame is dead-lettered rather than silently dropped or redelivered forever, and a
+sequence a consumer would order or dedup on can never vanish.
 The inbound loop decodes the envelope, dedups on the `Br-Message-Id`/envelope id
 (tolerating a non-uuid `Nats-Msg-Id` — a foreign fabric producer no longer
 dead-letters), hands the reaction the inner payload, and exposes the sender's
@@ -597,7 +598,8 @@ gauge. Four alerts ship as a `PrometheusRule` in
 (`ignore_missing`) with `grant_engine_access`: `scheduled_impact`, `leader_slot`,
 `accumulator_chunk`, `accumulator_seal`, `kv_relay_watermark`, `message_claim`,
 `sequence_guard`, `dead_letter`, `scheduled_message`, `offer_dirty`, `blob`,
-`person_erasure`, `schema_version`. Scheduled boundaries are claimed against the database clock,
+`person_erasure`, `schema_version`, `event_log`, `event_snapshot`,
+`mirror_watermark`. Scheduled boundaries are claimed against the database clock,
 never the pod clock. The app-role grant includes `USAGE, SELECT` on the engine
 schema's sequences.
 

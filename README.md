@@ -513,9 +513,14 @@ the command — the example's `create_card` reads it with `cx.try_principal()` a
 refuses a command whose actor is not a service. `cx.principal()` is the checked
 accessor: it returns a typed `PrincipalUnresolved` (terminal disposition) rather
 than panicking when no sender principal is resolved. An `OutboundEvent`/`OutboundCommand`
-derives its producer sequence from the aggregate's key and version at emit time
-(`sequence()`), and a declared sequence with no configured service is refused with
-a configuration error at emit rather than silently dropped; the engine renders it
+**declares** its producer sequence by overriding `sequence()` — the default is
+`None`, and the convention when it is declared is `(producer = service,
+seq_key = aggregate key, seq = aggregate version)`. Its `event_id`/`command_id`
+identifies exactly one fact or command instance: the same fact re-emitted MUST
+carry the same id, because the receiver dedups on it. A declared sequence with no
+configured service is refused with a configuration error at emit and recorded as
+a terminal violation, so the frame is dead-lettered rather than silently dropped
+or redelivered forever; the engine renders a declared sequence
 as the three `Br-Producer` / `Br-Seq-Key` /
 `Br-Seq` headers and persists it on the outbox row, so engine→engine traffic is
 ordered and the per-`(producer, reaction, seq_key)` sequence guard on the receiver
@@ -657,8 +662,8 @@ whichever mode it lives:
   consumer folds them into `service_engine.accumulator_chunk`, and the
   reply-finished command then replays the chunks, verifies the hash, commits the
   record and delivers it — read back over GraphQL — with nothing seeded through
-  Postgres. The accumulator's own internals stay proven in-crate (`s035`, `s066`,
-  `s133`) and by the reference service's reply e2e.
+  Postgres. The accumulator's own internals stay proven in-crate (`s035`, `s036`,
+  `s066`, `s146`, `s150`) and by the reference service's reply e2e.
 
 ```bash
 # both modes (in-crate sNNN + black-box bbNN), one crate
@@ -752,7 +757,12 @@ that the render loop consumes, so a slow render pass never stops the drain and
 never lets the cluster's notification queue back up behind this pod. When the
 render loop cannot keep up and the channel overflows, the drained impacts are
 dropped and one `Reconnected` is signalled, which re-snapshots every session on
-the pod — a detectable loss, never a silent gap. The beat samples
+the pod — a detectable loss, never a silent gap. Under a **sustained** overflow
+each overflowing tick re-snapshots, so the pod pays a reset storm: it is bounded
+(one `Reconnected` per overflow, coalesced) and visible as
+`service_engine_resets_total` climbing — the `ServiceEngineResetsSustained` alert
+names it, and the fix is to raise `listener_channel_capacity` or shed render load,
+not to touch the drain. The beat samples
 `pg_notification_queue_usage()` each tick; past `listener_queue_threshold` it
 closes the listener, which takes the pod DOWN, then reconnects and resets its
 sessions — losing impacts is repairable, failing every notifying commit on the
