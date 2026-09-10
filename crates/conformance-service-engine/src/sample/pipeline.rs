@@ -112,6 +112,65 @@ pub fn mint_secret<'m>(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RelabelWidget {
+    pub id: Uuid,
+    pub label: String,
+}
+
+impl MutationInput for RelabelWidget {
+    type Output = ();
+    type Error = SampleFault;
+    const NAME: &'static str = "relabel_widget";
+}
+
+pub fn relabel_widget<'m>(
+    cx: &'m mut Mutation<'m, SamplePrincipal>,
+    input: RelabelWidget,
+) -> BoxFuture<'m, Result<(), SampleFault>> {
+    Box::pin(async move {
+        let mut widget = cx
+            .load::<WidgetRow>(&input.id)
+            .await?
+            .ok_or(SampleFault::NotFound)?;
+        widget.label = input.label;
+        cx.save(&widget).await?;
+        cx.impact_caused::<Widget, _>(&widget.id, "relabelled")?;
+        Ok(())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteWidget {
+    pub id: Uuid,
+}
+
+impl MutationInput for DeleteWidget {
+    type Output = ();
+    type Error = SampleFault;
+    const NAME: &'static str = "delete_widget";
+}
+
+pub fn delete_widget<'m>(
+    cx: &'m mut Mutation<'m, SamplePrincipal>,
+    input: DeleteWidget,
+) -> BoxFuture<'m, Result<(), SampleFault>> {
+    Box::pin(async move {
+        let widget = cx
+            .load::<WidgetRow>(&input.id)
+            .await?
+            .ok_or(SampleFault::NotFound)?;
+        sqlx::query("DELETE FROM sample_widget WHERE id = $1")
+            .bind(widget.id)
+            .execute(cx.connection())
+            .await
+            .map_err(|error| SampleFault::Store(error.to_string()))?;
+        cx.delete(&widget)?;
+        cx.impact_caused::<Widget, _>(&widget.id, "deleted")?;
+        Ok(())
+    })
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ImportWidgets {
     pub tenant: Uuid,
     pub ids: Vec<Uuid>,

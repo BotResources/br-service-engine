@@ -133,6 +133,45 @@ impl Erasable for LedgerEraser {
     }
 }
 
+pub struct NoteDeleteEraser;
+
+impl Erasable for NoteDeleteEraser {
+    type Error = EraseFault;
+
+    fn erase<'a>(
+        &'a self,
+        cx: &'a mut Erase<'a>,
+        person: PersonId,
+    ) -> BoxFuture<'a, Result<Erased, EraseFault>> {
+        Box::pin(async move {
+            let owner = person.as_uuid();
+            let rows = sqlx::query(
+                "SELECT id, owner, tenant, body, blob_ref FROM sample_erase_note WHERE owner = $1",
+            )
+            .bind(owner)
+            .fetch_all(cx.connection())
+            .await?;
+            let mut out = Erased::new();
+            for row in &rows {
+                let note = EraseNote {
+                    id: row.get("id"),
+                    owner,
+                    tenant: row.get("tenant"),
+                    body: row.get("body"),
+                    blob_ref: row.get("blob_ref"),
+                };
+                cx.delete(&note)?;
+                out.rows(1);
+            }
+            sqlx::query("DELETE FROM sample_erase_note WHERE owner = $1")
+                .bind(owner)
+                .execute(cx.connection())
+                .await?;
+            Ok(out)
+        })
+    }
+}
+
 pub struct FailingEraser;
 
 impl Erasable for FailingEraser {

@@ -13,8 +13,9 @@ use crate::sample::blob_view::DocProjector;
 use crate::sample::engine::engine_config;
 use crate::sample::offer::{MintThenReject, WidgetOffer, mint_then_reject};
 use crate::sample::pipeline::{
-    CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, ScheduleCreate, close_widget,
-    create_widget, import_widgets, lock_widget, mint_secret, schedule_create,
+    CloseWidget, CreateWidget, DeleteWidget, ImportWidgets, LockWidget, MintSecret, RelabelWidget,
+    ScheduleCreate, close_widget, create_widget, delete_widget, import_widgets, lock_widget,
+    mint_secret, relabel_widget, schedule_create,
 };
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
 use crate::sample::widget::WidgetProjector;
@@ -122,10 +123,30 @@ pub async fn boot_offer_engine_reconciling(
     pod: &str,
     reconcile: Duration,
 ) -> Engine<SamplePrincipal> {
+    boot_offer_engine_leased(
+        db,
+        nats,
+        channel,
+        pod,
+        reconcile,
+        service_engine::config::DEFAULT_LEASE,
+    )
+    .await
+}
+
+pub async fn boot_offer_engine_leased(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    reconcile: Duration,
+    lease: Duration,
+) -> Engine<SamplePrincipal> {
     let mut engine = Engine::boot(
         engine_config(channel, pod)
             .with_lock_timeout(Duration::from_millis(300))
-            .with_offer_reconcile(reconcile),
+            .with_offer_reconcile(reconcile)
+            .with_lease(lease),
         db.app_pool().clone(),
         nats,
         ReadinessHandle::ready(),
@@ -144,6 +165,12 @@ pub async fn boot_offer_engine_reconciling(
     engine
         .register_mutation::<CloseWidget, _>(close_widget)
         .expect("register the close mutation");
+    engine
+        .register_mutation::<RelabelWidget, _>(relabel_widget)
+        .expect("register the relabel mutation");
+    engine
+        .register_mutation::<DeleteWidget, _>(delete_widget)
+        .expect("register the delete mutation");
     engine
         .register_mutation::<MintThenReject, _>(mint_then_reject)
         .expect("register the mint-then-reject mutation");
