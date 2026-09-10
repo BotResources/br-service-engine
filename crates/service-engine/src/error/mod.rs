@@ -160,6 +160,31 @@ pub enum EngineError {
     #[error("a seal hash is not 32 lowercase-hex bytes: {0}")]
     SealHashFormat(String),
 
+    #[error(
+        "accumulator {accumulator} for this key is already sealed at high water {high_water}, so \
+         sealing again would rewrite the sealed record"
+    )]
+    AlreadySealed {
+        accumulator: AccumulatorName,
+        high_water: u64,
+    },
+
+    #[error(
+        "accumulator {accumulator} cannot seal at last sequence {last_seq}: the stream already \
+         holds chunk {max_seq} beyond it, so a chunk was made durable that this seal would drop"
+    )]
+    SealChunkBeyondLastSeq {
+        accumulator: AccumulatorName,
+        last_seq: u64,
+        max_seq: u64,
+    },
+
+    #[error(
+        "an accumulator is registered but no service is configured, so the lane-A \
+         STREAMING_{{service}} stream cannot be bound; call EngineConfig::with_service"
+    )]
+    AccumulatorWithoutService,
+
     #[error("boot posture: {0}")]
     Posture(String),
 

@@ -30,6 +30,7 @@ use crate::sample::widget::WidgetProjector;
 
 pub const SAMPLE_RELAY: RelayName = RelayName::from_static("sample_rows");
 pub const SAMPLE_JOB: &str = "sample_heartbeat";
+pub const SAMPLE_SERVICE: &str = "sample";
 
 pub fn engine_config(channel: &str, pod: &str) -> EngineConfig {
     EngineConfig::new(
@@ -131,7 +132,7 @@ pub async fn boot_sample_engine(
     pod: &str,
 ) -> Engine<SamplePrincipal> {
     let mut engine = Engine::boot(
-        engine_config(channel, pod),
+        engine_config(channel, pod).with_service(SAMPLE_SERVICE),
         db.app_pool().clone(),
         nats,
         ReadinessHandle::ready(),

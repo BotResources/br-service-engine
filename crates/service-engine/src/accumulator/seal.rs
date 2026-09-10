@@ -30,15 +30,13 @@ pub struct Swept {
     pub chunks: u64,
 }
 
-pub(crate) async fn seal(
+pub(crate) async fn seal_current(
     entry: &Registered,
     tx: &mut PgConnection,
     key: &KeyBytes,
     at: Timestamp,
 ) -> Result<ChunkSeq, EngineError> {
-    let stream = (entry.name.clone(), key.clone());
-    guard::hold(&mut *tx, std::slice::from_ref(&stream)).await?;
-    let key_value = key.decode::<serde_json::Value>()?;
+    let key_value = hold_and_refuse_if_sealed(entry, tx, key).await?;
     let high_water: i64 = sqlx::query(
         "SELECT COALESCE(MAX(seq) + 1, 0) AS high_water FROM service_engine.accumulator_chunk \
          WHERE accumulator = $1 AND key = $2",
@@ -48,29 +46,97 @@ pub(crate) async fn seal(
     .fetch_one(&mut *tx)
     .await?
     .get("high_water");
+    write_marker(entry, tx, &key_value, high_water, at).await?;
+    Ok(ChunkSeq::from_storable(high_water.max(0)))
+}
 
-    sqlx::query("DELETE FROM service_engine.accumulator_chunk WHERE accumulator = $1 AND key = $2")
-        .bind(entry.name.as_str())
-        .bind(&key_value)
-        .execute(&mut *tx)
-        .await?;
-
-    sqlx::query(
-        "INSERT INTO service_engine.accumulator_seal (accumulator, key, high_water, sealed_at, purged_at) \
-         VALUES ($1, $2, $3, $4, NULL) \
-         ON CONFLICT (accumulator, key) DO UPDATE \
-         SET high_water = GREATEST(EXCLUDED.high_water, accumulator_seal.high_water), \
-             sealed_at = EXCLUDED.sealed_at, \
-             purged_at = NULL",
+pub(crate) async fn seal_upto(
+    entry: &Registered,
+    tx: &mut PgConnection,
+    key: &KeyBytes,
+    last_seq: ChunkSeq,
+    at: Timestamp,
+) -> Result<ChunkSeq, EngineError> {
+    let key_value = hold_and_refuse_if_sealed(entry, tx, key).await?;
+    let max_seq: Option<i64> = sqlx::query(
+        "SELECT MAX(seq) AS max_seq FROM service_engine.accumulator_chunk \
+         WHERE accumulator = $1 AND key = $2 AND seq >= 0",
     )
     .bind(entry.name.as_str())
     .bind(&key_value)
+    .fetch_one(&mut *tx)
+    .await?
+    .get("max_seq");
+    if let Some(max) = max_seq
+        && max > last_seq.to_i64()
+    {
+        return Err(EngineError::SealChunkBeyondLastSeq {
+            accumulator: entry.name.clone(),
+            last_seq: last_seq.get(),
+            max_seq: ChunkSeq::from_storable(max).get(),
+        });
+    }
+    let high_water = last_seq.to_i64().saturating_add(1);
+    write_marker(entry, tx, &key_value, high_water, at).await?;
+    Ok(ChunkSeq::from_storable(high_water))
+}
+
+async fn hold_and_refuse_if_sealed(
+    entry: &Registered,
+    tx: &mut PgConnection,
+    key: &KeyBytes,
+) -> Result<serde_json::Value, EngineError> {
+    let stream = (entry.name.clone(), key.clone());
+    guard::hold(&mut *tx, std::slice::from_ref(&stream)).await?;
+    let key_value = key.decode::<serde_json::Value>()?;
+    if let Some(high_water) = existing_high_water(entry, tx, &key_value).await? {
+        return Err(EngineError::AlreadySealed {
+            accumulator: entry.name.clone(),
+            high_water: ChunkSeq::from_storable(high_water.max(0)).get(),
+        });
+    }
+    Ok(key_value)
+}
+
+async fn existing_high_water(
+    entry: &Registered,
+    tx: &mut PgConnection,
+    key_value: &serde_json::Value,
+) -> Result<Option<i64>, EngineError> {
+    Ok(sqlx::query(
+        "SELECT high_water FROM service_engine.accumulator_seal \
+         WHERE accumulator = $1 AND key = $2",
+    )
+    .bind(entry.name.as_str())
+    .bind(key_value)
+    .fetch_optional(&mut *tx)
+    .await?
+    .map(|row| row.get::<i64, _>("high_water")))
+}
+
+async fn write_marker(
+    entry: &Registered,
+    tx: &mut PgConnection,
+    key_value: &serde_json::Value,
+    high_water: i64,
+    at: Timestamp,
+) -> Result<(), EngineError> {
+    sqlx::query("DELETE FROM service_engine.accumulator_chunk WHERE accumulator = $1 AND key = $2")
+        .bind(entry.name.as_str())
+        .bind(key_value)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO service_engine.accumulator_seal (accumulator, key, high_water, sealed_at, purged_at) \
+         VALUES ($1, $2, $3, $4, NULL)",
+    )
+    .bind(entry.name.as_str())
+    .bind(key_value)
     .bind(high_water)
     .bind(at)
     .execute(&mut *tx)
     .await?;
-
-    Ok(ChunkSeq::from_storable(high_water.max(0)))
+    Ok(())
 }
 
 pub(crate) async fn marker(

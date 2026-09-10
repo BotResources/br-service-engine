@@ -9,6 +9,7 @@ mod multipod;
 mod presence;
 mod reply;
 mod reply_ingress;
+mod reply_seal;
 mod rls_regime;
 mod session_lifetime;
 mod subscriptions;

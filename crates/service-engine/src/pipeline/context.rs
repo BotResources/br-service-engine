@@ -19,6 +19,7 @@ pub struct Reaction<'a> {
     ops: Ops<'a>,
     principal: Option<ErasedPrincipal>,
     metadata: MessageMetadata,
+    delivered: u32,
 }
 
 impl<'a> Reaction<'a> {
@@ -26,11 +27,13 @@ impl<'a> Reaction<'a> {
         ops: Ops<'a>,
         principal: Option<ErasedPrincipal>,
         metadata: MessageMetadata,
+        delivered: u32,
     ) -> Self {
         Self {
             ops,
             principal,
             metadata,
+            delivered,
         }
     }
 
@@ -48,6 +51,10 @@ impl<'a> Reaction<'a> {
 
     pub fn causation_id(&self) -> Option<Uuid> {
         self.metadata.causation_id
+    }
+
+    pub fn delivered(&self) -> u32 {
+        self.delivered
     }
 
     pub fn try_principal<P: Principal>(&self) -> Option<&P> {

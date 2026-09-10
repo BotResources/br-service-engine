@@ -47,7 +47,7 @@ async fn s066_seal_marker() {
 
     let mut tx = db.app_pool().begin().await.expect("a caller transaction");
     first
-        .seal::<NoteBody>(&mut tx, &sealed_key)
+        .seal_current::<NoteBody>(&mut tx, &sealed_key)
         .await
         .expect("seal joins the caller transaction");
     tx.commit().await.expect("the caller commits");
@@ -180,7 +180,7 @@ async fn s066_seal_marker() {
         async move {
             let mut tx = pool.begin().await.expect("a caller transaction");
             racer
-                .seal::<NoteBody>(&mut tx, &key)
+                .seal_current::<NoteBody>(&mut tx, &key)
                 .await
                 .expect("seal joins the caller transaction");
             tx.commit().await.expect("the caller commits");

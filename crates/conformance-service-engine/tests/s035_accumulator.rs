@@ -166,7 +166,7 @@ async fn s035_accumulator() {
 
     let mut open = db.app_pool().begin().await.expect("a caller transaction");
     engine_a
-        .seal::<NoteBody>(&mut open, &key)
+        .seal_current::<NoteBody>(&mut open, &key)
         .await
         .expect("seal joins the caller transaction");
     assert_eq!(
@@ -190,7 +190,7 @@ async fn s035_accumulator() {
 
     let mut committed = db.app_pool().begin().await.expect("a caller transaction");
     engine_a
-        .seal::<NoteBody>(&mut committed, &key)
+        .seal_current::<NoteBody>(&mut committed, &key)
         .await
         .expect("seal joins the caller transaction");
     committed.commit().await.expect("the caller commits");

@@ -70,6 +70,22 @@ pub fn reply_cancelled_coords() -> CommandCoords {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SealFailed {
+    pub reply_id: Uuid,
+    pub board_id: Uuid,
+    pub reason: String,
+}
+
+pub fn seal_failed_coords() -> EventCoords {
+    EventCoords {
+        producer: Bc::new(SERVICE).expect("service bc"),
+        aggregate: Aggregate::new("reply").expect("reply aggregate"),
+        fact: PastFact::new("seal-failed").expect("seal-failed fact"),
+        version: 1,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersonCreated {
     pub person_id: Uuid,
     pub board_id: Uuid,
