@@ -164,9 +164,12 @@ impl<P: Principal> Engine<P> {
             self.config.lease,
             self.config.beat,
         );
-        let relay =
-            crate::offers::OfferRelay::<O>::new(self.nats.clone(), leader, self.config.offer_reconcile)
-                .map_err(|error| EngineError::Service(Box::new(error)))?;
+        let relay = crate::offers::OfferRelay::<O>::new(
+            self.nats.clone(),
+            leader,
+            self.config.offer_reconcile,
+        )
+        .map_err(|error| EngineError::Service(Box::new(error)))?;
         self.beat.relays().register_erased(Arc::new(relay))?;
         self.offers.register::<O>();
         Ok(())
