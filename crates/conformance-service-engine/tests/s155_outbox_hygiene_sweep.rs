@@ -9,7 +9,7 @@ use uuid::Uuid;
 const RETENTION: Duration = Duration::from_secs(3600);
 
 #[tokio::test]
-async fn s150_the_beat_sweeps_published_rows_and_stale_claims_but_keeps_recent_ones() {
+async fn s155_the_beat_sweeps_published_rows_and_stale_claims_but_keeps_recent_ones() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

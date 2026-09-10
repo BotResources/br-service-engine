@@ -12,7 +12,7 @@ const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s147_a_rebuilt_bucket_is_repopulated_from_the_store_by_the_reconcile() {
+async fn s152_a_rebuilt_bucket_is_repopulated_from_the_store_by_the_reconcile() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

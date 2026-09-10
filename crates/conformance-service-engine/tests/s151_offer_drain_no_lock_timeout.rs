@@ -8,7 +8,7 @@ const BACKLOG: usize = 800;
 const CONTENDING_MUTATIONS: usize = 100;
 
 #[tokio::test]
-async fn s146_a_mutation_on_an_offered_noun_commits_while_a_large_drain_is_in_flight() {
+async fn s151_a_mutation_on_an_offered_noun_commits_while_a_large_drain_is_in_flight() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

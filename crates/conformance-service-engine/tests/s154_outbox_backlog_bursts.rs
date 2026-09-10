@@ -11,7 +11,7 @@ const BACKLOG: usize = 1000;
 const DRAIN_BOUND: usize = 256;
 
 #[tokio::test]
-async fn s149_a_thousand_row_backlog_drains_in_one_beat_burst() {
+async fn s154_a_thousand_row_backlog_drains_in_one_beat_burst() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

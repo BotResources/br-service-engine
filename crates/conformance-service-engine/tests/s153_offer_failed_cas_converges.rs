@@ -18,7 +18,7 @@ const HAMMER_FOR: Duration = Duration::from_secs(2);
 const HAMMER_EVERY: Duration = Duration::from_millis(15);
 
 #[tokio::test]
-async fn s148_a_leader_that_loses_the_cas_re_marks_the_key_and_converges_once_contention_clears() {
+async fn s153_a_leader_that_loses_the_cas_re_marks_the_key_and_converges_once_contention_clears() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
