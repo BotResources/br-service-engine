@@ -190,16 +190,19 @@ stream to bind. `register_presence` binds the
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
 as `Upsert`/`Remove` through the same session/render machinery as every other
 lane; name the bucket with `EngineConfig::with_service`. With `register_offer`,
-a saved noun that carries an offer stages the offer's dirty key in
-the same transaction as the write (`service_engine.offer_dirty`), the pod that
-holds the offer's leader lease drains those keys — claiming and resolving them in
-a short transaction, then putting or retracting the published value on the
-`PUBLISHED_LANGUAGE` bucket outside any transaction (a `create` for an absent key
-or a compare-and-set on the revision it read, a failed set left dirty for the
-next drain), and finally raising the per-key watermark and deleting the marker in
-a small fenced transaction that asserts the lease — so a concurrent write to an
-offered noun never waits on the drain and a leader frozen past its lease fails its
-writes rather than regressing the bucket. It reconciles the
+a saved or deleted noun that carries an offer stages the offer's dirty key in
+the same transaction as the write (`service_engine.offer_dirty`; `cx.delete`
+stages the same key so a deleted row retracts), the pod that holds the offer's
+single leader lease — one fixed-slot row it renews on the beat, taken over by
+another pod only once it expires — drains those keys, claiming them skip-locked
+and resolving them in a short transaction, then putting or retracting the
+published value on the `PUBLISHED_LANGUAGE` bucket outside any transaction (a
+`create` for an absent key or a compare-and-set on the revision it read at
+resolve, a failed set left dirty for the next drain), and finally raising the
+per-key watermark and deleting the marker in a small fenced transaction that
+asserts the lease — so a concurrent write to an offered noun never waits on the
+drain and a leader frozen past its lease fails its writes rather than regressing
+the bucket. It reconciles the
 bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
@@ -319,8 +322,9 @@ the `Erase` context — the same `Ops` the write pipeline gives a handler — to
 delete or anonymize its rows (CRUD deletes, soft EDA also scrubs the person's
 value out of the appended fact log, full EDA rewrites the person's events in
 place and re-snapshots), stage a Remove impact per touched key
-(`cx.impact`/`cx.impact_caused`) and dirty the offers of the rows it erases
-(`cx.dirty_offer`, so the leader retracts them). It returns an `Erased` manifest
+(`cx.impact`/`cx.impact_caused`) and dirty the offers of the rows it erases so
+the leader retracts them (`cx.delete` dirties the offer for a deleted row;
+`cx.dirty_offer` covers a row anonymised outside the aggregate API). It returns an `Erased` manifest
 naming what to purge after the commit: accumulated-lane stream keys
 (`purge_stream`), presence keys (`purge_presence`) and un-owned blob references
 the person's rows released (`purge_blob`). `engine.erase(person)` runs **every**
