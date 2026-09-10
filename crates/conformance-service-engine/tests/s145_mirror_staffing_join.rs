@@ -14,7 +14,7 @@ const OBSERVED_WITHIN: Duration = Duration::from_secs(25);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s143_the_boot_join_merges_two_offers_and_retires_a_stale_group() {
+async fn s145_the_boot_join_merges_two_offers_and_retires_a_stale_group() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -67,7 +67,7 @@ async fn s143_the_boot_join_merges_two_offers_and_retires_a_stale_group() {
 }
 
 #[tokio::test]
-async fn s143_a_user_retract_reaches_every_group_the_user_was_joined_into() {
+async fn s145_a_user_retract_reaches_every_group_the_user_was_joined_into() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

@@ -19,7 +19,7 @@ const LEASE: Duration = Duration::from_secs(1);
 const BEAT: Duration = Duration::from_millis(200);
 
 #[tokio::test]
-async fn s142_a_put_between_the_boot_read_and_the_watch_is_not_lost() {
+async fn s144_a_put_between_the_boot_read_and_the_watch_is_not_lost() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -62,7 +62,7 @@ async fn s142_a_put_between_the_boot_read_and_the_watch_is_not_lost() {
 }
 
 #[tokio::test]
-async fn s142_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revision() {
+async fn s144_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revision() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -123,7 +123,7 @@ async fn s142_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revi
 }
 
 #[tokio::test]
-async fn s142_emptying_a_consumed_prefix_at_run_time_takes_readiness_down_and_keeps_known_star() {
+async fn s144_emptying_a_consumed_prefix_at_run_time_takes_readiness_down_and_keeps_known_star() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -186,7 +186,7 @@ async fn s142_emptying_a_consumed_prefix_at_run_time_takes_readiness_down_and_ke
 }
 
 #[tokio::test]
-async fn s142_the_periodic_reconcile_repairs_a_retract_the_watch_missed() {
+async fn s144_the_periodic_reconcile_repairs_a_retract_the_watch_missed() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
