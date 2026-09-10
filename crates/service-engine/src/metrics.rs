@@ -24,6 +24,8 @@ pub const TRANSPORT_RECONNECTS_TOTAL: &str = "service_engine_transport_reconnect
 pub const MIRROR_RESTARTS_TOTAL: &str = "service_engine_mirror_restarts_total";
 pub const BLOBS_REAPED_TOTAL: &str = "service_engine_blobs_reaped_total";
 pub const DEAD_LETTERS_TOTAL: &str = "service_engine_dead_letters_total";
+pub const OUTBOX_PENDING: &str = "service_engine_outbox_pending";
+pub const OUTBOX_OLDEST_AGE_SECONDS: &str = "service_engine_outbox_oldest_age_seconds";
 pub const DEPENDENCY_UP: &str = "service_engine_dependency_up";
 
 pub const ALL: &[&str] = &[
@@ -51,6 +53,8 @@ pub const ALL: &[&str] = &[
     MIRROR_RESTARTS_TOTAL,
     BLOBS_REAPED_TOTAL,
     DEAD_LETTERS_TOTAL,
+    OUTBOX_PENDING,
+    OUTBOX_OLDEST_AGE_SECONDS,
     DEPENDENCY_UP,
 ];
 

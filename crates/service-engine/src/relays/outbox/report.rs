@@ -1,7 +1,6 @@
-use br_core_integration::{OutboxStatus, Transition};
 use uuid::Uuid;
 
-use crate::nats::{NatsError, PublishFailure, PublishOutcome};
+use crate::nats::{NatsError, PublishFailure};
 
 pub const DEFAULT_MAX_ATTEMPTS: u32 = 5;
 pub const DEFAULT_MAX_MESSAGES: usize = 256;
@@ -32,6 +31,7 @@ pub struct RelayPass {
     pub failed: usize,
     pub retried: usize,
     pub structural: usize,
+    pub dead_lettered: usize,
     pub min_retry_attempts: Option<u32>,
 }
 
@@ -48,34 +48,6 @@ pub fn classify_failure(err: &NatsError) -> FailureClass {
             ..
         } => FailureClass::Structural,
         _ => FailureClass::Transient,
-    }
-}
-
-pub(super) fn classify_pass(
-    pass: &mut RelayPass,
-    publish_result: &Result<PublishOutcome, NatsError>,
-    transition: Transition,
-    structural: bool,
-) {
-    if let Ok(outcome) = publish_result {
-        pass.published += 1;
-        if outcome.is_duplicate() {
-            pass.duplicates += 1;
-        }
-        return;
-    }
-    if structural {
-        pass.structural += 1;
-        return;
-    }
-    if transition.status == OutboxStatus::Failed {
-        pass.failed += 1;
-    } else {
-        pass.retried += 1;
-        pass.min_retry_attempts = Some(match pass.min_retry_attempts {
-            Some(prev) => prev.min(transition.attempts),
-            None => transition.attempts,
-        });
     }
 }
 
@@ -100,14 +72,7 @@ pub(super) fn message_id_for(row_id: Uuid, payload: &serde_json::Value) -> (Uuid
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn stored() -> Result<PublishOutcome, NatsError> {
-        Ok(PublishOutcome::Stored { sequence: 1 })
-    }
-
-    fn duplicate() -> Result<PublishOutcome, NatsError> {
-        Ok(PublishOutcome::Duplicate { sequence: 1 })
-    }
+    use crate::nats::PublishOutcome;
 
     fn no_stream() -> Result<PublishOutcome, NatsError> {
         Err(NatsError::Publish {
@@ -125,13 +90,6 @@ mod tests {
         })
     }
 
-    fn pending(attempts: u32) -> Transition {
-        Transition {
-            status: OutboxStatus::Pending,
-            attempts,
-        }
-    }
-
     #[test]
     fn no_stream_is_structural() {
         assert_eq!(
@@ -146,30 +104,6 @@ mod tests {
             classify_failure(&transient().unwrap_err()),
             FailureClass::Transient
         );
-    }
-
-    #[test]
-    fn a_duplicate_ack_counts_as_published_and_as_a_duplicate() {
-        let mut pass = RelayPass::default();
-        classify_pass(&mut pass, &duplicate(), pending(1), false);
-        assert_eq!(pass.published, 1);
-        assert_eq!(pass.duplicates, 1);
-    }
-
-    #[test]
-    fn a_plain_success_is_published_and_not_a_duplicate() {
-        let mut pass = RelayPass::default();
-        classify_pass(&mut pass, &stored(), pending(1), false);
-        assert_eq!(pass.published, 1);
-        assert_eq!(pass.duplicates, 0);
-    }
-
-    #[test]
-    fn a_structural_failure_does_not_burn_retry() {
-        let mut pass = RelayPass::default();
-        classify_pass(&mut pass, &no_stream(), pending(0), true);
-        assert_eq!(pass.structural, 1);
-        assert_eq!(pass.retried, 0);
     }
 
     #[test]

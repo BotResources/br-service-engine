@@ -71,6 +71,7 @@ backoff (one log per step, never a hot spin), and past a consecutive-failure
 threshold the supervisor lowers readiness with
 `REASON_INBOUND_STOPPED` so a dead consumer never leaves the pod deaf while it
 reports ready; on shutdown a consumer naks its pulled-but-unprocessed frames so
+<<<<<<< HEAD
 they redeliver to a live pod. A handler that panics is caught at dispatch, rolled
 back and dead-lettered as a terminal frame, so one panicking reaction never
 becomes an invisible poison that redelivers every `ack_wait` with readiness UP;
@@ -84,6 +85,20 @@ frame is terminated only once its dead-letter row is durably written: if that
 write fails (Postgres unreachable) the frame is nak'ed, not terminated, and the
 broker redelivers it until the table can record it, so an accepted message is
 never lost to a transient store outage.
+||||||| 77fd58e
+they redeliver to a live pod. The `service_engine.dead_letter` table is the one
+table for every source of work: inbound reactions, scheduled messages, cron
+ticks and a persistently stuck mirror all record there
+(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror}`), each staging an
+ops-view impact and incrementing `service_engine_dead_letters_total` by source.
+=======
+they redeliver to a live pod. The `service_engine.dead_letter` table is the one
+table for every source of work: inbound reactions, scheduled messages, cron
+ticks, a persistently stuck mirror and an outbox row that keeps failing to
+publish against a reachable broker all record there
+(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox}`), each staging an
+ops-view impact and incrementing `service_engine_dead_letters_total` by source.
+>>>>>>> feat/engine/p2-b-outbox
 `register_mutation` and `register_bulk`: a GraphQL mutation and a
 NATS command run **one** direct write pipeline — load, gate (the affordance
 function in deny mode), domain command, `save` through the `Persistence` trait,
@@ -495,11 +510,36 @@ drain bound, so
 a full batch signals the beat to come back), and a periodic hygiene pass
 (`EngineConfig::with_message_retention`, swept on `HostedOutboxRelay::with_sweep_every`)
 deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
+<<<<<<< HEAD
 the retention. Because an inbound durable replays from the start of its stream,
 the engine refuses at boot a `message_retention` below the `max_age` of any
 integration stream a reaction binds (an unlimited `max_age` is refused too), so a
 claim is never swept while its message can still be redelivered and re-run; the
 sweep itself is best-effort and never lowers readiness. To recover a `KvDrainRelay`'s published-language
+||||||| 77fd58e
+the retention — a bound the operator sets to at least the outbox stream's
+retention plus its dedup window, since a claim swept while the broker still
+dedups its id could let a redelivery re-run the effect; the sweep is best-effort
+and never lowers readiness. To recover a `KvDrainRelay`'s published-language
+=======
+the retention — a bound the operator sets to at least the outbox stream's
+retention plus its dedup window, since a claim swept while the broker still
+dedups its id could let a redelivery re-run the effect; the sweep is best-effort
+and never lowers readiness. A committed outbox row is never lost to a broker
+outage: while `Nats::reachable()` is false the relay skips its publish pass
+entirely, so the rows wait (the degrade table's "outbox rows … wait") and the
+single beat keeps ticking — heartbeat, cron, scheduled boundaries and the
+readiness refresh run every beat and the `nats_grace` probe alone takes the pod
+DOWN, never a beat frozen on a full outbox. A publish is bounded by
+`PUBLISH_ACK_TIMEOUT` so a send to a just-died broker cannot hang the beat. A
+transient failure never counts an attempt while the broker is unreachable, so an
+outage of any length is retried forever rather than exhausting a budget; only a
+row that keeps failing to publish against a *reachable* broker is bounded, and at
+the bound it is dead-lettered (`DeadLetterSource::Outbox`, with an ops-view
+impact) in the same transaction that marks it `FAILED`, never abandoned silently.
+`service_engine_outbox_pending` and `service_engine_outbox_oldest_age_seconds`
+export the backlog depth and the age of its oldest waiting row. To recover a `KvDrainRelay`'s published-language
+>>>>>>> feat/engine/p2-b-outbox
 bucket that an operator truncated and rebuilt, call `reset_watermarks` and have
 the relay's source re-stage its set, so the version guard does not refuse the
 unchanged keys the rebuilt bucket lost.

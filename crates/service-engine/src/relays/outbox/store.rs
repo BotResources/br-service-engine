@@ -81,6 +81,21 @@ impl OutboxStore {
         Ok(())
     }
 
+    pub async fn pending_stats<'e, E>(&self, executor: E) -> Result<(i64, Option<f64>), sqlx::Error>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let row: (i64, Option<f64>) = sqlx::query_as(
+            "SELECT count(*), \
+                    extract(epoch FROM now() - min(created_at)) \
+             FROM integration_outbox \
+             WHERE status = 'PENDING'",
+        )
+        .fetch_one(executor)
+        .await?;
+        Ok(row)
+    }
+
     pub async fn sweep_published<'e, E>(
         &self,
         executor: E,

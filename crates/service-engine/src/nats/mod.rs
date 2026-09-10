@@ -46,6 +46,8 @@ pub const INTEGRATION_CMD: &str = "INTEGRATION_CMD";
 pub const INTEGRATION_EVT: &str = "INTEGRATION_EVT";
 pub const KV_PUBLISHED_LANGUAGE: &str = "PUBLISHED_LANGUAGE";
 
+pub const PUBLISH_ACK_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Clone)]
 pub struct Nats {
     jetstream: Context,
@@ -178,15 +180,28 @@ impl Nats {
             headers.insert(crate::inbound::HEADER_SEQ_KEY, seq_key);
             headers.insert(crate::inbound::HEADER_SEQ, seq.to_string().as_str());
         }
-        let ack_future = self
-            .jetstream
-            .publish_with_headers(subject.to_string(), headers, bytes.into())
-            .await
-            .map_err(|e| publish_error(subject, e.kind(), &e))?;
-        let ack = ack_future
-            .await
-            .map_err(|e| publish_error(subject, e.kind(), &e))?;
-        Ok(PublishOutcome::from_ack(&ack))
+        let publish = async {
+            let ack_future = self
+                .jetstream
+                .publish_with_headers(subject.to_string(), headers, bytes.into())
+                .await
+                .map_err(|e| publish_error(subject, e.kind(), &e))?;
+            let ack = ack_future
+                .await
+                .map_err(|e| publish_error(subject, e.kind(), &e))?;
+            Ok(PublishOutcome::from_ack(&ack))
+        };
+        match tokio::time::timeout(PUBLISH_ACK_TIMEOUT, publish).await {
+            Ok(result) => result,
+            Err(_elapsed) => Err(NatsError::Publish {
+                subject: subject.to_string(),
+                kind: PublishFailure::Transient,
+                detail: format!(
+                    "publish ack did not return within {}s; the broker is unreachable or wedged",
+                    PUBLISH_ACK_TIMEOUT.as_secs()
+                ),
+            }),
+        }
     }
 
     pub async fn stream_max_age(&self, name: &str) -> Result<Duration, NatsError> {
