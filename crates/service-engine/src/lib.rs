@@ -102,6 +102,7 @@ pub use graphql::{
     attach, cause_json, engine_schema, execute, execute_bulk, key_json, lane_notice_stream,
     mutation_error, serve, typed_presence_view, typed_view,
 };
+pub use graphql::{attach_with_session, page};
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
 pub use housekeeping::gc::{Gc, GcRound, SessionGc};
@@ -150,7 +151,7 @@ pub use relays::kv::{KvChange, KvDrainRelay, KvSource, KvWrite, Versioned};
 pub use relays::outbox::{HostedOutboxRelay, OutboxRelay};
 pub use render::{PassReport, SessionFault, Transition};
 #[cfg(feature = "test-support")]
-pub use runtime::{RenderMetrics, SessionRuntime};
+pub use runtime::{PageReport, RenderMetrics, SessionRuntime};
 pub use scopes::{ScopeError, ScopeManifest};
 pub use session::{AttachRequest, SessionId, SessionStream, WindowParams, WindowSpec};
 pub use time::Timestamp;

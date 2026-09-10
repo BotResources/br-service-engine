@@ -384,7 +384,65 @@ two disagree. A `WindowSpec` is still passed an `rls` flag, but it is a caller
 assertion checked against the projector at attach: a flag that contradicts the
 declaration is refused with `AttachError::RlsRegimeMismatch`, and an RLS
 projector attached with no `RlsApplier` registered is refused with
-`AttachError::MissingRlsApplier`. The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
+`AttachError::MissingRlsApplier`.
+
+**Cohorts, per-registration reset threshold and emission on the view surface.**
+`view::Projector` carries the three hooks the render pass needs, so "one load per
+frame whatever the number of viewers" is reachable without dropping to the raw
+`projector::Projector`. `fn cohort(principal) -> CohortKey` (default
+`CohortKey::principal(id)`) groups the sessions a frame loads together: sessions
+that share a cohort key load the noun's dirty keys once and each is personalised
+from that one load; in debug builds the render pass recomputes the cohort key of
+every session it grouped and asserts it equals the one the session was grouped
+under, so a `cohort()` that is not a pure function of the principal — which would
+land a session in more than one cohort and split or merge groups wrongly — panics
+in test rather than shipping. That a shared cohort renders one view for all its
+members is not asserted by re-projection (that would double the very load and
+projection the cohort exists to save, and the black-box `s158` proves it directly
+by comparing the delivered views); it is guaranteed by the `Visibility`
+declaration being total and injective (the collision-free `CohortKey` invariant
+below). `const RESET_THRESHOLD: Option<usize>`
+overrides the global `reset_threshold` for one projector (a churn beyond it on a
+repopulate sends a fresh `Reset` instead of a delta stream); `None` keeps the
+global default. `fn emission(&Impact) -> Emission` lets a projector ask for
+`PerImpact` delivery (one delta per causing impact, carrying its `cause`) or the
+default `Coalesced`; a `PerImpact` projector never faults on a **causeless**
+impact (a principal-facts change, a foreign change, a scheduled impact) — those
+fold coalesced, because only an impact that carries a cause can be delivered per
+impact. A `Cause` that does not fit one 8000-byte notification fails the **write**
+transaction fail-closed (`TransportError`): the write is refused rather than the
+cause silently dropped, so a service that attaches a large payload as a cause
+learns at the mutation, not by a viewer missing it — keep a cause to a small fact
+and carry bulk in the view.
+
+**Page through history behind a live window.** The kit gesture
+`service_engine::page::<P, V>(ctx, session, &cursor)` re-runs the
+projector's `populate` with a cursor and **appends** the older keys it returns to
+the window the session already holds, delivering the new keys as `Upsert`s on the
+contiguous revision — scrolling back never sends a `Reset`. The window is the
+live head `populate` filled at attach plus every appended page; a key changes
+wherever it sits (an edit to an old row reaches the viewer who holds it), a
+`Remove` leaves the window only when the row is deleted or becomes invisible,
+never because it fell off a page bound. `window_capacity` bounds the keys a
+session may hold across its pages: once appending a page would exceed it the
+**oldest appended page is released** — dropped from the window and from the
+session's `last_sent` with no `Remove` delta, since the client that asked for
+that page drops it too — while the live head is always retained. A paged history
+survives a principal-facts refresh and a reconnect `Reset` (still subject to its
+own visibility). The gesture is authorized against the caller's `Passport`: the
+engine serves only a **live session owned by the calling principal**. Because a
+session lives on the pod that holds its socket, a page request must be issued
+**over that session's own connection** (a mutation over the same WebSocket lands
+on the same pod); a page for a session this pod does not hold — or one held for a
+different principal — is refused with `EngineError::NoLiveSession`, so knowing
+another session's id buys an attacker nothing. The client correlates the two by
+supplying its own `SessionId`: `attach_with_session` (kit) / a `session` argument
+on the subscription pins the id the `page` mutation then names. The
+reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
+size)` opens the head window and `pageCards(session, boardId, before, size)`
+appends an older page behind it.
+
+The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
 cancel decision (with the cancel gate as its affordance, a presence signal the
 producer watches and a scheduled deadline), a reaction that seals the producer's

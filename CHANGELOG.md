@@ -469,7 +469,41 @@ directions reach a live session within the frame. A projector gated by Postgres
 RLS or open to every viewer declares `type Visibility = Unrestricted<Row,
 Principal>`, an explicit "no cohort gate here" rather than a permissive default.
 The low-level `projector::Projector` stays as the escape hatch for a projector
-that joins nouns.
+that joins nouns. `view::Projector` also carries the render-pass hooks: `fn
+cohort(principal)` (default per-principal) groups the sessions a frame loads
+together — sessions sharing a cohort key load once and personalise per session,
+and in debug the pass recomputes each grouped session's cohort key and asserts it
+equals the one it was grouped under, so a `cohort()` that is not a pure function
+of the principal (which would land a session in more than one cohort) panics in
+test; that a shared cohort renders one identical view for all its members is not
+re-projected (it would double the load and projection the cohort saves, and
+`s158` proves it directly) but rests on the total, injective `Visibility`
+declaration and the collision-free `CohortKey`; `const RESET_THRESHOLD:
+Option<usize>` overrides the global
+`reset_threshold` per projector; and `fn emission(&Impact)` chooses `PerImpact`
+(one delta per causing impact with its `cause`) or the default `Coalesced`, where
+a `PerImpact` projector folds a **causeless** impact (principal-facts, foreign,
+scheduled) coalesced instead of faulting, since only a caused impact can be
+delivered per impact. A `Cause` that exceeds one 8000-byte notification fails the
+write transaction fail-closed rather than being dropped — a cause is a small
+fact, bulk rides the view.
+
+**Page through history behind a live window.** The kit gesture
+`service_engine::page::<P, V>(ctx, session, &cursor)` re-runs `populate` with a
+cursor and appends the older keys to the window the session holds, delivering them
+as `Upsert`s on the contiguous revision — scrolling back never sends a `Reset`. A
+`Remove` leaves a window only when the row is deleted or becomes invisible, never
+because it fell off a page bound. `window_capacity` (validated at boot) is now
+**enforced**: once appending a page would exceed it the oldest appended page is
+released from the window and `last_sent` with no `Remove` delta (the client that
+asked for the page drops it too), while the live head is always retained; a paged
+history survives a principal refresh and a reconnect `Reset`. The gesture is
+authorized against the caller's `Passport`: the engine serves only a live session
+**owned by the calling principal**, and refuses a page for a session this pod does
+not hold, or one held for a different principal, with `EngineError::NoLiveSession`
+(knowing another session's id buys nothing). `attach_with_session` / a
+client-supplied `SessionId` correlates the subscription and the `page` mutation.
+The reference `card` slice ships the pair (`cardPageDeltas` + `pageCards`).
 
 **Engine-owned NATS, Postgres connect and readiness.** The engine's internal
 loops run on `async-nats` directly through the `nats` module (`Nats`, `KvBucket`,
@@ -542,7 +576,19 @@ window repopulated in both directions on a principal change (`s135`), the
 schema-version singleton refusing a second pod on a different service version
 (`s136`), erasure under a strict deny-when-unset RLS policy (`s137`), the
 beat completing a purge the erase committed but never finished (`s138`), and
-erasing a person purging their chunks from the lane-A NATS stream (`s141`).
+erasing a person purging their chunks from the lane-A NATS stream (`s141`). The
+view-surface scenarios prove paging and its render hooks: a page appends the
+older keys behind the live window with contiguous revisions and no `Reset`, and
+an edit to an old paged row reaches its holder (`s156`); `window_capacity`
+releases the oldest page silently — no `Remove`, the live head retained (`s157`);
+one load per `(dirty key, cohort)` per frame with several sessions in one cohort
+and two in another on the `view::Projector` cohort hook (`s158`); a
+per-registration `RESET_THRESHOLD` resetting a window where the global default
+still diffs (`s159`); a `PerImpact` view emitting its cause per caused impact
+yet folding a causeless impact coalesced without faulting (`s160`); and a page
+request for a live session the caller does not own refused
+(`EngineError::NoLiveSession`) while delivering nothing on the victim's wire,
+the caller still paging her own session (`s161`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL

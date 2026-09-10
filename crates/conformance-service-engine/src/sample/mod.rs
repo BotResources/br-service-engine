@@ -14,6 +14,7 @@ pub mod mirror;
 pub mod note;
 pub mod offer;
 pub mod outbox;
+pub mod paged;
 pub mod pipeline;
 pub mod pipeline_support;
 pub mod presence;
@@ -121,6 +122,9 @@ pub use offer::{
     published_widget, seed_bucket, widget_key,
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
+pub use paged::{
+    AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
+};
 pub use pipeline::{
     CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, SampleFault,
     SampleReactionFault, ScheduleCreate, WidgetCreated, close_widget, create_widget,

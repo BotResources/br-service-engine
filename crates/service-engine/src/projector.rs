@@ -90,6 +90,10 @@ pub trait Projector: Send + Sync + 'static {
         CohortKey::principal(principal.id())
     }
 
+    fn reset_threshold(&self) -> Option<usize> {
+        None
+    }
+
     fn emission(&self, _impact: &Impact) -> Emission {
         Emission::Coalesced
     }

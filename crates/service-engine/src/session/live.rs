@@ -1,86 +1,18 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::delta::{Delta, ErasedView, Revision};
-use crate::dyn_compat::{ErasedPopulation, ErasedWindowQuery};
 use crate::impact::Impact;
 use crate::name::ProjectorName;
 use crate::principal::Principal;
+use crate::session::SessionId;
 use crate::session::stream::Outbox;
-use crate::session::{SessionId, WindowParams};
 use crate::wire::{KeyBytes, ViewBytes};
 
+pub(crate) use crate::session::window::{WindowShape, WindowState, members_of, refreshed_members};
+
 pub(crate) type ViewKey = (ProjectorName, KeyBytes);
-
-#[derive(Debug, Clone)]
-pub(crate) enum WindowShape {
-    Fixed,
-    Ordered { open_head: bool },
-    Query(ErasedWindowQuery),
-}
-
-impl WindowShape {
-    pub(crate) fn of(population: &ErasedPopulation) -> Self {
-        match population {
-            ErasedPopulation::Keys(_) => Self::Fixed,
-            ErasedPopulation::Ordered { open_head, .. } => Self::Ordered {
-                open_head: *open_head,
-            },
-            ErasedPopulation::Query(query) => Self::Query(query.clone()),
-        }
-    }
-
-    pub(crate) fn query(&self) -> Option<&ErasedWindowQuery> {
-        match self {
-            Self::Query(query) => Some(query),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn refreshed(&self, population: &ErasedPopulation) -> Self {
-        match (self, population) {
-            (Self::Query(_), ErasedPopulation::Query(_)) => Self::of(population),
-            (Self::Query(_), _) => self.clone(),
-            _ => Self::of(population),
-        }
-    }
-}
-
-pub(crate) fn refreshed_members(
-    previous: &BTreeSet<KeyBytes>,
-    discovered: &BTreeSet<KeyBytes>,
-    population: &ErasedPopulation,
-) -> BTreeSet<KeyBytes> {
-    match population {
-        ErasedPopulation::Query(query) if query.authoritative() => {
-            let mut members = query.keys().clone();
-            members.extend(discovered.iter().cloned());
-            members
-        }
-        ErasedPopulation::Query(_) => {
-            let mut members = previous.clone();
-            members.extend(discovered.iter().cloned());
-            members
-        }
-        keyed => members_of(keyed),
-    }
-}
-
-pub(crate) fn members_of(population: &ErasedPopulation) -> BTreeSet<KeyBytes> {
-    match population {
-        ErasedPopulation::Keys(keys) => keys.clone(),
-        ErasedPopulation::Ordered { keys, .. } => keys.iter().cloned().collect(),
-        ErasedPopulation::Query(query) => query.keys().clone(),
-    }
-}
-
-pub(crate) struct WindowState {
-    pub(crate) projector: ProjectorName,
-    pub(crate) params: WindowParams,
-    pub(crate) members: BTreeSet<KeyBytes>,
-    pub(crate) shape: WindowShape,
-}
 
 pub(crate) enum Phase {
     Pending { held: Vec<Impact>, overflowed: bool },

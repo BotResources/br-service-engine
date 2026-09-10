@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 
+use crate::cohort::CohortKey;
 use crate::error::EngineError;
 use crate::impact::{ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};
@@ -55,6 +56,8 @@ pub trait Projector: Send + Sync + 'static {
 
     const RLS: bool = false;
 
+    const RESET_THRESHOLD: Option<usize> = None;
+
     fn populate(
         cx: &Populate<'_, Self::Principal>,
         query: &Self::Query,
@@ -66,7 +69,11 @@ pub trait Projector: Send + Sync + 'static {
         <Self::Visibility as Visibility>::visible(row, principal)
     }
 
-    fn emission() -> Emission {
+    fn cohort(principal: &Self::Principal) -> CohortKey {
+        CohortKey::principal(principal.id())
+    }
+
+    fn emission(_impact: &Impact) -> Emission {
         Emission::Coalesced
     }
 }
@@ -121,8 +128,16 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
         V::RLS
     }
 
-    fn emission(&self, _impact: &Impact) -> Emission {
-        V::emission()
+    fn cohort(&self, principal: &V::Principal) -> CohortKey {
+        V::cohort(principal)
+    }
+
+    fn reset_threshold(&self) -> Option<usize> {
+        V::RESET_THRESHOLD
+    }
+
+    fn emission(&self, impact: &Impact) -> Emission {
+        V::emission(impact)
     }
 
     fn populate<'a>(

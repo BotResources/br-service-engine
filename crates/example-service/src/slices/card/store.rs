@@ -160,6 +160,36 @@ pub async fn cards_of_board(pg: &PgPool, board: Uuid) -> Result<Vec<Uuid>, Engin
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
+pub async fn cards_of_board_head(
+    pg: &PgPool,
+    board: Uuid,
+    size: i64,
+) -> Result<Vec<Uuid>, EngineError> {
+    let rows = sqlx::query("SELECT id FROM card WHERE board_id = $1 ORDER BY id DESC LIMIT $2")
+        .bind(board)
+        .bind(size)
+        .fetch_all(pg)
+        .await?;
+    Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+}
+
+pub async fn cards_of_board_before(
+    pg: &PgPool,
+    board: Uuid,
+    before: Uuid,
+    size: i64,
+) -> Result<Vec<Uuid>, EngineError> {
+    let rows = sqlx::query(
+        "SELECT id FROM card WHERE board_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
+    )
+    .bind(board)
+    .bind(before)
+    .bind(size)
+    .fetch_all(pg)
+    .await?;
+    Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+}
+
 pub async fn all_card_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query("SELECT id FROM card").fetch_all(pg).await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())

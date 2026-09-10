@@ -47,7 +47,7 @@ impl<P: Principal> SessionRuntime<P> {
                 });
             }
         }
-        let id = SessionId::new();
+        let id = request.session.unwrap_or_default();
         let outbox = Arc::new(Outbox::new(self.config.session_buffer));
         let windows = request
             .windows
@@ -57,14 +57,24 @@ impl<P: Principal> SessionRuntime<P> {
                 params: spec.params.clone(),
                 members: BTreeSet::new(),
                 shape: WindowShape::Fixed,
+                pages: Vec::new(),
             })
             .collect();
-        self.table.lock().await.insert(Session::pending(
-            id,
-            request.principal.clone(),
-            windows,
-            outbox.clone(),
-        ));
+        {
+            let mut table = self.table.lock().await;
+            if table
+                .get(id)
+                .is_some_and(|existing| existing.is_live() || existing.is_pending())
+            {
+                return Err(AttachError::DuplicateSession { session: id });
+            }
+            table.insert(Session::pending(
+                id,
+                request.principal.clone(),
+                windows,
+                outbox.clone(),
+            ));
+        }
 
         let snapshots = match self.snapshot(&request.principal, &request.windows).await {
             Ok(snapshots) => snapshots,

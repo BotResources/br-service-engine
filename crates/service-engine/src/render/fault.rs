@@ -64,9 +64,7 @@ mod tests {
         let session = SessionId::new();
         faults.record(
             session,
-            &EngineError::CauseRequired {
-                projector: ProjectorName::from_static("assignments"),
-            },
+            &EngineError::UnboundProjector(ProjectorName::from_static("assignments")),
         );
         let reported = faults.into_report(&BTreeSet::new());
         assert_eq!(reported.len(), 1);
@@ -85,9 +83,7 @@ mod tests {
         faults.record(session, &EngineError::MissingPrincipalResolver);
         faults.record(
             session,
-            &EngineError::CauseRequired {
-                projector: ProjectorName::from_static("assignments"),
-            },
+            &EngineError::UnboundProjector(ProjectorName::from_static("assignments")),
         );
         assert!(faults.contains(session));
         let reported = faults.into_report(&BTreeSet::from([session]));

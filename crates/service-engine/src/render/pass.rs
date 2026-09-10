@@ -18,6 +18,7 @@ use crate::render::plan::{PlannedWindow, outgoing_for, plan};
 use crate::render::refresh::{refresh_principals, repopulate};
 use crate::render::repair::resnapshot;
 use crate::render::route;
+use crate::render::totality::debug_assert_group_totality;
 use crate::session::SessionId;
 use crate::session::store::SessionTable;
 use crate::wire::KeyBytes;
@@ -110,6 +111,7 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     let mut groups: BTreeMap<GroupKey, Group<P>> = BTreeMap::new();
     for windows in plans.values() {
         for window in windows {
+            debug_assert_group_totality(ctx, window);
             let entry = groups.entry(window.group()).or_insert_with(|| Group {
                 keys: BTreeSet::new(),
                 representative: window.representative.clone(),

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use super::EngineError;
 use crate::name::ProjectorName;
+use crate::session::SessionId;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -48,4 +49,7 @@ pub enum AttachError {
 
     #[error("the engine is shutting down")]
     ShuttingDown,
+
+    #[error("a live session already holds the id {session}")]
+    DuplicateSession { session: SessionId },
 }

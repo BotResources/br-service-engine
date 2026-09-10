@@ -1,6 +1,7 @@
 mod compose;
 mod error;
 mod mutation;
+mod paging;
 mod principal;
 mod query;
 mod router;
@@ -13,6 +14,7 @@ mod ws;
 
 pub use error::{CODE_EXTENSION, mutation_error};
 pub use mutation::{MutationAck, ack, ack_bulk, execute, execute_bulk};
+pub use paging::{attach_with_session, page};
 pub use principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, PrincipalRejected};
 pub use query::Query;
 pub use router::{app, serve};

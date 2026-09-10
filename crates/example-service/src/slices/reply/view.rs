@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gated};
+use service_engine::impact::Impact;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
@@ -59,7 +60,7 @@ impl Projector for RepliesView {
         }
     }
 
-    fn emission() -> Emission {
+    fn emission(_impact: &Impact) -> Emission {
         Emission::PerImpact
     }
 }
