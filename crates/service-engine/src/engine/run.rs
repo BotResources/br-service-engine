@@ -4,12 +4,10 @@ use tokio::sync::Notify;
 
 use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
-use crate::engine::loops::{
-    RenderGc, RenderRepairs, RenderReset, join_presence, run_scheduled_messages,
-};
+use crate::engine::loops::{join_presence, run_scheduled_messages};
 use crate::error::EngineError;
-use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
-use crate::inbound::{DeadLetters, InboundLoop};
+use crate::housekeeping::ready::REASON_WORKER_STOPPED;
+use crate::inbound::InboundLoop;
 use crate::pipeline::DirectPipeline;
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
@@ -53,45 +51,19 @@ impl<P: Principal> Engine<P> {
             ..
         } = self;
         let offers = Arc::new(offers);
-        let dead_letters = DeadLetters::new(pg.clone())
-            .with_transport(transport.clone() as Arc<dyn ImpactTransport>);
-        mirrors.set_dead_letters(dead_letters.clone());
-        let (inbound_health, inbound_health_rx) = crate::inbound::InboundHealth::new();
-
-        beat.relays().register_erased(Arc::new(
-            crate::relays::outbox::HostedOutboxRelay::hosting(
-                crate::name::RelayName::from_static("integration_outbox"),
-                crate::relays::outbox::OutboxRelay::new(pg.clone(), nats.clone()),
-                config.impacts_per_commit.max(1),
-            ),
-        ))?;
-
         let readiness_guard = readiness.clone();
-        let assembly = ReadinessAssembly::new(readiness, mirrors.health())
-            .with_relays(beat.relays().health())
-            .with_listener(transport.listener_health())
-            .with_inbound_health(inbound_health_rx)
-            .with_nats(nats.clone(), config.nats_grace);
-        beat = beat
-            .with_transport(transport.clone())
-            .with_accumulators(accumulators.clone())
-            .with_dead_letters(dead_letters.clone())
-            .with_readiness(assembly)
-            .with_repairs(Arc::new(RenderRepairs(render.clone())));
-        if let Some(drain) = erasure_drain {
-            beat = beat.with_erasure_drain(drain);
-        }
-        if render.lane_channel().has_session_lanes() {
-            let reset: Arc<dyn crate::housekeeping::lane::ResetAll> =
-                Arc::new(RenderReset(render.clone()));
-            beat = beat.with_lane_supervisor(crate::housekeeping::lane::LaneSupervisor::new(
-                nats.clone(),
-                config.nats_grace,
-                render.lane_channel(),
-                reset,
-            ));
-        }
-        beat.gc().set_sessions(Arc::new(RenderGc(render.clone())));
+        let (mut beat, dead_letters, inbound_health) = crate::engine::wiring::wire_beat(
+            beat,
+            &pg,
+            &nats,
+            &config,
+            &transport,
+            readiness,
+            &mut mirrors,
+            &accumulators,
+            &render,
+            erasure_drain,
+        )?;
 
         let stop_render = Arc::new(Notify::new());
         let stop_beat = Arc::new(Notify::new());

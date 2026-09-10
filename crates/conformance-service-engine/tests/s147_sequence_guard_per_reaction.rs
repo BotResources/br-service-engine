@@ -42,5 +42,6 @@ async fn s147_two_reactions_of_one_producer_keep_independent_watermarks() {
          reaction holds"
     );
 
+    drop(conn);
     db.cleanup().await;
 }

@@ -6,6 +6,7 @@ mod register;
 mod run;
 mod serve;
 mod shutdown;
+mod wiring;
 
 pub use blobs::BlobReader;
 

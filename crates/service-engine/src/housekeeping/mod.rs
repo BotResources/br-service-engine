@@ -1,5 +1,6 @@
 pub mod backoff;
 pub mod beat;
+pub mod beat_builder;
 pub mod cron;
 mod drain;
 pub mod gc;

@@ -4,7 +4,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::accumulator::AccumulatorRuntime;
-use crate::accumulator::ingress::spawn_lane_a;
+use crate::accumulator::lane_a_loop::spawn_lane_a;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
 use crate::nats::Nats;

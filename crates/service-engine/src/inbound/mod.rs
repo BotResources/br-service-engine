@@ -1,9 +1,11 @@
 mod budget;
 mod consumer;
 mod deadletter;
+mod deadletter_row;
 mod dispatch;
 mod disposition;
 mod guard;
+mod handle;
 mod message;
 mod reaction;
 mod runtime;

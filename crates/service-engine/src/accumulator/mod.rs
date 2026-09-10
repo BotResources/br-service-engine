@@ -3,6 +3,7 @@ pub mod flush;
 pub(crate) mod guard;
 mod hash;
 pub(crate) mod ingress;
+pub(crate) mod lane_a_loop;
 pub(crate) mod persisted;
 pub mod reader;
 pub mod runtime;
