@@ -10,6 +10,7 @@ use service_engine::nats::{
 use uuid::Uuid;
 
 pub const STREAMING_MAX_AGE: Duration = Duration::from_secs(300);
+pub const INTEGRATION_MAX_AGE: Duration = Duration::from_secs(1800);
 
 pub struct TestNats {
     child: Child,
@@ -78,6 +79,7 @@ impl TestNats {
                 name: name.to_string(),
                 subjects: vec![subject.to_string()],
                 duplicate_window: Duration::from_secs(120),
+                max_age: INTEGRATION_MAX_AGE,
                 ..Default::default()
             })
             .await
