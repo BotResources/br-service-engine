@@ -70,6 +70,7 @@ pub struct Engine<P: Principal> {
     schema_slices: Vec<SliceFragment>,
     schema_sdl: Option<String>,
     shutdown: Arc<tokio::sync::Notify>,
+    ws_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     declared_scopes: Option<ScopeDeclaration>,
     contributed_scopes: Vec<&'static str>,
     reaction_principal: Option<Arc<dyn crate::principal::ReactionPrincipalResolver>>,
@@ -94,6 +95,7 @@ impl<P: Principal> Engine<P> {
     ) -> Result<Engine<P>, EngineError> {
         config.validate()?;
         crate::observe::install_identity(&config);
+        let nats = nats.with_publish_ack_timeout(config.publish_ack_timeout);
         let transport =
             Arc::new(establish_transport_with_probe(pg.clone(), &config, &readiness, probe).await?);
         let accumulators = Arc::new(
@@ -127,6 +129,7 @@ impl<P: Principal> Engine<P> {
             schema_slices: Vec::new(),
             schema_sdl: None,
             shutdown: Arc::new(tokio::sync::Notify::new()),
+            ws_shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             declared_scopes: None,
             contributed_scopes: Vec::new(),
             reaction_principal: None,
@@ -139,6 +142,14 @@ impl<P: Principal> Engine<P> {
 
     pub fn shutdown_handle(&self) -> Arc<tokio::sync::Notify> {
         self.shutdown.clone()
+    }
+
+    pub(crate) fn ws_shutdown_sender(&self) -> Arc<tokio::sync::watch::Sender<bool>> {
+        self.ws_shutdown.clone()
+    }
+
+    pub(crate) fn ws_shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.ws_shutdown.subscribe()
     }
 
     pub fn set_schema_sdl(&mut self, sdl: String) {

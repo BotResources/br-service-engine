@@ -112,12 +112,14 @@ where
     }
     let schema = state.schema.clone();
     let max_age = state.engine.runtime().config().session_max_age;
+    let shutdown = state.engine.ws_shutdown();
     upgrade
         .protocols(ALL_WEBSOCKET_PROTOCOLS)
         .on_upgrade(move |socket| async move {
             let mut data = Data::default();
             data.insert(principal);
-            crate::graphql::ws::serve_bounded(socket, schema, protocol, data, max_age).await
+            crate::graphql::ws::serve_bounded(socket, schema, protocol, data, max_age, shutdown)
+                .await
         })
 }
 
