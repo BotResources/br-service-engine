@@ -187,3 +187,23 @@ impl std::fmt::Debug for ObjectStore {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::content_disposition;
+
+    #[test]
+    fn the_disposition_names_the_file_as_an_attachment() {
+        assert_eq!(
+            content_disposition("report.pdf"),
+            "attachment; filename=\"report.pdf\""
+        );
+    }
+
+    #[test]
+    fn a_quote_newline_or_backslash_cannot_break_out_of_the_header() {
+        let out = content_disposition("a\"b\\c\nd\re");
+        assert_eq!(out, "attachment; filename=\"a_b_cde\"");
+        assert!(!out.contains('\n') && !out.contains('\r'));
+    }
+}

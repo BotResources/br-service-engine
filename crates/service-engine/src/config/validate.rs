@@ -137,8 +137,35 @@ mod tests {
         assert_eq!(c.nats_grace, Duration::from_secs(10));
         assert_eq!(c.window_capacity, 10_000);
         assert_eq!(c.impacts_per_commit, 1_000);
+        assert_eq!(c.publish_ack_timeout, Duration::from_secs(2));
         assert_eq!(c.service, None);
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn a_publish_ack_timeout_above_the_nats_grace_is_refused() {
+        assert!(
+            config()
+                .with_nats_grace(Duration::from_secs(3))
+                .with_publish_ack_timeout(Duration::from_secs(5))
+                .validate()
+                .is_err()
+        );
+        config()
+            .with_nats_grace(Duration::from_secs(10))
+            .with_publish_ack_timeout(Duration::from_secs(10))
+            .validate()
+            .expect("a publish ack timeout equal to the grace is accepted");
+    }
+
+    #[test]
+    fn a_zero_publish_ack_timeout_is_refused() {
+        assert!(
+            config()
+                .with_publish_ack_timeout(Duration::ZERO)
+                .validate()
+                .is_err()
+        );
     }
 
     #[test]
