@@ -28,7 +28,7 @@ async fn s154_a_thousand_row_backlog_drains_in_one_beat_burst() {
         OUTBOX,
         OutboxRelay::new(pool.clone(), fabric.clone()),
     ));
-    let mut runtime = RelayRuntime::new(PodId::new("se-s149-0").expect("a valid pod id"));
+    let mut runtime = RelayRuntime::new(PodId::new("se-s154-0").expect("a valid pod id"));
     runtime
         .register_erased(relay.clone())
         .expect("the hosted relay registers");
@@ -61,7 +61,7 @@ async fn s154_a_thousand_row_backlog_drains_in_one_beat_burst() {
     );
 
     assert_eq!(
-        delivered_event_ids(&fabric, "se-observer-s149").await.len(),
+        delivered_event_ids(&fabric, "se-observer-s154").await.len(),
         BACKLOG,
         "every backlogged event reached the stream"
     );
