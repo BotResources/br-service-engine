@@ -305,38 +305,30 @@ stale `Put` after a newer `Retract` is a no-op). The hosted outbox relay drains
 in batches whose cap equals its drain bound, so a backlog bursts within one beat
 instead of one batch per beat, and a periodic hygiene pass (`with_sweep_every`)
 deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
-<<<<<<< HEAD
 `with_message_retention`; because a durable replays from the start of its stream,
 the engine refuses at boot a `message_retention` below the `max_age` of any
 integration stream an inbound reaction binds (an unlimited `max_age` is refused
 too), so a claim can never be swept before its message can still be redelivered.
-The sweep is best-effort and never lowers readiness. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
-||||||| 77fd58e
-`with_message_retention` — a bound the operator sets to at least the outbox
-stream's retention plus its dedup window; the sweep is best-effort and never
-lowers readiness. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
-=======
-`with_message_retention` — a bound the operator sets to at least the outbox
-stream's retention plus its dedup window; the sweep is best-effort and never
-lowers readiness. The relay skips its publish pass while `Nats::reachable()` is
-false, so a full outbox during a broker outage costs nothing per beat and never
-freezes the single beat task (heartbeat, cron, scheduled boundaries and the
-readiness refresh keep running; the `nats_grace` probe alone takes the pod DOWN);
-each publish is bounded by `PUBLISH_ACK_TIMEOUT`. A transient publish failure
-never counts an attempt while the broker is unreachable, so a committed row is
-retried forever through an outage rather than exhausting a budget; only a row
-that keeps failing against a reachable broker is bounded and, at the bound, is
-dead-lettered (`DeadLetterSource::Outbox`) in the same transaction that marks it
-`FAILED`. `service_engine_outbox_pending` and
+The sweep is best-effort and never lowers readiness. The relay skips its publish
+pass while `Nats::reachable()` is false, so a full outbox during a broker outage
+costs nothing per beat and never freezes the single beat task (heartbeat, cron,
+scheduled boundaries and the readiness refresh keep running; the `nats_grace`
+probe alone takes the pod DOWN); each publish is bounded by `PUBLISH_ACK_TIMEOUT`.
+A transient publish failure never counts an attempt while the broker is
+unreachable, so a committed row is retried forever through an outage rather than
+exhausting a budget; only a row that keeps failing against a reachable broker is
+bounded and, at the bound, is dead-lettered (`DeadLetterSource::Outbox`) in the
+same transaction that marks it `FAILED`. `service_engine_outbox_pending` and
 `service_engine_outbox_oldest_age_seconds` gauge the backlog depth and its oldest
 waiting row. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
->>>>>>> feat/engine/p2-b-outbox
-`publish`) and `register_offer::<O>()`: a saved noun that carries an offer stages
-its dirty key (`service_engine.offer_dirty`) in the same transaction as the
-write; the leader drains dirty keys by claiming and resolving them in a short
-transaction, then doing the KV round-trips outside any transaction — a `create`
-for an absent key or a compare-and-set on the revision the leader read, a failed
-set leaving the key dirty for the next drain — and finally raising the per-key
+`publish`) and `register_offer::<O>()`: a saved or `cx.delete`'d noun that
+carries an offer stages its dirty key (`service_engine.offer_dirty`) in the same
+transaction as the write; the pod holding the offer's single fixed-slot lease
+(renewed on the beat, taken over by another pod only once it expires) drains
+dirty keys, claiming them skip-locked and resolving them in a short transaction,
+then doing the KV round-trips outside any transaction — a `create` for an absent
+key or a compare-and-set on the revision the leader read at resolve, a failed set
+leaving the key dirty for the next drain — and finally raising the per-key
 watermark and deleting the marker in a small fenced transaction that asserts the
 lease. So a concurrent mutation on an offered noun never waits on the drain, and
 a leader frozen past its lease fails its writes instead of regressing the bucket.
@@ -435,7 +427,8 @@ Postgres chunks, so the erased key stays sealed and the beat's seal-purge then
 drops its NATS subject), presence keys and blobs, then marks the row purged. The purge
 is durable: a pod that dies between commit and purge leaves the row unpurged and
 the beat drains it over the persisted manifest. A slice retracts the person's
-offers by dirtying them (`cx.dirty_offer`), so the leader retracts within a beat.
+offers by dirtying them — `cx.delete` for a deleted row, `cx.dirty_offer` for a
+row anonymised outside the aggregate API — so the leader retracts within a beat.
 Idempotent.
 Other services react to `PersonErased`; `known_*` mirrors follow the producer's
 offer retract, never the event.
@@ -611,9 +604,10 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s171` and `s176`–`s179` — drives the real engine through an in-crate `sample` service and
+`s001`–`s182` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
-injection, direct impact-bus/transport assertions): shared-consumer ownership
+injection, a one-shot offer-drain pause, direct impact-bus/transport
+assertions): shared-consumer ownership
 across two pods, ack-after-durable with a crash before commit, poison budget to
 dead letter, early parking and release, the sequence guard, the mutation gate
 deny/allow through one pipeline, all three persistence styles over one `counter`

@@ -109,6 +109,8 @@ impl<'a> Ops<'a> {
     }
 
     pub fn delete<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        self.offers
+            .stage_for(aggregate, &mut self.staged.offer_dirty)?;
         let reconcile_key = reconcile_key::<A>(aggregate)?;
         let mut released = self.blob_seen.remove(&reconcile_key).unwrap_or_default();
         for reference in aggregate.blob_refs() {

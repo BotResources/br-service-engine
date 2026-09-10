@@ -104,8 +104,8 @@ pub use engine::{
 };
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 pub use engine_pipeline::{
-    boot_blob_engine, boot_offer_engine, boot_offer_engine_reconciling, boot_panic_engine,
-    boot_pipeline_engine,
+    boot_blob_engine, boot_offer_engine, boot_offer_engine_leased, boot_offer_engine_reconciling,
+    boot_panic_engine, boot_pipeline_engine,
 };
 
 pub use assignment::{
@@ -127,10 +127,10 @@ pub use paged::{
     AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
 };
 pub use pipeline::{
-    CloseWidget, CreateWidget, DetonateWidget, ImportWidgets, LockWidget, MintSecret, SampleFault,
-    SampleReactionFault, ScheduleCreate, WidgetCreated, close_widget, create_widget,
-    create_widget_coords, detonate_widget, detonate_widget_coords, import_widgets, lock_widget,
-    lock_widget_coords, mint_secret, schedule_create,
+    CloseWidget, CreateWidget, DeleteWidget, DetonateWidget, ImportWidgets, LockWidget, MintSecret,
+    RelabelWidget, SampleFault, SampleReactionFault, ScheduleCreate, WidgetCreated, close_widget,
+    create_widget, create_widget_coords, delete_widget, detonate_widget, detonate_widget_coords,
+    import_widgets, lock_widget, lock_widget_coords, mint_secret, relabel_widget, schedule_create,
 };
 pub use presence::{
     Cursor, CursorKey, CursorValue, CursorView, Typing, TypingKey, TypingValue, TypingView,

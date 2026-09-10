@@ -211,6 +211,7 @@ fn install_log_capture() {
     });
 }
 
+
 fn base_config(pod: &str, addr: SocketAddr) -> EngineConfig {
     EngineConfig::new(
         ChannelName::new("example").expect("valid channel"),

@@ -9,7 +9,8 @@ use crate::sample::engine::engine_config;
 use crate::sample::erase::note::{EraseNoteOffer, EraseNoteProjector, EraseNoteStream};
 use crate::sample::erase::secret::SecretEraser;
 use crate::sample::erase::slice::{
-    AttachNoteBlob, FailingEraser, LedgerEraser, MemoEraser, NoteEraser, attach_note_blob,
+    AttachNoteBlob, FailingEraser, LedgerEraser, MemoEraser, NoteDeleteEraser, NoteEraser,
+    attach_note_blob,
 };
 use crate::sample::presence::Typing;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
@@ -78,6 +79,26 @@ pub async fn boot_erase_lane_a_engine(
     engine
         .register_accumulator(EraseNoteStream)
         .expect("register the erase-note accumulator so lane A binds its STREAMING stream");
+    engine
+}
+
+pub async fn boot_erase_via_delete_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    service: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = boot(db, nats, channel, pod, service).await;
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_offer::<EraseNoteOffer>()
+        .expect("register the erase-note offer");
+    engine
+        .register_erasable(NoteDeleteEraser)
+        .expect("register the cx.delete-based note eraser");
     engine
 }
 
