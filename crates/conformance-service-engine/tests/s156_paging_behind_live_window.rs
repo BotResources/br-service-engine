@@ -58,8 +58,14 @@ async fn s156_a_page_appends_older_keys_behind_the_live_window_without_a_reset()
         .await
         .expect("the page request runs against the live session");
     assert_eq!(report.added, 2, "the older page appended two keys");
-    assert_eq!(report.released, 0, "nothing fell off under a generous capacity");
-    assert_eq!(report.delivered, 2, "the two new keys are delivered as Upserts");
+    assert_eq!(
+        report.released, 0,
+        "nothing fell off under a generous capacity"
+    );
+    assert_eq!(
+        report.delivered, 2,
+        "the two new keys are delivered as Upserts"
+    );
 
     let first = next_delta(&mut stream, SOON).await.expect("an Upsert");
     let second = next_delta(&mut stream, SOON).await.expect("an Upsert");
@@ -79,7 +85,11 @@ async fn s156_a_page_appends_older_keys_behind_the_live_window_without_a_reset()
         assignment_ids(&[upserted(&second).clone()])[0],
     ];
     paged.sort();
-    assert_eq!(paged, vec![ids[2], ids[3]], "the page holds the two keys just before the head");
+    assert_eq!(
+        paged,
+        vec![ids[2], ids[3]],
+        "the page holds the two keys just before the head"
+    );
 
     let deeper = engine
         .page(
@@ -93,7 +103,11 @@ async fn s156_a_page_appends_older_keys_behind_the_live_window_without_a_reset()
     let third = next_delta(&mut stream, SOON).await.expect("an Upsert");
     let fourth = next_delta(&mut stream, SOON).await.expect("an Upsert");
     assert!(matches!(third, Delta::Upsert { .. }) && matches!(fourth, Delta::Upsert { .. }));
-    assert_eq!(fourth.revision().get(), 5, "still contiguous, still no Reset");
+    assert_eq!(
+        fourth.revision().get(),
+        5,
+        "still contiguous, still no Reset"
+    );
 
     db.cleanup().await;
 }

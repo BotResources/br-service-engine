@@ -45,8 +45,14 @@ async fn s159_a_registration_threshold_resets_where_the_global_default_still_dif
         ))
         .await
         .expect("the default-threshold session attaches");
-    assert_eq!(reset_views(&next_delta(&mut low, SOON).await.unwrap()).len(), 3);
-    assert_eq!(reset_views(&next_delta(&mut default, SOON).await.unwrap()).len(), 3);
+    assert_eq!(
+        reset_views(&next_delta(&mut low, SOON).await.unwrap()).len(),
+        3
+    );
+    assert_eq!(
+        reset_views(&next_delta(&mut default, SOON).await.unwrap()).len(),
+        3
+    );
 
     delete_assignment(&pool, ids[0]).await;
     delete_assignment(&pool, ids[1]).await;

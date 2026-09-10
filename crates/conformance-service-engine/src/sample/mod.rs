@@ -115,14 +115,14 @@ pub use gated::{
     reasons,
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
-pub use paged::{
-    AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
-};
 pub use offer::{
     MintThenReject, PublishedWidget, WidgetOffer, mint_then_reject, offer_dirty_keys,
     published_widget, seed_bucket, widget_key,
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
+pub use paged::{
+    AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
+};
 pub use pipeline::{
     CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, SampleFault,
     SampleReactionFault, ScheduleCreate, WidgetCreated, close_widget, create_widget,

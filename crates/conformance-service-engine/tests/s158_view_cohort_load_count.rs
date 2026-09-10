@@ -46,7 +46,10 @@ async fn s158_one_load_per_cohort_per_frame_whatever_the_number_of_viewers() {
     retitle(&pool, subject_a, "a renamed").await;
     retitle(&pool, subject_b, "b renamed").await;
     let report = engine
-        .render(vec![resource(&subject_a, Dims::ALL), resource(&subject_b, Dims::ALL)])
+        .render(vec![
+            resource(&subject_a, Dims::ALL),
+            resource(&subject_b, Dims::ALL),
+        ])
         .await
         .expect("the pass runs");
 

@@ -58,8 +58,13 @@ async fn s160_a_per_impact_view_emits_the_cause_but_never_faults_on_a_causeless_
         causeless_report.faults.is_empty(),
         "a PerImpact projector must not fault on a causeless impact"
     );
-    let coalesced = next_delta(&mut stream, SOON).await.expect("a coalesced Upsert");
-    assert!(matches!(coalesced, Delta::Upsert { .. }), "got {coalesced:?}");
+    let coalesced = next_delta(&mut stream, SOON)
+        .await
+        .expect("a coalesced Upsert");
+    assert!(
+        matches!(coalesced, Delta::Upsert { .. }),
+        "got {coalesced:?}"
+    );
     assert_eq!(
         upsert_cause(&coalesced),
         None,

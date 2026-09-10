@@ -99,8 +99,7 @@ pub use graphql::{
     AuthReject, CODE_EXTENSION, GraphqlState, JsonScalar, MutationAck, PASSPORT_HEADER,
     PassportPrincipal, PrincipalRejected, Query, SchemaSlices, SliceFragment, ack, ack_bulk, app,
     attach, attach_with_session, cause_json, engine_schema, execute, execute_bulk, key_json,
-    mutation_error, page, serve,
-    typed_presence_view, typed_view,
+    mutation_error, page, serve, typed_presence_view, typed_view,
 };
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};

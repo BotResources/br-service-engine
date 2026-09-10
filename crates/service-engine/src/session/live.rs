@@ -311,7 +311,11 @@ mod tests {
             window.members, survivors,
             "the head (1, 2) and the newest retained page (7, 8) survive"
         );
-        assert_eq!(window.pages.len(), 1, "only the newest page is still tracked");
+        assert_eq!(
+            window.pages.len(),
+            1,
+            "only the newest page is still tracked"
+        );
     }
 
     #[test]

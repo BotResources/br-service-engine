@@ -117,9 +117,7 @@ pub(crate) async fn run_pass_focused<P: Principal>(
                 witness: None,
             });
             entry.keys.extend(window.dirty.keys().cloned());
-            if entry.witness.is_none()
-                && entry.representative.id() != window.representative.id()
-            {
+            if entry.witness.is_none() && entry.representative.id() != window.representative.id() {
                 entry.witness = Some(window.representative.clone());
             }
         }

@@ -54,7 +54,10 @@ async fn s157_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head
         .await
         .expect("the first page appends the keys before the head");
     assert_eq!(first.added, 2);
-    assert_eq!(first.released, 0, "the window is exactly at capacity, nothing falls off");
+    assert_eq!(
+        first.released, 0,
+        "the window is exactly at capacity, nothing falls off"
+    );
     let _ = drain(&mut stream).await;
 
     let second = engine
@@ -73,7 +76,11 @@ async fn s157_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head
     assert_eq!(second.delivered, 2, "only the new keys are delivered");
 
     let deltas = drain(&mut stream).await;
-    assert_eq!(deltas.len(), 2, "the released page produces no delta of its own");
+    assert_eq!(
+        deltas.len(),
+        2,
+        "the released page produces no delta of its own"
+    );
     for delta in &deltas {
         assert!(
             matches!(delta, Delta::Upsert { .. }),
@@ -85,7 +92,11 @@ async fn s157_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head
         .map(|delta| assignment_ids(&[upserted(delta).clone()])[0])
         .collect();
     arrived.sort();
-    assert_eq!(arrived, vec![ids[0], ids[1]], "the deepest page's keys arrived");
+    assert_eq!(
+        arrived,
+        vec![ids[0], ids[1]],
+        "the deepest page's keys arrived"
+    );
 
     retitle(&pool, ids[2], "edited-released").await;
     let released = engine
