@@ -13,6 +13,7 @@ use crate::inbound::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
 use crate::inbound::{Claimed, Ordering, advance_sequence, claim};
 use crate::inbound::{ReactionInvoker, ReactionRegistry};
 use crate::offers::OfferStagers;
+use crate::pipeline::confirm::{record_confirmations, stored_confirmations};
 use crate::pipeline::context::Reaction;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::OutboundContext;
@@ -92,6 +93,32 @@ impl DirectPipeline {
             .map_err(|error| classify_engine(&error))
     }
 
+    async fn replay_confirmation(
+        &self,
+        mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
+        msg: &Incoming,
+    ) -> DispatchOutcome {
+        let stored = match stored_confirmations(&mut tx, msg.message_id, &msg.reaction).await {
+            Ok(stored) => stored,
+            Err(error) => {
+                let _ = tx.rollback().await;
+                return DispatchOutcome::Failed(classify_engine(&error));
+            }
+        };
+        if stored.is_empty() {
+            let _ = tx.rollback().await;
+            return DispatchOutcome::Applied(Applied::NoOp(NoOp::Duplicate));
+        }
+        let staged = Staged {
+            outbox: stored,
+            ..Staged::default()
+        };
+        match flush_and_commit(tx, &staged, self.transport.as_ref()).await {
+            Ok(()) => DispatchOutcome::Applied(Applied::NoOp(NoOp::Duplicate)),
+            Err(error) => DispatchOutcome::Failed(classify_engine(&error)),
+        }
+    }
+
     async fn run(&self, msg: &Incoming) -> DispatchOutcome {
         let Some(invoker) = self.reactions.invoker(&msg.reaction).cloned() else {
             return DispatchOutcome::Failed(DispatchError::terminal(format!(
@@ -105,8 +132,7 @@ impl DirectPipeline {
         };
         match claim(&mut tx, msg.message_id, &msg.reaction).await {
             Ok(Claimed::Duplicate) => {
-                let _ = tx.rollback().await;
-                return DispatchOutcome::Applied(Applied::NoOp(NoOp::Duplicate));
+                return self.replay_confirmation(tx, msg).await;
             }
             Ok(Claimed::Fresh) => {}
             Err(error) => {
@@ -165,6 +191,12 @@ impl DirectPipeline {
                 staged.impacts.len(),
                 self.impacts_per_commit
             )));
+        }
+        if let Err(error) =
+            record_confirmations(&mut tx, msg.message_id, &msg.reaction, &staged.outbox).await
+        {
+            let _ = tx.rollback().await;
+            return DispatchOutcome::Failed(classify_engine(&error));
         }
         match flush_and_commit(tx, &staged, self.transport.as_ref()).await {
             Ok(()) => {

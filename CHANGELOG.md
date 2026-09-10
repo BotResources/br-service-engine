@@ -102,7 +102,16 @@ durable name, so a message is owned by one pod at a time.
 - The per-(producer, key) sequence guard (`service_engine.sequence_guard`) and
   the idempotency claim (`service_engine.message_claim`), applied inside the
   effect transaction; the claim is keyed `(message_id, reaction)`, so two
-  reactions of one service on the same coordinate each run once.
+  reactions of one service on the same coordinate each run once. The confirmation
+  the reaction emitted is stored on the claim row (`message_claim.confirmations`)
+  in the same transaction as the effect; a later command carrying an
+  already-claimed id re-emits that stored confirmation through the outbox instead
+  of acking a silent no-op, so a producer that lost its confirmation past the
+  broker's duplicate window is answered again without re-running the effect — the
+  aggregate does nothing, the engine replays. A command that reuses an
+  aggregate id under a *fresh* message id is a genuine duplicate the reaction
+  decides on (re-emit its confirmation, or a typed rejection), never a
+  dead-letter for a legitimate replay.
 
 **Direct write pipeline and handler contexts.** A GraphQL mutation and a NATS
 command run **one** pipeline: load, gate (the affordance function in deny mode,
@@ -235,7 +244,10 @@ landed beyond `last_seq` between the replay and the seal is refused
 by the seal, and sealing a key that already carries a marker is refused
 (`EngineError::AlreadySealed`) rather than rewriting the sealed record — the
 deadline `seal_current` treats that as a lost race. `seal_partial` and
-`seal_current` are the cancel gestures. Boot binds the gitops-declared
+`seal_current` are the cancel gestures. `seal_current` folds the chunks under the
+same per-key advisory lock it seals with and returns *that* state, so a chunk that
+becomes durable while the seal is waiting for the lock is folded, deleted and
+present in the returned state rather than read before the lock and lost. Boot binds the gitops-declared
 `STREAMING_{service}` stream (bind-only, fail-loud; readiness stays DOWN when a
 registered accumulator has no stream) and one ephemeral consumer per pod folds
 every `(key, seq, chunk)` frame published on `stream.{service}.{key}` into the

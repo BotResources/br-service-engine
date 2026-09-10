@@ -31,6 +31,16 @@ pub fn create_card<'r>(
             ));
         }
         let cmd = msg.0;
+        if let Some(existing) = cx.load::<CardAggregate>(&cmd.card_id).await? {
+            cx.emit(OutCardReady {
+                ready: CardReady {
+                    card_id: cmd.card_id,
+                    board_id: existing.0.board_id,
+                },
+                version: 1,
+            })?;
+            return Ok(());
+        }
         let cause = CardEvent::Created {
             board_id: cmd.board_id,
             title: cmd.title.clone(),
@@ -66,6 +76,9 @@ pub fn person_created<'r>(
     Box::pin(async move {
         let event = msg.0;
         let card_id = welcome_card_id(event.person_id);
+        if cx.load::<CardAggregate>(&card_id).await?.is_some() {
+            return Ok(());
+        }
         let title = format!("Welcome {}", event.display_name);
         let cause = CardEvent::Created {
             board_id: event.board_id,

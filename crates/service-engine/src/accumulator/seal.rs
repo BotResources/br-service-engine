@@ -4,6 +4,7 @@ use sqlx::{PgConnection, PgPool, Row};
 
 use crate::accumulator::guard;
 use crate::accumulator::{ChunkSeq, Registered};
+use crate::dyn_compat::ErasedState;
 use crate::error::EngineError;
 use crate::time::Timestamp;
 use crate::wire::KeyBytes;
@@ -35,19 +36,47 @@ pub(crate) async fn seal_current(
     tx: &mut PgConnection,
     key: &KeyBytes,
     at: Timestamp,
-) -> Result<ChunkSeq, EngineError> {
+) -> Result<(ChunkSeq, ErasedState), EngineError> {
     let key_value = hold_and_refuse_if_sealed(entry, tx, key).await?;
-    let high_water: i64 = sqlx::query(
-        "SELECT COALESCE(MAX(seq) + 1, 0) AS high_water FROM service_engine.accumulator_chunk \
-         WHERE accumulator = $1 AND key = $2",
+    let (high_water, state) = fold_current(entry, tx, &key_value).await?;
+    write_marker(entry, tx, &key_value, high_water, at).await?;
+    Ok((ChunkSeq::from_storable(high_water.max(0)), state))
+}
+
+async fn fold_current(
+    entry: &Registered,
+    tx: &mut PgConnection,
+    key_value: &serde_json::Value,
+) -> Result<(i64, ErasedState), EngineError> {
+    let rows = sqlx::query(
+        "SELECT seq, chunk FROM service_engine.accumulator_chunk \
+         WHERE accumulator = $1 AND key = $2 ORDER BY seq",
     )
     .bind(entry.name.as_str())
-    .bind(&key_value)
-    .fetch_one(&mut *tx)
-    .await?
-    .get("high_water");
-    write_marker(entry, tx, &key_value, high_water, at).await?;
-    Ok(ChunkSeq::from_storable(high_water.max(0)))
+    .bind(key_value)
+    .fetch_all(&mut *tx)
+    .await?;
+    let high_water = rows
+        .last()
+        .map(|row| row.get::<i64, _>("seq") + 1)
+        .unwrap_or(0);
+    let mut state = entry.erased.init_state();
+    let mut expected = ChunkSeq::ZERO;
+    for row in &rows {
+        let raw = row.get::<i64, _>("seq");
+        if raw < 0 {
+            continue;
+        }
+        let seq = ChunkSeq::from_storable(raw);
+        if seq != expected {
+            break;
+        }
+        entry
+            .erased
+            .fold(&mut state, seq, &row.get::<serde_json::Value, _>("chunk"))?;
+        expected = seq.next();
+    }
+    Ok((high_water, state))
 }
 
 pub(crate) async fn seal_upto(
