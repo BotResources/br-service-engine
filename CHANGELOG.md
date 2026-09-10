@@ -95,14 +95,30 @@ durable name, so a message is owned by one pod at a time.
   handler's disposition, so a coarse `Store(_) => Retry` cannot nak a constraint
   violation forever.
 - The `service_engine.dead_letter` table and `DeadLetters` store (`record`,
-  `list` by `DeadLetterSource`, `discard`, `retry` — retry re-publishes with a
-  fresh dedup token but the original logical id, so the claim and sequence guard
-  keep a replay on newer state a no-op). Dead-lettering stages an impact on the
-  ops noun in the same transaction, so an ops view updates like any other change.
-- The per-(producer, key) sequence guard (`service_engine.sequence_guard`) and
-  the idempotency claim (`service_engine.message_claim`), applied inside the
-  effect transaction; the claim is keyed `(message_id, reaction)`, so two
-  reactions of one service on the same coordinate each run once.
+  `record_work`, `list` by `DeadLetterSource`, `discard`, `retry` — retry
+  re-publishes with a fresh dedup token but the original logical id, so the claim
+  and sequence guard keep a replay on newer state a no-op). It is the one table
+  for **every source of work**: inbound reactions, scheduled messages, cron ticks
+  and a mirror stuck past its restart threshold all record there
+  (`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror}`), each staging an impact
+  on the ops noun in the same transaction and incrementing the
+  `service_engine_dead_letters_total` counter labelled by source.
+- The per-(producer, reaction, key) sequence guard
+  (`service_engine.sequence_guard`) and the idempotency claim
+  (`service_engine.message_claim`), applied inside the effect transaction; the
+  claim is keyed `(message_id, reaction)`, and the guard is scoped per reaction,
+  so two reactions consuming different facts of one producer under one key keep
+  independent watermarks and never drop each other's messages.
+- Inbound-consumer and lane-A ingress supervision: each runs under a supervisor
+  that restarts it with bounded backoff (one log per step, never a hot spin) and,
+  past a consecutive-failure threshold, lowers readiness (`REASON_INBOUND_STOPPED`,
+  a `service_engine_dependency_up{dependency="inbound"}` gauge) so a dead consumer
+  never leaves the pod deaf while it reports ready; on shutdown a consumer naks its
+  pulled-but-unprocessed frames so they redeliver to a live pod.
+- Scheduled messages carry a per-row `attempts` count and publish isolated from
+  the rest of their batch, so one message that cannot publish is dead-lettered
+  past its delivery budget while the rest of the batch and the next beat still
+  fire, rather than one poison row rolling back and re-blocking the queue forever.
 
 **Direct write pipeline and handler contexts.** A GraphQL mutation and a NATS
 command run **one** pipeline: load, gate (the affordance function in deny mode,
@@ -140,7 +156,8 @@ producer sequence `(producer = service, seq_key = aggregate key, seq = aggregate
 version)` at emit time; the engine persists it on the outbox row
 (`integration_outbox.producer` / `seq_key` / `seq`) and renders the three
 `Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
-traffic is ordered and the per-`(producer, seq_key)` sequence guard is reachable.
+traffic is ordered and the per-`(producer, reaction, seq_key)` sequence guard is
+reachable.
 The inbound loop decodes the envelope, dedups on the `Br-Message-Id`/envelope id
 (tolerating a non-uuid `Nats-Msg-Id` — a foreign fabric producer no longer
 dead-letters), hands the reaction the inner payload, and exposes the sender's
@@ -442,16 +459,29 @@ its own readiness handle and `/readyz` route.
 bound of the intent's config table at boot (`session_max_age`, `lock_timeout`,
 `nats_grace`, `listener_queue_threshold`, `window_capacity`, `impacts_per_commit`,
 `listener_channel_capacity`, the `lease` outlasting the `beat`, `session_max_age`
-outlasting `session_ttl`, `listener_queue_threshold` in `(0.0, 1.0]`) and carries an optional `service`
-label and `http_addr`. A session lives at most `session_max_age` (ended with the
+outlasting `session_ttl`, `listener_queue_threshold` in `(0.0, 1.0]`,
+`lock_timeout` strictly below `ack_wait`, `max_ack_pending` positive) and carries
+an optional `service` label and `http_addr`. `ack_wait` (30 s) and
+`max_ack_pending` (256) are fields on `EngineConfig` that build the inbound
+consumer, so the lock-timeout-below-ack-wait relation is enforced rather than
+assumed. A session lives at most `session_max_age` (ended with the
 stream-closing signal so the client reconnects with a fresh passport, distinct
 from `session_ttl`); the WebSocket connection carrying it is closed at the same
 bound measured from the handshake, so the bound holds even when a client keeps
 the socket open. A `NatsHealth` tracker keeps the pod UP through an outage
-shorter than `nats_grace` and DOWN past it. Every metric is labelled by `service`
-and `pod`; `impacts_committed_total` is the notify-budget counter, and each
-degrade-table dependency is a `dependency_up` gauge. Four alerts ship as a
-`PrometheusRule` in `observability/service-engine-alerts.yaml`.
+shorter than `nats_grace` and DOWN past it. Past `nats_grace` the accumulated and
+presence lanes pause and every session that watches one is told on its
+subscription: the engine emits an out-of-band `LanesPaused { lanes }` notice and,
+on return, a `LanesResumed { lanes }` notice followed by a `Reset` of the session.
+The notice carries no revision, so `Reset` / `Upsert` / `Remove` contiguity is
+untouched; the subscription union exposes `LanesPaused` / `LanesResumed` as
+members, `Engine::lane_notices` exposes the raw signal, and the union's generated
+`subscribe(deltas, notices)` merges it. Every metric is labelled by `service`
+and `pod`; `impacts_committed_total` is the notify-budget counter,
+`dead_letters_total` counts dead letters by source, and each degrade-table
+dependency (postgres, listener, nats, mirrors, inbound) is a `dependency_up`
+gauge. Four alerts ship as a `PrometheusRule` in
+`observability/service-engine-alerts.yaml`.
 
 **Postgres schema (reserved range),** applied by `schema::migrate`
 (`ignore_missing`) with `grant_engine_access`: `scheduled_impact`, `leader_slot`,

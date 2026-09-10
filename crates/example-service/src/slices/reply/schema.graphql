@@ -5,11 +5,24 @@ A scalar that can represent any JSON value.
 """
 scalar JSON
 
+enum Lane {
+	ACCUMULATED
+	PRESENCE
+}
+
+type LanesPaused {
+	lanes: [Lane!]!
+}
+
+type LanesResumed {
+	lanes: [Lane!]!
+}
+
 type MutationAck {
 	success: Boolean!
 }
 
-union ReplyDelta = ReplyReset | ReplyUpsert | ReplyRemove
+union ReplyDelta = ReplyReset | ReplyUpsert | ReplyRemove | LanesPaused | LanesResumed
 
 type ReplyMutation {
 	startReply(id: UUID!, boardId: UUID!): MutationAck!
@@ -58,7 +71,7 @@ type ReplyView {
 
 union ReplyViewUnion = ReplyView
 
-union TypingDelta = TypingReset | TypingUpsert | TypingRemove
+union TypingDelta = TypingReset | TypingUpsert | TypingRemove | LanesPaused | LanesResumed
 
 type TypingRemove {
 	revision: Int!

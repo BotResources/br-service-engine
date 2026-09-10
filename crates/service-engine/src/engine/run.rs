@@ -232,29 +232,28 @@ impl<P: Principal> Engine<P> {
             }
         };
 
-        let lane_a =
-            match crate::engine::lane_a::spawn_if_registered(
-                &nats,
-                &config,
-                &accumulators,
-                inbound_health.clone(),
-            )
-            .await
-            {
-                Ok(tasks) => tasks,
-                Err(error) => {
-                    readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
-                    stop_mirrors.notify_waiters();
-                    stop_presence.notify_waiters();
-                    join_presence(presence_task.take()).await;
-                    if let Some(inbound) = inbound.take() {
-                        inbound.stop();
-                        inbound.join().await;
-                    }
-                    render.shutdown().await;
-                    return Err(error);
+        let lane_a = match crate::engine::lane_a::spawn_if_registered(
+            &nats,
+            &config,
+            &accumulators,
+            inbound_health.clone(),
+        )
+        .await
+        {
+            Ok(tasks) => tasks,
+            Err(error) => {
+                readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
+                stop_mirrors.notify_waiters();
+                stop_presence.notify_waiters();
+                join_presence(presence_task.take()).await;
+                if let Some(inbound) = inbound.take() {
+                    inbound.stop();
+                    inbound.join().await;
                 }
-            };
+                render.shutdown().await;
+                return Err(error);
+            }
+        };
         let crate::engine::lane_a::LaneATasks {
             stop_ingress,
             stop_purge,

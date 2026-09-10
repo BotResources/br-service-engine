@@ -15,8 +15,8 @@ use crate::housekeeping::lane::ResetAll;
 use crate::housekeeping::scheduled_message::{
     DEFAULT_SCHEDULED_MESSAGE_BATCH, DEFAULT_SCHEDULED_MESSAGE_BUDGET, fire_due,
 };
-use crate::inbound::DeadLetters;
 use crate::impact::TransportEvent;
+use crate::inbound::DeadLetters;
 use crate::nats::Nats;
 use crate::presence::PresenceRegistry;
 use crate::principal::Principal;

@@ -153,7 +153,10 @@ mod tests {
         let mut tracker = HealthTracker::new("commands".to_string(), health, 3);
         assert!(*rx.borrow_and_update());
         tracker.failed(Duration::ZERO, DEFAULT_HEALTHY_UPTIME, "boom");
-        assert!(*rx.borrow_and_update(), "one quick failure keeps the pod ready");
+        assert!(
+            *rx.borrow_and_update(),
+            "one quick failure keeps the pod ready"
+        );
         tracker.failed(Duration::ZERO, DEFAULT_HEALTHY_UPTIME, "boom");
         tracker.failed(Duration::ZERO, DEFAULT_HEALTHY_UPTIME, "boom");
         assert!(
@@ -178,6 +181,9 @@ mod tests {
         a.promote();
         assert!(!*rx.borrow_and_update(), "b is still down");
         b.promote();
-        assert!(*rx.borrow_and_update(), "both up, so the aggregate recovers");
+        assert!(
+            *rx.borrow_and_update(),
+            "both up, so the aggregate recovers"
+        );
     }
 }

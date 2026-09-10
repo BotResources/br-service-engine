@@ -175,7 +175,9 @@ impl<P: Principal> Engine<P> {
         self.render_runtime().attach(req).await
     }
 
-    pub fn lane_notices(&self) -> impl futures_util::Stream<Item = crate::lanes::LaneNotice> {
+    pub fn lane_notices(
+        &self,
+    ) -> impl futures_util::Stream<Item = crate::lanes::LaneNotice> + use<P> {
         let channel = self.render_runtime().lane_channel();
         crate::lanes::notices(channel.receiver(), channel.lanes())
     }

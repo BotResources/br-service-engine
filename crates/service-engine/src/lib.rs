@@ -102,7 +102,6 @@ pub use graphql::{
     attach, cause_json, engine_schema, execute, execute_bulk, key_json, lane_notice_stream,
     mutation_error, serve, typed_presence_view, typed_view,
 };
-pub use lanes::{Lane, LaneNotice, LanesPaused, LanesResumed};
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
 pub use housekeeping::gc::{Gc, GcRound, SessionGc};
@@ -116,6 +115,7 @@ pub use housekeeping::relay::{RelayRound, RelayRuntime};
 pub use housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
 pub use impact::{Deps, Dims, ForeignKey, Impact, TransportEvent};
 pub use inbound::{Disposition, ReactionError};
+pub use lanes::{Lane, LaneNotice, LanesPaused, LanesResumed};
 pub use mirror::{
     Change, ChangeOp, Consumed, Known, KnownScope, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader,
     MirrorReady, Project, Projection, Shadow, Shadows,

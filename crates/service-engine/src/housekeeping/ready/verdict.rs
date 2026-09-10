@@ -135,7 +135,14 @@ mod tests {
     #[test]
     fn a_dead_inbound_consumer_while_nats_is_up_takes_the_pod_out_of_rotation() {
         assert_eq!(
-            verdict(Some(true), Some(NatsCondition::Up), false, &converged(), None, &[]),
+            verdict(
+                Some(true),
+                Some(NatsCondition::Up),
+                false,
+                &converged(),
+                None,
+                &[]
+            ),
             Some(REASON_INBOUND_STOPPED),
             "a consumer that stopped while the broker is reachable leaves the pod deaf, so it must \
              not report ready"

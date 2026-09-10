@@ -28,7 +28,8 @@ pub use health::{MirrorCondition, MirrorsHealth, MirrorsHealthReceiver};
 type Board = Arc<watch::Sender<MirrorsHealth>>;
 
 const MIRROR_DEAD_LETTER_THRESHOLD: u32 = 5;
-const MIRROR_DEAD_LETTER_NAMESPACE: Uuid = Uuid::from_u128(0x91130000_c0c07100_b0000000_dead1e77u128);
+const MIRROR_DEAD_LETTER_NAMESPACE: Uuid =
+    Uuid::from_u128(0x91130000_c0c07100_b0000000_dead1e77u128);
 
 pub struct MirrorSupervisor {
     mirrors: Vec<MirrorHandle>,

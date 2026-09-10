@@ -80,8 +80,11 @@ impl InboundConsumer {
         health: InboundHealth,
         cfg: SupervisorConfig,
     ) {
-        let mut tracker =
-            HealthTracker::new(self.subscription.reaction.clone(), health, cfg.failure_threshold);
+        let mut tracker = HealthTracker::new(
+            self.subscription.reaction.clone(),
+            health,
+            cfg.failure_threshold,
+        );
         loop {
             if *cancel.borrow() {
                 break;
@@ -89,7 +92,8 @@ impl InboundConsumer {
             let consumer = match self.open().await {
                 Ok(consumer) => consumer,
                 Err(error) => {
-                    let delay = tracker.failed(Duration::ZERO, cfg.healthy_uptime, &describe(&error));
+                    let delay =
+                        tracker.failed(Duration::ZERO, cfg.healthy_uptime, &describe(&error));
                     if sleep_or_cancel(delay, &mut cancel).await {
                         break;
                     }

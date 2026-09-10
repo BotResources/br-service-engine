@@ -262,8 +262,11 @@ async fn run_lane_a_supervised(
     stop: Arc<Notify>,
 ) {
     let cfg = SupervisorConfig::default();
-    let mut tracker =
-        HealthTracker::new(format!("streaming:{service}"), health, cfg.failure_threshold);
+    let mut tracker = HealthTracker::new(
+        format!("streaming:{service}"),
+        health,
+        cfg.failure_threshold,
+    );
     loop {
         let established = establish(
             &nats,
@@ -302,7 +305,8 @@ async fn run_lane_a_supervised(
                 }
             }
             Err(error) => {
-                let delay = tracker.failed(started.elapsed(), cfg.healthy_uptime, &describe(&error));
+                let delay =
+                    tracker.failed(started.elapsed(), cfg.healthy_uptime, &describe(&error));
                 if sleep_or_notified(delay, &stop).await {
                     return;
                 }

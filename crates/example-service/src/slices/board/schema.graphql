@@ -1,6 +1,6 @@
 scalar Affordances
 
-union BoardDelta = BoardReset | BoardUpsert | BoardRemove
+union BoardDelta = BoardReset | BoardUpsert | BoardRemove | LanesPaused | LanesResumed
 
 type BoardMutation {
 	createBoard(id: UUID!, name: String!, isPublic: Boolean!): MutationAck!
@@ -53,11 +53,24 @@ A scalar that can represent any JSON value.
 """
 scalar JSON
 
+enum Lane {
+	ACCUMULATED
+	PRESENCE
+}
+
+type LanesPaused {
+	lanes: [Lane!]!
+}
+
+type LanesResumed {
+	lanes: [Lane!]!
+}
+
 type MutationAck {
 	success: Boolean!
 }
 
-union OrgBoardDelta = OrgBoardReset | OrgBoardUpsert | OrgBoardRemove
+union OrgBoardDelta = OrgBoardReset | OrgBoardUpsert | OrgBoardRemove | LanesPaused | LanesResumed
 
 type OrgBoardRemove {
 	revision: Int!
