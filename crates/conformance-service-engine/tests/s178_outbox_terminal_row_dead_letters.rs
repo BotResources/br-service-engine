@@ -9,7 +9,7 @@ use uuid::Uuid;
 const MAX_ATTEMPTS: u32 = 5;
 
 #[tokio::test]
-async fn s179_a_row_the_reachable_broker_keeps_rejecting_is_dead_lettered_not_abandoned() {
+async fn s178_a_row_the_reachable_broker_keeps_rejecting_is_dead_lettered_not_abandoned() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     let fabric = nats.nats().await;

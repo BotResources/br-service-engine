@@ -12,7 +12,7 @@ const POLL: Duration = Duration::from_millis(50);
 const SERVICE: &str = "erasedelete";
 
 #[tokio::test]
-async fn s182_erasing_a_person_retracts_their_offered_row_through_cx_delete() {
+async fn s181_erasing_a_person_retracts_their_offered_row_through_cx_delete() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -25,7 +25,7 @@ async fn s182_erasing_a_person_retracts_their_offered_row_through_cx_delete() {
     seed_note(&pool, id, person, tenant, "the person's note").await;
 
     let engine =
-        boot_erase_via_delete_engine(&db, fabric.clone(), "se_s182", "pod-s182", SERVICE).await;
+        boot_erase_via_delete_engine(&db, fabric.clone(), "se_s181", "pod-s181", SERVICE).await;
     let shutdown = engine.shutdown_handle();
     let eraser = engine.eraser();
     let running = tokio::spawn(engine.run());

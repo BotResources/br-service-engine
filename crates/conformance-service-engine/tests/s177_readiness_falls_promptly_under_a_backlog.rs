@@ -17,14 +17,14 @@ const DETECTION_MARGIN: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s178_a_pending_backlog_does_not_delay_the_nats_down_verdict() {
+async fn s177_a_pending_backlog_does_not_delay_the_nats_down_verdict() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    let config = engine_config("se_s178_backlog_down", "pod-s178")
+    let config = engine_config("se_s177_backlog_down", "pod-s177")
         .with_beat(BEAT)
         .with_nats_grace(NATS_GRACE);
     let readiness = ReadinessHandle::ready();

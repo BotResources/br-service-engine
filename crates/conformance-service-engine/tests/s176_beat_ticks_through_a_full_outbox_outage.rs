@@ -12,22 +12,22 @@ use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
 
 const BACKLOG: usize = 200;
-const JOB: &str = "s177_beat";
-const POD: &str = "pod-s177";
+const JOB: &str = "s176_beat";
+const POD: &str = "pod-s176";
 const NATS_GRACE: Duration = Duration::from_secs(2);
 const READY_WITHIN: Duration = Duration::from_secs(25);
 const OUTAGE_OBSERVE: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(100);
 
 #[tokio::test]
-async fn s177_a_full_outbox_never_freezes_the_beat_while_nats_is_down() {
+async fn s176_a_full_outbox_never_freezes_the_beat_while_nats_is_down() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    let config = engine_config("se_s177_beat_ticks", POD)
+    let config = engine_config("se_s176_beat_ticks", POD)
         .with_beat(Duration::from_millis(100))
         .with_lease(Duration::from_secs(2))
         .with_nats_grace(NATS_GRACE);

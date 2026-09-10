@@ -14,7 +14,7 @@ const POLL: Duration = Duration::from_millis(50);
 const RELAY_SLOT: &str = "relay:widget_v1";
 
 #[tokio::test]
-async fn s183_two_pods_share_a_single_offer_leader_lease() {
+async fn s182_two_pods_share_a_single_offer_leader_lease() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -25,7 +25,7 @@ async fn s183_two_pods_share_a_single_offer_leader_lease() {
     let a = boot_offer_engine_reconciling(
         &db,
         nats.nats().await,
-        "se_s183",
+        "se_s182",
         "pod-a",
         Duration::from_secs(300),
     )
@@ -33,7 +33,7 @@ async fn s183_two_pods_share_a_single_offer_leader_lease() {
     let b = boot_offer_engine_reconciling(
         &db,
         nats.nats().await,
-        "se_s183",
+        "se_s182",
         "pod-b",
         Duration::from_secs(300),
     )

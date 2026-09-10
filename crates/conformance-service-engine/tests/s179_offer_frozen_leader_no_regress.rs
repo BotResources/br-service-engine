@@ -15,7 +15,7 @@ const POLL: Duration = Duration::from_millis(50);
 const HOLD_FOR: Duration = Duration::from_millis(1500);
 
 #[tokio::test]
-async fn s180_a_leader_frozen_past_its_lease_fails_its_stale_cas_instead_of_regressing() {
+async fn s179_a_leader_frozen_past_its_lease_fails_its_stale_cas_instead_of_regressing() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -25,9 +25,9 @@ async fn s180_a_leader_frozen_past_its_lease_fails_its_stale_cas_instead_of_regr
     let tenant = Uuid::now_v7();
     let lease = Duration::from_millis(600);
     let reconcile = Duration::from_secs(300);
-    let a = boot_offer_engine_leased(&db, nats.nats().await, "se_s180", "pod-a", reconcile, lease)
+    let a = boot_offer_engine_leased(&db, nats.nats().await, "se_s179", "pod-a", reconcile, lease)
         .await;
-    let b = boot_offer_engine_leased(&db, nats.nats().await, "se_s180", "pod-b", reconcile, lease)
+    let b = boot_offer_engine_leased(&db, nats.nats().await, "se_s179", "pod-b", reconcile, lease)
         .await;
     let sa = a.shutdown_handle();
     let sb = b.shutdown_handle();

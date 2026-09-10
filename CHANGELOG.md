@@ -655,14 +655,14 @@ clears the per-key watermark, after which the source's re-staged set converges
 the rebuilt bucket back to the store (`s171`). The outbox-outage scenarios prove
 a broker outage never loses a committed row nor freezes the beat: rows committed
 while NATS is down wait as `PENDING` and deliver exactly once on restart, with no
-dead letter (`s176`); a full outbox backlog with NATS down keeps the beat ticking
+dead letter (`s175`); a full outbox backlog with NATS down keeps the beat ticking
 — the schema-version heartbeat and a cron's leader slots keep advancing while
-readiness carries the nats reason (`s177`); the same backlog does not delay the
+readiness carries the nats reason (`s176`); the same backlog does not delay the
 `REASON_NATS_UNREACHABLE` verdict past `nats_grace` plus a small detection margin,
 where a beat frozen on the backlog would have held the pod UP for minutes
-(`s178`); and a row the *reachable* broker keeps rejecting is retried under a
+(`s177`); and a row the *reachable* broker keeps rejecting is retried under a
 bound and then dead-lettered `DeadLetterSource::Outbox`, never silently
-abandoned as `FAILED` (`s179`).
+abandoned as `FAILED` (`s178`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL

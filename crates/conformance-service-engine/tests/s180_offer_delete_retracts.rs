@@ -14,7 +14,7 @@ const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s181_cx_delete_retracts_an_offered_row_before_the_reconcile() {
+async fn s180_cx_delete_retracts_an_offered_row_before_the_reconcile() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -25,8 +25,8 @@ async fn s181_cx_delete_retracts_an_offered_row_before_the_reconcile() {
     let engine = boot_offer_engine_reconciling(
         &db,
         nats.nats().await,
-        "se_s181",
-        "pod-s181",
+        "se_s180",
+        "pod-s180",
         Duration::from_secs(300),
     )
     .await;

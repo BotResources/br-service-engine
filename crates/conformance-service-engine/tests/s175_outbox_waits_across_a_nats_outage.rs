@@ -18,14 +18,14 @@ const PUBLISHED_WITHIN: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(100);
 
 #[tokio::test]
-async fn s176_committed_outbox_rows_wait_out_a_nats_outage_and_deliver_once_on_return() {
+async fn s175_committed_outbox_rows_wait_out_a_nats_outage_and_deliver_once_on_return() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    let config = engine_config("se_s176_outbox_wait", "pod-s176")
+    let config = engine_config("se_s175_outbox_wait", "pod-s175")
         .with_beat(Duration::from_millis(100))
         .with_nats_grace(NATS_GRACE);
     let readiness = ReadinessHandle::ready();
@@ -72,7 +72,7 @@ async fn s176_committed_outbox_rows_wait_out_a_nats_outage_and_deliver_once_on_r
     nats.restart().await;
     await_all_published(&pool, &staged).await;
 
-    let mut delivered = delivered_event_ids(&fabric, "se-observer-s176").await;
+    let mut delivered = delivered_event_ids(&fabric, "se-observer-s175").await;
     delivered.sort();
     let mut expected = staged.clone();
     expected.sort();
