@@ -371,10 +371,16 @@ frame whatever the number of viewers" is reachable without dropping to the raw
 `projector::Projector`. `fn cohort(principal) -> CohortKey` (default
 `CohortKey::principal(id)`) groups the sessions a frame loads together: sessions
 that share a cohort key load the noun's dirty keys once and each is personalised
-from that one load; in debug builds the render pass re-projects a second
-principal of the group and asserts byte-identical output, so a non-total cohort
-(two principals sharing a key that render differently) panics in test rather than
-leaking one viewer's view to another. `const RESET_THRESHOLD: Option<usize>`
+from that one load; in debug builds the render pass recomputes the cohort key of
+every session it grouped and asserts it equals the one the session was grouped
+under, so a `cohort()` that is not a pure function of the principal — which would
+land a session in more than one cohort and split or merge groups wrongly — panics
+in test rather than shipping. That a shared cohort renders one view for all its
+members is not asserted by re-projection (that would double the very load and
+projection the cohort exists to save, and the black-box `s158` proves it directly
+by comparing the delivered views); it is guaranteed by the `Visibility`
+declaration being total and injective (the collision-free `CohortKey` invariant
+below). `const RESET_THRESHOLD: Option<usize>`
 overrides the global `reset_threshold` for one projector (a churn beyond it on a
 repopulate sends a fresh `Reset` instead of a delta stream); `None` keeps the
 global default. `fn emission(&Impact) -> Emission` lets a projector ask for

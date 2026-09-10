@@ -5,7 +5,8 @@ use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::{AssignmentPage, PagedAssignments};
 use service_engine::ViewProjector;
 use service_engine::delta::Delta;
-use service_engine::impact::Dims;
+use service_engine::impact::{Deps, Dims, Impact};
+use service_engine::principal::Principal;
 use service_engine::session::{WindowParams, WindowSpec};
 use uuid::Uuid;
 
@@ -107,6 +108,92 @@ async fn s156_a_page_appends_older_keys_behind_the_live_window_without_a_reset()
         fourth.revision().get(),
         5,
         "still contiguous, still no Reset"
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s156_a_paged_history_survives_a_refresh_and_a_reconnect() {
+    let db = TestDb::fresh().await;
+    let pool = db.app_pool().clone();
+    let home = Uuid::now_v7();
+    let principal = member(&pool, Uuid::now_v7(), home).await;
+    let mut ids = Vec::new();
+    for n in 0..4 {
+        ids.push(assignment(&pool, home, &format!("m{n}")).await);
+    }
+
+    let mut registry = registry();
+    registry
+        .register_projector(ViewProjector::new(PagedAssignments))
+        .expect("the paged view registers");
+    let engine = runtime(&pool, render_config("pod-paging-survive"), registry);
+
+    let mut stream = engine
+        .attach(attach_request(
+            &principal,
+            vec![WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(1), false).unwrap()],
+        ))
+        .await
+        .expect("the session attaches");
+    next_delta(&mut stream, SOON).await.expect("a Reset");
+
+    engine
+        .page(
+            stream.id(),
+            PagedAssignments::NAME,
+            cursor(AssignmentPage::before(ids[3], 2)),
+        )
+        .await
+        .expect("a page appends the two rows behind the head");
+    let _ = drain(&mut stream).await;
+
+    let report = engine
+        .render(vec![Impact::principal_facts(
+            principal.id(),
+            Deps::bit(0).unwrap(),
+        )])
+        .await
+        .expect("the refresh pass runs");
+    assert_eq!(
+        report.ended, 0,
+        "a refresh that keeps the membership ends no session"
+    );
+    let after_refresh = drain(&mut stream).await;
+    assert!(
+        !after_refresh
+            .iter()
+            .any(|delta| matches!(delta, Delta::Remove { .. })),
+        "a refresh that keeps the membership drops no paged key: {after_refresh:?}"
+    );
+
+    retitle(&pool, ids[1], "edited after refresh").await;
+    engine
+        .render(vec![resource(&ids[1], Dims::ALL)])
+        .await
+        .expect("the edit pass runs");
+    let edit = next_delta(&mut stream, SOON)
+        .await
+        .expect("an edit to a paged row still reaches the holder after the refresh");
+    assert!(matches!(edit, Delta::Upsert { .. }), "got {edit:?}");
+    assert_eq!(assignment_ids(&[upserted(&edit).clone()]), vec![ids[1]]);
+
+    engine
+        .resnapshot_all()
+        .await
+        .expect("the reconnect resnapshots every live session");
+    let reset = next_delta(&mut stream, SOON)
+        .await
+        .expect("the reconnect delivers a fresh Reset");
+    assert!(matches!(reset, Delta::Reset { .. }), "got {reset:?}");
+    let mut carried = assignment_ids(reset_views(&reset));
+    carried.sort();
+    let mut expected = vec![ids[1], ids[2], ids[3]];
+    expected.sort();
+    assert_eq!(
+        carried, expected,
+        "the reconnect Reset carries the live head and the appended page, not the head alone"
     );
 
     db.cleanup().await;

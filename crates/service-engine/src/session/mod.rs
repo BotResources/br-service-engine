@@ -1,6 +1,7 @@
 pub(crate) mod live;
 pub(crate) mod store;
 pub mod stream;
+pub(crate) mod window;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

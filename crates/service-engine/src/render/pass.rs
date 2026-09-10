@@ -18,6 +18,7 @@ use crate::render::plan::{PlannedWindow, outgoing_for, plan};
 use crate::render::refresh::{refresh_principals, repopulate};
 use crate::render::repair::resnapshot;
 use crate::render::route;
+use crate::render::totality::debug_assert_group_totality;
 use crate::session::SessionId;
 use crate::session::store::SessionTable;
 use crate::wire::KeyBytes;
@@ -166,31 +167,6 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     deliver_pass(ctx, table, &delivery, &mut report, &mut faults, focus);
     repair_faulted(ctx, table, faults, &mut report).await;
     Ok(report)
-}
-
-#[cfg(debug_assertions)]
-fn debug_assert_group_totality<P: Principal>(ctx: &PassContext<'_, P>, window: &PlannedWindow<P>) {
-    let Some(projector) = ctx.registry.projector(&window.projector) else {
-        return;
-    };
-    let expected = if window.rls {
-        CohortKey::principal(window.representative.id())
-    } else {
-        projector.cohort(&window.representative)
-    };
-    debug_assert!(
-        expected == window.cohort,
-        "a session must land in exactly one cohort: the cohort recomputed for a principal \
-         differs from the one it was planned under, so cohort() is not a pure function of the \
-         principal and grouping would split or merge sessions wrongly"
-    );
-}
-
-#[cfg(not(debug_assertions))]
-fn debug_assert_group_totality<P: Principal>(
-    _ctx: &PassContext<'_, P>,
-    _window: &PlannedWindow<P>,
-) {
 }
 
 struct Delivery<'a, P: Principal> {

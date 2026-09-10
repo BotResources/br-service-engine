@@ -7,6 +7,7 @@ pub(crate) mod plan;
 pub(crate) mod refresh;
 pub(crate) mod repair;
 pub(crate) mod route;
+pub(crate) mod totality;
 
 pub use diff::{Transition, transition};
 pub use fault::SessionFault;

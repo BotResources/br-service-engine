@@ -455,9 +455,14 @@ The low-level `projector::Projector` stays as the escape hatch for a projector
 that joins nouns. `view::Projector` also carries the render-pass hooks: `fn
 cohort(principal)` (default per-principal) groups the sessions a frame loads
 together — sessions sharing a cohort key load once and personalise per session,
-and in debug the pass re-projects a second principal of the group and asserts
-byte-identical output so a non-total cohort panics in test rather than leaking a
-view; `const RESET_THRESHOLD: Option<usize>` overrides the global
+and in debug the pass recomputes each grouped session's cohort key and asserts it
+equals the one it was grouped under, so a `cohort()` that is not a pure function
+of the principal (which would land a session in more than one cohort) panics in
+test; that a shared cohort renders one identical view for all its members is not
+re-projected (it would double the load and projection the cohort saves, and
+`s158` proves it directly) but rests on the total, injective `Visibility`
+declaration and the collision-free `CohortKey`; `const RESET_THRESHOLD:
+Option<usize>` overrides the global
 `reset_threshold` per projector; and `fn emission(&Impact)` chooses `PerImpact`
 (one delta per causing impact with its `cause`) or the default `Coalesced`, where
 a `PerImpact` projector folds a **causeless** impact (principal-facts, foreign,
