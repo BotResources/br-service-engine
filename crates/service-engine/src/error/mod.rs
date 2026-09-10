@@ -66,9 +66,6 @@ pub enum EngineError {
     #[error("facts loaded for another projector were handed to {projector}")]
     FactsMismatch { projector: ProjectorName },
 
-    #[error("projector {projector} emits PerImpact but the impact carries no cause")]
-    CauseRequired { projector: ProjectorName },
-
     #[error(
         "the Query window on {projector} declares an empty Interest, so no impact can reach it"
     )]

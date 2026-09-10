@@ -32,10 +32,11 @@ where
     V: ViewProjector<Principal = P>,
 {
     let state = ctx.data::<Arc<GraphqlState<P>>>()?;
+    let principal = ctx.data::<P>()?.clone();
     let params = WindowParams::encode(cursor)?;
     state
         .runtime()
-        .page(session, V::NAME, params)
+        .page(&principal, session, V::NAME, params)
         .await
         .map_err(|error| Error::new(error.to_string()))
 }

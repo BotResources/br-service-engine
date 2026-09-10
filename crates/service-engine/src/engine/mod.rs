@@ -167,15 +167,6 @@ impl<P: Principal> Engine<P> {
         self.render_runtime().attach(req).await
     }
 
-    pub async fn page(
-        &self,
-        session: crate::session::SessionId,
-        projector: crate::name::ProjectorName,
-        cursor: crate::session::WindowParams,
-    ) -> Result<crate::runtime::PageReport, EngineError> {
-        self.render_runtime().page(session, projector, cursor).await
-    }
-
     pub fn push_chunk<A: Accumulator>(
         &self,
         key: &<A::Noun as Noun>::Key,

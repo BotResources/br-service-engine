@@ -140,13 +140,10 @@ pub(crate) fn outgoing_for<P: Principal>(
             continue;
         }
         for index in per_impact {
-            let cause =
-                impacts[index]
-                    .cause()
-                    .cloned()
-                    .ok_or_else(|| EngineError::CauseRequired {
-                        projector: projector.clone(),
-                    })?;
+            let cause = impacts[index]
+                .cause()
+                .cloned()
+                .expect("per_impact indices are filtered to impacts that carry a cause");
             outgoing.push(match &next {
                 Some(view) => Outgoing::Upsert {
                     projector: projector.clone(),

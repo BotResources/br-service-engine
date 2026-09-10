@@ -47,6 +47,7 @@ async fn s157_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head
 
     let first = engine
         .page(
+            &principal,
             stream.id(),
             PagedAssignments::NAME,
             cursor(AssignmentPage::before(ids[4], 2)),
@@ -62,6 +63,7 @@ async fn s157_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head
 
     let second = engine
         .page(
+            &principal,
             stream.id(),
             PagedAssignments::NAME,
             cursor(AssignmentPage::before(ids[2], 2)),

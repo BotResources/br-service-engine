@@ -52,6 +52,7 @@ async fn s156_a_page_appends_older_keys_behind_the_live_window_without_a_reset()
 
     let report = engine
         .page(
+            &principal,
             stream.id(),
             PagedAssignments::NAME,
             cursor(AssignmentPage::before(ids[4], 2)),
@@ -94,6 +95,7 @@ async fn s156_a_page_appends_older_keys_behind_the_live_window_without_a_reset()
 
     let deeper = engine
         .page(
+            &principal,
             stream.id(),
             PagedAssignments::NAME,
             cursor(AssignmentPage::before(ids[2], 2)),
@@ -141,6 +143,7 @@ async fn s156_a_paged_history_survives_a_refresh_and_a_reconnect() {
 
     engine
         .page(
+            &principal,
             stream.id(),
             PagedAssignments::NAME,
             cursor(AssignmentPage::before(ids[3], 2)),
@@ -227,6 +230,7 @@ async fn s156_an_edit_to_an_old_paged_row_reaches_the_viewer_who_holds_it() {
 
     engine
         .page(
+            &principal,
             stream.id(),
             PagedAssignments::NAME,
             cursor(AssignmentPage::before(ids[3], 2)),

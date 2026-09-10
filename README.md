@@ -394,8 +394,8 @@ cause silently dropped, so a service that attaches a large payload as a cause
 learns at the mutation, not by a viewer missing it — keep a cause to a small fact
 and carry bulk in the view.
 
-**Page through history behind a live window.** `Engine::page(session, projector,
-cursor)` (kit: `service_engine::page::<P, V>(ctx, session, &cursor)`) re-runs the
+**Page through history behind a live window.** The kit gesture
+`service_engine::page::<P, V>(ctx, session, &cursor)` re-runs the
 projector's `populate` with a cursor and **appends** the older keys it returns to
 the window the session already holds, delivering the new keys as `Upsert`s on the
 contiguous revision — scrolling back never sends a `Reset`. The window is the
@@ -408,12 +408,15 @@ session may hold across its pages: once appending a page would exceed it the
 session's `last_sent` with no `Remove` delta, since the client that asked for
 that page drops it too — while the live head is always retained. A paged history
 survives a principal-facts refresh and a reconnect `Reset` (still subject to its
-own visibility). Because a session lives on the pod that holds its socket, a page
-request must be issued **over that session's own connection** (a mutation over
-the same WebSocket lands on the same pod); a page for a session this pod does not
-hold is refused with `EngineError::NoLiveSession`. The client correlates the two
-by supplying its own `SessionId`: `attach_with_session` (kit) / a `session`
-argument on the subscription pins the id the `page` mutation then names. The
+own visibility). The gesture is authorized against the caller's `Passport`: the
+engine serves only a **live session owned by the calling principal**. Because a
+session lives on the pod that holds its socket, a page request must be issued
+**over that session's own connection** (a mutation over the same WebSocket lands
+on the same pod); a page for a session this pod does not hold — or one held for a
+different principal — is refused with `EngineError::NoLiveSession`, so knowing
+another session's id buys an attacker nothing. The client correlates the two by
+supplying its own `SessionId`: `attach_with_session` (kit) / a `session` argument
+on the subscription pins the id the `page` mutation then names. The
 reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
 size)` opens the head window and `pageCards(session, boardId, before, size)`
 appends an older page behind it.

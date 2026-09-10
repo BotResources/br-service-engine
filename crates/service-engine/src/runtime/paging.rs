@@ -22,6 +22,7 @@ pub struct PageReport {
 impl<P: Principal> SessionRuntime<P> {
     pub async fn page(
         &self,
+        caller: &P,
         session: SessionId,
         projector: ProjectorName,
         cursor: WindowParams,
@@ -30,7 +31,7 @@ impl<P: Principal> SessionRuntime<P> {
         let principal = {
             let live = table
                 .get(session)
-                .filter(|s| s.is_live())
+                .filter(|s| s.is_live() && s.principal.id() == caller.id())
                 .ok_or(EngineError::NoLiveSession { session })?;
             if !live.windows.iter().any(|w| w.projector == projector) {
                 return Err(EngineError::NoSuchWindow {
