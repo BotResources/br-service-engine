@@ -398,7 +398,7 @@ under, so a `cohort()` that is not a pure function of the principal — which wo
 land a session in more than one cohort and split or merge groups wrongly — panics
 in test rather than shipping. That a shared cohort renders one view for all its
 members is not asserted by re-projection (that would double the very load and
-projection the cohort exists to save, and the black-box `s158` proves it directly
+projection the cohort exists to save, and the black-box `s164` proves it directly
 by comparing the delivered views); it is guaranteed by the `Visibility`
 declaration being total and injective (the collision-free `CohortKey` invariant
 below). `const RESET_THRESHOLD: Option<usize>`

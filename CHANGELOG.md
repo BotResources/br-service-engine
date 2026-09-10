@@ -477,7 +477,7 @@ equals the one it was grouped under, so a `cohort()` that is not a pure function
 of the principal (which would land a session in more than one cohort) panics in
 test; that a shared cohort renders one identical view for all its members is not
 re-projected (it would double the load and projection the cohort saves, and
-`s158` proves it directly) but rests on the total, injective `Visibility`
+`s164` proves it directly) but rests on the total, injective `Visibility`
 declaration and the collision-free `CohortKey`; `const RESET_THRESHOLD:
 Option<usize>` overrides the global
 `reset_threshold` per projector; and `fn emission(&Impact)` chooses `PerImpact`
@@ -579,16 +579,16 @@ beat completing a purge the erase committed but never finished (`s138`), and
 erasing a person purging their chunks from the lane-A NATS stream (`s141`). The
 view-surface scenarios prove paging and its render hooks: a page appends the
 older keys behind the live window with contiguous revisions and no `Reset`, and
-an edit to an old paged row reaches its holder (`s156`); `window_capacity`
-releases the oldest page silently — no `Remove`, the live head retained (`s157`);
+an edit to an old paged row reaches its holder (`s162`); `window_capacity`
+releases the oldest page silently — no `Remove`, the live head retained (`s163`);
 one load per `(dirty key, cohort)` per frame with several sessions in one cohort
-and two in another on the `view::Projector` cohort hook (`s158`); a
+and two in another on the `view::Projector` cohort hook (`s164`); a
 per-registration `RESET_THRESHOLD` resetting a window where the global default
-still diffs (`s159`); a `PerImpact` view emitting its cause per caused impact
-yet folding a causeless impact coalesced without faulting (`s160`); and a page
+still diffs (`s165`); a `PerImpact` view emitting its cause per caused impact
+yet folding a causeless impact coalesced without faulting (`s166`); and a page
 request for a live session the caller does not own refused
 (`EngineError::NoLiveSession`) while delivering nothing on the victim's wire,
-the caller still paging her own session (`s161`).
+the caller still paging her own session (`s167`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL
