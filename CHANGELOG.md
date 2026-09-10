@@ -553,7 +553,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s169` — drives the real engine through an in-crate `sample` service and
+`s001`–`s171` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, direct impact-bus/transport assertions): shared-consumer ownership
 across two pods, ack-after-durable with a crash before commit, poison budget to
@@ -593,7 +593,14 @@ regime the projector does not declare, and the reverse, are both refused at
 attach (`s168`); and a stuck worker re-recorded on every beat records its
 dead-letter row once and increments `service_engine_dead_letters_total{source}`
 once, never once per restart, while a genuinely distinct dead letter still
-counts (`s169`).
+counts (`s169`); and a `LaneNotice` maps through a service's generated
+`subscription_union!` into the `LanesPaused` / `LanesResumed` union members and
+`subscribe(deltas, notices)` merges them into the subscription stream, so a lane
+pause reaches a GraphQL subscriber and not only `Engine::lane_notices` (`s170`);
+and a `KvDrainRelay` whose published-language bucket an operator truncated and
+rebuilt refuses to re-put its unchanged-version keys until `reset_watermarks`
+clears the per-key watermark, after which the source's re-staged set converges
+the rebuilt bucket back to the store (`s171`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL

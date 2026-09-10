@@ -9,4 +9,6 @@ pub use boot::{
 };
 pub use passport::{TENANT_CLAIM, passport_for};
 pub use rls::{RlsAssignmentProjector, RlsQueryRoot};
-pub use roots::{AssignmentQueries, MutationRoot, QueryRoot, SubscriptionRoot, WidgetQueries};
+pub use roots::{
+    AssignmentQueries, EngineDelta, MutationRoot, QueryRoot, SubscriptionRoot, WidgetQueries,
+};
