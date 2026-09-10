@@ -2,10 +2,9 @@ use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::engine::engine_config;
-use conformance_service_engine::sample::note::NoteProjector;
 use conformance_service_engine::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
 use conformance_service_engine::sample::render::member;
-use conformance_service_engine::sample::stream::{NoteBody, NoteKey};
+use conformance_service_engine::sample::{NoteBody, NoteKey, NoteProjector};
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
 use service_engine::pipeline::{Mutation, MutationFault, MutationInput};

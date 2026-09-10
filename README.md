@@ -388,6 +388,17 @@ its producer sequence from the aggregate's key and version at emit time
 ordered and the per-`(producer, seq_key)` sequence guard on the receiver drops a
 stale message as an acked no-op — a view never walks backwards.
 
+Every command gets exactly one confirmation, and a duplicate re-emits it. The
+confirmation a reaction emits is stored on its idempotency claim in the same
+transaction as the effect; a command that arrives with an already-claimed id
+re-emits that stored confirmation through the outbox (the aggregate does nothing,
+the engine replays), so a producer that lost its confirmation past the broker's
+duplicate window is answered again without re-running the effect. A command that
+reuses an *aggregate* id under a fresh message id is not a claim duplicate — it
+reaches the reaction, which decides: the example's `create_card` finds the card
+already exists and re-emits `CardReady` rather than colliding on the unique
+constraint and dead-lettering a legitimate replay.
+
 A service depends on `br-rust-common` only for frontier types (the Passport, the
 integration envelope and coordinates, the scope declaration and its handshake, the
 shared value types): the
