@@ -24,6 +24,7 @@ pub use deadletter::{
     DEAD_LETTER_NOUN, DeadLetter, DeadLetterSource, DeadLetters, DiscardOutcome, RetryOutcome,
 };
 pub use dispatch::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
+pub(crate) use disposition::log_reaction_db_fault;
 pub use disposition::{Disposition, ReactionError, sqlx_is_terminal};
 pub use guard::{Claimed, Ordering, advance_sequence, claim};
 pub use message::{

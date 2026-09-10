@@ -22,6 +22,28 @@ pub fn sqlx_is_terminal(error: &sqlx::Error) -> bool {
     }
 }
 
+pub(crate) fn log_reaction_db_fault(context: &'static str, error: &crate::error::EngineError) {
+    let crate::error::EngineError::Db(db) = error else {
+        return;
+    };
+    let cause = crate::chain::describe(error);
+    if sqlx_is_terminal(db) {
+        tracing::error!(
+            context,
+            %cause,
+            "a reaction aborted on a terminal database fault; the dead-letter row and the ack \
+             carry a generic reason while the underlying cause is kept here"
+        );
+    } else {
+        tracing::warn!(
+            context,
+            %cause,
+            "a reaction hit a retryable database fault and will be redelivered; the underlying \
+             cause is kept here"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

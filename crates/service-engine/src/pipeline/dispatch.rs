@@ -285,13 +285,6 @@ pub(crate) fn classify_engine(error: &EngineError) -> DispatchError {
 }
 
 fn classify_engine_logged(context: &'static str, error: &EngineError) -> DispatchError {
-    if matches!(error, EngineError::Db(_)) {
-        tracing::error!(
-            context,
-            cause = %crate::chain::describe(error),
-            "a reaction aborted on an internal engine error; the dead-letter row and the ack \
-             carry a generic reason while the underlying cause is kept here"
-        );
-    }
+    crate::inbound::log_reaction_db_fault(context, error);
     classify_engine(error)
 }
