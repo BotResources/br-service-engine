@@ -74,6 +74,30 @@ impl TestNats {
         let _ = self.child.wait();
     }
 
+    pub async fn restart(&mut self) {
+        self.stop();
+        let child = Command::new("nats-server")
+            .args([
+                "-js",
+                "-a",
+                "127.0.0.1",
+                "-p",
+                &self.port.to_string(),
+                "-n",
+                &self.name,
+                "-sd",
+                self.store.to_str().expect("a utf-8 store path"),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("nats-server must be on PATH to restart the broker in place");
+        self.child = child;
+        if !self.await_ready().await {
+            panic!("nats-server did not come back up on port {}", self.port);
+        }
+    }
+
     pub async fn nats(&self) -> Nats {
         Nats::connect(&self.url())
             .await

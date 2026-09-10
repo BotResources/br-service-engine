@@ -106,8 +106,8 @@ impl TestNats {
         js.create_key_value(async_nats::jetstream::kv::Config {
             bucket: format!("EPHEMERAL_{service}"),
             history: 1,
-            max_age: Duration::from_secs(5),
-            limit_markers: Some(Duration::from_secs(5)),
+            max_age: Duration::from_secs(300),
+            limit_markers: Some(Duration::from_secs(300)),
             ..Default::default()
         })
         .await

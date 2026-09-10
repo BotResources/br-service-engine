@@ -89,7 +89,8 @@ pub use blob::{
 };
 pub use blob_view::{Doc, DocProjector, DocView};
 pub use engine::{
-    SAMPLE_JOB, SAMPLE_RELAY, boot_blob_engine, boot_offer_engine, boot_offer_engine_reconciling,
+    FAST_PRESENCE_TTL, SAMPLE_JOB, SAMPLE_RELAY, SLOW_PRESENCE_TTL, boot_blob_engine,
+    boot_dual_presence_engine, boot_offer_engine, boot_offer_engine_reconciling,
     boot_presence_engine, boot_render_engine, boot_sample_engine, engine_config,
 };
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
@@ -117,7 +118,8 @@ pub use pipeline::{
     schedule_create,
 };
 pub use presence::{
-    Typing, TypingKey, TypingValue, TypingView, typing_key, typing_value, typing_window,
+    Cursor, CursorKey, CursorValue, CursorView, Typing, TypingKey, TypingValue, TypingView,
+    cursor_key, cursor_value, cursor_window, typing_key, typing_value, typing_window,
 };
 pub use principal::{
     FailingPrincipalResolver, SamplePrincipal, SamplePrincipalResolver, SampleRls,

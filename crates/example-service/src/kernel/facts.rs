@@ -2,6 +2,10 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use uuid::Uuid;
+
+pub struct BoardMemberships(pub Vec<Uuid>);
+
 #[derive(Default, Clone)]
 pub struct PrincipalFacts {
     map: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,

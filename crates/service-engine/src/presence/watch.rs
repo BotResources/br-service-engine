@@ -42,16 +42,24 @@ pub(crate) async fn bind_and_seed<P: Principal>(
         .await
         .map_err(|error| EngineError::Service(Box::new(error)))?;
     for lane in lanes {
-        if max_age > lane.ttl() {
+        if max_age < lane.ttl() {
             return Err(EngineError::Posture(format!(
-                "presence bucket {bucket_name} keeps values for {max_age:?}, longer than the \
-                 {ttl:?} lifetime the {projector} lane declares, so a stale value would outlive \
-                 its presence",
+                "presence bucket {bucket_name} caps values at {max_age:?}, shorter than the \
+                 {ttl:?} lifetime the {projector} lane declares, so the per-key TTL would be \
+                 truncated and the value would vanish before its presence ends",
                 ttl = lane.ttl(),
                 projector = lane.projector_name(),
             )));
         }
     }
+    reseed(&bucket, lanes).await?;
+    Ok(bucket)
+}
+
+async fn reseed<P: Principal>(
+    bucket: &KvBucket<Value>,
+    lanes: &[Arc<dyn PresenceLane<P>>],
+) -> Result<(), EngineError> {
     let entries = bucket
         .all()
         .await
@@ -59,10 +67,21 @@ pub(crate) async fn bind_and_seed<P: Principal>(
     for lane in lanes {
         lane.reseed(&entries)?;
     }
-    Ok(bucket)
+    Ok(())
+}
+
+const RECONNECT_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+
+fn emit_reset<P: Principal>(lanes: &[Arc<dyn PresenceLane<P>>], impacts: &PresenceImpacts) {
+    let resets = lanes
+        .iter()
+        .map(|lane| Impact::projector_reset(lane.projector_name()))
+        .collect();
+    let _ = impacts.send(Ok(TransportEvent::Impacts(resets)));
 }
 
 pub(crate) async fn run_watch<P: Principal>(
+    nats: Nats,
     bucket: KvBucket<Value>,
     lanes: Vec<Arc<dyn PresenceLane<P>>>,
     impacts: PresenceImpacts,
@@ -71,6 +90,8 @@ pub(crate) async fn run_watch<P: Principal>(
     let stopping = shutdown.notified();
     tokio::pin!(stopping);
     stopping.as_mut().enable();
+    let mut was_down = false;
+    let mut reseed_pending = false;
     loop {
         let mut watch = match bucket.watch_all().await {
             Ok(watch) => watch,
@@ -78,19 +99,51 @@ pub(crate) async fn run_watch<P: Principal>(
                 tracing::warn!(%error, "the presence watch could not be opened; retrying");
                 tokio::select! {
                     () = &mut stopping => return,
-                    () = tokio::time::sleep(std::time::Duration::from_millis(200)) => continue,
+                    () = tokio::time::sleep(RECONNECT_POLL) => continue,
                 }
             }
         };
+        let mut tick = tokio::time::interval(RECONNECT_POLL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            if reseed_pending && nats.reachable() {
+                match reseed(&bucket, &lanes).await {
+                    Ok(()) => {
+                        emit_reset(&lanes, &impacts);
+                        reseed_pending = false;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            "reseeding presence after a reconnect failed; sessions keep their \
+                             last values until a later reseed repairs them"
+                        );
+                    }
+                }
+            }
             let event = tokio::select! {
                 () = &mut stopping => return,
+                _ = tick.tick() => {
+                    if nats.reachable() {
+                        if was_down {
+                            was_down = false;
+                            reseed_pending = true;
+                        }
+                    } else {
+                        was_down = true;
+                    }
+                    continue;
+                }
                 event = watch.next::<Value>() => event,
             };
             match event {
-                None => break,
+                None => {
+                    reseed_pending = true;
+                    break;
+                }
                 Some(Err(error)) => {
                     tracing::warn!(%error, "the presence watch dropped; re-establishing");
+                    reseed_pending = true;
                     break;
                 }
                 Some(Ok(event)) => {

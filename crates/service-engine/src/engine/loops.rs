@@ -88,6 +88,7 @@ pub(super) async fn open_presence_stream<P: Principal>(
     let _ = presence.bucket_slot().set(bucket.clone());
     let (sender, stream) = crate::presence::presence_channel();
     let presence_task = tokio::spawn(crate::presence::run_watch(
+        nats.clone(),
         bucket,
         lanes,
         sender,

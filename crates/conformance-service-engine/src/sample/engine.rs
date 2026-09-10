@@ -22,7 +22,7 @@ use crate::sample::pipeline::{
     CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, ScheduleCreate, close_widget,
     create_widget, import_widgets, lock_widget, mint_secret, schedule_create,
 };
-use crate::sample::presence::Typing;
+use crate::sample::presence::{Cursor, Typing};
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::relays::RowClaimSampleRelay;
 use crate::sample::stream::NoteBody;
@@ -91,6 +91,36 @@ pub async fn boot_presence_engine(
     engine
         .register_presence::<Typing>(Duration::from_secs(30))
         .expect("register the typing presence lane");
+    engine
+}
+
+pub const FAST_PRESENCE_TTL: Duration = Duration::from_secs(2);
+pub const SLOW_PRESENCE_TTL: Duration = Duration::from_secs(6);
+
+pub async fn boot_dual_presence_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    service: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_service(service),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the dual-lane presence engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_presence::<Typing>(FAST_PRESENCE_TTL)
+        .expect("register the fast typing presence lane");
+    engine
+        .register_presence::<Cursor>(SLOW_PRESENCE_TTL)
+        .expect("register the slow cursor presence lane");
     engine
 }
 

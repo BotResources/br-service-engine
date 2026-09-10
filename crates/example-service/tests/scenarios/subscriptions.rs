@@ -233,6 +233,14 @@ async fn the_typed_presence_union_delivers_typing_over_the_wire() {
     let pass = passport(user, org, &[], false);
     let board = Uuid::now_v7();
 
+    ok(&world
+        .gql(
+            &pass,
+            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            serde_json::json!({ "id": board, "n": "drafts" }),
+        )
+        .await);
+
     let query = format!(
         "subscription{{typingDeltas(board:\"{board}\"){{\
             __typename \

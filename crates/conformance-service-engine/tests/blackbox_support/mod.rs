@@ -42,7 +42,7 @@ impl World {
         let nats_server = TestNats::spawn().await;
         nats_server.provision().await;
         nats_server
-            .provision_presence(SERVICE, Duration::from_secs(5))
+            .provision_presence(SERVICE, Duration::from_secs(300))
             .await;
         nats_server
             .provision_streaming(SERVICE, Duration::from_secs(300))
