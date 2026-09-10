@@ -26,12 +26,12 @@ impl InboundConsumer {
         ) {
             Ok(incoming) => incoming,
             Err(error) => {
-                self.dead_letter(
+                self.dead_letter_and_settle(
+                    message,
                     &self.unidentified(source, subject, message.payload.clone(), delivered),
                     &error.to_string(),
                 )
                 .await;
-                self.terminate(message).await;
                 return;
             }
         };
@@ -76,29 +76,46 @@ impl InboundConsumer {
             self.config.backoff_max,
         );
         match route {
-            Route::Nak(delay) => {
-                if let Err(ack) = message.ack_with(AckKind::Nak(Some(delay))).await {
-                    tracing::warn!(reaction = %incoming.reaction, %ack, "nak failed");
-                }
-            }
+            Route::Nak(delay) => self.nak(message, incoming, delay).await,
             Route::DeadLetter => {
-                self.dead_letter(incoming, &error.detail).await;
-                self.terminate(message).await;
+                self.dead_letter_and_settle(message, incoming, &error.detail)
+                    .await
             }
         }
     }
 
-    async fn dead_letter(&self, incoming: &Incoming, detail: &str) {
-        if let Err(error) = self
+    async fn dead_letter_and_settle(
+        &self,
+        message: &async_nats::jetstream::Message,
+        incoming: &Incoming,
+        detail: &str,
+    ) {
+        match self
             .dead_letters
             .record(DeadLetterSource::Reaction, incoming, detail)
             .await
         {
-            tracing::error!(
-                reaction = %incoming.reaction,
-                %error,
-                "a poison message could not be written to the dead-letter table"
-            );
+            Ok(()) => self.terminate(message).await,
+            Err(error) => {
+                tracing::error!(
+                    reaction = %incoming.reaction,
+                    %error,
+                    "the dead-letter write failed; the frame is nak'ed, not terminated, so the \
+                     broker keeps redelivering it until the table can record it"
+                );
+                self.nak(message, incoming, self.config.backoff_max).await;
+            }
+        }
+    }
+
+    async fn nak(
+        &self,
+        message: &async_nats::jetstream::Message,
+        incoming: &Incoming,
+        delay: std::time::Duration,
+    ) {
+        if let Err(ack) = message.ack_with(AckKind::Nak(Some(delay))).await {
+            tracing::warn!(reaction = %incoming.reaction, %ack, "nak failed");
         }
     }
 

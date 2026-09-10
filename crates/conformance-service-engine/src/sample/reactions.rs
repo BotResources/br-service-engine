@@ -164,3 +164,48 @@ pub fn lock_widget<'r>(
         Ok(())
     })
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DetonateWidget {
+    pub id: Uuid,
+    pub tenant: Uuid,
+    pub label: String,
+    pub explode: bool,
+}
+
+pub fn detonate_widget_coords() -> CommandCoords {
+    CommandCoords {
+        receiver: Bc::new("sample").unwrap(),
+        aggregate: CoordAggregate::new("widget").unwrap(),
+        verb: Verb::new("detonate").unwrap(),
+        version: 1,
+    }
+}
+
+impl ReactionMessage for DetonateWidget {
+    fn coordinates() -> ReactionCoordinates {
+        ReactionCoordinates::Command(detonate_widget_coords())
+    }
+
+    fn decode(payload: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(payload)
+    }
+}
+
+pub fn detonate_widget<'r>(
+    cx: &'r mut Reaction<'r>,
+    cmd: DetonateWidget,
+) -> BoxFuture<'r, Result<(), SampleReactionFault>> {
+    Box::pin(async move {
+        assert!(!cmd.explode, "detonate_widget was told to explode");
+        let widget = WidgetRow {
+            id: cmd.id,
+            tenant_id: cmd.tenant,
+            label: cmd.label,
+            closed: false,
+        };
+        cx.create(&widget).await?;
+        cx.impact_caused::<Widget, _>(&widget.id, "created")?;
+        Ok(())
+    })
+}

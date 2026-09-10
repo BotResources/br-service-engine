@@ -71,11 +71,19 @@ backoff (one log per step, never a hot spin), and past a consecutive-failure
 threshold the supervisor lowers readiness with
 `REASON_INBOUND_STOPPED` so a dead consumer never leaves the pod deaf while it
 reports ready; on shutdown a consumer naks its pulled-but-unprocessed frames so
-they redeliver to a live pod. The `service_engine.dead_letter` table is the one
-table for every source of work: inbound reactions, scheduled messages, cron
-ticks and a persistently stuck mirror all record there
+they redeliver to a live pod. A handler that panics is caught at dispatch, rolled
+back and dead-lettered as a terminal frame, so one panicking reaction never
+becomes an invisible poison that redelivers every `ack_wait` with readiness UP;
+`cx.principal` returns a typed `PrincipalUnresolved` (terminal) rather than
+panicking when a message carries no resolvable sender. The `service_engine.dead_letter`
+table is the one table for every source of work: inbound reactions, scheduled
+messages, cron ticks and a persistently stuck mirror all record there
 (`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror}`), each staging an
-ops-view impact and incrementing `service_engine_dead_letters_total` by source.
+ops-view impact and incrementing `service_engine_dead_letters_total` by source. A
+frame is terminated only once its dead-letter row is durably written: if that
+write fails (Postgres unreachable) the frame is nak'ed, not terminated, and the
+broker redelivers it until the table can record it, so an accepted message is
+never lost to a transient store outage.
 `register_mutation` and `register_bulk`: a GraphQL mutation and a
 NATS command run **one** direct write pipeline — load, gate (the affordance
 function in deny mode), domain command, `save` through the `Persistence` trait,
@@ -468,11 +476,15 @@ envelope, dedups on its id (the `Br-Message-Id`/envelope id, so a foreign
 producer's non-uuid `Nats-Msg-Id` no longer dead-letters), hands the reaction the
 inner payload, exposes the metadata on `Reaction` (`cx.metadata`, `cx.actor`), and
 resolves the sender's identity into the service's `Principal` through a registered
-resolver (`Engine::register_reaction_principal`) so `cx.principal()` lets a
-reaction gate on who sent the command — the example's `create_card` refuses a
-command whose actor is not a service. An `OutboundEvent`/`OutboundCommand` derives
-its producer sequence from the aggregate's key and version at emit time
-(`sequence()`); the engine renders it as the three `Br-Producer` / `Br-Seq-Key` /
+resolver (`Engine::register_reaction_principal`) so a reaction can gate on who sent
+the command — the example's `create_card` reads it with `cx.try_principal()` and
+refuses a command whose actor is not a service. `cx.principal()` is the checked
+accessor: it returns a typed `PrincipalUnresolved` (terminal disposition) rather
+than panicking when no sender principal is resolved. An `OutboundEvent`/`OutboundCommand`
+derives its producer sequence from the aggregate's key and version at emit time
+(`sequence()`), and a declared sequence with no configured service is refused with
+a configuration error at emit rather than silently dropped; the engine renders it
+as the three `Br-Producer` / `Br-Seq-Key` /
 `Br-Seq` headers and persists it on the outbox row, so engine→engine traffic is
 ordered and the per-`(producer, reaction, seq_key)` sequence guard on the receiver
 drops a stale message as an acked no-op — a view never walks backwards. The guard
@@ -483,10 +495,11 @@ drain bound, so
 a full batch signals the beat to come back), and a periodic hygiene pass
 (`EngineConfig::with_message_retention`, swept on `HostedOutboxRelay::with_sweep_every`)
 deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
-the retention — a bound the operator sets to at least the outbox stream's
-retention plus its dedup window, since a claim swept while the broker still
-dedups its id could let a redelivery re-run the effect; the sweep is best-effort
-and never lowers readiness. To recover a `KvDrainRelay`'s published-language
+the retention. Because an inbound durable replays from the start of its stream,
+the engine refuses at boot a `message_retention` below the `max_age` of any
+integration stream a reaction binds (an unlimited `max_age` is refused too), so a
+claim is never swept while its message can still be redelivered and re-run; the
+sweep itself is best-effort and never lowers readiness. To recover a `KvDrainRelay`'s published-language
 bucket that an operator truncated and rebuilt, call `reset_watermarks` and have
 the relay's source re-stage its set, so the version guard does not refuse the
 unchanged keys the rebuilt bucket lost.
