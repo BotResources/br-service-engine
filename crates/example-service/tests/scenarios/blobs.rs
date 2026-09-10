@@ -20,6 +20,14 @@ async fn a_blob_is_attached_through_the_presigned_post_policy() {
     ok(&world
         .gql(
             &pass,
+            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            serde_json::json!({ "id": board, "n": "attachments" }),
+        )
+        .await);
+
+    ok(&world
+        .gql(
+            &pass,
             "mutation($id:UUID!,$b:UUID!){startReply(id:$id,boardId:$b){success}}",
             serde_json::json!({ "id": reply, "b": board }),
         )
@@ -101,6 +109,14 @@ async fn a_viewer_downloads_an_attachment_a_non_viewer_is_denied_the_same_refere
     let outsider = passport(Uuid::now_v7(), Uuid::now_v7(), &[], false);
     let board = Uuid::now_v7();
     let reply = Uuid::now_v7();
+
+    ok(&world
+        .gql(
+            &viewer,
+            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            serde_json::json!({ "id": board, "n": "attachments" }),
+        )
+        .await);
 
     ok(&world
         .gql(
