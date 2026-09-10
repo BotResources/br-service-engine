@@ -19,6 +19,17 @@ pub(crate) async fn drain_one(
 ) -> Result<Option<Drained>, RelayError> {
     let claim = Claim::new(pod.clone(), batch);
     if let Some(hosted) = relay.hosted_drain(pg, &claim) {
+        if discipline == Discipline::Leader && !relay.self_fenced() {
+            return Err(engine(EngineError::Service(
+                format!(
+                    "{} is a Leader hosted relay that does not fence itself: a hosted drain \
+                     rides no slot transaction, so the relay must assert the lease inside its \
+                     own short transactions (self_fenced) or run through the tx-based leader path",
+                    relay.name()
+                )
+                .into(),
+            )));
+        }
         return hosted.await.map(Some);
     }
     let mut tx = pg.begin().await?;

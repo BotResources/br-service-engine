@@ -175,6 +175,10 @@ impl<O: Offer> Relay for OfferRelay<O> {
         Discipline::Leader
     }
 
+    fn self_fenced(&self) -> bool {
+        true
+    }
+
     fn drain<'a>(
         &'a self,
         _conn: &'a mut PgConnection,
