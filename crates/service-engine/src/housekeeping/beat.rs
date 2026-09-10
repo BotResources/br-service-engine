@@ -193,7 +193,7 @@ impl Beat {
         tokio::pin!(stopping);
         stopping.as_mut().enable();
         let mut next_tick = Instant::now();
-        loop {
+        'run: loop {
             if Instant::now() >= next_tick {
                 let mut more = self.tick(&pg).await.more;
                 let mut bursts = 0;
@@ -201,7 +201,7 @@ impl Beat {
                     bursts += 1;
                     more = tokio::select! {
                         biased;
-                        () = &mut stopping => return,
+                        () = &mut stopping => break 'run,
                         more = self.drain_backlog(&pg) => more,
                     };
                     tokio::task::yield_now().await;
@@ -211,13 +211,14 @@ impl Beat {
             let pause = next_tick.saturating_duration_since(Instant::now());
             tokio::select! {
                 biased;
-                () = &mut stopping => return,
+                () = &mut stopping => break 'run,
                 () = after_pass.notified() => {
                     self.relays.after_pass(&pg).await;
                 }
                 () = tokio::time::sleep(pause) => {}
             }
         }
+        self.cron.drain(&pg).await;
     }
 
     async fn queue_usage(&self) -> Option<f64> {

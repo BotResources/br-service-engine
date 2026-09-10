@@ -156,6 +156,15 @@ impl CronRuntime {
         round
     }
 
+    pub async fn drain(&mut self, pg: &PgPool) {
+        for index in 0..self.entries.len() {
+            if let Some(flight) = self.entries[index].running.take() {
+                let name = self.entries[index].name.clone();
+                flight.finish(pg, &name, self.lease).await;
+            }
+        }
+    }
+
     async fn settle(&mut self, pg: &PgPool, index: usize, round: &mut CronRound) {
         let Some(flight) = self.entries[index].running.take() else {
             return;
