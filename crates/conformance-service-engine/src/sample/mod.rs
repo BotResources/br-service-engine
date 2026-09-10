@@ -5,6 +5,7 @@ pub mod counter;
 pub mod cron;
 pub mod engine;
 pub mod engine_persistence;
+pub mod engine_pipeline;
 pub mod erase;
 pub mod gate;
 pub mod gated;
@@ -95,17 +96,18 @@ pub use blob::{
 };
 pub use blob_view::{Doc, DocProjector, DocView};
 pub use engine::{
-    FAST_PRESENCE_TTL, SAMPLE_JOB, SAMPLE_RELAY, SLOW_PRESENCE_TTL, boot_blob_engine,
-    boot_dual_presence_engine, boot_offer_engine, boot_offer_engine_reconciling,
+    FAST_PRESENCE_TTL, SAMPLE_JOB, SAMPLE_RELAY, SLOW_PRESENCE_TTL, boot_dual_presence_engine,
     boot_presence_engine, boot_render_engine, boot_sample_engine, engine_config,
 };
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
+pub use engine_pipeline::{
+    boot_blob_engine, boot_offer_engine, boot_offer_engine_reconciling, boot_pipeline_engine,
+};
 
 pub use assignment::{
     Assignment, AssignmentFacts, AssignmentProjector, AssignmentRow, AssignmentStore,
     AssignmentView,
 };
-pub use engine::boot_pipeline_engine;
 pub use gate::Gate;
 pub use gated::{
     AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, VisibleAssignments,

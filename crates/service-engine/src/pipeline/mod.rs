@@ -3,6 +3,7 @@ mod dispatch;
 mod effect;
 mod mutation;
 mod ops;
+mod ops_seal;
 mod outbound;
 mod staged;
 

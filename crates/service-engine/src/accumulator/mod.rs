@@ -1,3 +1,4 @@
+pub(crate) mod commit;
 pub mod flush;
 pub(crate) mod guard;
 mod hash;
