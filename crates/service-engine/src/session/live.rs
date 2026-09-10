@@ -280,6 +280,60 @@ mod tests {
         }
     }
 
+    fn key(n: u32) -> KeyBytes {
+        KeyBytes::encode(&n).expect("a key encodes")
+    }
+
+    fn windowed(members: &[u32], pages: &[&[u32]]) -> WindowState {
+        WindowState {
+            projector: ProjectorName::from_static("paged"),
+            params: WindowParams::none(),
+            members: members.iter().copied().map(key).collect(),
+            shape: WindowShape::Fixed,
+            pages: pages
+                .iter()
+                .map(|page| page.iter().copied().map(key).collect())
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn eviction_releases_the_oldest_pages_first_and_always_keeps_the_live_head() {
+        let mut window = windowed(&[1, 2, 3, 4, 5, 6, 7, 8], &[&[3, 4], &[5, 6], &[7, 8]]);
+        let released = window.evict_to_capacity(4);
+        assert_eq!(
+            released,
+            vec![key(3), key(4), key(5), key(6)],
+            "the two oldest pages are released, in order, to reach capacity"
+        );
+        let survivors: BTreeSet<KeyBytes> = [1, 2, 7, 8].into_iter().map(key).collect();
+        assert_eq!(
+            window.members, survivors,
+            "the head (1, 2) and the newest retained page (7, 8) survive"
+        );
+        assert_eq!(window.pages.len(), 1, "only the newest page is still tracked");
+    }
+
+    #[test]
+    fn eviction_under_capacity_releases_nothing() {
+        let mut window = windowed(&[1, 2, 3, 4], &[&[3, 4]]);
+        assert!(window.evict_to_capacity(4).is_empty());
+        assert_eq!(window.members.len(), 4);
+        assert_eq!(window.pages.len(), 1);
+    }
+
+    #[test]
+    fn eviction_keeps_a_key_a_retained_page_still_holds() {
+        let mut window = windowed(&[1, 2, 3, 4], &[&[3, 4], &[3]]);
+        let released = window.evict_to_capacity(3);
+        assert_eq!(
+            released,
+            vec![key(4)],
+            "key 3 is retained because the newer page still holds it; only 4 is released"
+        );
+        assert!(window.members.contains(&key(3)));
+    }
+
     #[test]
     fn a_burst_past_the_bound_is_upgraded_to_a_reset_instead_of_growing_the_pod() {
         let mut session = pending();

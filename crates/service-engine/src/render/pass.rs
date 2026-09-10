@@ -57,6 +57,7 @@ pub(crate) type Vanished = BTreeMap<SessionId, BTreeSet<(ProjectorName, KeyBytes
 struct Group<P> {
     keys: BTreeSet<KeyBytes>,
     representative: P,
+    witness: Option<P>,
 }
 
 pub(crate) async fn run_pass_focused<P: Principal>(
@@ -113,8 +114,14 @@ pub(crate) async fn run_pass_focused<P: Principal>(
             let entry = groups.entry(window.group()).or_insert_with(|| Group {
                 keys: BTreeSet::new(),
                 representative: window.representative.clone(),
+                witness: None,
             });
             entry.keys.extend(window.dirty.keys().cloned());
+            if entry.witness.is_none()
+                && entry.representative.id() != window.representative.id()
+            {
+                entry.witness = Some(window.representative.clone());
+            }
         }
     }
     report.cohorts = groups.len();
@@ -144,6 +151,18 @@ pub(crate) async fn run_pass_focused<P: Principal>(
             Ok((views, cost)) => {
                 report.loads += cost.loads;
                 report.projections += cost.projections;
+                #[cfg(debug_assertions)]
+                if let Some(witness) = &group.witness
+                    && let Ok((witness_views, _)) = renderer
+                        .render(projector, group_key.1, group_key.2.clone(), witness, &keys)
+                        .await
+                {
+                    debug_assert_eq!(
+                        views, witness_views,
+                        "a cohort is not total: two principals sharing one cohort key render \
+                         different views, which would deliver one principal's view to the other"
+                    );
+                }
                 rendered.insert(group_key.clone(), views);
             }
             Err(error) => {

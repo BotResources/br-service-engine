@@ -14,6 +14,7 @@ pub mod mirror;
 pub mod note;
 pub mod offer;
 pub mod outbox;
+pub mod paged;
 pub mod pipeline;
 pub mod pipeline_support;
 pub mod presence;
@@ -114,6 +115,9 @@ pub use gated::{
     reasons,
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
+pub use paged::{
+    AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
+};
 pub use offer::{
     MintThenReject, PublishedWidget, WidgetOffer, mint_then_reject, offer_dirty_keys,
     published_widget, seed_bucket, widget_key,
