@@ -170,20 +170,6 @@ impl<P: Principal> Engine<P> {
         let mut inbound = if subscriptions.is_empty() {
             None
         } else {
-            if let Err(error) = crate::inbound::validate_message_retention(
-                &nats,
-                &subscriptions,
-                config.message_retention,
-            )
-            .await
-            {
-                readiness_guard.set_not_ready(crate::nats::REASON_NO_STREAM);
-                stop_mirrors.notify_waiters();
-                stop_presence.notify_waiters();
-                join_presence(presence_task.take()).await;
-                render.shutdown().await;
-                return Err(error);
-            }
             let pipeline = Arc::new(DirectPipeline::new(
                 pg.clone(),
                 transport.clone() as Arc<dyn ImpactTransport>,
@@ -196,16 +182,25 @@ impl<P: Principal> Engine<P> {
                 config.service.clone(),
                 reaction_principal.clone(),
             ));
-            match InboundLoop::start(
-                nats.clone(),
-                subscriptions,
-                pipeline,
-                dead_letters.clone(),
-                config.inbound_config(),
-                inbound_health.clone(),
-            )
-            .await
-            {
+            let started = async {
+                crate::inbound::validate_message_retention(
+                    &nats,
+                    &subscriptions,
+                    config.message_retention,
+                )
+                .await?;
+                InboundLoop::start(
+                    nats.clone(),
+                    subscriptions,
+                    pipeline,
+                    dead_letters.clone(),
+                    config.inbound_config(),
+                    inbound_health.clone(),
+                )
+                .await
+            }
+            .await;
+            match started {
                 Ok(loop_handle) => Some(loop_handle),
                 Err(error) => {
                     readiness_guard.set_not_ready(crate::nats::REASON_NO_STREAM);
