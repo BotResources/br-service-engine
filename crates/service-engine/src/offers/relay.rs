@@ -9,7 +9,7 @@ use tokio::sync::OnceCell;
 use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
 use crate::name::RelayName;
-use crate::nats::{KvBucket, Nats, NatsError};
+use crate::nats::{KvBucket, Nats, NatsError, Revision};
 use crate::offer::Offer;
 use crate::offers::apply::{self, KvOutcome, Write};
 use crate::offers::leader::OfferLeader;
@@ -17,6 +17,8 @@ use crate::offers::marker::{self, Marker};
 use crate::offers::reconcile;
 use crate::relay::{Claim, Discipline, Drained, Relay};
 use crate::relays::kv_watermark;
+
+type Observed<V> = Option<(V, Revision)>;
 
 pub(crate) struct OfferRelay<O: Offer> {
     name: RelayName,
@@ -102,18 +104,16 @@ impl<O: Offer> OfferRelay<O> {
             self.finalize(pg, lease, Vec::new()).await?;
             return Ok(0);
         }
+        #[cfg(feature = "test-support")]
+        crate::offers::pause::wait().await;
         let total = resolved.len();
         let bucket = self.bucket().await?;
         let mut applied: Vec<Marker> = Vec::with_capacity(total);
-        for (marker, watermark, write) in resolved {
+        for (marker, watermark, write, observed) in resolved {
             if watermark.is_some_and(|held| marker.seq <= held) {
                 applied.push(marker);
                 continue;
             }
-            let observed = bucket
-                .get_with_revision(&marker.kv_key)
-                .await
-                .map_err(published_language)?;
             match apply::apply_cas(bucket, &marker.kv_key, &write, observed).await? {
                 KvOutcome::Applied => applied.push(marker),
                 KvOutcome::Conflict => {}
@@ -123,12 +123,14 @@ impl<O: Offer> OfferRelay<O> {
         Ok(total)
     }
 
+    #[allow(clippy::type_complexity)]
     async fn claim_and_resolve(
         &self,
         pg: &PgPool,
         lease: &mut Lease,
         batch: usize,
-    ) -> Result<Vec<(Marker, Option<u64>, Write<O::Published>)>, RelayError> {
+    ) -> Result<Vec<(Marker, Option<u64>, Write<O::Published>, Observed<O::Published>)>, RelayError>
+    {
         let mut tx = pg.begin().await?;
         if !self.leader.still_leader(&mut tx, lease).await? {
             let _ = tx.rollback().await;
@@ -142,7 +144,17 @@ impl<O: Offer> OfferRelay<O> {
             resolved.push((marker, watermark, write));
         }
         tx.commit().await?;
-        Ok(resolved)
+
+        let bucket = self.bucket().await?;
+        let mut out = Vec::with_capacity(resolved.len());
+        for (marker, watermark, write) in resolved {
+            let observed = bucket
+                .get_with_revision(&marker.kv_key)
+                .await
+                .map_err(published_language)?;
+            out.push((marker, watermark, write, observed));
+        }
+        Ok(out)
     }
 
     async fn finalize(
@@ -160,7 +172,6 @@ impl<O: Offer> OfferRelay<O> {
             kv_watermark::raise(&mut tx, &self.name, &marker.kv_key, marker.seq).await?;
             marker::delete(&mut tx, &self.name, marker).await?;
         }
-        self.leader.complete(&mut tx, lease).await?;
         tx.commit().await?;
         Ok(())
     }

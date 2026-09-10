@@ -65,6 +65,31 @@ pub async fn claim_slot_at(
     Ok(row.map(|row| held(name, pod, &row)))
 }
 
+pub async fn claim_singleton_lease(
+    conn: &mut PgConnection,
+    name: SlotName,
+    pod: &PodId,
+    lease: Duration,
+) -> Result<Option<Lease>, EngineError> {
+    refuse_zero_lease(lease)?;
+    let sql = format!(
+        "INSERT INTO {TABLE_LEADER_SLOT} AS held (name, slot, pod, lease_until, completed_at) \
+         VALUES ($1, $2, $3, now() + make_interval(secs => $4), NULL) \
+         ON CONFLICT (name, slot) DO UPDATE \
+            SET pod = EXCLUDED.pod, lease_until = EXCLUDED.lease_until, completed_at = NULL \
+          WHERE held.pod = EXCLUDED.pod OR held.lease_until <= now() \
+         RETURNING slot, lease_until"
+    );
+    let row = sqlx::query(&sql)
+        .bind(name.qualified())
+        .bind(Timestamp::UNIX_EPOCH)
+        .bind(pod.as_str())
+        .bind(lease.as_secs_f64())
+        .fetch_optional(conn)
+        .await?;
+    Ok(row.map(|row| held(name, pod, &row)))
+}
+
 pub async fn renew_slot(
     conn: &mut PgConnection,
     lease: &mut Lease,

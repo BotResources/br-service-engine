@@ -13,16 +13,11 @@ fn engine(error: EngineError) -> RelayError {
 pub(crate) struct OfferLeader {
     pod: PodId,
     lease: Duration,
-    slot_period: Duration,
 }
 
 impl OfferLeader {
-    pub(crate) fn new(pod: PodId, lease: Duration, slot_period: Duration) -> Self {
-        Self {
-            pod,
-            lease,
-            slot_period,
-        }
+    pub(crate) fn new(pod: PodId, lease: Duration) -> Self {
+        Self { pod, lease }
     }
 
     pub(crate) async fn claim(
@@ -40,10 +35,9 @@ impl OfferLeader {
             let _ = tx.rollback().await;
             return Ok(None);
         }
-        let lease =
-            leader::claim_current_slot(&mut tx, slot_name, self.slot_period, &self.pod, self.lease)
-                .await
-                .map_err(engine)?;
+        let lease = leader::claim_singleton_lease(&mut tx, slot_name, &self.pod, self.lease)
+            .await
+            .map_err(engine)?;
         match lease {
             Some(lease) => {
                 tx.commit().await?;
@@ -64,13 +58,5 @@ impl OfferLeader {
         leader::renew_slot(conn, lease, self.lease)
             .await
             .map_err(engine)
-    }
-
-    pub(crate) async fn complete(
-        &self,
-        conn: &mut PgConnection,
-        lease: &Lease,
-    ) -> Result<bool, RelayError> {
-        leader::complete_slot(conn, lease).await.map_err(engine)
     }
 }

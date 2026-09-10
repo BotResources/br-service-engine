@@ -159,11 +159,7 @@ impl<P: Principal> Engine<P> {
     }
 
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
-        let leader = crate::offers::OfferLeader::new(
-            self.config.pod_id.clone(),
-            self.config.lease,
-            self.config.beat,
-        );
+        let leader = crate::offers::OfferLeader::new(self.config.pod_id.clone(), self.config.lease);
         let relay = crate::offers::OfferRelay::<O>::new(
             self.nats.clone(),
             leader,

@@ -20,7 +20,8 @@ pub(crate) async fn pending(
 ) -> Result<Vec<Marker>, RelayError> {
     let rows = sqlx::query(&format!(
         "SELECT kv_key, agg_key, seq FROM {TABLE_OFFER_DIRTY} \
-         WHERE offer = $1 ORDER BY seq LIMIT $2"
+         WHERE offer = $1 ORDER BY seq LIMIT $2 \
+         FOR UPDATE SKIP LOCKED"
     ))
     .bind(name.as_str())
     .bind(i64::try_from(batch).unwrap_or(i64::MAX))
