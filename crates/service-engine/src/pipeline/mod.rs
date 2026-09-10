@@ -1,3 +1,4 @@
+mod classify;
 mod confirm;
 mod context;
 mod dispatch;
@@ -7,9 +8,11 @@ mod ops;
 mod ops_seal;
 mod outbound;
 mod staged;
+mod tx;
 
 pub use context::{Bulk, Mutation, PrincipalUnresolved, Reaction};
-pub(crate) use dispatch::{DirectPipeline, begin_scoped, flush_and_commit};
+pub(crate) use dispatch::DirectPipeline;
+pub(crate) use tx::{begin_scoped, flush_and_commit};
 pub use mutation::{MutationExecutor, MutationInput, MutationRegistry};
 pub use ops::Ops;
 pub use outbound::{OutboundCommand, OutboundEvent, ProducerSequence};

@@ -158,6 +158,12 @@ impl<'a> Ops<'a> {
         }
     }
 
+    fn note_config_terminal(&mut self, error: &EngineError) {
+        if self.staged.terminal_violation.is_none() && matches!(error, EngineError::Config(_)) {
+            self.staged.terminal_violation = Some(error.to_string());
+        }
+    }
+
     pub fn impact<N: Noun>(&mut self, key: &N::Key, dims: Dims) -> Result<(), EngineError> {
         self.staged.impacts.push(Impact::resource::<N>(key, dims)?);
         Ok(())
@@ -189,13 +195,25 @@ impl<'a> Ops<'a> {
     }
 
     pub fn emit<E: OutboundEvent>(&mut self, event: E) -> Result<(), EngineError> {
-        let record = event_record(&event, self.outbound()?)?;
+        let record = match self.outbound().and_then(|ctx| event_record(&event, ctx)) {
+            Ok(record) => record,
+            Err(error) => {
+                self.note_config_terminal(&error);
+                return Err(error);
+            }
+        };
         self.staged.outbox.push(record);
         Ok(())
     }
 
     pub fn command<C: OutboundCommand>(&mut self, command: C) -> Result<(), EngineError> {
-        let record = command_record(&command, self.outbound()?)?;
+        let record = match self.outbound().and_then(|ctx| command_record(&command, ctx)) {
+            Ok(record) => record,
+            Err(error) => {
+                self.note_config_terminal(&error);
+                return Err(error);
+            }
+        };
         self.staged.outbox.push(record);
         Ok(())
     }
