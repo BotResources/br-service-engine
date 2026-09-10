@@ -22,8 +22,6 @@ use br_core_integration::{CommandCoords, EventCoords, IntegrationEvent};
 use publish::publish_error;
 use serde::Serialize;
 
-use publish::publish_error;
-
 pub fn event_subject(coords: &EventCoords) -> String {
     format!(
         "integration.evt.{}.{}.{}.v{}",
