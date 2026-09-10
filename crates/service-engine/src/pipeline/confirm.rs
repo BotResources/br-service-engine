@@ -53,7 +53,10 @@ pub(crate) async fn record_confirmations(
     if records.is_empty() {
         return Ok(());
     }
-    let stored: Vec<StoredConfirmation> = records.iter().map(StoredConfirmation::from_record).collect();
+    let stored: Vec<StoredConfirmation> = records
+        .iter()
+        .map(StoredConfirmation::from_record)
+        .collect();
     let value = serde_json::to_value(&stored).map_err(|source| EngineError::Encode {
         what: "stored confirmation",
         source,
@@ -92,5 +95,8 @@ pub(crate) async fn stored_confirmations(
             what: "stored confirmation",
             source,
         })?;
-    Ok(stored.into_iter().map(StoredConfirmation::into_record).collect())
+    Ok(stored
+        .into_iter()
+        .map(StoredConfirmation::into_record)
+        .collect())
 }
