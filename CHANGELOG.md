@@ -553,7 +553,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s141` — drives the real engine through an in-crate `sample` service and
+`s001`–`s169` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, direct impact-bus/transport assertions): shared-consumer ownership
 across two pods, ack-after-durable with a crash before commit, poison budget to
@@ -588,7 +588,12 @@ still diffs (`s165`); a `PerImpact` view emitting its cause per caused impact
 yet folding a causeless impact coalesced without faulting (`s166`); and a page
 request for a live session the caller does not own refused
 (`EngineError::NoLiveSession`) while delivering nothing on the victim's wire,
-the caller still paging her own session (`s167`).
+the caller still paging her own session (`s167`). A window that asserts an RLS
+regime the projector does not declare, and the reverse, are both refused at
+attach (`s168`); and a stuck worker re-recorded on every beat records its
+dead-letter row once and increments `service_engine_dead_letters_total{source}`
+once, never once per restart, while a genuinely distinct dead letter still
+counts (`s169`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL

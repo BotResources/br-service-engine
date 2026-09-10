@@ -81,9 +81,13 @@ NATS command run **one** direct write pipeline — load, gate (the affordance
 function in deny mode), domain command, `save` through the `Persistence` trait,
 stage impacts (`cx.impact_caused` / `cx.impact_at` / `cx.impact_all`), stage
 outbox rows (`cx.emit` / `cx.command`), commit, respond — under `lock_timeout`
-below the consumer's `ack_wait` (a lock timeout is retryable, `nak`), with the
-idempotency claim and the per-(producer, reaction, key) sequence guard in the
-effect transaction. `ack_wait` and `max_ack_pending` are fields on
+below the consumer's `ack_wait` (a lock timeout is retryable, `nak`). The NATS
+command entry adds two rows to that same effect transaction that the GraphQL
+entry has no message for: the idempotency claim on the message id and the
+per-(producer, reaction, key) sequence guard, so a redelivered command is a
+no-op and a reordered one is dropped; a GraphQL mutation carries neither a
+message id nor a producer sequence and runs the pipeline once per call by
+construction. `ack_wait` and `max_ack_pending` are fields on
 `EngineConfig` (defaults 30 s and 256) that build the inbound consumer, and boot
 validation refuses a `lock_timeout` that is not strictly below `ack_wait`, so a
 pipeline transaction can never still hold its row lock when the consumer

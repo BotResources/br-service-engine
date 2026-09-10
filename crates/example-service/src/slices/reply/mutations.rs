@@ -16,7 +16,7 @@ const CANCEL_GRACE_SECONDS: i64 = 30;
 
 pub const NOT_A_MEMBER: Reason = Reason::new("not_a_board_member");
 
-pub fn typing_gate(principal: &AppPrincipal, board: Uuid) -> Gate {
+pub fn board_member_gate(principal: &AppPrincipal, board: Uuid) -> Gate {
     let is_member = principal
         .facts()
         .get::<BoardMemberships>()
@@ -70,7 +70,7 @@ pub fn set_typing<'m>(
     input: SetTyping,
 ) -> BoxFuture<'m, Result<(), AppFault>> {
     Box::pin(async move {
-        typing_gate(cx.principal(), input.board).require()?;
+        board_member_gate(cx.principal(), input.board).require()?;
         let user = cx.principal().user();
         cx.present::<Typing>(
             &TypingKey {
@@ -138,11 +138,12 @@ pub fn attach_reply<'m>(
     input: AttachReply,
 ) -> BoxFuture<'m, Result<OneShot<UploadUrl>, AppFault>> {
     Box::pin(async move {
-        let blob = cx.blob::<Attachment>(input.name, input.content_type)?;
         let mut reply = cx
             .load::<ReplyRow>(&input.reply_id)
             .await?
             .ok_or(AppFault::NotFound)?;
+        board_member_gate(cx.principal(), reply.board_id).require()?;
+        let blob = cx.blob::<Attachment>(input.name, input.content_type)?;
         let cause = reply.attach(blob.reference().as_uuid());
         cx.save(&reply).await?;
         cx.impact_caused::<Reply, _>(&reply.id, cause)?;
