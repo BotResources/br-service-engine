@@ -89,6 +89,18 @@ durable name, so a message is owned by one pod at a time.
   retryable failure `Nak`s with a growing capped backoff and frees the slot; a
   redelivery after a crash-before-commit finds the idempotency claim and acks as
   a no-op, so the effect lands exactly once.
+- A poison message is never lost: routing to the dead letter terminates the frame
+  only once the dead-letter row is durably written. If that write fails (Postgres
+  unreachable during a CNPG switchover), the frame is nak'ed with the capped
+  backoff, not terminated, so the broker keeps redelivering it (`max_deliver` is
+  unlimited) until the table can record it — then it is terminated once. The same
+  holds for a frame that cannot be identified at all.
+- A reaction handler that panics is caught at dispatch, rolled back and routed to
+  the dead-letter table as a terminal frame, so the consumer keeps serving instead
+  of redelivering the panicking frame every `ack_wait` forever with readiness UP.
+  `cx.principal` no longer panics on a bare message: it returns a typed
+  `PrincipalUnresolved` (terminal disposition) that a handler propagates like any
+  other reaction error, and `cx.try_principal` stays the fallible accessor.
 - `Disposition` (Retry / Park / Terminal) routed against per-reaction budgets;
   `sqlx_is_terminal` classifies a Postgres integrity (SQLSTATE class 23) or data
   (class 22) violation as terminal on the engine's own authority, ahead of the
@@ -166,7 +178,9 @@ version)` at emit time; the engine persists it on the outbox row
 (`integration_outbox.producer` / `seq_key` / `seq`) and renders the three
 `Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
 traffic is ordered and the per-`(producer, reaction, seq_key)` sequence guard is
-reachable.
+reachable. A declared sequence with no configured service (`producer`) is refused
+with a configuration error at emit rather than silently dropped, so a sequence a
+consumer would order or dedup on can never vanish.
 The inbound loop decodes the envelope, dedups on the `Br-Message-Id`/envelope id
 (tolerating a non-uuid `Nats-Msg-Id` — a foreign fabric producer no longer
 dead-letters), hands the reaction the inner payload, and exposes the sender's
@@ -290,9 +304,11 @@ stale `Put` after a newer `Retract` is a no-op). The hosted outbox relay drains
 in batches whose cap equals its drain bound, so a backlog bursts within one beat
 instead of one batch per beat, and a periodic hygiene pass (`with_sweep_every`)
 deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
-`with_message_retention` — a bound the operator sets to at least the outbox
-stream's retention plus its dedup window; the sweep is best-effort and never
-lowers readiness. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
+`with_message_retention`; because a durable replays from the start of its stream,
+the engine refuses at boot a `message_retention` below the `max_age` of any
+integration stream an inbound reaction binds (an unlimited `max_age` is refused
+too), so a claim can never be swept before its message can still be redelivered.
+The sweep is best-effort and never lowers readiness. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
 `publish`) and `register_offer::<O>()`: a saved noun that carries an offer stages
 its dirty key (`service_engine.offer_dirty`) in the same transaction as the
 write; the leader drains dirty keys by claiming and resolving them in a short

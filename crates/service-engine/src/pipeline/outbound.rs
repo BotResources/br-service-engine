@@ -49,13 +49,26 @@ impl OutboundContext {
         }
     }
 
-    fn sequence(&self, seq: Option<ProducerSequence>) -> Option<OutboundSequence> {
-        let (producer, seq) = self.producer.as_ref().zip(seq)?;
-        Some(OutboundSequence {
+    fn sequence(
+        &self,
+        seq: Option<ProducerSequence>,
+        kind: &'static str,
+    ) -> Result<Option<OutboundSequence>, EngineError> {
+        let Some(seq) = seq else {
+            return Ok(None);
+        };
+        let Some(producer) = self.producer.as_ref() else {
+            return Err(EngineError::Config(format!(
+                "an outbound {kind} declares a producer sequence but no service is configured, so \
+                 the sequence would be silently dropped and consumers could not order or dedup it; \
+                 call EngineConfig::with_service to name the producer"
+            )));
+        };
+        Ok(Some(OutboundSequence {
             producer: producer.clone(),
             seq_key: seq.key,
             seq: seq.version,
-        })
+        }))
     }
 }
 
@@ -82,7 +95,7 @@ pub(crate) fn event_record<E: OutboundEvent>(
         Uuid::now_v7(),
         subject,
         payload,
-        ctx.sequence(event.sequence()),
+        ctx.sequence(event.sequence(), "event")?,
     ))
 }
 
@@ -145,6 +158,62 @@ pub(crate) fn command_record<C: OutboundCommand>(
         Uuid::now_v7(),
         subject,
         payload,
-        ctx.sequence(command.sequence()),
+        ctx.sequence(command.sequence(), "command")?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context(producer: Option<&str>) -> OutboundContext {
+        OutboundContext {
+            actor: crate::identity::service_actor(producer.unwrap_or("")),
+            correlation_id: Uuid::now_v7(),
+            causation_id: None,
+            producer: producer.map(str::to_string),
+        }
+    }
+
+    fn producer_sequence() -> ProducerSequence {
+        ProducerSequence {
+            key: "chat-1".to_string(),
+            version: 7,
+        }
+    }
+
+    #[test]
+    fn a_declared_sequence_without_a_service_fails_loud_instead_of_being_dropped() {
+        let error = context(None)
+            .sequence(Some(producer_sequence()), "event")
+            .expect_err("a producer sequence with no service must fail loud");
+        assert!(matches!(error, EngineError::Config(_)));
+    }
+
+    #[test]
+    fn a_declared_sequence_with_a_service_is_carried() {
+        let carried = context(Some("chat"))
+            .sequence(Some(producer_sequence()), "event")
+            .expect("a producer sequence with a service is carried")
+            .expect("the sequence is present");
+        assert_eq!(carried.producer, "chat");
+        assert_eq!(carried.seq_key, "chat-1");
+        assert_eq!(carried.seq, 7);
+    }
+
+    #[test]
+    fn no_declared_sequence_is_none_whether_or_not_a_service_is_set() {
+        assert!(
+            context(None)
+                .sequence(None, "command")
+                .expect("no sequence is always fine")
+                .is_none()
+        );
+        assert!(
+            context(Some("chat"))
+                .sequence(None, "command")
+                .expect("no sequence is always fine")
+                .is_none()
+        );
+    }
 }

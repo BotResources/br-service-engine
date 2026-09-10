@@ -12,8 +12,8 @@ pub use crate::sample::pipeline_support::{
     insert_widget, publish_command, publish_raw, wait_for_widget, widget_count, widget_label,
 };
 pub use crate::sample::reactions::{
-    CreateWidget, LockWidget, SampleReactionFault, WidgetCreated, create_widget,
-    create_widget_coords, lock_widget, lock_widget_coords,
+    CreateWidget, DetonateWidget, LockWidget, SampleReactionFault, WidgetCreated, create_widget,
+    create_widget_coords, detonate_widget, detonate_widget_coords, lock_widget, lock_widget_coords,
 };
 
 #[derive(Debug)]

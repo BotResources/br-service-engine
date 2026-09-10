@@ -170,6 +170,20 @@ impl<P: Principal> Engine<P> {
         let mut inbound = if subscriptions.is_empty() {
             None
         } else {
+            if let Err(error) = crate::inbound::validate_message_retention(
+                &nats,
+                &subscriptions,
+                config.message_retention,
+            )
+            .await
+            {
+                readiness_guard.set_not_ready(crate::nats::REASON_NO_STREAM);
+                stop_mirrors.notify_waiters();
+                stop_presence.notify_waiters();
+                join_presence(presence_task.take()).await;
+                render.shutdown().await;
+                return Err(error);
+            }
             let pipeline = Arc::new(DirectPipeline::new(
                 pg.clone(),
                 transport.clone() as Arc<dyn ImpactTransport>,

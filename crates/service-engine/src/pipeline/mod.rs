@@ -8,7 +8,7 @@ mod ops_seal;
 mod outbound;
 mod staged;
 
-pub use context::{Bulk, Mutation, Reaction};
+pub use context::{Bulk, Mutation, PrincipalUnresolved, Reaction};
 pub(crate) use dispatch::{DirectPipeline, begin_scoped, flush_and_commit};
 pub use mutation::{MutationExecutor, MutationInput, MutationRegistry};
 pub use ops::Ops;

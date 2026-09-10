@@ -12,6 +12,7 @@ use uuid::Uuid;
 const BOOT_TIMEOUT: Duration = Duration::from_secs(20);
 const SPAWN_ATTEMPTS: usize = 5;
 pub const DUPLICATE_WINDOW: Duration = Duration::from_secs(120);
+pub const INTEGRATION_MAX_AGE: Duration = Duration::from_secs(1800);
 
 pub struct TestNats {
     child: Child,
@@ -114,6 +115,7 @@ impl TestNats {
                 name: name.to_string(),
                 subjects: vec![subject.to_string()],
                 duplicate_window: DUPLICATE_WINDOW,
+                max_age: INTEGRATION_MAX_AGE,
                 ..Default::default()
             })
             .await

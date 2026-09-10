@@ -13,8 +13,9 @@ use crate::sample::blob_view::DocProjector;
 use crate::sample::engine::engine_config;
 use crate::sample::offer::{MintThenReject, WidgetOffer, mint_then_reject};
 use crate::sample::pipeline::{
-    CloseWidget, CreateWidget, ImportWidgets, LockWidget, MintSecret, ScheduleCreate, close_widget,
-    create_widget, import_widgets, lock_widget, mint_secret, schedule_create,
+    CloseWidget, CreateWidget, DetonateWidget, ImportWidgets, LockWidget, MintSecret,
+    ScheduleCreate, close_widget, create_widget, detonate_widget, import_widgets, lock_widget,
+    mint_secret, schedule_create,
 };
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
 use crate::sample::widget::WidgetProjector;
@@ -103,6 +104,32 @@ pub async fn boot_pipeline_engine(
     engine
         .register_reaction::<LockWidget, _, _>("sample-lock-widget", lock_widget)
         .expect("register the lock-widget reaction");
+    engine
+}
+
+pub async fn boot_panic_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the panic engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(WidgetProjector)
+        .expect("register the widget projector, which auto-binds the widget noun");
+    engine
+        .register_reaction::<DetonateWidget, _, _>("sample-detonate-widget", detonate_widget)
+        .expect("register the detonate reaction whose handler can panic");
     engine
 }
 

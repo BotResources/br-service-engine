@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::inbound::MessageMetadata;
+use crate::inbound::{Disposition, ReactionError};
 use crate::pipeline::ops::Ops;
 use crate::presence::{Presence, PresenceHandle, PresenceKey};
 use crate::principal::{ErasedPrincipal, Principal};
@@ -61,12 +62,22 @@ impl<'a> Reaction<'a> {
         self.principal.as_ref().and_then(|p| p.downcast_ref::<P>())
     }
 
-    pub fn principal<P: Principal>(&self) -> &P {
-        self.try_principal::<P>().expect(
-            "the reaction has no resolved sender principal; register a reaction-principal \
-             resolver with Engine::register_reaction_principal and ensure the inbound message \
-             carries an integration envelope with an actor",
-        )
+    pub fn principal<P: Principal>(&self) -> Result<&P, PrincipalUnresolved> {
+        self.try_principal::<P>().ok_or(PrincipalUnresolved)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the reaction has no resolved sender principal of the requested type; register a \
+     reaction-principal resolver with Engine::register_reaction_principal and ensure the \
+     inbound message carries an integration envelope with an actor"
+)]
+pub struct PrincipalUnresolved;
+
+impl ReactionError for PrincipalUnresolved {
+    fn disposition(&self) -> Disposition {
+        Disposition::Terminal
     }
 }
 

@@ -1,6 +1,8 @@
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use sqlx::{PgConnection, PgPool};
 
@@ -215,7 +217,22 @@ async fn invoke<'a>(
     cx: &'a mut Reaction<'a>,
     payload: &'a [u8],
 ) -> Result<(), DispatchError> {
-    invoker.invoke(cx, payload).await
+    match AssertUnwindSafe(invoker.invoke(cx, payload))
+        .catch_unwind()
+        .await
+    {
+        Ok(result) => result,
+        Err(panic) => Err(DispatchError::terminal(panic_detail(panic))),
+    }
+}
+
+fn panic_detail(panic: Box<dyn std::any::Any + Send>) -> String {
+    let message = panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no panic message".to_string());
+    format!("the reaction handler panicked, so its frame is dead-lettered: {message}")
 }
 
 impl Dispatch for DirectPipeline {
