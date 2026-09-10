@@ -7,12 +7,17 @@ use std::time::Duration;
 
 use sqlx::PgPool;
 
+use uuid::Uuid;
+
 use crate::config::{DEFAULT_BEAT, DEFAULT_LEASE, EngineConfig};
 use crate::cron::{CronJob, NextFire, Schedule};
 use crate::error::CronError;
 use crate::housekeeping::leader::{self, Lease, SlotName};
+use crate::inbound::{DeadLetterSource, DeadLetters};
 use crate::name::{JobName, PodId};
 use crate::time::{self, Timestamp};
+
+const CRON_DEAD_LETTER_NAMESPACE: Uuid = Uuid::from_u128(0x91130000_c0c07100_a0000000_dead1e77u128);
 
 pub use report::{CronReport, JobRecord};
 pub use run::CronRound;
@@ -35,6 +40,7 @@ pub struct CronRuntime {
     lease: Duration,
     retention: Duration,
     entries: Vec<Entry>,
+    dead_letters: Option<DeadLetters>,
 }
 
 impl CronRuntime {
@@ -45,7 +51,12 @@ impl CronRuntime {
             lease: DEFAULT_LEASE,
             retention: DEFAULT_SLOT_RETENTION,
             entries: Vec::new(),
+            dead_letters: None,
         }
+    }
+
+    pub fn set_dead_letters(&mut self, dead_letters: DeadLetters) {
+        self.dead_letters = Some(dead_letters);
     }
 
     pub fn from_config(config: &EngineConfig) -> Self {
@@ -156,10 +167,39 @@ impl CronRuntime {
                 round.completed += 1;
                 if outcome.failed {
                     round.failed += 1;
+                    self.dead_letter_failed_tick(&name, &outcome).await;
                 }
                 crate::observe::record_cron_run(&name, outcome.duration, outcome.failed);
                 self.entries[index].record.observe(&outcome);
             }
+        }
+    }
+
+    async fn dead_letter_failed_tick(&self, name: &JobName, outcome: &run::RunOutcome) {
+        let Some(dead_letters) = &self.dead_letters else {
+            return;
+        };
+        let key = format!("{}:{}", name.as_str(), outcome.slot);
+        let message_id = Uuid::new_v5(&CRON_DEAD_LETTER_NAMESPACE, key.as_bytes());
+        let detail = outcome
+            .reason
+            .as_deref()
+            .unwrap_or("a cron tick failed with no reason");
+        if let Err(error) = dead_letters
+            .record_work(
+                DeadLetterSource::Cron,
+                name.as_str(),
+                name.as_str(),
+                message_id,
+                detail,
+            )
+            .await
+        {
+            tracing::warn!(
+                job = %name,
+                reason = %crate::chain::describe(&error),
+                "a failed cron tick could not be written to the dead-letter table",
+            );
         }
     }
 

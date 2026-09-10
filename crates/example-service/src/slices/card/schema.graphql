@@ -1,4 +1,4 @@
-union CardDelta = CardReset | CardUpsert | CardRemove
+union CardDelta = CardReset | CardUpsert | CardRemove | LanesPaused | LanesResumed
 
 type CardMutation {
 	advanceCard(id: UUID!): MutationAck!
@@ -46,6 +46,19 @@ union CardViewUnion = CardView
 A scalar that can represent any JSON value.
 """
 scalar JSON
+
+enum Lane {
+	ACCUMULATED
+	PRESENCE
+}
+
+type LanesPaused {
+	lanes: [Lane!]!
+}
+
+type LanesResumed {
+	lanes: [Lane!]!
+}
 
 type MutationAck {
 	success: Boolean!

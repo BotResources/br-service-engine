@@ -14,12 +14,28 @@ impl EngineConfig {
             ("listener_probe_timeout", self.listener_probe_timeout),
             ("session_max_age", self.session_max_age),
             ("lock_timeout", self.lock_timeout),
+            ("ack_wait", self.ack_wait),
             ("nats_grace", self.nats_grace),
             ("message_retention", self.message_retention),
         ] {
             if value.is_zero() {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));
             }
+        }
+        if self.max_ack_pending <= 0 {
+            return Err(EngineError::Config(
+                "max_ack_pending must be positive, or the inbound consumer would let no frame be \
+                 in flight"
+                    .into(),
+            ));
+        }
+        if self.lock_timeout >= self.ack_wait {
+            return Err(EngineError::Config(
+                "lock_timeout must stay below ack_wait, otherwise a pipeline transaction can still \
+                 hold its row lock when the consumer redelivers the frame, so the redelivery races \
+                 the in-flight effect instead of finding it done"
+                    .into(),
+            ));
         }
         for (label, value) in [
             ("session_buffer", self.session_buffer),
@@ -106,6 +122,8 @@ mod tests {
         assert_eq!(c.repair_attempts, 5);
         assert_eq!(c.session_max_age, Duration::from_secs(43_200));
         assert_eq!(c.lock_timeout, Duration::from_secs(5));
+        assert_eq!(c.ack_wait, Duration::from_secs(30));
+        assert_eq!(c.max_ack_pending, 256);
         assert_eq!(c.listener_queue_threshold, 0.5);
         assert_eq!(c.listener_channel_capacity, 1_024);
         assert_eq!(c.nats_grace, Duration::from_secs(10));
@@ -196,6 +214,44 @@ mod tests {
                 .validate()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_lock_timeout_that_is_not_below_ack_wait_is_refused() {
+        assert!(
+            config()
+                .with_ack_wait(Duration::from_secs(5))
+                .with_lock_timeout(Duration::from_secs(5))
+                .validate()
+                .is_err(),
+            "a lock_timeout equal to ack_wait lets a transaction still hold its lock at redelivery"
+        );
+        assert!(
+            config()
+                .with_ack_wait(Duration::from_secs(30))
+                .with_lock_timeout(Duration::from_secs(31))
+                .validate()
+                .is_err()
+        );
+        assert!(
+            config()
+                .with_ack_wait(Duration::from_secs(30))
+                .with_lock_timeout(Duration::from_secs(5))
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_non_positive_max_ack_pending_is_refused() {
+        assert!(config().with_max_ack_pending(0).validate().is_err());
+        assert!(config().with_max_ack_pending(-1).validate().is_err());
+        assert!(config().with_max_ack_pending(1).validate().is_ok());
+    }
+
+    #[test]
+    fn a_zero_ack_wait_is_refused() {
+        assert!(config().with_ack_wait(Duration::ZERO).validate().is_err());
     }
 
     #[test]

@@ -64,19 +64,40 @@ author-facing surface is implemented.
 derives its inbound subscription, and the engine-owned inbound loop (durable
 consumer, ack-after-durable, `Disposition` routing, poison budget with the
 `service_engine.dead_letter` table and its retry/discard gestures, the
-per-(producer, key) sequence guard beside the idempotency claim) runs over it.
+per-(producer, reaction, key) sequence guard beside the idempotency claim) runs
+over it. Each inbound consumer and the lane-A ingress task run under a
+supervisor: a consumer that ends, errors or panics is restarted with bounded
+backoff (one log per step, never a hot spin), and past a consecutive-failure
+threshold the supervisor lowers readiness with
+`REASON_INBOUND_STOPPED` so a dead consumer never leaves the pod deaf while it
+reports ready; on shutdown a consumer naks its pulled-but-unprocessed frames so
+they redeliver to a live pod. The `service_engine.dead_letter` table is the one
+table for every source of work: inbound reactions, scheduled messages, cron
+ticks and a persistently stuck mirror all record there
+(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror}`), each staging an
+ops-view impact and incrementing `service_engine_dead_letters_total` by source.
 `register_mutation` and `register_bulk`: a GraphQL mutation and a
 NATS command run **one** direct write pipeline — load, gate (the affordance
 function in deny mode), domain command, `save` through the `Persistence` trait,
 stage impacts (`cx.impact_caused` / `cx.impact_at` / `cx.impact_all`), stage
 outbox rows (`cx.emit` / `cx.command`), commit, respond — under `lock_timeout`
 below the consumer's `ack_wait` (a lock timeout is retryable, `nak`), with the
-idempotency claim and the per-(producer, key) sequence guard in the effect
-transaction. The synchronous channel answers `{ success }`, a typed
+idempotency claim and the per-(producer, reaction, key) sequence guard in the
+effect transaction. `ack_wait` and `max_ack_pending` are fields on
+`EngineConfig` (defaults 30 s and 256) that build the inbound consumer, and boot
+validation refuses a `lock_timeout` that is not strictly below `ack_wait`, so a
+pipeline transaction can never still hold its row lock when the consumer
+redelivers the frame. The synchronous channel answers `{ success }`, a typed
 `MutationError` carrying the gate's `Reason` code, or a typed `OneShot` secret
 (which never enters a view, impact, offer or event). `cx.schedule_at` stages a
-scheduled reaction the beat fires on the database clock; dead-lettering stages
-an impact on the ops view. The engine starts the inbound loop at boot, after
+scheduled reaction the beat fires on the database clock; a scheduled row carries
+a per-row `attempts` count and is published isolated from the rest of its batch,
+so one message that cannot publish is dead-lettered past its delivery budget
+rather than blocking every message behind it at every beat, and the next due row
+still fires. A cron tick that fails is dead-lettered once per slot (it is never
+re-run, the slot is already claimed and completed), and a mirror stuck past its
+restart threshold records too — all into the one dead-letter table with an
+ops-view impact. The engine starts the inbound loop at boot, after
 the scope handshake, so a booted engine with registered reactions consumes with
 no test-support seam.
 All three persistence styles fill the same `Persistence` trait behind the
@@ -415,6 +436,14 @@ reuses an *aggregate* id under a fresh message id is not a claim duplicate — i
 reaches the reaction, which decides: the example's `create_card` finds the card
 already exists and re-emits `CardReady` rather than colliding on the unique
 constraint and dead-lettering a legitimate replay.
+||||||| db7912b
+ordered and the per-`(producer, seq_key)` sequence guard on the receiver drops a
+stale message as an acked no-op — a view never walks backwards.
+ordered and the per-`(producer, reaction, seq_key)` sequence guard on the
+receiver drops a stale message as an acked no-op — a view never walks backwards.
+The guard is scoped per reaction, so two reactions consuming different facts of
+one producer under one key keep independent watermarks and never drop each
+other's messages.
 
 A service depends on `br-rust-common` only for frontier types (the Passport, the
 integration envelope and coordinates, the scope declaration and its handshake, the
@@ -620,6 +649,21 @@ a NATS blink shorter than `nats_grace` keeps the pod UP, an outage past it
 takes the pod DOWN with the reason in the readiness payload and back UP on
 reconnect; a consumed bucket missing at boot never comes UP and during a run
 takes the pod DOWN at the reconcile deadline.
+
+When NATS has been unreachable past `nats_grace` the accumulated (lane A) and
+presence (lane B) lanes pause, and every session that watches a paused lane is
+told so on its subscription: the engine emits a `LanesPaused { lanes }` notice
+and, on return, a `LanesResumed { lanes }` notice followed by a `Reset` of the
+session from the store and the bucket. The notice is out-of-band — the
+subscription union exposes `LanesPaused` / `LanesResumed` as members alongside
+`Reset` / `Upsert` / `Remove`, but a notice carries **no revision**: it does not
+participate in the contiguous per-session revision, so a client that drops it
+loses nothing and the `Reset` that follows on return continues the revision
+sequence unbroken. A direct-lane subscription is unaffected — mutations still
+commit under an outage, so its views keep flowing. `Engine::lane_notices()`
+exposes the raw signal to a service or a test; `graphql::lane_notice_stream` and
+the union's generated `subscribe(deltas, notices)` merge it into a subscription
+(the reference `replyDeltas` / `typingDeltas` do this).
 
 Every engine metric is exported on the shared observability endpoint labelled
 by `service` and `pod`; each dependency of the degrade table is a

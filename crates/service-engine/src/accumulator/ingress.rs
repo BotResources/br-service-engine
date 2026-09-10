@@ -1,19 +1,20 @@
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream::AckKind;
 use async_nats::jetstream::consumer::pull::Config as PullConfig;
 use async_nats::jetstream::consumer::{AckPolicy, Consumer, DeliverPolicy, ReplayPolicy};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use tokio::sync::Notify;
-use tokio::task::JoinHandle;
 
+use crate::accumulator::ChunkSeq;
 use crate::accumulator::runtime::AccumulatorRuntime;
-use crate::accumulator::{ChunkSeq, seal};
 use crate::chain::describe;
 use crate::error::EngineError;
+use crate::inbound::{HealthTracker, ServeExit};
 use crate::name::AccumulatorName;
-use crate::nats::{Nats, StreamFrame, streaming_filter, streaming_stream, subject_token};
+use crate::nats::{Nats, StreamFrame, streaming_filter, streaming_stream};
 
 const INACTIVE_THRESHOLD: Duration = Duration::from_secs(300);
 
@@ -71,31 +72,62 @@ impl StreamingIngress {
             })
     }
 
-    pub async fn serve(
-        self,
+    async fn serve(
+        &self,
         consumer: Consumer<PullConfig>,
-        shutdown: Arc<Notify>,
-    ) -> Result<(), EngineError> {
+        stop: &Arc<Notify>,
+    ) -> Result<ServeExit, EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
                 "the lane-A ingress could not open its message stream: {error}"
             ))
         })?;
-        let stopping = shutdown.notified();
+        let stopping = stop.notified();
         tokio::pin!(stopping);
         loop {
             let message = tokio::select! {
                 biased;
-                () = &mut stopping => return Ok(()),
+                () = &mut stopping => return Ok(ServeExit::Cancelled),
                 next = messages.next() => next,
             };
             match message {
                 Some(Ok(message)) => self.fold(&message).await,
-                Some(Err(error)) => tracing::warn!(
-                    reason = %error,
-                    "the lane-A ingress stream yielded an error; the consumer continues"
-                ),
-                None => return Ok(()),
+                Some(Err(error)) => {
+                    return Err(EngineError::Config(format!(
+                        "the lane-A ingress lost its message stream: {error}"
+                    )));
+                }
+                None => return Ok(ServeExit::Ended),
+            }
+        }
+    }
+
+    pub(crate) async fn serve_with_promotion(
+        &self,
+        consumer: Consumer<PullConfig>,
+        stop: &Arc<Notify>,
+        tracker: &mut HealthTracker,
+        uptime: Duration,
+    ) -> Result<ServeExit, EngineError> {
+        let served = AssertUnwindSafe(self.serve(consumer, stop)).catch_unwind();
+        tokio::pin!(served);
+        let promote = tokio::time::sleep(uptime);
+        tokio::pin!(promote);
+        let mut promoted = false;
+        loop {
+            tokio::select! {
+                biased;
+                exit = &mut served => return exit.unwrap_or_else(|_| {
+                    Err(EngineError::Config(
+                        "the lane-A ingress panicked while folding a chunk; it restarts under \
+                         supervision and, past the threshold, lowers readiness"
+                            .to_string(),
+                    ))
+                }),
+                () = &mut promote, if !promoted => {
+                    tracker.promote();
+                    promoted = true;
+                }
             }
         }
     }
@@ -152,108 +184,4 @@ impl StreamingIngress {
             tracing::warn!(%error, "terminating a malformed lane-A chunk failed");
         }
     }
-}
-
-pub(crate) async fn establish(
-    nats: &Nats,
-    service: &str,
-    seal_retention: Duration,
-    accumulators: Arc<AccumulatorRuntime>,
-    ack_wait: Duration,
-    max_ack_pending: i64,
-) -> Result<(StreamingIngress, Consumer<PullConfig>), EngineError> {
-    let stream = streaming_stream(service);
-    let max_age = nats.stream_max_age(&stream).await?;
-    if max_age.is_zero() || seal_retention < max_age {
-        return Err(EngineError::SealRetentionTooShort {
-            stream,
-            seal_retention,
-            max_age,
-        });
-    }
-    let ingress = StreamingIngress::new(
-        nats.clone(),
-        service.to_string(),
-        accumulators,
-        ack_wait,
-        max_ack_pending,
-    );
-    let consumer = ingress.open().await?;
-    Ok((ingress, consumer))
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn spawn_lane_a(
-    nats: &Nats,
-    service: String,
-    seal_retention: Duration,
-    accumulators: Arc<AccumulatorRuntime>,
-    beat: Duration,
-    ack_wait: Duration,
-    max_ack_pending: i64,
-    stop_ingress: Arc<Notify>,
-    stop_purge: Arc<Notify>,
-) -> Result<(JoinHandle<Result<(), EngineError>>, JoinHandle<()>), EngineError> {
-    let (ingress, consumer) = establish(
-        nats,
-        &service,
-        seal_retention,
-        accumulators.clone(),
-        ack_wait,
-        max_ack_pending,
-    )
-    .await?;
-    let ingress_task = tokio::spawn(ingress.serve(consumer, stop_ingress));
-    let purge_task = tokio::spawn(run_purge(
-        nats.clone(),
-        accumulators,
-        service,
-        beat,
-        stop_purge,
-    ));
-    Ok((ingress_task, purge_task))
-}
-
-pub(crate) async fn run_purge(
-    nats: Nats,
-    accumulators: Arc<AccumulatorRuntime>,
-    service: String,
-    interval: Duration,
-    shutdown: Arc<Notify>,
-) {
-    let stopping = shutdown.notified();
-    tokio::pin!(stopping);
-    loop {
-        tokio::select! {
-            biased;
-            () = &mut stopping => return,
-            () = tokio::time::sleep(interval) => {
-                if let Err(error) = purge_sealed(&nats, &accumulators, &service).await {
-                    tracing::warn!(
-                        reason = %describe(&error),
-                        "the beat could not purge a sealed lane-A subject; it retries next tick"
-                    );
-                }
-            }
-        }
-    }
-}
-
-pub async fn purge_sealed(
-    nats: &Nats,
-    accumulators: &AccumulatorRuntime,
-    service: &str,
-) -> Result<u64, EngineError> {
-    let stream = streaming_stream(service);
-    let pool = accumulators.reader().pool();
-    let pending = seal::unpurged(pool).await?;
-    let mut purged = 0;
-    for (accumulator, key) in pending {
-        let token = subject_token(&key)?;
-        nats.purge_chunk_subject(&stream, &crate::nats::chunk_subject(service, &token))
-            .await?;
-        seal::mark_purged(pool, &accumulator, &key).await?;
-        purged += 1;
-    }
-    Ok(purged)
 }

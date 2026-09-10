@@ -35,6 +35,7 @@ pub struct SessionRuntime<P: Principal> {
     pub(crate) counters: Counters,
     pub(crate) shutting_down: AtomicBool,
     pub(crate) after_pass: Arc<Notify>,
+    pub(crate) lane: crate::lanes::LaneChannel,
 }
 
 impl<P: Principal> std::fmt::Debug for SessionRuntime<P> {
@@ -52,6 +53,7 @@ impl<P: Principal> SessionRuntime<P> {
         pg: PgPool,
         registry: RenderRegistry<P>,
         chunks: ChunkReader,
+        lanes: Vec<crate::lanes::Lane>,
     ) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -63,7 +65,12 @@ impl<P: Principal> SessionRuntime<P> {
             counters: Counters::default(),
             shutting_down: AtomicBool::new(false),
             after_pass: Arc::new(Notify::new()),
+            lane: crate::lanes::LaneChannel::new(lanes),
         })
+    }
+
+    pub(crate) fn lane_channel(&self) -> crate::lanes::LaneChannel {
+        self.lane.clone()
     }
 
     pub fn config(&self) -> &EngineConfig {

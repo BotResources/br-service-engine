@@ -81,7 +81,9 @@ pub use counter::{
     open_full, open_soft, replay_from_scratch,
 };
 
-pub use cron::{SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs};
+pub use cron::{
+    FailingCronJob, SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs,
+};
 
 pub use roster::{KnownUserNoun, RosterUserView, RosterUsers};
 

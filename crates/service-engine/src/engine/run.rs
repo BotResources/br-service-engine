@@ -4,10 +4,10 @@ use tokio::sync::Notify;
 
 use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
-use crate::engine::loops::{RenderGc, RenderRepairs, join_presence, run_scheduled_messages};
+use crate::engine::loops::{join_presence, run_scheduled_messages};
 use crate::error::EngineError;
-use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
-use crate::inbound::{DeadLetters, InboundConfig, InboundLoop};
+use crate::housekeeping::ready::REASON_WORKER_STOPPED;
+use crate::inbound::InboundLoop;
 use crate::pipeline::DirectPipeline;
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
@@ -39,8 +39,8 @@ impl<P: Principal> Engine<P> {
             transport,
             readiness,
             accumulators,
-            mut beat,
-            mirrors,
+            beat,
+            mut mirrors,
             inbound_reactions,
             offers,
             presence,
@@ -51,29 +51,19 @@ impl<P: Principal> Engine<P> {
             ..
         } = self;
         let offers = Arc::new(offers);
-
-        beat.relays().register_erased(Arc::new(
-            crate::relays::outbox::HostedOutboxRelay::hosting(
-                crate::name::RelayName::from_static("integration_outbox"),
-                crate::relays::outbox::OutboxRelay::new(pg.clone(), nats.clone()),
-            )
-            .with_message_retention(config.message_retention),
-        ))?;
-
         let readiness_guard = readiness.clone();
-        let assembly = ReadinessAssembly::new(readiness, mirrors.health())
-            .with_relays(beat.relays().health())
-            .with_listener(transport.listener_health())
-            .with_nats(nats.clone(), config.nats_grace);
-        beat = beat
-            .with_transport(transport.clone())
-            .with_accumulators(accumulators.clone())
-            .with_readiness(assembly)
-            .with_repairs(Arc::new(RenderRepairs(render.clone())));
-        if let Some(drain) = erasure_drain {
-            beat = beat.with_erasure_drain(drain);
-        }
-        beat.gc().set_sessions(Arc::new(RenderGc(render.clone())));
+        let (mut beat, dead_letters, inbound_health) = crate::engine::wiring::wire_beat(
+            beat,
+            &pg,
+            &nats,
+            &config,
+            &transport,
+            readiness,
+            &mut mirrors,
+            &accumulators,
+            &render,
+            erasure_drain,
+        )?;
 
         let stop_render = Arc::new(Notify::new());
         let stop_beat = Arc::new(Notify::new());
@@ -196,9 +186,9 @@ impl<P: Principal> Engine<P> {
                 nats.clone(),
                 subscriptions,
                 pipeline,
-                DeadLetters::new(pg.clone())
-                    .with_transport(transport.clone() as Arc<dyn ImpactTransport>),
-                InboundConfig::default(),
+                dead_letters.clone(),
+                config.inbound_config(),
+                inbound_health.clone(),
             )
             .await
             {
@@ -214,22 +204,28 @@ impl<P: Principal> Engine<P> {
             }
         };
 
-        let lane_a =
-            match crate::engine::lane_a::spawn_if_registered(&nats, &config, &accumulators).await {
-                Ok(tasks) => tasks,
-                Err(error) => {
-                    readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
-                    stop_mirrors.notify_waiters();
-                    stop_presence.notify_waiters();
-                    join_presence(presence_task.take()).await;
-                    if let Some(inbound) = inbound.take() {
-                        inbound.stop();
-                        inbound.join().await;
-                    }
-                    render.shutdown().await;
-                    return Err(error);
+        let lane_a = match crate::engine::lane_a::spawn_if_registered(
+            &nats,
+            &config,
+            &accumulators,
+            inbound_health.clone(),
+        )
+        .await
+        {
+            Ok(tasks) => tasks,
+            Err(error) => {
+                readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
+                stop_mirrors.notify_waiters();
+                stop_presence.notify_waiters();
+                join_presence(presence_task.take()).await;
+                if let Some(inbound) = inbound.take() {
+                    inbound.stop();
+                    inbound.join().await;
                 }
-            };
+                render.shutdown().await;
+                return Err(error);
+            }
+        };
         let crate::engine::lane_a::LaneATasks {
             stop_ingress,
             stop_purge,
@@ -240,6 +236,7 @@ impl<P: Principal> Engine<P> {
         let sched_task = tokio::spawn(run_scheduled_messages(
             pg.clone(),
             nats.clone(),
+            dead_letters.clone(),
             config.beat,
             stop_sched.clone(),
         ));

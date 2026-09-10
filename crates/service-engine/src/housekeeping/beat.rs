@@ -5,7 +5,6 @@ use futures_util::future::BoxFuture;
 use sqlx::PgPool;
 use tokio::sync::Notify;
 
-use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::{BlobReaper, ReaperRound};
 use crate::chain::describe;
 use crate::config::EngineConfig;
@@ -13,6 +12,7 @@ use crate::erase::ErasureDrain;
 use crate::error::EngineError;
 use crate::housekeeping::cron::{CronRound, CronRuntime};
 use crate::housekeeping::gc::{Gc, GcRound};
+use crate::housekeeping::lane::LaneSupervisor;
 use crate::housekeeping::ready::ReadinessAssembly;
 use crate::housekeeping::relay::{RelayRound, RelayRuntime};
 use crate::housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
@@ -37,17 +37,18 @@ pub struct BeatRound {
 
 pub struct Beat {
     interval: Duration,
-    relays: RelayRuntime,
-    cron: CronRuntime,
-    gc: Gc,
-    scheduled: Option<ScheduledBoundaries>,
-    transport: Option<Arc<PgListenNotify>>,
-    readiness: Option<ReadinessAssembly>,
-    repairs: Option<Arc<dyn RepairRetry>>,
-    blob_reaper: Option<BlobReaper>,
+    pub(super) relays: RelayRuntime,
+    pub(super) cron: CronRuntime,
+    pub(super) gc: Gc,
+    pub(super) scheduled: Option<ScheduledBoundaries>,
+    pub(super) transport: Option<Arc<PgListenNotify>>,
+    pub(super) readiness: Option<ReadinessAssembly>,
+    pub(super) repairs: Option<Arc<dyn RepairRetry>>,
+    pub(super) blob_reaper: Option<BlobReaper>,
     listener_queue_threshold: f64,
     schema_version: (String, String),
-    erasures: Option<Arc<dyn ErasureDrain>>,
+    pub(super) erasures: Option<Arc<dyn ErasureDrain>>,
+    pub(super) lane: Option<LaneSupervisor>,
 }
 
 impl Beat {
@@ -72,60 +73,8 @@ impl Beat {
                 config.schema_service_version().to_string(),
             ),
             erasures: None,
+            lane: None,
         })
-    }
-
-    pub(crate) fn with_blob_reaper(mut self, reaper: BlobReaper) -> Self {
-        self.blob_reaper = Some(reaper);
-        self
-    }
-
-    pub(crate) fn with_erasure_drain(mut self, drain: Arc<dyn ErasureDrain>) -> Self {
-        self.erasures = Some(drain);
-        self
-    }
-
-    pub fn with_transport(mut self, transport: Arc<PgListenNotify>) -> Self {
-        self.scheduled = Some(ScheduledBoundaries::new(transport.clone()));
-        self.transport = Some(transport);
-        self
-    }
-
-    pub fn with_scheduled_batch(mut self, batch: i64) -> Result<Self, EngineError> {
-        self.scheduled = match self.scheduled.take() {
-            Some(scheduled) => Some(scheduled.with_batch(batch)?),
-            None => {
-                return Err(EngineError::Config(
-                    "a scheduled-boundary batch needs a transport to claim through".into(),
-                ));
-            }
-        };
-        Ok(self)
-    }
-
-    pub fn with_accumulators(mut self, accumulators: Arc<AccumulatorRuntime>) -> Self {
-        self.gc = self.gc.with_accumulators(accumulators);
-        self
-    }
-
-    pub fn with_slot_retention(mut self, retention: Duration) -> Self {
-        self.cron.set_slot_retention(retention);
-        self
-    }
-
-    pub fn with_gc_interval(mut self, interval: Duration) -> Self {
-        self.gc.set_interval(interval);
-        self
-    }
-
-    pub fn with_readiness(mut self, readiness: ReadinessAssembly) -> Self {
-        self.readiness = Some(readiness);
-        self
-    }
-
-    pub fn with_repairs(mut self, repairs: Arc<dyn RepairRetry>) -> Self {
-        self.repairs = Some(repairs);
-        self
     }
 
     pub fn relays(&mut self) -> &mut RelayRuntime {
@@ -177,6 +126,9 @@ impl Beat {
                 reason = %describe(&error),
                 "the beat could not complete a pending person-erasure purge",
             );
+        }
+        if let Some(lane) = &mut self.lane {
+            lane.tick().await;
         }
         let queue_usage = self.queue_usage().await;
         self.apply_listener_brake(queue_usage);

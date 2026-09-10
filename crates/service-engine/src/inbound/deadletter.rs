@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
-use async_nats::HeaderMap;
-use bytes::Bytes;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::impact::{Dims, Impact};
-use crate::inbound::message::{
-    HEADER_MESSAGE_ID, HEADER_PRODUCER, HEADER_SEQ, HEADER_SEQ_KEY, Incoming,
-};
+use crate::inbound::deadletter_row::{Row, republish};
+use crate::inbound::message::Incoming;
 use crate::name::NounName;
 use crate::nats::{Nats, NatsError};
 use crate::schema::TABLE_DEAD_LETTER;
@@ -63,6 +60,19 @@ pub enum DiscardOutcome {
     Absent,
 }
 
+pub(crate) struct StagedDeadLetter<'a> {
+    pub(crate) source: DeadLetterSource,
+    pub(crate) reaction: &'a str,
+    pub(crate) subject: &'a str,
+    pub(crate) message_id: Uuid,
+    pub(crate) payload: &'a [u8],
+    pub(crate) producer: Option<&'a str>,
+    pub(crate) seq_key: Option<&'a str>,
+    pub(crate) seq: Option<i64>,
+    pub(crate) error: &'a str,
+    pub(crate) delivered: i32,
+}
+
 #[derive(Clone)]
 pub struct DeadLetters {
     pool: PgPool,
@@ -90,12 +100,63 @@ impl DeadLetters {
     ) -> Result<(), sqlx::Error> {
         let (producer, seq_key, seq) = match &msg.sequence {
             Some(s) => (
-                Some(s.key.producer.clone()),
-                Some(s.key.key.clone()),
+                Some(s.key.producer.as_str()),
+                Some(s.key.key.as_str()),
                 Some(s.seq as i64),
             ),
             None => (None, None, None),
         };
+        let entry = StagedDeadLetter {
+            source,
+            reaction: &msg.reaction,
+            subject: &msg.subject,
+            message_id: msg.message_id,
+            payload: msg.payload.as_ref(),
+            producer,
+            seq_key,
+            seq,
+            error,
+            delivered: msg.delivered as i32,
+        };
+        let mut tx = self.pool.begin().await?;
+        let staged = self.stage(&mut tx, &entry).await?;
+        tx.commit().await?;
+        crate::observe::record_impacts_committed(usize::from(staged));
+        Ok(())
+    }
+
+    pub async fn record_work(
+        &self,
+        source: DeadLetterSource,
+        reaction: &str,
+        subject: &str,
+        message_id: Uuid,
+        error: &str,
+    ) -> Result<(), sqlx::Error> {
+        let entry = StagedDeadLetter {
+            source,
+            reaction,
+            subject,
+            message_id,
+            payload: &[],
+            producer: None,
+            seq_key: None,
+            seq: None,
+            error,
+            delivered: 1,
+        };
+        let mut tx = self.pool.begin().await?;
+        let staged = self.stage(&mut tx, &entry).await?;
+        tx.commit().await?;
+        crate::observe::record_impacts_committed(usize::from(staged));
+        Ok(())
+    }
+
+    pub(crate) async fn stage(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        entry: &StagedDeadLetter<'_>,
+    ) -> Result<bool, sqlx::Error> {
         let id = Uuid::now_v7();
         let sql = format!(
             "INSERT INTO {TABLE_DEAD_LETTER} \
@@ -105,43 +166,40 @@ impl DeadLetters {
                SET delivered = EXCLUDED.delivered, error = EXCLUDED.error, last_seen = now() \
              RETURNING id"
         );
-        let mut tx = self.pool.begin().await?;
         let row_id: Uuid = sqlx::query_scalar(&sql)
             .bind(id)
-            .bind(source.as_str())
-            .bind(&msg.reaction)
-            .bind(&msg.subject)
-            .bind(msg.message_id)
-            .bind(msg.payload.as_ref())
-            .bind(producer)
-            .bind(seq_key)
-            .bind(seq)
-            .bind(error)
-            .bind(msg.delivered as i32)
-            .fetch_one(&mut *tx)
+            .bind(entry.source.as_str())
+            .bind(entry.reaction)
+            .bind(entry.subject)
+            .bind(entry.message_id)
+            .bind(entry.payload)
+            .bind(entry.producer)
+            .bind(entry.seq_key)
+            .bind(entry.seq)
+            .bind(entry.error)
+            .bind(entry.delivered)
+            .fetch_one(&mut *conn)
             .await?;
-        let mut committed_impacts = 0usize;
-        if let Some(transport) = &self.transport {
-            let key = KeyBytes::encode(&row_id).map_err(|error| {
-                sqlx::Error::Protocol(format!("encoding the ops-view impact key: {error}"))
+        crate::observe::record_dead_letter(entry.source.as_str());
+        let Some(transport) = &self.transport else {
+            return Ok(false);
+        };
+        let key = KeyBytes::encode(&row_id).map_err(|error| {
+            sqlx::Error::Protocol(format!("encoding the ops-view impact key: {error}"))
+        })?;
+        let impact = Impact::ResourceChanged {
+            noun: DEAD_LETTER_NOUN,
+            key,
+            dims: Dims::ALL,
+            cause: None,
+        };
+        transport
+            .stage_in(conn, std::slice::from_ref(&impact))
+            .await
+            .map_err(|error| {
+                sqlx::Error::Protocol(format!("staging the ops-view impact: {error}"))
             })?;
-            let impact = Impact::ResourceChanged {
-                noun: DEAD_LETTER_NOUN,
-                key,
-                dims: Dims::ALL,
-                cause: None,
-            };
-            transport
-                .stage_in(&mut tx, std::slice::from_ref(&impact))
-                .await
-                .map_err(|error| {
-                    sqlx::Error::Protocol(format!("staging the ops-view impact: {error}"))
-                })?;
-            committed_impacts = 1;
-        }
-        tx.commit().await?;
-        crate::observe::record_impacts_committed(committed_impacts);
-        Ok(())
+        Ok(true)
     }
 
     pub async fn list(
@@ -200,72 +258,5 @@ impl DeadLetters {
                 detail: e.to_string(),
             })?;
         Ok(RetryOutcome::Republished)
-    }
-}
-
-async fn republish(nats: &Nats, entry: &DeadLetter) -> Result<(), NatsError> {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        async_nats::header::NATS_MESSAGE_ID,
-        Uuid::now_v7().to_string(),
-    );
-    headers.insert(HEADER_MESSAGE_ID, entry.message_id.to_string());
-    if let (Some(producer), Some(seq_key), Some(seq)) = (&entry.producer, &entry.seq_key, entry.seq)
-    {
-        headers.insert(HEADER_PRODUCER, producer.as_str());
-        headers.insert(HEADER_SEQ_KEY, seq_key.as_str());
-        headers.insert(HEADER_SEQ, seq.to_string());
-    }
-    let ack = nats
-        .context()
-        .publish_with_headers(
-            entry.subject.clone(),
-            headers,
-            Bytes::from(entry.payload.clone()),
-        )
-        .await
-        .map_err(|e| NatsError::Publish {
-            subject: entry.subject.clone(),
-            kind: crate::nats::PublishFailure::Transient,
-            detail: e.to_string(),
-        })?;
-    ack.await.map_err(|e| NatsError::Publish {
-        subject: entry.subject.clone(),
-        kind: crate::nats::PublishFailure::Transient,
-        detail: e.to_string(),
-    })?;
-    Ok(())
-}
-
-#[derive(sqlx::FromRow)]
-struct Row {
-    id: Uuid,
-    source: String,
-    reaction: String,
-    subject: String,
-    message_id: Uuid,
-    payload: Vec<u8>,
-    producer: Option<String>,
-    seq_key: Option<String>,
-    seq: Option<i64>,
-    error: String,
-    delivered: i32,
-}
-
-impl Row {
-    fn into_dead_letter(self) -> DeadLetter {
-        DeadLetter {
-            id: self.id,
-            source: self.source,
-            reaction: self.reaction,
-            subject: self.subject,
-            message_id: self.message_id,
-            payload: self.payload,
-            producer: self.producer,
-            seq_key: self.seq_key,
-            seq: self.seq,
-            error: self.error,
-            delivered: self.delivered,
-        }
     }
 }

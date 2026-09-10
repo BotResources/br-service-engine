@@ -50,14 +50,15 @@ spec:
               sustained rate means one of those is recurring rather than repairing, and clients are
               paying full re-snapshots instead of deltas.
         - alert: ServiceEngineDeadLettersPresent
-          expr: sum by (service, source) (service_engine_dead_letters) > 0
+          expr: sum by (service, source) (service_engine_dead_letters_total) > 0
           for: 1m
           labels:
             severity: warning
           annotations:
             summary: A service has dead-lettered work waiting on a human
             description: >-
-              service_engine_dead_letters on {{ $labels.service }} for source {{ $labels.source }}
-              is above zero. A poison message, a failing scheduled row, a failing cron tick or a
-              non-converging mirror key has been parked for a human to retry or discard from the
-              ops view. The dead-letter counter is emitted by the engine's inbound loop.
+              service_engine_dead_letters_total on {{ $labels.service }} for source
+              {{ $labels.source }} is above zero. A poison message, a failing scheduled row, a
+              failing cron tick or a mirror stuck past its restart threshold has been parked for a
+              human to retry or discard from the ops view. The counter is emitted for every source
+              of work the engine runs, labelled by source.

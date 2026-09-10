@@ -39,6 +39,7 @@ pub enum Ordering {
 
 pub async fn advance_sequence(
     conn: &mut PgConnection,
+    reaction: &str,
     key: &SequenceKey,
     seq: u64,
 ) -> Result<Ordering, sqlx::Error> {
@@ -48,13 +49,15 @@ pub async fn advance_sequence(
         ))
     })?;
     let sql = format!(
-        "INSERT INTO {TABLE_SEQUENCE_GUARD} (producer, seq_key, last_seq) VALUES ($1, $2, $3) \
-         ON CONFLICT (producer, seq_key) DO UPDATE SET last_seq = EXCLUDED.last_seq \
+        "INSERT INTO {TABLE_SEQUENCE_GUARD} (producer, reaction, seq_key, last_seq) \
+         VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (producer, reaction, seq_key) DO UPDATE SET last_seq = EXCLUDED.last_seq \
          WHERE {TABLE_SEQUENCE_GUARD}.last_seq < EXCLUDED.last_seq \
          RETURNING last_seq"
     );
     let advanced: Option<(i64,)> = sqlx::query_as(&sql)
         .bind(&key.producer)
+        .bind(reaction)
         .bind(&key.key)
         .bind(seq)
         .fetch_optional(conn)

@@ -51,6 +51,7 @@ pub fn runtime(
         pool.clone(),
         registry,
         accumulators.reader().clone(),
+        Vec::new(),
     )
 }
 

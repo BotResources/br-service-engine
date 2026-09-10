@@ -6,6 +6,7 @@ mod register;
 mod run;
 mod serve;
 mod shutdown;
+mod wiring;
 
 pub use blobs::BlobReader;
 
@@ -153,11 +154,19 @@ impl<P: Principal> Engine<P> {
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .take()
                     .expect("the render registry is assembled once, before the first attach");
+                let mut lanes = Vec::new();
+                if self.accumulators.registered() > 0 {
+                    lanes.push(crate::lanes::Lane::Accumulated);
+                }
+                if !self.presence.is_empty() {
+                    lanes.push(crate::lanes::Lane::Presence);
+                }
                 SessionRuntime::new(
                     self.config.clone(),
                     self.pg.clone(),
                     registry,
                     self.accumulators.reader().clone(),
+                    lanes,
                 )
             })
             .clone()
@@ -165,6 +174,13 @@ impl<P: Principal> Engine<P> {
 
     pub async fn attach(&self, req: AttachRequest<P>) -> Result<SessionStream, AttachError> {
         self.render_runtime().attach(req).await
+    }
+
+    pub fn lane_notices(
+        &self,
+    ) -> impl futures_util::Stream<Item = crate::lanes::LaneNotice> + use<P> {
+        let channel = self.render_runtime().lane_channel();
+        crate::lanes::notices(channel.receiver(), channel.lanes())
     }
 
     pub fn push_chunk<A: Accumulator>(

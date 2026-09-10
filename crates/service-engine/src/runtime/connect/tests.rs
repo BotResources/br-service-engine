@@ -40,6 +40,7 @@ fn runtime() -> std::sync::Arc<SessionRuntime<TestPrincipal>> {
         pg.clone(),
         registry,
         ChunkReader::with_registry(pg, new_registry()),
+        Vec::new(),
     )
 }
 

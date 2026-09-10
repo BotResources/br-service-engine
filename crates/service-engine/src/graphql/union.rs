@@ -99,6 +99,8 @@ macro_rules! subscription_union {
             Reset($reset),
             Upsert($upsert),
             Remove($remove),
+            LanesPaused($crate::LanesPaused),
+            LanesResumed($crate::LanesResumed),
         }
 
         impl $delta {
@@ -137,6 +139,37 @@ macro_rules! subscription_union {
                         cause: $crate::graphql::cause_json(cause.as_ref())?,
                     })),
                 }
+            }
+
+            pub fn from_lane_notice(notice: &$crate::LaneNotice) -> Self {
+                match notice {
+                    $crate::LaneNotice::Paused(lanes) => {
+                        $delta::LanesPaused($crate::LanesPaused { lanes: lanes.clone() })
+                    }
+                    $crate::LaneNotice::Resumed(lanes) => {
+                        $delta::LanesResumed($crate::LanesResumed { lanes: lanes.clone() })
+                    }
+                }
+            }
+
+            pub fn subscribe<D, N>(
+                deltas: D,
+                notices: N,
+            ) -> impl ::futures_util::Stream<
+                Item = ::core::result::Result<Self, ::async_graphql::Error>,
+            >
+            where
+                D: ::futures_util::Stream<Item = $crate::Delta> + ::core::marker::Send + 'static,
+                N: ::futures_util::Stream<Item = $crate::LaneNotice>
+                    + ::core::marker::Send
+                    + 'static,
+            {
+                use ::futures_util::StreamExt;
+                let deltas = deltas.map(|delta| $delta::from_delta(&delta)).boxed();
+                let notices = notices
+                    .map(|notice| ::core::result::Result::Ok($delta::from_lane_notice(&notice)))
+                    .boxed();
+                ::futures_util::stream::select(deltas, notices)
             }
         }
     };
@@ -196,6 +229,8 @@ macro_rules! presence_subscription_union {
             Reset($reset),
             Upsert($upsert),
             Remove($remove),
+            LanesPaused($crate::LanesPaused),
+            LanesResumed($crate::LanesResumed),
         }
 
         impl $delta {
@@ -227,6 +262,37 @@ macro_rules! presence_subscription_union {
                         key: $crate::graphql::key_json(key)?,
                     })),
                 }
+            }
+
+            pub fn from_lane_notice(notice: &$crate::LaneNotice) -> Self {
+                match notice {
+                    $crate::LaneNotice::Paused(lanes) => {
+                        $delta::LanesPaused($crate::LanesPaused { lanes: lanes.clone() })
+                    }
+                    $crate::LaneNotice::Resumed(lanes) => {
+                        $delta::LanesResumed($crate::LanesResumed { lanes: lanes.clone() })
+                    }
+                }
+            }
+
+            pub fn subscribe<D, N>(
+                deltas: D,
+                notices: N,
+            ) -> impl ::futures_util::Stream<
+                Item = ::core::result::Result<Self, ::async_graphql::Error>,
+            >
+            where
+                D: ::futures_util::Stream<Item = $crate::Delta> + ::core::marker::Send + 'static,
+                N: ::futures_util::Stream<Item = $crate::LaneNotice>
+                    + ::core::marker::Send
+                    + 'static,
+            {
+                use ::futures_util::StreamExt;
+                let deltas = deltas.map(|delta| $delta::from_delta(&delta)).boxed();
+                let notices = notices
+                    .map(|notice| ::core::result::Result::Ok($delta::from_lane_notice(&notice)))
+                    .boxed();
+                ::futures_util::stream::select(deltas, notices)
             }
         }
     };

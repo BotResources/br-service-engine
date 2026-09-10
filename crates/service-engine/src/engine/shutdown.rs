@@ -29,7 +29,7 @@ pub(crate) struct RunTasks<P: Principal> {
     pub flush_task: JoinHandle<()>,
     pub sched_task: JoinHandle<()>,
     pub inbound: Option<InboundLoop>,
-    pub ingress_task: Option<JoinHandle<Result<(), EngineError>>>,
+    pub ingress_task: Option<JoinHandle<()>>,
     pub purge_task: Option<JoinHandle<()>>,
     pub presence_task: Option<JoinHandle<()>>,
 }

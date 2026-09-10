@@ -19,6 +19,6 @@ pub use router::{app, serve};
 pub use schema::engine_schema;
 pub use slices::{SchemaSlices, SliceFragment};
 pub use state::GraphqlState;
-pub use subscription::attach;
+pub use subscription::{attach, lane_notice_stream};
 pub use union::{JsonScalar, cause_json, key_json, typed_presence_view, typed_view};
 pub use ws::{SESSION_MAX_AGE_CLOSE_CODE, SESSION_MAX_AGE_CLOSE_REASON};

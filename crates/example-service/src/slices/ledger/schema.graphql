@@ -3,7 +3,20 @@ A scalar that can represent any JSON value.
 """
 scalar JSON
 
-union LedgerDelta = LedgerReset | LedgerUpsert | LedgerRemove
+enum Lane {
+	ACCUMULATED
+	PRESENCE
+}
+
+type LanesPaused {
+	lanes: [Lane!]!
+}
+
+type LanesResumed {
+	lanes: [Lane!]!
+}
+
+union LedgerDelta = LedgerReset | LedgerUpsert | LedgerRemove | LanesPaused | LanesResumed
 
 type LedgerMutation {
 	recordEntry(id: UUID!, amount: Int!): MutationAck!

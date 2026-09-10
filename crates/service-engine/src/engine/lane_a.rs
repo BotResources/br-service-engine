@@ -4,7 +4,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::accumulator::AccumulatorRuntime;
-use crate::accumulator::ingress::spawn_lane_a;
+use crate::accumulator::lane_a_loop::spawn_lane_a;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
 use crate::nats::Nats;
@@ -12,7 +12,7 @@ use crate::nats::Nats;
 pub(crate) struct LaneATasks {
     pub stop_ingress: Arc<Notify>,
     pub stop_purge: Arc<Notify>,
-    pub ingress_task: Option<JoinHandle<Result<(), EngineError>>>,
+    pub ingress_task: Option<JoinHandle<()>>,
     pub purge_task: Option<JoinHandle<()>>,
 }
 
@@ -28,6 +28,7 @@ pub(crate) async fn spawn_if_registered(
     nats: &Nats,
     config: &EngineConfig,
     accumulators: &Arc<AccumulatorRuntime>,
+    health: crate::inbound::InboundHealth,
 ) -> Result<LaneATasks, EngineError> {
     let stop_ingress = Arc::new(Notify::new());
     let stop_purge = Arc::new(Notify::new());
@@ -42,8 +43,9 @@ pub(crate) async fn spawn_if_registered(
             config.seal_retention,
             accumulators.clone(),
             config.beat,
-            crate::inbound::DEFAULT_ACK_WAIT,
-            crate::inbound::DEFAULT_MAX_ACK_PENDING,
+            config.ack_wait,
+            config.max_ack_pending,
+            health,
             stop_ingress.clone(),
             stop_purge.clone(),
         )
