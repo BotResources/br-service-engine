@@ -33,6 +33,20 @@ impl<P: Principal> Renderer<'_, P> {
         principal: &P,
         keys: &[KeyBytes],
     ) -> Result<(Rendered, RenderCost), EngineError> {
+        self.render_checked(projector, under_rls, cohort, principal, keys, None)
+            .await
+    }
+
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))]
+    pub(crate) async fn render_checked(
+        &self,
+        projector: &Arc<dyn ErasedProjector<P>>,
+        under_rls: bool,
+        cohort: CohortKey,
+        principal: &P,
+        keys: &[KeyBytes],
+        witness: Option<&P>,
+    ) -> Result<(Rendered, RenderCost), EngineError> {
         if keys.is_empty() {
             return Ok((Rendered::new(), RenderCost::default()));
         }
@@ -66,6 +80,18 @@ impl<P: Principal> Renderer<'_, P> {
         let mut rendered = Rendered::new();
         for key in keys {
             rendered.insert(key.clone(), projector.project(&facts, key, principal)?);
+        }
+        #[cfg(debug_assertions)]
+        if let Some(witness) = witness {
+            for key in keys {
+                let witnessed = projector.project(&facts, key, witness)?;
+                debug_assert!(
+                    rendered.get(key) == Some(&witnessed),
+                    "a cohort is not total: two principals sharing one cohort key render \
+                     different views for the same row, which would deliver one principal's \
+                     view to the other"
+                );
+            }
         }
         Ok((
             rendered,

@@ -137,30 +137,19 @@ pub(crate) async fn run_pass_focused<P: Principal>(
             .ok_or_else(|| EngineError::UnboundProjector(group_key.0.clone()))?;
         let keys: Vec<KeyBytes> = group.keys.iter().cloned().collect();
         match renderer
-            .render(
+            .render_checked(
                 projector,
                 group_key.1,
                 group_key.2.clone(),
                 &group.representative,
                 &keys,
+                group.witness.as_ref(),
             )
             .await
         {
             Ok((views, cost)) => {
                 report.loads += cost.loads;
                 report.projections += cost.projections;
-                #[cfg(debug_assertions)]
-                if let Some(witness) = &group.witness
-                    && let Ok((witness_views, _)) = renderer
-                        .render(projector, group_key.1, group_key.2.clone(), witness, &keys)
-                        .await
-                {
-                    debug_assert_eq!(
-                        views, witness_views,
-                        "a cohort is not total: two principals sharing one cohort key render \
-                         different views, which would deliver one principal's view to the other"
-                    );
-                }
                 rendered.insert(group_key.clone(), views);
             }
             Err(error) => {
