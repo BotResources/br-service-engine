@@ -73,9 +73,15 @@ threshold the supervisor lowers readiness with
 reports ready; on shutdown a consumer naks its pulled-but-unprocessed frames so
 they redeliver to a live pod. A handler that panics is caught at dispatch, rolled
 back and dead-lettered as a terminal frame, so one panicking reaction never
-becomes an invisible poison that redelivers every `ack_wait` with readiness UP;
+becomes an invisible poison that redelivers every `ack_wait` with readiness UP.
+This catch relies on the default `panic = "unwind"`: a build that sets
+`panic = "abort"` turns a handler panic into a process abort, so the pod exits
+and is rescheduled rather than dead-lettering the one frame — keep the unwinding
+profile for a service that wants a single panicking frame parked instead of a
+pod restart.
 `cx.principal` returns a typed `PrincipalUnresolved` (terminal) rather than
-panicking when a message carries no resolvable sender. The `service_engine.dead_letter`
+panicking when a message carries no resolvable sender; `cx.try_principal`
+returns `None` for the same case when a reaction tolerates a bare message. The `service_engine.dead_letter`
 table is the one table for every source of work: inbound reactions, scheduled
 messages, cron ticks, a persistently stuck mirror and an outbox row that keeps
 failing to publish against a reachable broker all record there
@@ -215,7 +221,12 @@ the bucket. It reconciles the
 bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
-drift and an emptied or rebuilt bucket is repopulated from the store; the version
+drift and an emptied or rebuilt bucket is repopulated from the store. The
+reconcile cadence is held in the leader's **process memory**, not the store, so a
+leader restart or a failover re-runs the reconcile on the new leader's first
+drain and then resets its own timer; reconcile is an idempotent repair, not a
+scheduled commitment, so an extra reconcile after a takeover is harmless. The
+version
 lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
 `known_*` through the direct lane, joined by a `keyed_by` function and written
@@ -245,8 +256,13 @@ owner, size and state) inside the pipeline transaction, so it commits with the
 referencing aggregate and a rollback leaves no row; it returns a typed
 `UploadUrl` — an S3 SigV4 **presigned POST** carrying a policy whose
 `content-length-range` is `[0, max_bytes]`, so an object over the cap is refused
-by object storage at upload and can never land. A download `DownloadUrl` — an S3
-SigV4 presigned GET, short-lived — is minted only through the gated
+by object storage at upload and can never land, and whose `Content-Type`
+condition pins the reference row's recorded content type, so the object cannot be
+uploaded under a different type than the row claims. A download `DownloadUrl` — an
+S3 SigV4 presigned GET, short-lived, carrying `response-content-disposition` (the
+stored file name, as an attachment) and `response-content-type` (the recorded
+content type) so the object is served under its real name and type — is minted
+only through the gated
 `Query::download::<View>(key, reference)` gesture, never from a bare reference: a
 reference travels in a view by design, so a bare-reference presign would make it a
 permanent bearer capability that outlives the row and the viewer. `download`
@@ -278,7 +294,11 @@ hatch. Because release is driven entirely by the `load`/`save` diff, a reference
 a slice drops with **raw SQL** — bypassing `cx.delete`, a `load`+`save`, or
 `cx.release_blob` — is never observed by the pipeline, so its object is **never
 reaped**; a slice that writes its own SQL against a blob-referencing table owns
-releasing the blob. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
+releasing the blob. A reference is held by **exactly one** aggregate: the
+`load`/`save` diff releases it the moment its holder stops listing it, so pointing
+two aggregates at one reference is unsupported — the first holder to drop it
+orphans the object out from under the second. A blob shared between two nouns is
+modelled as two references (two uploads), never one reference held twice. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
 **not** reached by `purge_person_blobs`; a personal file that must be erasable
 with its owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type,
 person)`. `Engine::purge_person_blobs` is the erase hook `Engine::erase` calls to drop a
@@ -413,7 +433,14 @@ from that one load; in debug builds the render pass recomputes the cohort key of
 every session it grouped and asserts it equals the one the session was grouped
 under, so a `cohort()` that is not a pure function of the principal — which would
 land a session in more than one cohort and split or merge groups wrongly — panics
-in test rather than shipping. That a shared cohort renders one view for all its
+in test rather than shipping. The contract a coarser `cohort()` carries is that
+its key **fingerprints every fact that `visible` and `project` read off the
+principal**: two principals sharing a cohort key are rendered from one load and
+must be indistinguishable to both hooks, or the shared render would deliver one
+member's view to another. The default per-principal cohort discharges this
+trivially; any coarser key is a deliberate assertion that the grouped facts are
+the only principal-derived inputs the projector reads. That a shared cohort
+renders one view for all its
 members is not asserted by re-projection (that would double the very load and
 projection the cohort exists to save, and the black-box `s164` proves it directly
 by comparing the delivered views); it is guaranteed by the `Visibility`
