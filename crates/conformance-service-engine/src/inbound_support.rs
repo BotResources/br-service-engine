@@ -6,8 +6,8 @@ use br_core_integration::{Aggregate, Bc, CommandCoords, Verb};
 use futures_util::future::BoxFuture;
 use service_engine::inbound::{
     DeadLetters, Dispatch, EffectWriter, HEADER_PRODUCER, HEADER_SEQ, HEADER_SEQ_KEY,
-    InboundConfig, InboundLoop, Incoming, ReactionCoordinates, ReactionError, ReactionMessage,
-    StubDispatch, StubPayload, Subscription,
+    InboundConfig, InboundHealth, InboundLoop, Incoming, ReactionCoordinates, ReactionError,
+    ReactionMessage, StubDispatch, StubPayload, Subscription,
 };
 use service_engine::nats::{Nats, command_subject};
 use service_engine::pipeline::Reaction;
@@ -60,6 +60,7 @@ pub async fn start_loop(
     dispatch: Arc<dyn Dispatch>,
     pool: PgPool,
 ) -> InboundLoop {
+    let (health, _health_rx) = InboundHealth::new();
     InboundLoop::start(
         nats.clone(),
         subscriptions,
@@ -69,6 +70,7 @@ pub async fn start_loop(
             ack_wait: Duration::from_secs(2),
             ..InboundConfig::default()
         },
+        health,
     )
     .await
     .expect("the inbound loop binds its streams and starts")

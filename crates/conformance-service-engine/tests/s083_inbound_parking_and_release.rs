@@ -8,8 +8,8 @@ use conformance_service_engine::inbound_support::{
 };
 use conformance_service_engine::infra::{TestDb, TestNats};
 use service_engine::inbound::{
-    Budgets, DeadLetters, Dispatch, InboundConfig, InboundLoop, ReactionCoordinates, RetryOutcome,
-    StubDispatch, StubPayload, StubVerdict, Subscription,
+    Budgets, DeadLetters, Dispatch, InboundConfig, InboundHealth, InboundLoop, ReactionCoordinates,
+    RetryOutcome, StubDispatch, StubPayload, StubVerdict, Subscription,
 };
 use uuid::Uuid;
 
@@ -30,6 +30,7 @@ async fn s083_an_early_message_parks_then_lands_on_release_while_a_stuck_one_dea
         delivery: 8,
         parking: 3,
     });
+    let (health, _health_rx) = InboundHealth::new();
     let inbound = InboundLoop::start(
         nats.nats().await,
         vec![subscription],
@@ -41,6 +42,7 @@ async fn s083_an_early_message_parks_then_lands_on_release_while_a_stuck_one_dea
             backoff_max: Duration::from_millis(500),
             ..InboundConfig::default()
         },
+        health,
     )
     .await
     .expect("the inbound loop starts");

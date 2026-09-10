@@ -36,12 +36,12 @@ struct Inner {
 }
 
 #[derive(Clone)]
-pub(crate) struct InboundHealth {
+pub struct InboundHealth {
     inner: Arc<Inner>,
 }
 
 impl InboundHealth {
-    pub(crate) fn new() -> (Self, watch::Receiver<bool>) {
+    pub fn new() -> (Self, watch::Receiver<bool>) {
         let (tx, rx) = watch::channel(true);
         (
             Self {

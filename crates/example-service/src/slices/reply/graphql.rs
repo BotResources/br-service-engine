@@ -1,5 +1,5 @@
 use async_graphql::{Context, Json, Object, Result, Subscription};
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use serde::Serialize;
 use service_engine::graphql::SliceFragment;
 use service_engine::session::{WindowParams, WindowSpec};
@@ -139,7 +139,8 @@ impl ReplySubscription {
             )],
         )
         .await?;
-        Ok(stream.map(|delta| ReplyDelta::from_delta(&delta)))
+        let notices = service_engine::graphql::lane_notice_stream::<AppPrincipal>(ctx)?;
+        Ok(ReplyDelta::subscribe(stream, notices))
     }
 
     async fn typing_deltas(
@@ -153,6 +154,7 @@ impl ReplySubscription {
             vec![WindowSpec::new(Typing::NAME, params, false)],
         )
         .await?;
-        Ok(stream.map(|delta| TypingDelta::from_delta(&delta)))
+        let notices = service_engine::graphql::lane_notice_stream::<AppPrincipal>(ctx)?;
+        Ok(TypingDelta::subscribe(stream, notices))
     }
 }

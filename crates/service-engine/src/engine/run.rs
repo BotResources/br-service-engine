@@ -4,7 +4,9 @@ use tokio::sync::Notify;
 
 use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
-use crate::engine::loops::{RenderGc, RenderRepairs, join_presence, run_scheduled_messages};
+use crate::engine::loops::{
+    RenderGc, RenderRepairs, RenderReset, join_presence, run_scheduled_messages,
+};
 use crate::error::EngineError;
 use crate::housekeeping::ready::{REASON_WORKER_STOPPED, ReadinessAssembly};
 use crate::inbound::{DeadLetters, InboundLoop};
@@ -78,6 +80,16 @@ impl<P: Principal> Engine<P> {
             .with_repairs(Arc::new(RenderRepairs(render.clone())));
         if let Some(drain) = erasure_drain {
             beat = beat.with_erasure_drain(drain);
+        }
+        if render.lane_channel().has_session_lanes() {
+            let reset: Arc<dyn crate::housekeeping::lane::ResetAll> =
+                Arc::new(RenderReset(render.clone()));
+            beat = beat.with_lane_supervisor(crate::housekeeping::lane::LaneSupervisor::new(
+                nats.clone(),
+                config.nats_grace,
+                render.lane_channel(),
+                reset,
+            ));
         }
         beat.gc().set_sessions(Arc::new(RenderGc(render.clone())));
 

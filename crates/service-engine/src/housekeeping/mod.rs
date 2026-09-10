@@ -4,6 +4,7 @@ pub mod cron;
 mod drain;
 pub mod gc;
 pub mod health;
+pub mod lane;
 pub mod leader;
 pub mod mirror;
 pub mod ready;

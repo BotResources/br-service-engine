@@ -30,9 +30,8 @@ pub use message::{
 };
 pub use reaction::{ReactionEntry, ReactionInvoker, ReactionMessage, ReactionRegistry};
 pub use runtime::InboundLoop;
-pub(crate) use supervisor::{
-    HealthTracker, InboundHealth, ServeExit, SupervisorConfig, sleep_or_cancel,
-};
+pub use supervisor::InboundHealth;
+pub(crate) use supervisor::{HealthTracker, ServeExit, SupervisorConfig};
 pub use subscription::{
     DEFAULT_ACK_WAIT, DEFAULT_MAX_ACK_PENDING, InboundConfig, ReactionCoordinates, Subscription,
 };

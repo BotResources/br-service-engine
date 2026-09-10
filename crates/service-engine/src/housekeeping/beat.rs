@@ -13,6 +13,7 @@ use crate::erase::ErasureDrain;
 use crate::error::EngineError;
 use crate::housekeeping::cron::{CronRound, CronRuntime};
 use crate::housekeeping::gc::{Gc, GcRound};
+use crate::housekeeping::lane::LaneSupervisor;
 use crate::housekeeping::ready::ReadinessAssembly;
 use crate::housekeeping::relay::{RelayRound, RelayRuntime};
 use crate::housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
@@ -48,6 +49,7 @@ pub struct Beat {
     listener_queue_threshold: f64,
     schema_version: (String, String),
     erasures: Option<Arc<dyn ErasureDrain>>,
+    lane: Option<LaneSupervisor>,
 }
 
 impl Beat {
@@ -72,7 +74,13 @@ impl Beat {
                 config.schema_service_version().to_string(),
             ),
             erasures: None,
+            lane: None,
         })
+    }
+
+    pub(crate) fn with_lane_supervisor(mut self, lane: LaneSupervisor) -> Self {
+        self.lane = Some(lane);
+        self
     }
 
     pub(crate) fn with_blob_reaper(mut self, reaper: BlobReaper) -> Self {
@@ -182,6 +190,9 @@ impl Beat {
                 reason = %describe(&error),
                 "the beat could not complete a pending person-erasure purge",
             );
+        }
+        if let Some(lane) = &mut self.lane {
+            lane.tick().await;
         }
         let queue_usage = self.queue_usage().await;
         self.apply_listener_brake(queue_usage);

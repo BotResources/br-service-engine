@@ -11,6 +11,7 @@ use crate::config::EngineConfig;
 use crate::error::{EngineError, TransportError};
 use crate::housekeeping::beat::RepairRetry;
 use crate::housekeeping::gc::SessionGc;
+use crate::housekeeping::lane::ResetAll;
 use crate::housekeeping::scheduled_message::{
     DEFAULT_SCHEDULED_MESSAGE_BATCH, DEFAULT_SCHEDULED_MESSAGE_BUDGET, fire_due,
 };
@@ -36,6 +37,14 @@ pub(super) struct RenderRepairs<P: Principal>(pub(super) Arc<SessionRuntime<P>>)
 impl<P: Principal> RepairRetry for RenderRepairs<P> {
     fn retry<'a>(&'a self) -> BoxFuture<'a, Result<usize, EngineError>> {
         Box::pin(async move { self.0.retry_repairs().await })
+    }
+}
+
+pub(super) struct RenderReset<P: Principal>(pub(super) Arc<SessionRuntime<P>>);
+
+impl<P: Principal> ResetAll for RenderReset<P> {
+    fn reset_all(&self) -> BoxFuture<'_, Result<usize, EngineError>> {
+        Box::pin(async move { self.0.resnapshot_all().await })
     }
 }
 
