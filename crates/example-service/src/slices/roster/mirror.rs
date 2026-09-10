@@ -2,11 +2,11 @@ use example_contract::PERSON_PREFIX;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Change, Mirror, MirrorReady, Project, Projection};
+use service_engine::mirror::{Change, Known, KnownScope, Mirror, MirrorReady, Project, Projection};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Shadows};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 pub const DIRECTORY_MIRROR: MirrorName = MirrorName::from_static("directory");
@@ -33,6 +33,56 @@ fn id_of(key: &KvKey) -> Option<Uuid> {
         .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
+struct KnownPersonRow {
+    id: Uuid,
+    email: String,
+    display_name: String,
+}
+
+impl Known for KnownPersonRow {
+    const NAMESPACE: &'static str = PERSON_NAMESPACE;
+
+    fn foreign_key(&self) -> String {
+        self.id.to_string()
+    }
+
+    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query(
+                "INSERT INTO known_persons (user_id, email, display_name) \
+                 VALUES ($1, $2, $3) \
+                 ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, \
+                   display_name = EXCLUDED.display_name",
+            )
+            .bind(self.id)
+            .bind(&self.email)
+            .bind(&self.display_name)
+            .execute(conn)
+            .await?;
+            Ok(())
+        })
+    }
+}
+
+struct ByPerson(Uuid);
+
+impl KnownScope for ByPerson {
+    const NAMESPACE: &'static str = PERSON_NAMESPACE;
+
+    fn delete<'c>(
+        &'c self,
+        conn: &'c mut PgConnection,
+    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
+        Box::pin(async move {
+            sqlx::query("DELETE FROM known_persons WHERE user_id = $1")
+                .bind(self.0)
+                .execute(conn)
+                .await?;
+            Ok(vec![self.0.to_string()])
+        })
+    }
+}
+
 struct DirectoryProjection;
 
 impl Project<Uuid> for DirectoryProjection {
@@ -47,26 +97,15 @@ impl Project<Uuid> for DirectoryProjection {
             let person = cx.shadow::<ConsumedPerson>().get(&person_key(id)).cloned();
             match person {
                 Some(person) => {
-                    sqlx::query(
-                        "INSERT INTO known_persons (user_id, email, display_name) \
-                         VALUES ($1, $2, $3) \
-                         ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, \
-                           display_name = EXCLUDED.display_name",
-                    )
-                    .bind(id)
-                    .bind(&person.email)
-                    .bind(&person.display_name)
-                    .execute(cx.conn())
-                    .await?;
+                    cx.replace_one(KnownPersonRow {
+                        id,
+                        email: person.email,
+                        display_name: person.display_name,
+                    })
+                    .await
                 }
-                None => {
-                    sqlx::query("DELETE FROM known_persons WHERE user_id = $1")
-                        .bind(id)
-                        .execute(cx.conn())
-                        .await?;
-                }
+                None => cx.remove(ByPerson(id)).await,
             }
-            cx.impact_foreign(PERSON_NAMESPACE, &id.to_string())
         })
     }
 }

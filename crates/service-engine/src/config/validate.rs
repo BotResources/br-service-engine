@@ -10,6 +10,7 @@ impl EngineConfig {
             ("seal_retention", self.seal_retention),
             ("lease", self.lease),
             ("offer_reconcile", self.offer_reconcile),
+            ("mirror_reconcile", self.mirror_reconcile),
             ("listener_probe_timeout", self.listener_probe_timeout),
             ("session_max_age", self.session_max_age),
             ("lock_timeout", self.lock_timeout),
@@ -99,6 +100,7 @@ mod tests {
         assert_eq!(c.fold_cache_capacity, 10_000);
         assert_eq!(c.lease, Duration::from_secs(30));
         assert_eq!(c.offer_reconcile, Duration::from_secs(300));
+        assert_eq!(c.mirror_reconcile, Duration::from_secs(300));
         assert_eq!(c.listener_probe_timeout, Duration::from_secs(2));
         assert_eq!(c.repair_attempts, 5);
         assert_eq!(c.session_max_age, Duration::from_secs(43_200));
@@ -131,6 +133,12 @@ mod tests {
         assert!(
             config()
                 .with_offer_reconcile(Duration::ZERO)
+                .validate()
+                .is_err()
+        );
+        assert!(
+            config()
+                .with_mirror_reconcile(Duration::ZERO)
                 .validate()
                 .is_err()
         );

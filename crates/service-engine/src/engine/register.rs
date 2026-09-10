@@ -100,16 +100,18 @@ impl<P: Principal> Engine<P> {
         K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
         Pr: Project<K>,
     {
-        let handle = mirror.build_led(
-            self.nats.clone(),
-            self.pg.clone(),
-            self.transport.clone() as Arc<dyn ImpactTransport>,
-            crate::mirror::MirrorLeader::new(
-                self.config.pod_id.clone(),
-                self.config.lease,
-                self.config.beat,
-            ),
-        );
+        let handle = mirror
+            .with_reconcile_deadline(self.config.mirror_reconcile)
+            .build_led(
+                self.nats.clone(),
+                self.pg.clone(),
+                self.transport.clone() as Arc<dyn ImpactTransport>,
+                crate::mirror::MirrorLeader::new(
+                    self.config.pod_id.clone(),
+                    self.config.lease,
+                    self.config.beat,
+                ),
+            );
         self.mirrors.register(handle)
     }
 

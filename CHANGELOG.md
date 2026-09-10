@@ -250,13 +250,24 @@ same transaction as the write; the leader drains dirty keys (re-read, `publish`,
 put/retract under a per-key watermark and a bucket-revision compare-and-swap) and
 reconciles the bucket against the store on its first drain after boot and every
 `with_offer_reconcile` period, so a rebuilt or drifted bucket is repaired even
-under a stable leader. `Mirror::new(name).consume::<C>().keyed_by(f).project(p)`
-and `register_mirror`: a per-pod typed `Shadow<C>` of each consumed offer, a
-full read of every consumed prefix at boot before readiness reports converged,
-and leader-gated projection into `known_*` through the direct lane (standbys
-keep shadows current and re-project their shadow on takeover, so a change inside
-the failover window is never missed). A consumed prefix that reads empty holds
-readiness DOWN and keeps `known_*` and the shadows as they are, never projecting
+under a stable leader. `Mirror::new(name).consume::<C>()…consume::<D>().keyed_by(f).project(p)`
+and `register_mirror`: a per-pod typed `Shadow<C>` of each consumed offer merged
+by `keyed_by`, a full read of every consumed prefix at boot before readiness
+reports converged, and leader-gated projection into `known_*` through the direct
+lane (standbys keep shadows current and re-project their shadow on takeover, so a
+change inside the failover window is never missed). A projector writes no SQL of
+its own: it implements `Known` (a derived row's table write) and `KnownScope` (a
+selector's delete) once, and the projection function calls `Projection::replace`,
+`replace_one` and `remove`, which also stage the foreign impacts. The mirror
+persists a per-bucket watermark — the bucket revision it has projected up to,
+advanced by the leader as it projects — so a standby reports converged only once
+its shadows are loaded **and** the watermark has reached the revision its boot
+read reached, and the watch resumes from that revision (`watch_all_from_revision`)
+so a put or retract between the boot read and the watch is not lost. A periodic
+reconcile on `with_mirror_reconcile` (a new validated bound) repairs drift. A
+consumed prefix that reads empty — at boot, at the reconcile deadline, or a
+watch change that would empty it during a run — holds readiness DOWN with the
+prefix's name and keeps `known_*` and the shadows as they are, never projecting
 to empty.
 
 **Blobs over S3-compatible object storage.** `register_blobs::<Kind>(BlobPolicy)`

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error as StdError;
 
 use futures_util::future::BoxFuture;
@@ -55,6 +56,53 @@ impl<'a> Projection<'a> {
             .push(Impact::foreign(ForeignKey::new(namespace, key)?));
         Ok(())
     }
+
+    pub async fn replace_one<R: Known>(&mut self, row: R) -> Result<(), EngineError> {
+        row.upsert(self.conn).await?;
+        self.impact_foreign(R::NAMESPACE, &row.foreign_key())
+    }
+
+    pub async fn remove<S: KnownScope>(&mut self, scope: S) -> Result<(), EngineError> {
+        let touched = scope.delete(self.conn).await?;
+        for key in touched {
+            self.impact_foreign(S::NAMESPACE, &key)?;
+        }
+        Ok(())
+    }
+
+    pub async fn replace<S, R, I>(&mut self, scope: S, rows: I) -> Result<(), EngineError>
+    where
+        S: KnownScope,
+        R: Known,
+        I: IntoIterator<Item = R>,
+    {
+        let mut touched: BTreeSet<String> = scope.delete(self.conn).await?.into_iter().collect();
+        for row in rows {
+            row.upsert(self.conn).await?;
+            touched.insert(row.foreign_key());
+        }
+        for key in touched {
+            self.impact_foreign(R::NAMESPACE, &key)?;
+        }
+        Ok(())
+    }
+}
+
+pub trait Known: Send + Sync + 'static {
+    const NAMESPACE: &'static str;
+
+    fn foreign_key(&self) -> String;
+
+    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>>;
+}
+
+pub trait KnownScope: Send + Sync {
+    const NAMESPACE: &'static str;
+
+    fn delete<'c>(
+        &'c self,
+        conn: &'c mut PgConnection,
+    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>>;
 }
 
 pub trait Project<K>: Send + Sync + 'static {

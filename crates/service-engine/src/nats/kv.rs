@@ -144,6 +144,21 @@ impl<V> KvBucket<V> {
         })?;
         Ok(KvWatch { inner })
     }
+
+    pub async fn watch_all_from(&self, revision: u64) -> Result<KvWatch, NatsError> {
+        if revision == 0 {
+            return self.watch_all().await;
+        }
+        let inner = self
+            .store
+            .watch_all_from_revision(revision)
+            .await
+            .map_err(|e| NatsError::Kv {
+                key: "watch".to_string(),
+                detail: e.to_string(),
+            })?;
+        Ok(KvWatch { inner })
+    }
 }
 
 impl<V> KvBucket<V>
@@ -245,6 +260,13 @@ where
     }
 
     pub async fn entries(&self, prefix: &KvPrefix) -> Result<Vec<(KvKey, V)>, NatsError> {
+        Ok(self.entries_with_revision(prefix).await?.0)
+    }
+
+    pub async fn entries_with_revision(
+        &self,
+        prefix: &KvPrefix,
+    ) -> Result<(Vec<(KvKey, V)>, u64), NatsError> {
         use futures_util::StreamExt;
         let mut keys = self
             .store
@@ -256,6 +278,7 @@ where
             })?
             .boxed();
         let mut out = Vec::new();
+        let mut max_revision = 0;
         while let Some(next) = keys.next().await {
             let raw = next.map_err(|e| NatsError::Kv {
                 key: prefix.as_str().to_string(),
@@ -265,11 +288,12 @@ where
                 continue;
             }
             let Ok(key) = KvKey::new(raw) else { continue };
-            if let Some((value, _)) = self.get_with_revision(&key).await? {
+            if let Some((value, revision)) = self.get_with_revision(&key).await? {
+                max_revision = max_revision.max(revision.get());
                 out.push((key, value));
             }
         }
-        Ok(out)
+        Ok((out, max_revision))
     }
 
     pub async fn all(&self) -> Result<Vec<(KvKey, V)>, NatsError> {
