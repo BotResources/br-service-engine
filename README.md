@@ -73,8 +73,9 @@ threshold the supervisor lowers readiness with
 reports ready; on shutdown a consumer naks its pulled-but-unprocessed frames so
 they redeliver to a live pod. The `service_engine.dead_letter` table is the one
 table for every source of work: inbound reactions, scheduled messages, cron
-ticks and a persistently stuck mirror all record there
-(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror}`), each staging an
+ticks, a persistently stuck mirror and an outbox row that keeps failing to
+publish against a reachable broker all record there
+(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox}`), each staging an
 ops-view impact and incrementing `service_engine_dead_letters_total` by source.
 `register_mutation` and `register_bulk`: a GraphQL mutation and a
 NATS command run **one** direct write pipeline — load, gate (the affordance
@@ -486,7 +487,20 @@ deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
 the retention — a bound the operator sets to at least the outbox stream's
 retention plus its dedup window, since a claim swept while the broker still
 dedups its id could let a redelivery re-run the effect; the sweep is best-effort
-and never lowers readiness. To recover a `KvDrainRelay`'s published-language
+and never lowers readiness. A committed outbox row is never lost to a broker
+outage: while `Nats::reachable()` is false the relay skips its publish pass
+entirely, so the rows wait (the degrade table's "outbox rows … wait") and the
+single beat keeps ticking — heartbeat, cron, scheduled boundaries and the
+readiness refresh run every beat and the `nats_grace` probe alone takes the pod
+DOWN, never a beat frozen on a full outbox. A publish is bounded by
+`PUBLISH_ACK_TIMEOUT` so a send to a just-died broker cannot hang the beat. A
+transient failure never counts an attempt while the broker is unreachable, so an
+outage of any length is retried forever rather than exhausting a budget; only a
+row that keeps failing to publish against a *reachable* broker is bounded, and at
+the bound it is dead-lettered (`DeadLetterSource::Outbox`, with an ops-view
+impact) in the same transaction that marks it `FAILED`, never abandoned silently.
+`service_engine_outbox_pending` and `service_engine_outbox_oldest_age_seconds`
+export the backlog depth and the age of its oldest waiting row. To recover a `KvDrainRelay`'s published-language
 bucket that an operator truncated and rebuilt, call `reset_watermarks` and have
 the relay's source re-stage its set, so the version guard does not refuse the
 unchanged keys the rebuilt bucket lost.

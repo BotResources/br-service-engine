@@ -98,10 +98,11 @@ durable name, so a message is owned by one pod at a time.
   `record_work`, `list` by `DeadLetterSource`, `discard`, `retry` — retry
   re-publishes with a fresh dedup token but the original logical id, so the claim
   and sequence guard keep a replay on newer state a no-op). It is the one table
-  for **every source of work**: inbound reactions, scheduled messages, cron ticks
-  and a mirror stuck past its restart threshold all record there
-  (`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror}`), each staging an impact
-  on the ops noun in the same transaction and incrementing the
+  for **every source of work**: inbound reactions, scheduled messages, cron ticks,
+  a mirror stuck past its restart threshold and an outbox row that keeps failing
+  to publish against a reachable broker all record there
+  (`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox}`), each staging an
+  impact on the ops noun in the same transaction and incrementing the
   `service_engine_dead_letters_total` counter labelled by source.
 - The per-(producer, reaction, key) sequence guard
   (`service_engine.sequence_guard`) and the idempotency claim
@@ -292,7 +293,18 @@ instead of one batch per beat, and a periodic hygiene pass (`with_sweep_every`)
 deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
 `with_message_retention` — a bound the operator sets to at least the outbox
 stream's retention plus its dedup window; the sweep is best-effort and never
-lowers readiness. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
+lowers readiness. The relay skips its publish pass while `Nats::reachable()` is
+false, so a full outbox during a broker outage costs nothing per beat and never
+freezes the single beat task (heartbeat, cron, scheduled boundaries and the
+readiness refresh keep running; the `nats_grace` probe alone takes the pod DOWN);
+each publish is bounded by `PUBLISH_ACK_TIMEOUT`. A transient publish failure
+never counts an attempt while the broker is unreachable, so a committed row is
+retried forever through an outage rather than exhausting a budget; only a row
+that keeps failing against a reachable broker is bounded and, at the bound, is
+dead-lettered (`DeadLetterSource::Outbox`) in the same transaction that marks it
+`FAILED`. `service_engine_outbox_pending` and
+`service_engine_outbox_oldest_age_seconds` gauge the backlog depth and its oldest
+waiting row. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
 `publish`) and `register_offer::<O>()`: a saved noun that carries an offer stages
 its dirty key (`service_engine.offer_dirty`) in the same transaction as the
 write; the leader drains dirty keys by claiming and resolving them in a short
@@ -537,7 +549,9 @@ untouched; the subscription union exposes `LanesPaused` / `LanesResumed` as
 members, `Engine::lane_notices` exposes the raw signal, and the union's generated
 `subscribe(deltas, notices)` merges it. Every metric is labelled by `service`
 and `pod`; `impacts_committed_total` is the notify-budget counter,
-`dead_letters_total` counts dead letters by source, and each degrade-table
+`dead_letters_total` counts dead letters by source, `outbox_pending` and
+`outbox_oldest_age_seconds` gauge the outbox backlog and the age of its oldest
+waiting row, and each degrade-table
 dependency (postgres, listener, nats, mirrors, inbound) is a `dependency_up`
 gauge. Four alerts ship as a `PrometheusRule` in
 `observability/service-engine-alerts.yaml`.
@@ -553,7 +567,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s171` — drives the real engine through an in-crate `sample` service and
+`s001`–`s171` and `s176`–`s179` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, direct impact-bus/transport assertions): shared-consumer ownership
 across two pods, ack-after-durable with a crash before commit, poison budget to
@@ -600,7 +614,17 @@ pause reaches a GraphQL subscriber and not only `Engine::lane_notices` (`s170`);
 and a `KvDrainRelay` whose published-language bucket an operator truncated and
 rebuilt refuses to re-put its unchanged-version keys until `reset_watermarks`
 clears the per-key watermark, after which the source's re-staged set converges
-the rebuilt bucket back to the store (`s171`).
+the rebuilt bucket back to the store (`s171`). The outbox-outage scenarios prove
+a broker outage never loses a committed row nor freezes the beat: rows committed
+while NATS is down wait as `PENDING` and deliver exactly once on restart, with no
+dead letter (`s176`); a full outbox backlog with NATS down keeps the beat ticking
+— the schema-version heartbeat and a cron's leader slots keep advancing while
+readiness carries the nats reason (`s177`); the same backlog does not delay the
+`REASON_NATS_UNREACHABLE` verdict past `nats_grace` plus a small detection margin,
+where a beat frozen on the backlog would have held the pod UP for minutes
+(`s178`); and a row the *reachable* broker keeps rejecting is retried under a
+bound and then dead-lettered `DeadLetterSource::Outbox`, never silently
+abandoned as `FAILED` (`s179`).
 **Black-box mode** — `bb01`–`bb06`
 — spawns the real `example-service` binary (and the `example-twin` binary for the
 cross-service cycle) and drives them over their public channels only (GraphQL
