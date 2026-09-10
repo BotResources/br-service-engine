@@ -79,13 +79,12 @@ impl BlobReaper {
         policy: &BlobPolicy,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
-        let orphan_after =
-            chrono::Duration::from_std(policy.orphan_after).map_err(|_| {
-                EngineError::Config(format!(
-                    "the blob policy orphan_after {:?} does not fit a timestamp cutoff",
-                    policy.orphan_after
-                ))
-            })?;
+        let orphan_after = chrono::Duration::from_std(policy.orphan_after).map_err(|_| {
+            EngineError::Config(format!(
+                "the blob policy orphan_after {:?} does not fit a timestamp cutoff",
+                policy.orphan_after
+            ))
+        })?;
         let cutoff = chrono::Utc::now() - orphan_after;
         self.promote_and_reap_incomplete(pg, store, kind, cutoff, round)
             .await?;

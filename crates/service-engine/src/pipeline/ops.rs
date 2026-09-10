@@ -207,7 +207,10 @@ impl<'a> Ops<'a> {
     }
 
     pub fn command<C: OutboundCommand>(&mut self, command: C) -> Result<(), EngineError> {
-        let record = match self.outbound().and_then(|ctx| command_record(&command, ctx)) {
+        let record = match self
+            .outbound()
+            .and_then(|ctx| command_record(&command, ctx))
+        {
             Ok(record) => record,
             Err(error) => {
                 self.note_config_terminal(&error);

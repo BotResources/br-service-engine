@@ -11,11 +11,11 @@ use crate::offers::OfferStagers;
 use uuid::Uuid;
 
 use crate::pipeline::context::{Bulk, Mutation};
-use crate::pipeline::tx::{begin_scoped, flush_and_commit};
 use crate::pipeline::mutation::MutationInput;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::OutboundContext;
 use crate::pipeline::staged::Staged;
+use crate::pipeline::tx::{begin_scoped, flush_and_commit};
 use crate::pipeline::{MutationError, MutationFault};
 use crate::presence::PresenceHandle;
 use crate::principal::Principal;

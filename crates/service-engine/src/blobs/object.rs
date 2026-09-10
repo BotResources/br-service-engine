@@ -81,9 +81,10 @@ impl ObjectStore {
         file_name: &str,
     ) -> DownloadUrl {
         let mut action = self.bucket.get_object(Some(&self.credentials), object_key);
-        action
-            .query_mut()
-            .insert("response-content-disposition", content_disposition(file_name));
+        action.query_mut().insert(
+            "response-content-disposition",
+            content_disposition(file_name),
+        );
         if !content_type.is_empty() {
             action
                 .query_mut()

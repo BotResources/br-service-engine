@@ -71,7 +71,12 @@ pub async fn serve_bounded<Q, M, S>(
 
     match ended {
         Ended::Expired => {
-            send_close(&mut sink, SESSION_MAX_AGE_CLOSE_CODE, SESSION_MAX_AGE_CLOSE_REASON).await;
+            send_close(
+                &mut sink,
+                SESSION_MAX_AGE_CLOSE_CODE,
+                SESSION_MAX_AGE_CLOSE_REASON,
+            )
+            .await;
         }
         Ended::ShuttingDown => {
             send_close(&mut sink, SHUTDOWN_CLOSE_CODE, SHUTDOWN_CLOSE_REASON).await;
