@@ -10,7 +10,7 @@ use uuid::Uuid;
 const SOON: Duration = Duration::from_secs(2);
 
 #[tokio::test]
-async fn s158_one_load_per_cohort_per_frame_whatever_the_number_of_viewers() {
+async fn s164_one_load_per_cohort_per_frame_whatever_the_number_of_viewers() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let tenant_a = Uuid::now_v7();

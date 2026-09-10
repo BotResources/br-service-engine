@@ -12,7 +12,7 @@ use uuid::Uuid;
 const SOON: Duration = Duration::from_secs(2);
 
 #[tokio::test]
-async fn s159_a_registration_threshold_resets_where_the_global_default_still_diffs() {
+async fn s165_a_registration_threshold_resets_where_the_global_default_still_diffs() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

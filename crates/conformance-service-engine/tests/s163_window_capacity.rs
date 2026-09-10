@@ -16,7 +16,7 @@ fn cursor(page: AssignmentPage) -> WindowParams {
 }
 
 #[tokio::test]
-async fn s157_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head() {
+async fn s163_capacity_releases_the_oldest_page_silently_and_keeps_the_live_head() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

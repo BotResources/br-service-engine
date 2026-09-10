@@ -15,7 +15,7 @@ fn cursor(page: AssignmentPage) -> WindowParams {
 }
 
 #[tokio::test]
-async fn s161_a_page_request_for_a_session_the_caller_does_not_own_is_refused() {
+async fn s167_a_page_request_for_a_session_the_caller_does_not_own_is_refused() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

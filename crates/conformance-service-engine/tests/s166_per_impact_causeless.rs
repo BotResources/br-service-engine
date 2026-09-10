@@ -12,7 +12,7 @@ use uuid::Uuid;
 const SOON: Duration = Duration::from_secs(2);
 
 #[tokio::test]
-async fn s160_a_per_impact_view_emits_the_cause_but_never_faults_on_a_causeless_impact() {
+async fn s166_a_per_impact_view_emits_the_cause_but_never_faults_on_a_causeless_impact() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
