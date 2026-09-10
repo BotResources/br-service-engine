@@ -238,7 +238,7 @@ impl OutboxRelay {
             error: detail,
             delivered: i32::try_from(attempts).unwrap_or(i32::MAX),
         };
-        dead_letters.stage(&mut **tx, &entry).await?;
+        dead_letters.stage(tx, &entry).await?;
         Ok(())
     }
 }

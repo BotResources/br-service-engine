@@ -81,10 +81,7 @@ impl OutboxStore {
         Ok(())
     }
 
-    pub async fn pending_stats<'e, E>(
-        &self,
-        executor: E,
-    ) -> Result<(i64, Option<f64>), sqlx::Error>
+    pub async fn pending_stats<'e, E>(&self, executor: E) -> Result<(i64, Option<f64>), sqlx::Error>
     where
         E: Executor<'e, Database = Postgres>,
     {

@@ -51,7 +51,9 @@ async fn s176_committed_outbox_rows_wait_out_a_nats_outage_and_deliver_once_on_r
     for n in 0..BACKLOG {
         staged.push(stage_outbox_row(&mut tx, &format!("wait-{n}")).await);
     }
-    tx.commit().await.expect("commit the backlog while nats is down");
+    tx.commit()
+        .await
+        .expect("commit the backlog while nats is down");
 
     tokio::time::sleep(Duration::from_millis(600)).await;
     for id in &staged {
@@ -89,12 +91,10 @@ async fn s176_committed_outbox_rows_wait_out_a_nats_outage_and_deliver_once_on_r
 }
 
 async fn outbox_source_dead_letters(pool: &PgPool) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM service_engine.dead_letter WHERE source = 'outbox'",
-    )
-    .fetch_one(pool)
-    .await
-    .expect("read the outbox dead letters")
+    sqlx::query_scalar("SELECT count(*) FROM service_engine.dead_letter WHERE source = 'outbox'")
+        .fetch_one(pool)
+        .await
+        .expect("read the outbox dead letters")
 }
 
 async fn await_ready(readiness: &ReadinessHandle) {

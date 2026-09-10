@@ -50,7 +50,9 @@ async fn s178_a_pending_backlog_does_not_delay_the_nats_down_verdict() {
     for n in 0..BACKLOG {
         stage_outbox_row(&mut tx, &format!("backlog-{n}")).await;
     }
-    tx.commit().await.expect("commit the backlog while nats is down");
+    tx.commit()
+        .await
+        .expect("commit the backlog while nats is down");
 
     let reason = await_not_ready(&readiness, NATS_GRACE + DETECTION_MARGIN).await;
     let took = stopped_at.elapsed();
