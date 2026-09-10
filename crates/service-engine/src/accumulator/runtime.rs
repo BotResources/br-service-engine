@@ -200,12 +200,27 @@ impl AccumulatorRuntime {
         &self,
         tx: &mut PgConnection,
         key: &<A::Noun as Noun>::Key,
-    ) -> Result<(AccumulatorName, KeyBytes), EngineError> {
+    ) -> Result<((AccumulatorName, KeyBytes), A::State), EngineError> {
         let entry = lookup::<A>(&self.registry)?;
         let key = encode_key::<A::Noun>(key)?;
-        seal::seal_current(&entry, tx, &key, time::now()).await?;
+        let (_high_water, state) = seal::seal_current(&entry, tx, &key, time::now()).await?;
         self.reader.forget(&entry.name, &key);
-        Ok((entry.name, key))
+        let state = *state
+            .downcast::<A::State>()
+            .map_err(|_| EngineError::StateMismatch {
+                accumulator: entry.name.clone(),
+            })?;
+        Ok(((entry.name, key), state))
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn stream_lock_id<A: Accumulator>(
+        &self,
+        key: &<A::Noun as Noun>::Key,
+    ) -> Result<i64, EngineError> {
+        let entry = lookup::<A>(&self.registry)?;
+        let key = encode_key::<A::Noun>(key)?;
+        Ok(crate::accumulator::guard::lock_id(&(entry.name, key)))
     }
 
     pub async fn seal_upto<A: Accumulator>(

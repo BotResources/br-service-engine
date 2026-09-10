@@ -31,6 +31,16 @@ pub fn create_card<'r>(
             ));
         }
         let cmd = msg.0;
+        if let Some(existing) = cx.load::<CardAggregate>(&cmd.card_id).await? {
+            cx.emit(OutCardReady {
+                ready: CardReady {
+                    card_id: cmd.card_id,
+                    board_id: existing.0.board_id,
+                },
+                version: 1,
+            })?;
+            return Ok(());
+        }
         let cause = CardEvent::Created {
             board_id: cmd.board_id,
             title: cmd.title.clone(),

@@ -1,3 +1,4 @@
+mod confirm;
 mod context;
 mod dispatch;
 mod effect;

@@ -33,10 +33,9 @@ impl Ops<'_> {
         &mut self,
         key: &<A::Noun as Noun>::Key,
     ) -> Result<A::State, EngineError> {
-        let accumulated = self.accumulators.reader().state::<A>(key).await?;
-        let sealed = self.accumulators.seal_current::<A>(self.conn, key).await?;
+        let (sealed, state) = self.accumulators.seal_current::<A>(self.conn, key).await?;
         self.staged.sealed_keys.push(sealed);
-        Ok(accumulated.state)
+        Ok(state)
     }
 
     async fn seal_verified<A: Accumulator>(
