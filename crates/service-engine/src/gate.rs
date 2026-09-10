@@ -150,7 +150,7 @@ impl Affordances {
     pub fn require(&self, action: ActionName) -> Result<(), Reason> {
         match self.get(action) {
             Some(gate) => gate.require(),
-            None => Ok(()),
+            None => Err(Reason::new("unknown_action")),
         }
     }
 }

@@ -5,7 +5,7 @@ use tokio::task::{JoinError, JoinHandle};
 
 use crate::engine::loops::join_presence;
 use crate::error::EngineError;
-use crate::housekeeping::ready::REASON_WORKER_STOPPED;
+use crate::housekeeping::ready::{REASON_SHUTTING_DOWN, REASON_WORKER_STOPPED};
 use crate::inbound::InboundLoop;
 use crate::principal::Principal;
 use crate::readiness::ReadinessHandle;
@@ -40,6 +40,8 @@ pub(crate) async fn finish<P: Principal>(
     mut tasks: RunTasks<P>,
     readiness_guard: &ReadinessHandle,
 ) -> Result<(), EngineError> {
+    readiness_guard.set_not_ready(REASON_SHUTTING_DOWN);
+    tasks.render_handle.begin_shutdown();
     stops.render.notify_one();
     stops.beat.notify_waiters();
     stops.flush.notify_one();

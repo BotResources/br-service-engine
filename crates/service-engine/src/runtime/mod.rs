@@ -191,6 +191,10 @@ impl<P: Principal> SessionRuntime<P> {
         Ok(report)
     }
 
+    pub fn begin_shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+    }
+
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
         let mut table = self.table.lock().await;

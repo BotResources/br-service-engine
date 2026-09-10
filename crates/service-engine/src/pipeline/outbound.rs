@@ -79,7 +79,7 @@ pub(crate) fn event_record<E: OutboundEvent>(
         source,
     })?;
     Ok(OutboxRecord::stage_to(
-        event.event_id(),
+        Uuid::now_v7(),
         subject,
         payload,
         ctx.sequence(event.sequence()),
@@ -142,7 +142,7 @@ pub(crate) fn command_record<C: OutboundCommand>(
         source,
     })?;
     Ok(OutboxRecord::stage_to(
-        command.command_id(),
+        Uuid::now_v7(),
         subject,
         payload,
         ctx.sequence(command.sequence()),

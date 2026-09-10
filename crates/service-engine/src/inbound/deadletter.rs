@@ -164,9 +164,9 @@ impl DeadLetters {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
              ON CONFLICT (reaction, message_id) DO UPDATE \
                SET delivered = EXCLUDED.delivered, error = EXCLUDED.error, last_seen = now() \
-             RETURNING id"
+             RETURNING id, (xmax = 0) AS inserted"
         );
-        let row_id: Uuid = sqlx::query_scalar(&sql)
+        let (row_id, inserted): (Uuid, bool) = sqlx::query_as(&sql)
             .bind(id)
             .bind(entry.source.as_str())
             .bind(entry.reaction)
@@ -180,7 +180,9 @@ impl DeadLetters {
             .bind(entry.delivered)
             .fetch_one(&mut *conn)
             .await?;
-        crate::observe::record_dead_letter(entry.source.as_str());
+        if inserted {
+            crate::observe::record_dead_letter(entry.source.as_str());
+        }
         let Some(transport) = &self.transport else {
             return Ok(false);
         };

@@ -97,7 +97,7 @@ pub async fn boot(
     options: BootOptions,
 ) -> Result<Service, EngineError> {
     let http_addr = config.http_addr;
-    let readiness = ReadinessHandle::ready();
+    let readiness = ReadinessHandle::not_ready("booting");
     let (engine, app) = assemble(config, pool, nats, readiness.clone(), &options).await?;
     let stop = engine.shutdown_handle();
     let chunks = engine.accumulator_handle();

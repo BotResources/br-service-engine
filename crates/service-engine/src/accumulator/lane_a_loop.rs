@@ -14,14 +14,11 @@ use crate::error::EngineError;
 use crate::inbound::{HealthTracker, InboundHealth, ServeExit, SupervisorConfig};
 use crate::nats::{Nats, streaming_stream, subject_token};
 
-pub(crate) async fn establish(
+pub(crate) async fn validate_stream(
     nats: &Nats,
     service: &str,
     seal_retention: Duration,
-    accumulators: Arc<AccumulatorRuntime>,
-    ack_wait: Duration,
-    max_ack_pending: i64,
-) -> Result<(StreamingIngress, Consumer<PullConfig>), EngineError> {
+) -> Result<(), EngineError> {
     let stream = streaming_stream(service);
     let max_age = nats.stream_max_age(&stream).await?;
     if max_age.is_zero() || seal_retention < max_age {
@@ -31,6 +28,18 @@ pub(crate) async fn establish(
             max_age,
         });
     }
+    Ok(())
+}
+
+pub(crate) async fn establish(
+    nats: &Nats,
+    service: &str,
+    seal_retention: Duration,
+    accumulators: Arc<AccumulatorRuntime>,
+    ack_wait: Duration,
+    max_ack_pending: i64,
+) -> Result<(StreamingIngress, Consumer<PullConfig>), EngineError> {
+    validate_stream(nats, service, seal_retention).await?;
     let ingress = StreamingIngress::new(
         nats.clone(),
         service.to_string(),
@@ -55,15 +64,7 @@ pub(crate) async fn spawn_lane_a(
     stop_ingress: Arc<Notify>,
     stop_purge: Arc<Notify>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>), EngineError> {
-    let (_ingress, _consumer) = establish(
-        nats,
-        &service,
-        seal_retention,
-        accumulators.clone(),
-        ack_wait,
-        max_ack_pending,
-    )
-    .await?;
+    validate_stream(nats, &service, seal_retention).await?;
     let ingress_task = tokio::spawn(run_lane_a_supervised(
         nats.clone(),
         service.clone(),
