@@ -40,10 +40,6 @@ pub enum Unidentified {
         "the frame carries no br-core-integration envelope: the frontier accepts only an integration command or event, so a bare body is refused as terminal"
     )]
     NotEnveloped,
-    #[error(
-        "the message carries no resolvable id: neither a {HEADER_MESSAGE_ID} header, an integration envelope id, nor a uuid Nats-Msg-Id is present"
-    )]
-    NoMessageId,
 }
 
 #[derive(Debug, Clone)]
@@ -68,19 +64,17 @@ impl Incoming {
         payload: Bytes,
         delivered: u32,
     ) -> Result<Self, Unidentified> {
-        let decoded = Decoded::from(&payload);
-        let Some(body) = decoded.body else {
+        let Some(decoded) = Enveloped::decode(&payload) else {
             return Err(Unidentified::NotEnveloped);
         };
-        let message_id = message_id(headers, decoded.id).ok_or(Unidentified::NoMessageId)?;
         Ok(Self {
             reaction: reaction.to_string(),
             source,
             subject,
-            message_id,
+            message_id: message_id(headers, decoded.id),
             sequence: sequence(headers),
             metadata: decoded.metadata,
-            body,
+            body: decoded.body,
             payload,
             delivered,
         })
@@ -99,36 +93,17 @@ struct EnvelopeShell {
     payload: Option<serde_json::Value>,
 }
 
-struct Decoded {
-    id: Option<Uuid>,
+struct Enveloped {
+    id: Uuid,
     metadata: MessageMetadata,
-    body: Option<Bytes>,
+    body: Bytes,
 }
 
-impl Decoded {
-    fn from(raw: &Bytes) -> Self {
-        let Some(shell) = serde_json::from_slice::<EnvelopeShell>(raw).ok() else {
-            return Self {
-                id: None,
-                metadata: MessageMetadata::default(),
-                body: None,
-            };
-        };
-        let id = shell.event_id.or(shell.command_id);
-        let Some(inner) = shell.payload else {
-            return Self {
-                id: None,
-                metadata: MessageMetadata::default(),
-                body: None,
-            };
-        };
-        if id.is_none() {
-            return Self {
-                id: None,
-                metadata: MessageMetadata::default(),
-                body: None,
-            };
-        }
+impl Enveloped {
+    fn decode(raw: &Bytes) -> Option<Self> {
+        let shell = serde_json::from_slice::<EnvelopeShell>(raw).ok()?;
+        let id = shell.event_id.or(shell.command_id)?;
+        let inner = shell.payload?;
         let metadata = shell
             .metadata
             .map(|m| MessageMetadata {
@@ -137,8 +112,8 @@ impl Decoded {
                 causation_id: m.causation_id,
             })
             .unwrap_or_default();
-        let body = serde_json::to_vec(&inner).ok().map(Bytes::from);
-        Self { id, metadata, body }
+        let body = Bytes::from(serde_json::to_vec(&inner).ok()?);
+        Some(Self { id, metadata, body })
     }
 }
 
@@ -146,14 +121,10 @@ fn header<'a>(headers: Option<&'a HeaderMap>, name: &str) -> Option<&'a str> {
     headers.and_then(|h| h.get(name)).map(|v| v.as_str())
 }
 
-fn message_id(headers: Option<&HeaderMap>, envelope_id: Option<Uuid>) -> Option<Uuid> {
+fn message_id(headers: Option<&HeaderMap>, envelope_id: Uuid) -> Uuid {
     header(headers, HEADER_MESSAGE_ID)
         .and_then(|raw| Uuid::parse_str(raw).ok())
-        .or(envelope_id)
-        .or_else(|| {
-            header(headers, async_nats::header::NATS_MESSAGE_ID.as_ref())
-                .and_then(|raw| Uuid::parse_str(raw).ok())
-        })
+        .unwrap_or(envelope_id)
 }
 
 fn sequence(headers: Option<&HeaderMap>) -> Option<Sequenced> {
