@@ -143,27 +143,14 @@ mod tests {
     }
 
     #[test]
-    fn a_publish_ack_timeout_at_or_above_ack_wait_is_refused() {
-        assert!(
-            config()
-                .with_publish_ack_timeout(Duration::from_secs(30))
-                .validate()
-                .is_err()
-        );
+    fn a_publish_ack_timeout_at_or_above_ack_wait_or_zero_is_refused() {
+        for bad in [Duration::from_secs(30), Duration::ZERO] {
+            assert!(config().with_publish_ack_timeout(bad).validate().is_err());
+        }
         config()
             .with_publish_ack_timeout(Duration::from_secs(29))
             .validate()
             .expect("a publish ack timeout below ack_wait is accepted");
-    }
-
-    #[test]
-    fn a_zero_publish_ack_timeout_is_refused() {
-        assert!(
-            config()
-                .with_publish_ack_timeout(Duration::ZERO)
-                .validate()
-                .is_err()
-        );
     }
 
     #[test]

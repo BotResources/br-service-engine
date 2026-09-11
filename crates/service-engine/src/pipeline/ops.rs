@@ -19,6 +19,7 @@ use crate::pipeline::outbound::{
 };
 use crate::pipeline::staged::{ScheduledMessage, Staged};
 use crate::principal::PrincipalId;
+use crate::relays::outbox::OutboxRecord;
 use crate::time::Timestamp;
 use crate::wire::{Cause, Noun, encode_key};
 
@@ -195,28 +196,22 @@ impl<'a> Ops<'a> {
     }
 
     pub fn emit<E: OutboundEvent>(&mut self, event: E) -> Result<(), EngineError> {
-        let record = match self.outbound().and_then(|ctx| event_record(&event, ctx)) {
-            Ok(record) => record,
-            Err(error) => {
-                self.note_config_terminal(&error);
-                return Err(error);
-            }
-        };
-        self.staged.outbox.push(record);
-        Ok(())
+        let record = self.outbound().and_then(|ctx| event_record(&event, ctx));
+        self.push_outbound(record)
     }
 
     pub fn command<C: OutboundCommand>(&mut self, command: C) -> Result<(), EngineError> {
-        let record = match self
+        let record = self
             .outbound()
-            .and_then(|ctx| command_record(&command, ctx))
-        {
-            Ok(record) => record,
-            Err(error) => {
-                self.note_config_terminal(&error);
-                return Err(error);
-            }
-        };
+            .and_then(|ctx| command_record(&command, ctx));
+        self.push_outbound(record)
+    }
+
+    fn push_outbound(
+        &mut self,
+        record: Result<OutboxRecord, EngineError>,
+    ) -> Result<(), EngineError> {
+        let record = record.inspect_err(|error| self.note_config_terminal(error))?;
         self.staged.outbox.push(record);
         Ok(())
     }
