@@ -14,16 +14,25 @@ const ACK_TIMEOUT: Duration = Duration::from_millis(200);
 const ROUNDS: usize = 6;
 
 #[tokio::test]
-async fn s190_scheduled_rows_wait_out_a_jetstream_unavailable_window_then_fire_once_on_return() {
+async fn s190_scheduled_rows_wait_out_a_jetstream_unavailable_window_then_fire_once() {
     let db = TestDb::fresh().await;
-    let mut nats = TestNats::spawn_plain().await;
+    let nats = TestNats::spawn().await;
     let pool = db.app_pool().clone();
     let fabric = nats.nats().await.with_publish_ack_timeout(ACK_TIMEOUT);
     let dead_letters = DeadLetters::new(pool.clone());
 
+    let sub_client = async_nats::connect(&nats.url())
+        .await
+        .expect("dial the broker for a plain responder");
+    let _sink = sub_client
+        .subscribe("integration.cmd.>")
+        .await
+        .expect("a non-jetstream responder keeps the server from answering `no responders`");
+    sub_client.flush().await.expect("flush the subscription");
+
     assert!(
         fabric.reachable(),
-        "the client is TCP-connected to the plain broker; only JetStream is unavailable"
+        "the client is TCP-connected; the command stream is simply not there to answer yet"
     );
 
     let mut staged = Vec::with_capacity(BACKLOG);
@@ -68,7 +77,7 @@ async fn s190_scheduled_rows_wait_out_a_jetstream_unavailable_window_then_fire_o
         "an unavailable JetStream is an outage, not poison: no scheduled row is dead-lettered"
     );
 
-    nats.enable_jetstream().await;
+    nats.provision().await;
 
     let mut fired = 0usize;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -83,13 +92,13 @@ async fn s190_scheduled_rows_wait_out_a_jetstream_unavailable_window_then_fire_o
         );
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the waiting scheduled rows never fired after JetStream came back"
+            "the waiting scheduled rows never fired after the stream was created"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert_eq!(
         fired, BACKLOG,
-        "every waiting row fired exactly once once JetStream returned"
+        "every waiting row fired exactly once once the stream was there to answer"
     );
 
     drop(nats);

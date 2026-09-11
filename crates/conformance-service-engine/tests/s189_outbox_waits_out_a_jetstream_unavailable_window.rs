@@ -15,16 +15,24 @@ const PUBLISHED_WITHIN: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(100);
 
 #[tokio::test]
-async fn s189_a_connected_broker_whose_jetstream_is_unavailable_spends_no_budget_and_delivers_on_return()
- {
+async fn s189_a_connected_broker_whose_jetstream_cannot_answer_spends_no_budget() {
     let db = TestDb::fresh().await;
-    let mut nats = TestNats::spawn_plain().await;
+    let nats = TestNats::spawn().await;
     let pool = db.app_pool().clone();
     let fabric = nats.nats().await.with_publish_ack_timeout(ACK_TIMEOUT);
 
+    let sub_client = async_nats::connect(&nats.url())
+        .await
+        .expect("dial the broker for a plain responder");
+    let _sink = sub_client
+        .subscribe("integration.evt.>")
+        .await
+        .expect("a non-jetstream responder keeps the server from answering `no responders`");
+    sub_client.flush().await.expect("flush the subscription");
+
     assert!(
         fabric.reachable(),
-        "the client is TCP-connected to the plain broker; only JetStream is unavailable"
+        "the client is TCP-connected; the event stream is simply not there to answer yet"
     );
 
     let mut staged = Vec::with_capacity(BACKLOG);
@@ -49,6 +57,10 @@ async fn s189_a_connected_broker_whose_jetstream_is_unavailable_spends_no_budget
         assert_eq!(
             pass.retried, 0,
             "pass {pass_n}: no bounded retry is counted"
+        );
+        assert_eq!(
+            pass.structural, 0,
+            "pass {pass_n}: it is an outage, not a missing stream"
         );
         assert_eq!(
             pass.dead_lettered, 0,
@@ -78,7 +90,7 @@ async fn s189_a_connected_broker_whose_jetstream_is_unavailable_spends_no_budget
         "an unavailable JetStream is an outage, not poison: no row is dead-lettered"
     );
 
-    nats.enable_jetstream().await;
+    nats.provision().await;
     await_all_published(&pool, &staged, &relay).await;
 
     let mut delivered = delivered_event_ids(&fabric, "se-observer-s189").await;
@@ -87,7 +99,7 @@ async fn s189_a_connected_broker_whose_jetstream_is_unavailable_spends_no_budget
     expected.sort();
     assert_eq!(
         delivered, expected,
-        "every waiting row is delivered exactly once once JetStream returns"
+        "every waiting row is delivered exactly once once the stream is there to answer"
     );
     assert_eq!(
         dead_letters(&pool).await,
@@ -130,7 +142,7 @@ async fn await_all_published(pool: &PgPool, staged: &[Uuid], relay: &OutboxRelay
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the waiting rows never drained after JetStream came back"
+            "the waiting rows never drained after the stream was created"
         );
         tokio::time::sleep(POLL).await;
     }
