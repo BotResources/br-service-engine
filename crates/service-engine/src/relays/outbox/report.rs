@@ -38,7 +38,8 @@ pub struct RelayPass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureClass {
     Structural,
-    Transient,
+    Unanswered,
+    Rejected,
 }
 
 pub fn classify_failure(err: &NatsError) -> FailureClass {
@@ -47,7 +48,11 @@ pub fn classify_failure(err: &NatsError) -> FailureClass {
             kind: PublishFailure::NoStream,
             ..
         } => FailureClass::Structural,
-        _ => FailureClass::Transient,
+        NatsError::Publish {
+            kind: PublishFailure::Unanswered,
+            ..
+        } => FailureClass::Unanswered,
+        _ => FailureClass::Rejected,
     }
 }
 
@@ -82,11 +87,19 @@ mod tests {
         })
     }
 
-    fn transient() -> Result<PublishOutcome, NatsError> {
+    fn unanswered() -> Result<PublishOutcome, NatsError> {
+        Err(NatsError::Publish {
+            subject: "integration.evt.sample.assignment.relayed.v1".into(),
+            kind: PublishFailure::Unanswered,
+            detail: "publish ack did not return".into(),
+        })
+    }
+
+    fn rejected() -> Result<PublishOutcome, NatsError> {
         Err(NatsError::Publish {
             subject: "integration.evt.sample.assignment.relayed.v1".into(),
             kind: PublishFailure::Transient,
-            detail: "timed out".into(),
+            detail: "message size exceeds the stream limit".into(),
         })
     }
 
@@ -99,10 +112,18 @@ mod tests {
     }
 
     #[test]
-    fn timeout_is_transient() {
+    fn an_unanswered_publish_is_not_an_attempt() {
         assert_eq!(
-            classify_failure(&transient().unwrap_err()),
-            FailureClass::Transient
+            classify_failure(&unanswered().unwrap_err()),
+            FailureClass::Unanswered
+        );
+    }
+
+    #[test]
+    fn a_broker_rejection_counts_as_an_attempt() {
+        assert_eq!(
+            classify_failure(&rejected().unwrap_err()),
+            FailureClass::Rejected
         );
     }
 

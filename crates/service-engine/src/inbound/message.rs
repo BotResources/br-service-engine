@@ -121,10 +121,17 @@ fn header<'a>(headers: Option<&'a HeaderMap>, name: &str) -> Option<&'a str> {
     headers.and_then(|h| h.get(name)).map(|v| v.as_str())
 }
 
+fn header_id(headers: Option<&HeaderMap>, name: &str) -> Option<Uuid> {
+    header(headers, name).and_then(|raw| Uuid::parse_str(raw).ok())
+}
+
+pub(crate) fn resolved_id(headers: Option<&HeaderMap>) -> Option<Uuid> {
+    header_id(headers, HEADER_MESSAGE_ID)
+        .or_else(|| header_id(headers, async_nats::header::NATS_MESSAGE_ID.as_ref()))
+}
+
 fn message_id(headers: Option<&HeaderMap>, envelope_id: Uuid) -> Uuid {
-    header(headers, HEADER_MESSAGE_ID)
-        .and_then(|raw| Uuid::parse_str(raw).ok())
-        .unwrap_or(envelope_id)
+    header_id(headers, HEADER_MESSAGE_ID).unwrap_or(envelope_id)
 }
 
 fn sequence(headers: Option<&HeaderMap>) -> Option<Sequenced> {

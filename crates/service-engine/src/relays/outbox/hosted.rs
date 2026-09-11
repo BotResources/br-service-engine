@@ -94,6 +94,7 @@ impl HostedOutboxRelay {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 total.published += swept.published;
+                total.failed += swept.failed;
                 total.claims += swept.claims;
                 *self
                     .last_sweep

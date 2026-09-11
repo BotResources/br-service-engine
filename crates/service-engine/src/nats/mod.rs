@@ -165,14 +165,18 @@ impl Nats {
         };
         match tokio::time::timeout(self.publish_ack_timeout, publish).await {
             Ok(result) => result,
-            Err(_elapsed) => Err(NatsError::Publish {
-                subject,
-                kind: PublishFailure::Transient,
-                detail: format!(
-                    "publish ack did not return within {:?}; the broker is unreachable or wedged",
-                    self.publish_ack_timeout
-                ),
-            }),
+            Err(_elapsed) => Err(self.ack_timeout(subject)),
+        }
+    }
+
+    fn ack_timeout(&self, subject: String) -> NatsError {
+        NatsError::Publish {
+            subject,
+            kind: PublishFailure::Unanswered,
+            detail: format!(
+                "publish ack did not return within {:?}; the broker is unreachable or wedged",
+                self.publish_ack_timeout
+            ),
         }
     }
 
@@ -202,6 +206,28 @@ impl Nats {
             headers.insert(crate::inbound::HEADER_SEQ_KEY, seq_key);
             headers.insert(crate::inbound::HEADER_SEQ, seq.to_string().as_str());
         }
+        self.publish_encoded(subject, headers, bytes).await
+    }
+
+    pub async fn publish_bytes_with_id(
+        &self,
+        subject: &str,
+        payload: &[u8],
+        message_id: &str,
+    ) -> Result<PublishOutcome, NatsError> {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id);
+        headers.insert(crate::inbound::HEADER_MESSAGE_ID, message_id);
+        self.publish_encoded(subject, headers, payload.to_vec())
+            .await
+    }
+
+    async fn publish_encoded(
+        &self,
+        subject: &str,
+        headers: async_nats::HeaderMap,
+        bytes: Vec<u8>,
+    ) -> Result<PublishOutcome, NatsError> {
         let publish = async {
             let ack_future = self
                 .jetstream
@@ -215,14 +241,7 @@ impl Nats {
         };
         match tokio::time::timeout(self.publish_ack_timeout, publish).await {
             Ok(result) => result,
-            Err(_elapsed) => Err(NatsError::Publish {
-                subject: subject.to_string(),
-                kind: PublishFailure::Transient,
-                detail: format!(
-                    "publish ack did not return within {:?}; the broker is unreachable or wedged",
-                    self.publish_ack_timeout
-                ),
-            }),
+            Err(_elapsed) => Err(self.ack_timeout(subject.to_string())),
         }
     }
 

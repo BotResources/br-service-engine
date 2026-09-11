@@ -116,6 +116,25 @@ impl OutboxStore {
         Ok(done.rows_affected())
     }
 
+    pub async fn sweep_failed<'e, E>(
+        &self,
+        executor: E,
+        older_than: Duration,
+    ) -> Result<u64, sqlx::Error>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let done = sqlx::query(
+            "DELETE FROM integration_outbox \
+             WHERE status = 'FAILED' \
+               AND created_at < now() - make_interval(secs => $1)",
+        )
+        .bind(older_than.as_secs_f64())
+        .execute(executor)
+        .await?;
+        Ok(done.rows_affected())
+    }
+
     pub async fn sweep_claims<'e, E>(
         &self,
         executor: E,

@@ -24,6 +24,7 @@ use crate::relays::outbox::report::{MessageIdSource, message_id_for};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Swept {
     pub published: u64,
+    pub failed: u64,
     pub claims: u64,
 }
 
@@ -74,8 +75,13 @@ impl OutboxRelay {
     pub async fn sweep(&self, older_than: Duration) -> Result<Swept, sqlx::Error> {
         let mut conn = self.pool.acquire().await?;
         let published = self.store.sweep_published(&mut *conn, older_than).await?;
+        let failed = self.store.sweep_failed(&mut *conn, older_than).await?;
         let claims = self.store.sweep_claims(&mut *conn, older_than).await?;
-        Ok(Swept { published, claims })
+        Ok(Swept {
+            published,
+            failed,
+            claims,
+        })
     }
 
     pub async fn pending_stats(&self) -> Result<(i64, Option<f64>), sqlx::Error> {
@@ -163,7 +169,7 @@ impl OutboxRelay {
             return Ok(Step::Halt);
         }
 
-        if !self.nats.reachable() {
+        if classify_failure(&outcome) == FailureClass::Unanswered || !self.nats.reachable() {
             let _ = tx.rollback().await;
             return Ok(Step::Halt);
         }

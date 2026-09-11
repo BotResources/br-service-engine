@@ -774,6 +774,28 @@ cause — and two-pod convergence.
   and a render never waits on it. A store that wants a single batched
   render query overrides `read_many` (`WHERE id = ANY($1)`) per the "every read
   function answers in one query" rule; the reference stores do.
+- **A connected broker whose JetStream cannot answer is an outage, not a
+  failure.** A publish that ends in a timeout, a broken pipe or the engine's own
+  ack-timeout is classified `Unanswered` in one shared place; the outbox relay and
+  the scheduled-message publisher both treat it exactly like an unreachable broker
+  — they spend no delivery attempt, halt the pass and let the committed rows wait,
+  so a JetStream-unavailable window over a live TCP connection never dead-letters
+  or `FAILED`s a row (`s189`, `s190`). Only a real broker rejection (a size or
+  limit refusal, a wrong sequence) still counts as a bounded attempt.
+- **The scheduled-message publisher claims one row per transaction** and publishes
+  through the same ack-timeout seam as the outbox, instead of holding the whole
+  due batch locked across a sequence of raw publishes.
+- **The offer relay reads the published-language revision before it resolves the
+  row image** (both inside the leader's fenced pass), so a lease that expires
+  between the two can never let a stale image win the compare-and-set and regress
+  the bucket (`s188`).
+- **An inbound frame with no resolvable envelope derives its dead-letter id from
+  the `Nats-Msg-Id` / `Br-Message-Id` header** when one is present, so a redelivery
+  records one dead-letter row rather than a fresh one each time; only a frame with
+  no id header at all falls back to a generated id.
+- **The retention sweep also removes terminal `FAILED` outbox rows** once they age
+  past the retention window, so the outbox table stops accumulating rows whose
+  audit copy already lives in the dead-letter table.
 
 ### Removed
 
