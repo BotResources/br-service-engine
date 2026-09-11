@@ -2,15 +2,18 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use crate::accumulator::guard;
 use crate::blobs::BlobRef;
 use crate::engine::BlobReader;
 use crate::erase::person::PersonId;
 use crate::error::EngineError;
+use crate::name::AccumulatorName;
 use crate::nats::KvKey;
 use crate::presence::PresenceHandle;
 use crate::principal::Principal;
 use crate::schema::{TABLE_ACCUMULATOR_CHUNK, TABLE_ACCUMULATOR_SEAL, TABLE_PERSON_ERASURE};
 use crate::time::{self, Timestamp};
+use crate::wire::KeyBytes;
 
 const DRAIN_BATCH: i64 = 128;
 
@@ -121,6 +124,12 @@ async fn purge_streams(
     at: Timestamp,
 ) -> Result<(), EngineError> {
     for stream in streams {
+        let stream_key = (
+            AccumulatorName::new(stream.accumulator.clone())?,
+            KeyBytes::encode(&stream.key)?,
+        );
+        let mut tx = pg.begin().await?;
+        guard::hold(&mut tx, std::slice::from_ref(&stream_key)).await?;
         sqlx::query(&format!(
             "INSERT INTO {TABLE_ACCUMULATOR_SEAL} (accumulator, key, high_water, sealed_at, purged_at) \
              SELECT $1, $2::jsonb, COALESCE(MAX(seq) + 1, 0), $3, NULL \
@@ -132,15 +141,16 @@ async fn purge_streams(
         .bind(&stream.accumulator)
         .bind(&stream.key)
         .bind(at)
-        .execute(pg)
+        .execute(&mut *tx)
         .await?;
         sqlx::query(&format!(
             "DELETE FROM {TABLE_ACCUMULATOR_CHUNK} WHERE accumulator = $1 AND key = $2::jsonb"
         ))
         .bind(&stream.accumulator)
         .bind(&stream.key)
-        .execute(pg)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
     }
     Ok(())
 }

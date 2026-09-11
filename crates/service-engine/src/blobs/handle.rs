@@ -66,7 +66,7 @@ impl BlobHandle {
         let store = self.store()?;
         let id = Uuid::now_v7();
         let object_key = format!("{}/{}/{}", store.service(), kind, id);
-        let upload_url = store.presign_upload(&object_key, policy.max_bytes)?;
+        let upload_url = store.presign_upload(&object_key, policy.max_bytes, &content_type)?;
         ops.push(BlobRowOp::Insert(ReferenceRow {
             id,
             object_key,

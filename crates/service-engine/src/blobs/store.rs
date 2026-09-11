@@ -92,8 +92,10 @@ impl BlobStore {
         &self,
         object_key: &str,
         max_bytes: u64,
+        content_type: &str,
     ) -> Result<UploadUrl, EngineError> {
-        self.object.presign_upload(object_key, max_bytes)
+        self.object
+            .presign_upload(object_key, max_bytes, content_type)
     }
 
     pub(crate) async fn download_url(
@@ -101,19 +103,23 @@ impl BlobStore {
         pool: &PgPool,
         reference: BlobRef,
     ) -> Result<Option<DownloadUrl>, EngineError> {
-        let row: Option<(String, String)> = sqlx::query_as(&format!(
-            "SELECT object_key, state FROM {TABLE_BLOB} WHERE id = $1"
+        let row: Option<(String, String, String, String)> = sqlx::query_as(&format!(
+            "SELECT object_key, state, content_type, file_name FROM {TABLE_BLOB} WHERE id = $1"
         ))
         .bind(reference.as_uuid())
         .fetch_optional(pool)
         .await?;
-        let Some((object_key, state)) = row else {
+        let Some((object_key, state, content_type, file_name)) = row else {
             return Ok(None);
         };
+        let presign = || {
+            self.object
+                .presign_download(&object_key, &content_type, &file_name)
+        };
         match state.as_str() {
-            "uploaded" => Ok(Some(self.object.presign_download(&object_key))),
+            "uploaded" => Ok(Some(presign())),
             "pending" => match self.object.head_size(&object_key).await? {
-                Some(_) => Ok(Some(self.object.presign_download(&object_key))),
+                Some(_) => Ok(Some(presign())),
                 None => Ok(None),
             },
             _ => Ok(None),

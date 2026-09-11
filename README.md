@@ -73,9 +73,15 @@ threshold the supervisor lowers readiness with
 reports ready; on shutdown a consumer naks its pulled-but-unprocessed frames so
 they redeliver to a live pod. A handler that panics is caught at dispatch, rolled
 back and dead-lettered as a terminal frame, so one panicking reaction never
-becomes an invisible poison that redelivers every `ack_wait` with readiness UP;
+becomes an invisible poison that redelivers every `ack_wait` with readiness UP.
+This catch relies on the default `panic = "unwind"`: a build that sets
+`panic = "abort"` turns a handler panic into a process abort, so the pod exits
+and is rescheduled rather than dead-lettering the one frame — keep the unwinding
+profile for a service that wants a single panicking frame parked instead of a
+pod restart.
 `cx.principal` returns a typed `PrincipalUnresolved` (terminal) rather than
-panicking when a message carries no resolvable sender. The `service_engine.dead_letter`
+panicking when a message carries no resolvable sender; `cx.try_principal`
+returns `None` for the same case when a reaction tolerates a bare message. The `service_engine.dead_letter`
 table is the one table for every source of work: inbound reactions, scheduled
 messages, cron ticks, a persistently stuck mirror and an outbox row that keeps
 failing to publish against a reachable broker all record there
@@ -215,7 +221,12 @@ the bucket. It reconciles the
 bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
-drift and an emptied or rebuilt bucket is repopulated from the store; the version
+drift and an emptied or rebuilt bucket is repopulated from the store. The
+reconcile cadence is held in the leader's **process memory**, not the store, so a
+leader restart or a failover re-runs the reconcile on the new leader's first
+drain and then resets its own timer; reconcile is an idempotent repair, not a
+scheduled commitment, so an extra reconcile after a takeover is harmless. The
+version
 lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
 `known_*` through the direct lane, joined by a `keyed_by` function and written
@@ -245,8 +256,13 @@ owner, size and state) inside the pipeline transaction, so it commits with the
 referencing aggregate and a rollback leaves no row; it returns a typed
 `UploadUrl` — an S3 SigV4 **presigned POST** carrying a policy whose
 `content-length-range` is `[0, max_bytes]`, so an object over the cap is refused
-by object storage at upload and can never land. A download `DownloadUrl` — an S3
-SigV4 presigned GET, short-lived — is minted only through the gated
+by object storage at upload and can never land, and whose `Content-Type`
+condition pins the reference row's recorded content type, so the object cannot be
+uploaded under a different type than the row claims. A download `DownloadUrl` — an
+S3 SigV4 presigned GET, short-lived, carrying `response-content-disposition` (the
+stored file name, as an attachment) and `response-content-type` (the recorded
+content type) so the object is served under its real name and type — is minted
+only through the gated
 `Query::download::<View>(key, reference)` gesture, never from a bare reference: a
 reference travels in a view by design, so a bare-reference presign would make it a
 permanent bearer capability that outlives the row and the viewer. `download`
@@ -278,7 +294,11 @@ hatch. Because release is driven entirely by the `load`/`save` diff, a reference
 a slice drops with **raw SQL** — bypassing `cx.delete`, a `load`+`save`, or
 `cx.release_blob` — is never observed by the pipeline, so its object is **never
 reaped**; a slice that writes its own SQL against a blob-referencing table owns
-releasing the blob. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
+releasing the blob. A reference is held by **exactly one** aggregate: the
+`load`/`save` diff releases it the moment its holder stops listing it, so pointing
+two aggregates at one reference is unsupported — the first holder to drop it
+orphans the object out from under the second. A blob shared between two nouns is
+modelled as two references (two uploads), never one reference held twice. `cx.blob::<Kind>(name, content_type)` records no owner, so its row is
 **not** reached by `purge_person_blobs`; a personal file that must be erasable
 with its owner MUST be attached with `cx.blob_owned::<Kind>(name, content_type,
 person)`. `Engine::purge_person_blobs` is the erase hook `Engine::erase` calls to drop a
@@ -413,7 +433,14 @@ from that one load; in debug builds the render pass recomputes the cohort key of
 every session it grouped and asserts it equals the one the session was grouped
 under, so a `cohort()` that is not a pure function of the principal — which would
 land a session in more than one cohort and split or merge groups wrongly — panics
-in test rather than shipping. That a shared cohort renders one view for all its
+in test rather than shipping. The contract a coarser `cohort()` carries is that
+its key **fingerprints every fact that `visible` and `project` read off the
+principal**: two principals sharing a cohort key are rendered from one load and
+must be indistinguishable to both hooks, or the shared render would deliver one
+member's view to another. The default per-principal cohort discharges this
+trivially; any coarser key is a deliberate assertion that the grouped facts are
+the only principal-derived inputs the projector reads. That a shared cohort
+renders one view for all its
 members is not asserted by re-projection (that would double the very load and
 projection the cohort exists to save, and the black-box `s164` proves it directly
 by comparing the delivered views); it is guaranteed by the `Visibility`
@@ -457,7 +484,11 @@ supplying its own `SessionId`: `attach_with_session` (kit) / a `session` argumen
 on the subscription pins the id the `page` mutation then names. The
 reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
 size)` opens the head window and `pageCards(session, boardId, before, size)`
-appends an older page behind it.
+appends an older page behind it. A page renders its appended keys **outside the
+session lock**, so its final delivery — taken back under the lock — skips any
+paged key a concurrent render pass has already delivered (its `last_sent` is
+present): a key scrolled in while it is being written settles on the committed
+view, never a stale page render that lost the race to the pass.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
@@ -486,9 +517,14 @@ the command — the example's `create_card` reads it with `cx.try_principal()` a
 refuses a command whose actor is not a service. `cx.principal()` is the checked
 accessor: it returns a typed `PrincipalUnresolved` (terminal disposition) rather
 than panicking when no sender principal is resolved. An `OutboundEvent`/`OutboundCommand`
-derives its producer sequence from the aggregate's key and version at emit time
-(`sequence()`), and a declared sequence with no configured service is refused with
-a configuration error at emit rather than silently dropped; the engine renders it
+**declares** its producer sequence by overriding `sequence()` — the default is
+`None`, and the convention when it is declared is `(producer = service,
+seq_key = aggregate key, seq = aggregate version)`. Its `event_id`/`command_id`
+identifies exactly one fact or command instance: the same fact re-emitted MUST
+carry the same id, because the receiver dedups on it. A declared sequence with no
+configured service is refused with a configuration error at emit and recorded as
+a terminal violation, so the frame is dead-lettered rather than silently dropped
+or redelivered forever; the engine renders a declared sequence
 as the three `Br-Producer` / `Br-Seq-Key` /
 `Br-Seq` headers and persists it on the outbox row, so engine→engine traffic is
 ordered and the per-`(producer, reaction, seq_key)` sequence guard on the receiver
@@ -630,8 +666,8 @@ whichever mode it lives:
   consumer folds them into `service_engine.accumulator_chunk`, and the
   reply-finished command then replays the chunks, verifies the hash, commits the
   record and delivers it — read back over GraphQL — with nothing seeded through
-  Postgres. The accumulator's own internals stay proven in-crate (`s035`, `s066`,
-  `s133`) and by the reference service's reply e2e.
+  Postgres. The accumulator's own internals stay proven in-crate (`s035`, `s036`,
+  `s066`, `s146`, `s150`) and by the reference service's reply e2e.
 
 ```bash
 # both modes (in-crate sNNN + black-box bbNN), one crate
@@ -725,7 +761,12 @@ that the render loop consumes, so a slow render pass never stops the drain and
 never lets the cluster's notification queue back up behind this pod. When the
 render loop cannot keep up and the channel overflows, the drained impacts are
 dropped and one `Reconnected` is signalled, which re-snapshots every session on
-the pod — a detectable loss, never a silent gap. The beat samples
+the pod — a detectable loss, never a silent gap. Under a **sustained** overflow
+each overflowing tick re-snapshots, so the pod pays a reset storm: it is bounded
+(one `Reconnected` per overflow, coalesced) and visible as
+`service_engine_resets_total` climbing — the `ServiceEngineResetsSustained` alert
+names it, and the fix is to raise `listener_channel_capacity` or shed render load,
+not to touch the drain. The beat samples
 `pg_notification_queue_usage()` each tick; past `listener_queue_threshold` it
 closes the listener, which takes the pod DOWN, then reconnects and resets its
 sessions — losing impacts is repairable, failing every notifying commit on the

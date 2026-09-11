@@ -17,10 +17,18 @@ impl EngineConfig {
             ("ack_wait", self.ack_wait),
             ("nats_grace", self.nats_grace),
             ("message_retention", self.message_retention),
+            ("publish_ack_timeout", self.publish_ack_timeout),
         ] {
             if value.is_zero() {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));
             }
+        }
+        if self.publish_ack_timeout >= self.ack_wait {
+            return Err(EngineError::Config(
+                "publish_ack_timeout must stay below ack_wait, otherwise a single wedged JetStream \
+                 publish can outlast the consumer's redelivery grace and stall the beat past it"
+                    .into(),
+            ));
         }
         if self.max_ack_pending <= 0 {
             return Err(EngineError::Config(
@@ -129,8 +137,20 @@ mod tests {
         assert_eq!(c.nats_grace, Duration::from_secs(10));
         assert_eq!(c.window_capacity, 10_000);
         assert_eq!(c.impacts_per_commit, 1_000);
+        assert_eq!(c.publish_ack_timeout, Duration::from_secs(2));
         assert_eq!(c.service, None);
         c.validate().unwrap();
+    }
+
+    #[test]
+    fn a_publish_ack_timeout_at_or_above_ack_wait_or_zero_is_refused() {
+        for bad in [Duration::from_secs(30), Duration::ZERO] {
+            assert!(config().with_publish_ack_timeout(bad).validate().is_err());
+        }
+        config()
+            .with_publish_ack_timeout(Duration::from_secs(29))
+            .validate()
+            .expect("a publish ack timeout below ack_wait is accepted");
     }
 
     #[test]

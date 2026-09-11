@@ -51,11 +51,20 @@ pub const PUBLISH_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone)]
 pub struct Nats {
     jetstream: Context,
+    publish_ack_timeout: Duration,
 }
 
 impl Nats {
     pub fn from_context(jetstream: Context) -> Self {
-        Self { jetstream }
+        Self {
+            jetstream,
+            publish_ack_timeout: PUBLISH_ACK_TIMEOUT,
+        }
+    }
+
+    pub fn with_publish_ack_timeout(mut self, publish_ack_timeout: Duration) -> Self {
+        self.publish_ack_timeout = publish_ack_timeout;
+        self
     }
 
     pub async fn connect(url: &str) -> Result<Self, NatsError> {
@@ -143,15 +152,28 @@ impl Nats {
     ) -> Result<PublishOutcome, NatsError> {
         let subject = event_subject(coords);
         let bytes = serde_json::to_vec(event).map_err(NatsError::Encode)?;
-        let ack_future = self
-            .jetstream
-            .publish(subject.clone(), bytes.into())
-            .await
-            .map_err(|e| publish_error(&subject, e.kind(), &e))?;
-        let ack = ack_future
-            .await
-            .map_err(|e| publish_error(&subject, e.kind(), &e))?;
-        Ok(PublishOutcome::from_ack(&ack))
+        let publish = async {
+            let ack_future = self
+                .jetstream
+                .publish(subject.clone(), bytes.into())
+                .await
+                .map_err(|e| publish_error(&subject, e.kind(), &e))?;
+            let ack = ack_future
+                .await
+                .map_err(|e| publish_error(&subject, e.kind(), &e))?;
+            Ok(PublishOutcome::from_ack(&ack))
+        };
+        match tokio::time::timeout(self.publish_ack_timeout, publish).await {
+            Ok(result) => result,
+            Err(_elapsed) => Err(NatsError::Publish {
+                subject,
+                kind: PublishFailure::Transient,
+                detail: format!(
+                    "publish ack did not return within {:?}; the broker is unreachable or wedged",
+                    self.publish_ack_timeout
+                ),
+            }),
+        }
     }
 
     pub async fn publish_value_with_id(
@@ -191,14 +213,14 @@ impl Nats {
                 .map_err(|e| publish_error(subject, e.kind(), &e))?;
             Ok(PublishOutcome::from_ack(&ack))
         };
-        match tokio::time::timeout(PUBLISH_ACK_TIMEOUT, publish).await {
+        match tokio::time::timeout(self.publish_ack_timeout, publish).await {
             Ok(result) => result,
             Err(_elapsed) => Err(NatsError::Publish {
                 subject: subject.to_string(),
                 kind: PublishFailure::Transient,
                 detail: format!(
-                    "publish ack did not return within {}s; the broker is unreachable or wedged",
-                    PUBLISH_ACK_TIMEOUT.as_secs()
+                    "publish ack did not return within {:?}; the broker is unreachable or wedged",
+                    self.publish_ack_timeout
                 ),
             }),
         }

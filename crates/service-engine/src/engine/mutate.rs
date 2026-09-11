@@ -51,6 +51,7 @@ impl<P: Principal> Engine<P> {
             self.render_runtime(),
             self.pg.clone(),
             self.blobs.store_slot(),
+            self.ws_shutdown_signal(),
         )
     }
 }

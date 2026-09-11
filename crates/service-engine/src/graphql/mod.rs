@@ -23,4 +23,7 @@ pub use slices::{SchemaSlices, SliceFragment};
 pub use state::GraphqlState;
 pub use subscription::{attach, lane_notice_stream};
 pub use union::{JsonScalar, cause_json, key_json, typed_presence_view, typed_view};
-pub use ws::{SESSION_MAX_AGE_CLOSE_CODE, SESSION_MAX_AGE_CLOSE_REASON};
+pub use ws::{
+    SESSION_MAX_AGE_CLOSE_CODE, SESSION_MAX_AGE_CLOSE_REASON, SHUTDOWN_CLOSE_CODE,
+    SHUTDOWN_CLOSE_REASON,
+};

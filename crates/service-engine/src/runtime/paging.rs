@@ -27,8 +27,8 @@ impl<P: Principal> SessionRuntime<P> {
         projector: ProjectorName,
         cursor: WindowParams,
     ) -> Result<PageReport, EngineError> {
-        let mut table = self.table.lock().await;
         let principal = {
+            let table = self.table.lock().await;
             let live = table
                 .get(session)
                 .filter(|s| s.is_live() && s.principal.id() == caller.id())
@@ -50,6 +50,7 @@ impl<P: Principal> SessionRuntime<P> {
         let page_keys = members_of(&population);
 
         let (added, released) = {
+            let mut table = self.table.lock().await;
             let live = table
                 .get_mut(session)
                 .filter(|s| s.is_live())
@@ -103,12 +104,27 @@ impl<P: Principal> SessionRuntime<P> {
             .render(&erased, under_rls, cohort, &principal, &keys)
             .await?;
 
+        let mut table = self.table.lock().await;
         let live = table
             .get_mut(session)
             .filter(|s| s.is_live())
             .ok_or(EngineError::NoLiveSession { session })?;
+        let in_window = |key: &KeyBytes| {
+            live.windows
+                .iter()
+                .any(|w| w.projector == projector && w.members.contains(key))
+        };
         let mut outgoing = Vec::new();
         for key in &keys {
+            if !in_window(key) {
+                continue;
+            }
+            if live
+                .last_sent
+                .contains_key(&(projector.clone(), key.clone()))
+            {
+                continue;
+            }
             if let Some(Some(view)) = rendered.get(key) {
                 outgoing.push(Outgoing::Upsert {
                     projector: projector.clone(),

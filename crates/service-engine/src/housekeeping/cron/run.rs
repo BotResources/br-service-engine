@@ -100,25 +100,42 @@ impl InFlight {
     }
 
     async fn complete(&self, pg: &PgPool, name: &JobName) {
-        match pg.acquire().await {
-            Ok(mut conn) => match leader::complete_slot(&mut conn, &self.lease).await {
-                Ok(true) => {}
-                Ok(false) => tracing::warn!(
-                    job = %name,
-                    slot = %self.lease.slot(),
-                    "the slot of a finished job was already taken over, so it may run twice",
-                ),
-                Err(error) => tracing::warn!(
-                    job = %name,
-                    reason = %describe(&error),
-                    "the slot of a finished job could not be marked complete",
-                ),
-            },
+        release_slot(pg, &self.lease, name).await;
+    }
+
+    pub(super) async fn finish(self, pg: &PgPool, name: &JobName, grace: Duration) {
+        let Self { handle, lease, .. } = self;
+        match tokio::time::timeout(grace, handle).await {
+            Ok(_) => release_slot(pg, &lease, name).await,
+            Err(_) => tracing::warn!(
+                job = %name,
+                slot = %lease.slot(),
+                "a cron job did not finish within the shutdown grace, so its lease is left to \
+                 expire and another pod resumes the slot after the lease duration",
+            ),
+        }
+    }
+}
+
+async fn release_slot(pg: &PgPool, lease: &Lease, name: &JobName) {
+    match pg.acquire().await {
+        Ok(mut conn) => match leader::complete_slot(&mut conn, lease).await {
+            Ok(true) => {}
+            Ok(false) => tracing::warn!(
+                job = %name,
+                slot = %lease.slot(),
+                "the slot of a finished job was already taken over, so it may run twice",
+            ),
             Err(error) => tracing::warn!(
                 job = %name,
                 reason = %describe(&error),
-                "no connection was free to mark a finished job's slot complete",
+                "the slot of a finished job could not be marked complete",
             ),
-        }
+        },
+        Err(error) => tracing::warn!(
+            job = %name,
+            reason = %describe(&error),
+            "no connection was free to mark a finished job's slot complete",
+        ),
     }
 }

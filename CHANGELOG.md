@@ -180,8 +180,9 @@ version)` at emit time; the engine persists it on the outbox row
 `Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
 traffic is ordered and the per-`(producer, reaction, seq_key)` sequence guard is
 reachable. A declared sequence with no configured service (`producer`) is refused
-with a configuration error at emit rather than silently dropped, so a sequence a
-consumer would order or dedup on can never vanish.
+with a configuration error at emit and recorded as a terminal violation, so the
+frame is dead-lettered rather than silently dropped or redelivered forever, and a
+sequence a consumer would order or dedup on can never vanish.
 The inbound loop decodes the envelope, dedups on the `Br-Message-Id`/envelope id
 (tolerating a non-uuid `Nats-Msg-Id` — a foreign fabric producer no longer
 dead-letters), hands the reaction the inner payload, and exposes the sender's
@@ -552,7 +553,12 @@ authorized against the caller's `Passport`: the engine serves only a live sessio
 not hold, or one held for a different principal, with `EngineError::NoLiveSession`
 (knowing another session's id buys nothing). `attach_with_session` / a
 client-supplied `SessionId` correlates the subscription and the `page` mutation.
-The reference `card` slice ships the pair (`cardPageDeltas` + `pageCards`).
+The reference `card` slice ships the pair (`cardPageDeltas` + `pageCards`). A
+page renders its appended keys outside the session lock, so the final delivery
+under the lock skips any paged key a concurrent render pass has already
+delivered (its `last_sent` is present): a key scrolled in while it is being
+written settles on the committed view, never a stale page render that lost the
+race to the pass (`s183`).
 
 **Engine-owned NATS, Postgres connect and readiness.** The engine's internal
 loops run on `async-nats` directly through the `nats` module (`Nats`, `KvBucket`,
@@ -597,7 +603,8 @@ gauge. Four alerts ship as a `PrometheusRule` in
 (`ignore_missing`) with `grant_engine_access`: `scheduled_impact`, `leader_slot`,
 `accumulator_chunk`, `accumulator_seal`, `kv_relay_watermark`, `message_claim`,
 `sequence_guard`, `dead_letter`, `scheduled_message`, `offer_dirty`, `blob`,
-`person_erasure`, `schema_version`. Scheduled boundaries are claimed against the database clock,
+`person_erasure`, `schema_version`, `event_log`, `event_snapshot`,
+`mirror_watermark`. Scheduled boundaries are claimed against the database clock,
 never the pod clock. The app-role grant includes `USAGE, SELECT` on the engine
 schema's sequences.
 

@@ -60,6 +60,7 @@ pub struct EngineConfig {
     pub window_capacity: usize,
     pub impacts_per_commit: usize,
     pub message_retention: Duration,
+    pub publish_ack_timeout: Duration,
     pub blob_reaper_interval: Duration,
     pub schema_version_liveness: Duration,
     pub http_addr: SocketAddr,
@@ -97,6 +98,7 @@ impl EngineConfig {
             window_capacity: DEFAULT_WINDOW_CAPACITY,
             impacts_per_commit: DEFAULT_IMPACTS_PER_COMMIT,
             message_retention: DEFAULT_MESSAGE_RETENTION,
+            publish_ack_timeout: crate::nats::PUBLISH_ACK_TIMEOUT,
             blob_reaper_interval: DEFAULT_BLOB_REAPER_INTERVAL,
             schema_version_liveness: DEFAULT_SCHEMA_VERSION_LIVENESS,
             http_addr: DEFAULT_HTTP_ADDR,
@@ -216,6 +218,11 @@ impl EngineConfig {
 
     pub fn with_session_max_age(mut self, session_max_age: Duration) -> Self {
         self.session_max_age = session_max_age;
+        self
+    }
+
+    pub fn with_publish_ack_timeout(mut self, publish_ack_timeout: Duration) -> Self {
+        self.publish_ack_timeout = publish_ack_timeout;
         self
     }
 
