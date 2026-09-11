@@ -149,10 +149,15 @@ async fn s045_a_job_killed_mid_run_is_re_run_once_on_the_other_runtime_after_the
     let db = TestDb::fresh().await;
     let pool = pool_named(&db, db.app_role(), "se_s045_killed").await;
 
+    let stuck = Schedule::Every {
+        period: Duration::from_secs(3600),
+        anchor: time::now(),
+    };
+
     let mut killed = runtime("se-cron-0");
     killed
         .register(
-            SampleCronJob::new("stuck", Schedule::EveryBeats(600), "se-cron-0")
+            SampleCronJob::new("stuck", stuck.clone(), "se-cron-0")
                 .with_hold(Duration::from_secs(30)),
         )
         .expect("a job that outlives its pod registers");
@@ -163,11 +168,7 @@ async fn s045_a_job_killed_mid_run_is_re_run_once_on_the_other_runtime_after_the
 
     let mut survivor = runtime("se-cron-1");
     survivor
-        .register(SampleCronJob::new(
-            "stuck",
-            Schedule::EveryBeats(600),
-            "se-cron-1",
-        ))
+        .register(SampleCronJob::new("stuck", stuck, "se-cron-1"))
         .expect("the surviving runtime registers the same job");
 
     let mut ran = false;
