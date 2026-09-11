@@ -14,6 +14,8 @@ use service_engine::pipeline::Reaction;
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
+use crate::sample::pipeline_support::enveloped_command;
+
 pub const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -92,15 +94,21 @@ pub async fn publish(
     payload: &StubPayload,
     sequence: Option<(&str, &str, u64)>,
 ) {
-    let subject = command_subject(&sample_command_coords());
+    let coords = sample_command_coords();
+    let subject = command_subject(&coords);
     let mut headers = HeaderMap::new();
     headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.to_string());
+    headers.insert(
+        service_engine::inbound::HEADER_MESSAGE_ID,
+        message_id.to_string(),
+    );
     if let Some((producer, key, seq)) = sequence {
         headers.insert(HEADER_PRODUCER, producer);
         headers.insert(HEADER_SEQ_KEY, key);
         headers.insert(HEADER_SEQ, seq.to_string());
     }
-    let bytes = serde_json::to_vec(payload).expect("the stub payload serializes");
+    let bytes = serde_json::to_vec(&enveloped_command(&coords, message_id, payload))
+        .expect("the enveloped stub payload serializes");
     let ack = nats
         .context()
         .publish_with_headers(subject, headers, bytes.into())

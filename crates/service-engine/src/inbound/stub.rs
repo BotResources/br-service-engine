@@ -120,7 +120,7 @@ impl StubDispatch {
     }
 
     async fn apply_inner(&self, msg: &Incoming) -> DispatchOutcome {
-        let payload: StubPayload = match serde_json::from_slice(&msg.payload) {
+        let payload: StubPayload = match serde_json::from_slice(&msg.body) {
             Ok(payload) => payload,
             Err(error) => {
                 return DispatchOutcome::Failed(DispatchError::terminal(error.to_string()));

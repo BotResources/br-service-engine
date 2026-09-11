@@ -70,6 +70,14 @@ impl Beat {
         self
     }
 
+    pub(crate) fn with_schema_displaced(
+        mut self,
+        displaced: tokio::sync::watch::Sender<bool>,
+    ) -> Self {
+        self.schema_displaced = Some(displaced);
+        self
+    }
+
     pub fn with_repairs(mut self, repairs: Arc<dyn RepairRetry>) -> Self {
         self.repairs = Some(repairs);
         self

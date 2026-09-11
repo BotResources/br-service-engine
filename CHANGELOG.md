@@ -72,7 +72,10 @@ returns `AttachError::ShuttingDown`.
   `EngineError::SchemaVersionConflict` and readiness stays DOWN with both versions
   in the reason — so a rolling deploy configured by mistake fails loud instead of
   two versions sharing one store; a stale row (heartbeat lapsed) never blocks. The
-  service version is `EngineConfig::with_service_version`.
+  service version is `EngineConfig::with_service_version`. A running pod whose beat
+  heartbeat updates no row has been displaced by another version that claimed the
+  singleton, and lowers readiness to DOWN until it owns the row again, rather than
+  serving over a store it no longer owns.
 - `Timestamp`, a newtype truncated to microseconds at construction, so every
   instant crossing the PostgreSQL `timestamptz` boundary round-trips equal.
 
@@ -98,9 +101,10 @@ durable name, so a message is owned by one pod at a time.
 - A reaction handler that panics is caught at dispatch, rolled back and routed to
   the dead-letter table as a terminal frame, so the consumer keeps serving instead
   of redelivering the panicking frame every `ack_wait` forever with readiness UP.
-  `cx.principal` no longer panics on a bare message: it returns a typed
-  `PrincipalUnresolved` (terminal disposition) that a handler propagates like any
-  other reaction error, and `cx.try_principal` stays the fallible accessor.
+  `cx.principal` no longer panics when no sender principal has been resolved: it
+  returns a typed `PrincipalUnresolved` (terminal disposition) that a handler
+  propagates like any other reaction error, and `cx.try_principal` stays the
+  fallible accessor.
 - `Disposition` (Retry / Park / Terminal) routed against per-reaction budgets;
   `sqlx_is_terminal` classifies a Postgres integrity (SQLSTATE class 23) or data
   (class 22) violation as terminal on the engine's own authority, ahead of the
@@ -138,9 +142,13 @@ durable name, so a message is owned by one pod at a time.
   never leaves the pod deaf while it reports ready; on shutdown a consumer naks its
   pulled-but-unprocessed frames so they redeliver to a live pod.
 - Scheduled messages carry a per-row `attempts` count and publish isolated from
-  the rest of their batch, so one message that cannot publish is dead-lettered
-  past its delivery budget while the rest of the batch and the next beat still
-  fire, rather than one poison row rolling back and re-blocking the queue forever.
+  the rest of their batch, so one message that cannot publish against a reachable
+  broker is dead-lettered past its delivery budget while the rest of the batch and
+  the next beat still fire, rather than one poison row rolling back and re-blocking
+  the queue forever. A failure observed while `Nats::reachable()` is false costs no
+  attempt — the beat skips `fire_due` under an outage, the same broker-state gate
+  the outbox relay reads — so a scheduled row waits out a broker outage without
+  spending its budget and fires on return.
 
 **Direct write pipeline and handler contexts.** A GraphQL mutation and a NATS
 command run **one** pipeline: load, gate (the affordance function in deny mode,
@@ -191,8 +199,10 @@ metadata on `Reaction` (`cx.metadata`, `cx.actor`). `Reaction` gained
 into the service's own `Principal` through a resolver registered with
 `Engine::register_reaction_principal`, so a reaction can gate on who sent the
 command (the reference `create_card` refuses a command whose actor is not a
-service). A bare (non-enveloped) message is still tolerated for internal/plumbing
-producers: it flows with the whole payload as the body and no sender metadata.
+service). The `br-core-integration` envelope is **mandatory on the frontier**: a
+frame that carries none is refused at `Incoming::identify` as terminal — one
+dead-letter row (`DeadLetterSource::Reaction`) and a `Term` — so no frame reaches
+a reaction without a sender, and there is no bare-body path.
 
 **Persistence — CRUD, soft EDA, full EDA behind one trait.** `Persistence`
 (`type Aggregate` / `type Key` / `type Event`, `const STYLE`, `load` / `save` /
@@ -222,11 +232,14 @@ redactor, then re-snapshot each touched aggregate by replaying the whole
 rewritten log from `genesis` in the same transaction, so a person folded into a
 snapshot past a crossed cadence boundary leaves no residue). `full_eda::keys` lists a noun's keys for a window populate.
 `load`
-and `read_many` are both non-locking; the write pipeline takes the row lock
-itself by calling `Persistence::lock` (default no-op; the reference stores run
-`SELECT … FOR UPDATE`) before `load`, inside the transaction under
-`lock_timeout`, so concurrent commands on one key serialize in every style while
-the render side never takes a row lock. The engine loads a projector's rows
+and `read_many` are both non-locking; the write pipeline serialises concurrent
+commands on one key itself by taking a transaction advisory lock in `load`
+(`pg_advisory_xact_lock` over a domain-tagged, separator-safe FNV-1a hash of the
+aggregate's store type and JSON-encoded key) before calling `Persistence::lock`,
+inside the transaction under `lock_timeout`, so concurrent commands on one key
+serialize in every style even when `lock` is the default no-op; the reference
+stores' `SELECT … FOR UPDATE` before `load` stays as an optimisation that pins
+the row image. The render side never takes a row lock. The engine loads a projector's rows
 through `Persistence::read_many`; a CRUD or soft-EDA store overrides it with a
 single batched read of the same committed table `load`/`save` use, and a
 full-EDA store keeps the default (a `load` per key) so the render side replays
@@ -740,15 +753,20 @@ cause — and two-pod convergence.
 
 ### Changed
 
-- **The write-path row lock lives in `Persistence::lock`, not in `load`.** `load`
-  is a plain, non-locking read and `read_many` (the batched render read) defaults
-  to it, so both reads are lock-free and a store author who writes only `load`
-  gets a render frame that never takes a row lock. The write pipeline calls
-  `Persistence::lock` (default no-op) before `load` to take the row lock; the
-  reference stores implement it as `SELECT … FOR UPDATE` on the row (or snapshot)
-  key, so concurrent commands on one key serialize in every style — inside the
-  pipeline transaction, under `lock_timeout`, so a contended write is retryable —
-  while a render never waits on that lock. A store that wants a single batched
+- **The write-path serialisation is engine-owned; `Persistence::lock` is an
+  optimisation.** `load` is a plain, non-locking read and `read_many` (the batched
+  render read) defaults to it, so both reads are lock-free and a store author who
+  writes only `load` gets a render frame that never takes a row lock. The write
+  pipeline serialises concurrent commands on one aggregate itself: before `load` it
+  takes a transaction advisory lock keyed on `(store type, JSON key)` — a
+  `pg_advisory_xact_lock` over a domain-tagged FNV-1a hash with a byte separator
+  between the parts, so two keys or two store types never collide — held to commit.
+  Concurrent commands on one key therefore serialize in every style even when the
+  store's `lock` is the default no-op; the reference stores' `SELECT … FOR UPDATE`
+  on the row (or snapshot) key stays as an optimisation that also pins the row
+  image. The advisory lock runs inside the pipeline transaction under
+  `lock_timeout`, so a contended write that waits past the timeout is retryable,
+  and a render never waits on it. A store that wants a single batched
   render query overrides `read_many` (`WHERE id = ANY($1)`) per the "every read
   function answers in one query" rule; the reference stores do.
 

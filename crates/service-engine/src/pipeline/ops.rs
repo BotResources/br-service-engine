@@ -7,8 +7,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::accumulator::AccumulatorRuntime;
-use crate::blobs::{Blob, BlobHandle, BlobRef, BlobRowOp, Blobs};
-use crate::erase::PersonId;
+use crate::blobs::{BlobHandle, BlobRef, BlobRowOp};
 use crate::error::EngineError;
 use crate::impact::{Deps, Dims, Impact};
 use crate::inbound::ReactionMessage;
@@ -82,6 +81,7 @@ impl<'a> Ops<'a> {
         &mut self,
         key: &<A::Store as Persistence>::Key,
     ) -> Result<Option<A>, EngineError> {
+        aggregate_advisory_lock::<A>(self.conn, key).await?;
         A::Store::lock(self.conn, key).await?;
         let loaded = A::Store::load(self.conn, key).await?;
         if let Some(aggregate) = &loaded {
@@ -243,48 +243,24 @@ impl<'a> Ops<'a> {
         Ok(())
     }
 
-    pub fn blob<B: Blobs>(
-        &mut self,
-        file_name: impl Into<String>,
-        content_type: impl Into<String>,
-    ) -> Result<Blob, EngineError> {
-        self.stage_blob::<B>(file_name.into(), content_type.into(), None)
-    }
+}
 
-    pub fn blob_owned<B: Blobs>(
-        &mut self,
-        file_name: impl Into<String>,
-        content_type: impl Into<String>,
-        owner: PersonId,
-    ) -> Result<Blob, EngineError> {
-        self.stage_blob::<B>(file_name.into(), content_type.into(), Some(owner))
-    }
-
-    pub fn release_blob(&mut self, reference: BlobRef) -> Result<(), EngineError> {
-        let handle = self.blob_handle()?;
-        handle.release(&mut self.staged.blob_ops, reference, self.now);
-        Ok(())
-    }
-
-    fn stage_blob<B: Blobs>(
-        &mut self,
-        file_name: String,
-        content_type: String,
-        owner: Option<PersonId>,
-    ) -> Result<Blob, EngineError> {
-        let handle = self.blob_handle()?;
-        handle.stage::<B>(&mut self.staged.blob_ops, file_name, content_type, owner)
-    }
-
-    fn blob_handle(&self) -> Result<&'a BlobHandle, EngineError> {
-        self.blobs.ok_or_else(|| {
-            EngineError::Blob(
-                "no object storage is configured; call EngineConfig::with_blob_storage and \
-                 register_blobs"
-                    .into(),
-            )
-        })
-    }
+async fn aggregate_advisory_lock<A: Aggregate>(
+    conn: &mut PgConnection,
+    key: &<A::Store as Persistence>::Key,
+) -> Result<(), EngineError> {
+    let store = std::any::type_name::<A::Store>();
+    let key_bytes = serde_json::to_vec(key).map_err(|source| EngineError::Encode {
+        what: "aggregate key for the load advisory lock",
+        source,
+    })?;
+    let id = crate::advisory::lock_id(crate::advisory::AGGREGATE_LOAD, &[store.as_bytes(), &key_bytes]);
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(id)
+        .execute(conn)
+        .await
+        .map_err(EngineError::Db)?;
+    Ok(())
 }
 
 fn reconcile_key<A: Aggregate>(aggregate: &A) -> Result<(TypeId, Vec<u8>), EngineError> {

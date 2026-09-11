@@ -43,16 +43,19 @@ pub(super) fn wire_beat<P: Principal>(
         .with_message_retention(config.message_retention),
     ))?;
 
+    let (schema_displaced_tx, schema_displaced_rx) = tokio::sync::watch::channel(false);
     let assembly = ReadinessAssembly::new(readiness, mirrors.health())
         .with_relays(beat.relays().health())
         .with_listener(transport.listener_health())
         .with_inbound_health(inbound_health_rx)
-        .with_nats(nats.clone(), config.nats_grace);
+        .with_nats(nats.clone(), config.nats_grace)
+        .with_schema_version(schema_displaced_rx);
     beat = beat
         .with_transport(transport.clone())
         .with_accumulators(accumulators.clone())
         .with_dead_letters(dead_letters.clone())
         .with_readiness(assembly)
+        .with_schema_displaced(schema_displaced_tx)
         .with_repairs(Arc::new(RenderRepairs(render.clone())));
     if let Some(drain) = erasure_drain {
         beat = beat.with_erasure_drain(drain);

@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 mod engine_twin;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::engine::engine_config;
@@ -15,20 +15,7 @@ use uuid::Uuid;
 
 const CHANNEL: &str = "se_s158_lane_signal";
 const SERVICE: &str = "s158lane";
-
-async fn await_not_ready(readiness: &ReadinessHandle) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if readiness.snapshot() != Readiness::Ready {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "readiness never fell after the broker was killed past its grace window"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
+const GRACE: Duration = Duration::from_secs(30);
 
 async fn next_notice(
     stream: &mut (impl futures_util::Stream<Item = LaneNotice> + Unpin),
@@ -40,7 +27,7 @@ async fn next_notice(
 }
 
 #[tokio::test]
-async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
+async fn s158_a_paused_lane_tells_every_session_before_grace_and_resumes_with_a_reset() {
     let db = TestDb::fresh().await;
     let mut nats = TestNats::spawn().await;
     nats.provision().await;
@@ -49,7 +36,7 @@ async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
 
     let config = engine_config(CHANNEL, "pod-s158")
         .with_service(SERVICE)
-        .with_nats_grace(Duration::from_secs(1))
+        .with_nats_grace(GRACE)
         .with_beat(Duration::from_millis(200));
     let mut engine = Engine::boot(
         config,
@@ -92,10 +79,16 @@ async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
     assert_eq!(
         paused,
         LaneNotice::Paused(vec![Lane::Presence]),
-        "when nats stays down past its grace window the presence lane pauses and every session \
-         that watches it is told so on its subscription"
+        "the presence lane pauses from the first beat that observes the broker unreachable and \
+         every session that watches it is told so on its subscription",
     );
-    await_not_ready(&readiness).await;
+    assert_eq!(
+        readiness.snapshot(),
+        Readiness::Ready,
+        "the lane paused while the outage is still well within nats_grace, so readiness — which \
+         nats_grace alone governs — has not fallen: had the pause waited for nats_grace, this \
+         notice could not arrive while the pod is still UP",
+    );
 
     nats.restart().await;
 
@@ -103,7 +96,7 @@ async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
     assert_eq!(
         resumed,
         LaneNotice::Resumed(vec![Lane::Presence]),
-        "on return the lane resumes and the same session is told"
+        "on return the lane resumes and the same session is told",
     );
 
     let reset = next_delta(&mut session, SOON)
@@ -111,15 +104,20 @@ async fn s158_a_paused_lane_tells_every_session_and_resumes_with_a_reset() {
         .expect("the session receives a Reset on return");
     assert!(
         matches!(reset, Delta::Reset { .. }),
-        "the intent's Reset on return reaches the session"
+        "the intent's Reset on return reaches the session because a pause was signalled",
     );
     assert!(
         reset.revision().get() > opening_revision,
         "the Reset advances the contiguous per-session revision rather than rewinding it; the \
-         out-of-band lane notice carried no revision of its own"
+         out-of-band lane notice carried no revision of its own",
     );
 
-    await_ready(&readiness).await;
+    assert_eq!(
+        readiness.snapshot(),
+        Readiness::Ready,
+        "the outage stayed within nats_grace throughout, so readiness never left UP even as the \
+         lane paused and resumed",
+    );
 
     shutdown.notify_one();
     running

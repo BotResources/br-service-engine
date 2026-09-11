@@ -42,7 +42,7 @@ battery-backed.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
-| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` to take the row lock (default no-op; the reference stores implement it as `SELECT … FOR UPDATE`); log-style events reach `save` via `Aggregate::pending_events` |
+| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `SELECT … FOR UPDATE` as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises); log-style events reach `save` via `Aggregate::pending_events` |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
 | `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
@@ -81,7 +81,10 @@ profile for a service that wants a single panicking frame parked instead of a
 pod restart.
 `cx.principal` returns a typed `PrincipalUnresolved` (terminal) rather than
 panicking when a message carries no resolvable sender; `cx.try_principal`
-returns `None` for the same case when a reaction tolerates a bare message. The `service_engine.dead_letter`
+returns `None` for the same case, for a reaction that does not need a sender. The
+frontier itself refuses a frame with no `br-core-integration` envelope at
+`Incoming::identify` (terminal — one dead-letter row and a `Term`), so a reaction
+never runs on a frame that carries no sender at all. The `service_engine.dead_letter`
 table is the one table for every source of work: inbound reactions, scheduled
 messages, cron ticks, a persistently stuck mirror and an outbox row that keeps
 failing to publish against a reachable broker all record there
@@ -111,9 +114,13 @@ redelivers the frame. The synchronous channel answers `{ success }`, a typed
 (which never enters a view, impact, offer or event). `cx.schedule_at` stages a
 scheduled reaction the beat fires on the database clock; a scheduled row carries
 a per-row `attempts` count and is published isolated from the rest of its batch,
-so one message that cannot publish is dead-lettered past its delivery budget
-rather than blocking every message behind it at every beat, and the next due row
-still fires. A cron tick that fails is dead-lettered once per slot (it is never
+so one message that cannot publish against a reachable broker is dead-lettered
+past its delivery budget rather than blocking every message behind it at every
+beat, and the next due row still fires. A publish failure observed while the
+broker is unreachable costs the row no attempt — the beat skips `fire_due` while
+`Nats::reachable()` is false, the same broker-state gate the outbox relay reads,
+so a scheduled row waits out an outage without spending its budget and fires on
+return. A cron tick that fails is dead-lettered once per slot (it is never
 re-run, the slot is already claimed and completed), and a mirror stuck past its
 restart threshold records too — all into the one dead-letter table with an
 ops-view impact. The engine starts the inbound loop at boot, after
@@ -136,12 +143,18 @@ gate and its hydration barrier, not in a declared FK/unique/check on the state.
 Both
 reads are non-locking — `load` is a plain read and `read_many` defaults to it —
 so the render side takes no row lock, whatever the author writes. The write
-pipeline takes the row lock itself: before `load` it calls the store's
-`Persistence::lock`, which the reference stores implement as
-`SELECT … FOR UPDATE` on the row (or snapshot) key, so concurrent commands on
-one key serialize in every style while a render frame never waits on that lock.
-`lock` runs inside the pipeline transaction under `lock_timeout`, so a contended
-write is retryable, not stuck. A CRUD or soft-EDA store overrides `read_many`
+pipeline serialises concurrent commands on one key itself: before `load` it takes
+a transaction advisory lock keyed on the aggregate's store type and its
+JSON-encoded key — `pg_advisory_xact_lock` over an FNV-1a hash of
+`(store type, key)` with a domain tag and a byte separator between the parts, so
+two keys or two store types never collide onto one lock — held until the
+pipeline transaction commits or rolls back. So concurrent commands on one
+aggregate serialize in **every** style even when the store's `Persistence::lock`
+is the default no-op; the reference stores' `SELECT … FOR UPDATE` on the row (or
+snapshot) key stays as an optimisation that also pins the row image. The advisory
+lock, like `lock`, runs inside the pipeline transaction under `lock_timeout`, so
+a contended write that waits past the timeout is retryable, not stuck; a render
+frame never waits on it. A CRUD or soft-EDA store overrides `read_many`
 with a single batched read of the same table `load` reads, so the author writes
 no render load SQL; a full-EDA store keeps the default `read_many` (a `load` per
 key) because the current state is the snapshot replayed forward, not a column
@@ -709,11 +722,13 @@ and no black-box scenario exercises a blob.
   declared cohort on the exact bytes of its parts, never a 64-bit hash, so it is
   the totality and injectivity of the declaration — not a hash width — that keeps
   two principals, or two distinct cohorts, from ever sharing one render.
-- `Persistence::load` and `read_many` must stay non-locking; the row lock that
-  serialises concurrent commands on one key belongs in `Persistence::lock`, a
-  `SELECT … FOR UPDATE` on the row (or snapshot) key. A slice whose commands
-  read-modify-write one key must implement `lock`; its default is a no-op, which
-  is correct only for a slice that needs no cross-command serialisation of a key.
+- `Persistence::load` and `read_many` must stay non-locking; the engine serialises
+  concurrent commands on one key with a per-key transaction advisory lock it takes
+  in `load`, so a slice needs no `Persistence::lock` to be correct. `lock` is an
+  optional optimisation — a `SELECT … FOR UPDATE` on the row (or snapshot) key that
+  also pins the row image — and its default is a no-op; a slice may implement it to
+  avoid a re-read under contention, never to obtain serialisation the engine
+  already guarantees.
 
 ## Deployment constraint
 
@@ -734,7 +749,10 @@ mis-configured rolling deploy into a loud failure instead of two versions quietl
 sharing one store. A stale row (a pod that died more than `schema_version_liveness`
 ago, so its heartbeat lapsed) never blocks — the booting pod claims the row. The
 service version comes from `EngineConfig::with_service_version`; the engine version
-is the engine crate's own version.
+is the engine crate's own version. If the beat's heartbeat later updates **no**
+row — another version has claimed the singleton while this pod ran, so it has been
+displaced — the pod lowers readiness to DOWN rather than keep serving over a store
+it no longer owns; it recovers when it once again owns the row.
 
 ## Configuration, degradation and observability
 
@@ -779,11 +797,14 @@ takes the pod DOWN with the reason in the readiness payload and back UP on
 reconnect; a consumed bucket missing at boot never comes UP and during a run
 takes the pod DOWN at the reconcile deadline.
 
-When NATS has been unreachable past `nats_grace` the accumulated (lane A) and
+From the first beat that observes NATS unreachable the accumulated (lane A) and
 presence (lane B) lanes pause, and every session that watches a paused lane is
-told so on its subscription: the engine emits a `LanesPaused { lanes }` notice
-and, on return, a `LanesResumed { lanes }` notice followed by a `Reset` of the
-session from the store and the bucket. The notice is out-of-band — the
+told so on its subscription: the engine emits a `LanesPaused { lanes }` notice —
+not past `nats_grace`, which governs readiness alone, but as soon as the outage
+is seen, so a presence viewer never mistakes a stalled lane for "nobody is
+typing". On return the engine emits a `LanesResumed { lanes }` notice followed by
+a `Reset` of the session from the store and the bucket, but only if a pause was
+signalled (a sub-beat blink is never observed, so it raises no notice). The notice is out-of-band — the
 subscription union exposes `LanesPaused` / `LanesResumed` as members alongside
 `Reset` / `Upsert` / `Remove`, but a notice carries **no revision**: it does not
 participate in the contiguous per-session revision, so a client that drops it
