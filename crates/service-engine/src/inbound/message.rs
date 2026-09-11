@@ -146,6 +146,10 @@ fn header<'a>(headers: Option<&'a HeaderMap>, name: &str) -> Option<&'a str> {
     headers.and_then(|h| h.get(name)).map(|v| v.as_str())
 }
 
+pub(crate) fn resolved_id(headers: Option<&HeaderMap>) -> Option<Uuid> {
+    message_id(headers, None)
+}
+
 fn message_id(headers: Option<&HeaderMap>, envelope_id: Option<Uuid>) -> Option<Uuid> {
     header(headers, HEADER_MESSAGE_ID)
         .and_then(|raw| Uuid::parse_str(raw).ok())

@@ -105,7 +105,7 @@ impl<O: Offer> OfferRelay<O> {
             return Ok(0);
         }
         #[cfg(feature = "test-support")]
-        crate::offers::pause::wait().await;
+        crate::offers::pause::wait(crate::offers::pause::Point::Drain).await;
         let total = resolved.len();
         let bucket = self.bucket().await?;
         let mut applied: Vec<Marker> = Vec::with_capacity(total);
@@ -138,29 +138,46 @@ impl<O: Offer> OfferRelay<O> {
         )>,
         RelayError,
     > {
+        let markers = {
+            let mut tx = pg.begin().await?;
+            if !self.leader.still_leader(&mut tx, lease).await? {
+                let _ = tx.rollback().await;
+                return Ok(Vec::new());
+            }
+            let markers = marker::pending(&mut tx, &self.name, batch).await?;
+            tx.commit().await?;
+            markers
+        };
+        if markers.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let bucket = self.bucket().await?;
+        let mut observed = Vec::with_capacity(markers.len());
+        for marker in &markers {
+            observed.push(
+                bucket
+                    .get_with_revision(&marker.kv_key)
+                    .await
+                    .map_err(published_language)?,
+            );
+        }
+
+        #[cfg(feature = "test-support")]
+        crate::offers::pause::wait(crate::offers::pause::Point::Resolve).await;
+
         let mut tx = pg.begin().await?;
         if !self.leader.still_leader(&mut tx, lease).await? {
             let _ = tx.rollback().await;
             return Ok(Vec::new());
         }
-        let markers = marker::pending(&mut tx, &self.name, batch).await?;
-        let mut resolved = Vec::with_capacity(markers.len());
-        for marker in markers {
+        let mut out = Vec::with_capacity(markers.len());
+        for (marker, observed) in markers.into_iter().zip(observed) {
             let watermark = kv_watermark::read(&mut tx, &self.name, &marker.kv_key).await?;
             let write = apply::resolve::<O>(&mut tx, &marker).await?;
-            resolved.push((marker, watermark, write));
-        }
-        tx.commit().await?;
-
-        let bucket = self.bucket().await?;
-        let mut out = Vec::with_capacity(resolved.len());
-        for (marker, watermark, write) in resolved {
-            let observed = bucket
-                .get_with_revision(&marker.kv_key)
-                .await
-                .map_err(published_language)?;
             out.push((marker, watermark, write, observed));
         }
+        tx.commit().await?;
         Ok(out)
     }
 

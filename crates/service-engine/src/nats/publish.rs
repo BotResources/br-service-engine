@@ -35,6 +35,7 @@ pub enum NatsError {
 #[non_exhaustive]
 pub enum PublishFailure {
     NoStream,
+    Unanswered,
     Transient,
 }
 
@@ -42,6 +43,7 @@ impl std::fmt::Display for PublishFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::NoStream => "no stream for subject",
+            Self::Unanswered => "broker did not answer",
             Self::Transient => "transient",
         })
     }
@@ -86,6 +88,7 @@ pub(crate) fn publish_error(
     use async_nats::jetstream::context::PublishErrorKind as K;
     let kind = match kind {
         K::StreamNotFound => PublishFailure::NoStream,
+        K::TimedOut | K::BrokenPipe => PublishFailure::Unanswered,
         _ => PublishFailure::Transient,
     };
     NatsError::Publish {

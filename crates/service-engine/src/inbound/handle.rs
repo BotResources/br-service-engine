@@ -28,7 +28,13 @@ impl InboundConsumer {
             Err(error) => {
                 self.dead_letter_and_settle(
                     message,
-                    &self.unidentified(source, subject, message.payload.clone(), delivered),
+                    &self.unidentified(
+                        source,
+                        subject,
+                        message.headers.as_ref(),
+                        message.payload.clone(),
+                        delivered,
+                    ),
                     &error.to_string(),
                 )
                 .await;
@@ -46,6 +52,7 @@ impl InboundConsumer {
         &self,
         source: Source,
         subject: String,
+        headers: Option<&async_nats::HeaderMap>,
         payload: Bytes,
         delivered: u32,
     ) -> Incoming {
@@ -53,7 +60,8 @@ impl InboundConsumer {
             reaction: self.subscription.reaction.clone(),
             source,
             subject,
-            message_id: Uuid::now_v7(),
+            message_id: crate::inbound::message::resolved_id(headers)
+                .unwrap_or_else(Uuid::now_v7),
             sequence: None,
             metadata: crate::inbound::MessageMetadata::default(),
             body: payload.clone(),
