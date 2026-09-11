@@ -6,8 +6,9 @@ use service_engine::nats::Nats;
 
 use crate::infra::TestDb;
 use crate::sample::counter::{
-    BumpCrud, BumpFull, BumpFullCmd, BumpSoft, FullCounterProjector, OpenCrud, OpenFull, OpenSoft,
-    bump_crud, bump_full, bump_full_reaction, bump_soft, open_crud, open_full, open_soft,
+    BumpCrud, BumpFull, BumpFullCmd, BumpLockless, BumpSoft, FullCounterProjector, OpenCrud,
+    OpenFull, OpenLockless, OpenSoft, bump_crud, bump_full, bump_full_reaction, bump_lockless,
+    bump_soft, open_crud, open_full, open_lockless, open_soft,
 };
 use crate::sample::engine::engine_config;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
@@ -85,5 +86,11 @@ pub async fn boot_serialization_engine(
     engine
         .register_mutation::<OpenFull, _>(open_full)
         .expect("register the full-EDA open mutation");
+    engine
+        .register_mutation::<BumpLockless, _>(bump_lockless)
+        .expect("register the lock-less bump mutation");
+    engine
+        .register_mutation::<OpenLockless, _>(open_lockless)
+        .expect("register the lock-less open mutation");
     engine
 }

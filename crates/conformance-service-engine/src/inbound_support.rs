@@ -117,6 +117,22 @@ pub async fn publish(
     ack.await.expect("the broker stores the published command");
 }
 
+pub async fn publish_bare(nats: &Nats, message_id: Uuid, body: &[u8]) {
+    let subject = command_subject(&sample_command_coords());
+    let mut headers = HeaderMap::new();
+    headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.to_string());
+    headers.insert(
+        service_engine::inbound::HEADER_MESSAGE_ID,
+        message_id.to_string(),
+    );
+    let ack = nats
+        .context()
+        .publish_with_headers(subject, headers, body.to_vec().into())
+        .await
+        .expect("publish the bare (non-enveloped) frame onto the command stream");
+    ack.await.expect("the broker stores the bare frame");
+}
+
 pub async fn effect_rows(pool: &PgPool) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM se_stub_effect")
         .fetch_one(pool)

@@ -36,8 +36,7 @@ fn a_message_id_header_is_preferred_over_the_envelope_id_and_the_nats_dedup_toke
             &dedup.to_string(),
         ),
     ]);
-    let msg =
-        Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap();
+    let msg = Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap();
     assert_eq!(msg.message_id, header_id);
 }
 
@@ -100,8 +99,7 @@ fn a_bare_json_payload_is_refused_because_it_carries_no_envelope() {
     let id = Uuid::now_v7();
     let map = headers(&[(HEADER_MESSAGE_ID, &id.to_string())]);
     let raw = Bytes::from_static(br#"{"verdict":"ok"}"#);
-    let err =
-        Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap_err();
+    let err = Incoming::identify("r", Source::Command, "s".into(), Some(&map), raw, 1).unwrap_err();
     assert!(
         matches!(err, Unidentified::NotEnveloped),
         "a plain JSON body with a message-id header is still not an integration envelope, so the \
@@ -140,14 +138,6 @@ fn a_sequence_needs_all_three_of_its_headers() {
     );
 
     let partial = headers(&[(HEADER_SEQ, "7")]);
-    let msg = Incoming::identify(
-        "r",
-        Source::Command,
-        "s".into(),
-        Some(&partial),
-        raw,
-        1,
-    )
-    .unwrap();
+    let msg = Incoming::identify("r", Source::Command, "s".into(), Some(&partial), raw, 1).unwrap();
     assert_eq!(msg.sequence, None);
 }

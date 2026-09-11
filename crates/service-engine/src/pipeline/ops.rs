@@ -242,7 +242,6 @@ impl<'a> Ops<'a> {
         });
         Ok(())
     }
-
 }
 
 async fn aggregate_advisory_lock<A: Aggregate>(
@@ -254,7 +253,10 @@ async fn aggregate_advisory_lock<A: Aggregate>(
         what: "aggregate key for the load advisory lock",
         source,
     })?;
-    let id = crate::advisory::lock_id(crate::advisory::AGGREGATE_LOAD, &[store.as_bytes(), &key_bytes]);
+    let id = crate::advisory::lock_id(
+        crate::advisory::AGGREGATE_LOAD,
+        &[store.as_bytes(), &key_bytes],
+    );
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(id)
         .execute(conn)
