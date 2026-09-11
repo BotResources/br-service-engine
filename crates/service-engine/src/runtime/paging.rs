@@ -119,6 +119,12 @@ impl<P: Principal> SessionRuntime<P> {
             if !in_window(key) {
                 continue;
             }
+            if live
+                .last_sent
+                .contains_key(&(projector.clone(), key.clone()))
+            {
+                continue;
+            }
             if let Some(Some(view)) = rendered.get(key) {
                 outgoing.push(Outgoing::Upsert {
                     projector: projector.clone(),
