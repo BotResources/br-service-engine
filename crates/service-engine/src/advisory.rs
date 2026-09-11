@@ -1,5 +1,6 @@
 pub(crate) const ACCUMULATOR_STREAM: u8 = 0x01;
 pub(crate) const LEADER_SLOT: u8 = 0x02;
+pub(crate) const AGGREGATE_LOAD: u8 = 0x03;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;

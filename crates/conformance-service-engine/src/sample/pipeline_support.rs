@@ -1,9 +1,32 @@
 use async_nats::HeaderMap;
-use br_core_integration::CommandCoords;
+use br_core_integration::{CommandCoords, EventMetadata, IntegrationCommand};
+use br_core_kernel::{Actor, ServiceAccountId};
+use chrono::Utc;
 use serde::Serialize;
 use service_engine::nats::{Nats, command_subject};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+pub fn enveloped_command<T: Serialize>(
+    coords: &CommandCoords,
+    command_id: Uuid,
+    payload: &T,
+) -> serde_json::Value {
+    let command_type = format!("{}.{}", coords.aggregate.as_str(), coords.verb.as_str());
+    let metadata = EventMetadata::new(
+        Actor::Service(ServiceAccountId::from(Uuid::now_v7())),
+        command_id,
+    );
+    let envelope = IntegrationCommand::new(
+        command_id,
+        command_type,
+        coords.version,
+        Utc::now(),
+        metadata,
+        payload,
+    );
+    serde_json::to_value(&envelope).expect("the integration command envelope serializes")
+}
 
 pub async fn publish_command<T: Serialize>(
     nats: &Nats,
@@ -21,7 +44,8 @@ pub async fn publish_command<T: Serialize>(
         service_engine::inbound::HEADER_MESSAGE_ID,
         message_id.to_string(),
     );
-    let bytes = serde_json::to_vec(payload).expect("the command payload serializes");
+    let bytes = serde_json::to_vec(&enveloped_command(coords, message_id, payload))
+        .expect("the enveloped command serializes");
     let ack = nats
         .context()
         .publish_with_headers(subject, headers, bytes.into())

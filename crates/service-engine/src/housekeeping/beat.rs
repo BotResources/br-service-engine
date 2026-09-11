@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
 use sqlx::PgPool;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
 use crate::blobs::{BlobReaper, ReaperRound};
 use crate::chain::describe;
@@ -47,6 +47,7 @@ pub struct Beat {
     pub(super) blob_reaper: Option<BlobReaper>,
     listener_queue_threshold: f64,
     schema_version: (String, String),
+    pub(super) schema_displaced: Option<watch::Sender<bool>>,
     pub(super) erasures: Option<Arc<dyn ErasureDrain>>,
     pub(super) lane: Option<LaneSupervisor>,
 }
@@ -72,6 +73,7 @@ impl Beat {
                 crate::schema::ENGINE_SCHEMA_VERSION.to_string(),
                 config.schema_service_version().to_string(),
             ),
+            schema_displaced: None,
             erasures: None,
             lane: None,
         })
@@ -156,13 +158,35 @@ impl Beat {
 
     async fn refresh_schema_version(&self, pg: &PgPool) {
         let (engine_version, service_version) = &self.schema_version;
-        if let Err(error) =
-            crate::schema_version::refresh_schema_version(pg, engine_version, service_version).await
+        match crate::schema_version::refresh_schema_version(pg, engine_version, service_version)
+            .await
         {
-            tracing::warn!(
-                reason = %describe(&error),
-                "the beat could not refresh the schema version heartbeat",
-            );
+            Ok(affected) => {
+                if let Some(displaced) = &self.schema_displaced {
+                    let is_displaced = affected == 0;
+                    displaced.send_if_modified(|current| {
+                        if *current == is_displaced {
+                            false
+                        } else {
+                            *current = is_displaced;
+                            true
+                        }
+                    });
+                    if is_displaced {
+                        tracing::error!(
+                            "the schema-version heartbeat updated no row: another engine or \
+                             service version has claimed the singleton, so this pod is displaced \
+                             and lowers readiness rather than serving over a store it no longer owns",
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    reason = %describe(&error),
+                    "the beat could not refresh the schema version heartbeat",
+                );
+            }
         }
     }
 

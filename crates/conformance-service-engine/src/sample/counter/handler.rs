@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::sample::counter::crud::CrudCounter;
 use crate::sample::counter::event::CounterEvent;
 use crate::sample::counter::full::FullCounter;
+use crate::sample::counter::lockless::LocklessCounter;
 use crate::sample::counter::slice::CounterAggregate;
 use crate::sample::counter::soft::SoftCounter;
 use crate::sample::principal::SamplePrincipal;
@@ -117,6 +118,12 @@ macro_rules! bump_input {
 bump_input!(BumpCrud, bump_crud, CrudCounter, "bump_crud");
 bump_input!(BumpSoft, bump_soft, SoftCounter, "bump_soft");
 bump_input!(BumpFull, bump_full, FullCounter, "bump_full");
+bump_input!(
+    BumpLockless,
+    bump_lockless,
+    LocklessCounter,
+    "bump_lockless"
+);
 
 async fn apply_open<A>(cx: &mut Ops<'_>, input: &Bump) -> Result<(), CounterFault>
 where
@@ -174,6 +181,12 @@ macro_rules! open_input {
 open_input!(OpenCrud, open_crud, CrudCounter, "open_crud");
 open_input!(OpenSoft, open_soft, SoftCounter, "open_soft");
 open_input!(OpenFull, open_full, FullCounter, "open_full");
+open_input!(
+    OpenLockless,
+    open_lockless,
+    LocklessCounter,
+    "open_lockless"
+);
 
 #[derive(Debug, Deserialize)]
 pub struct BumpFullCmd {

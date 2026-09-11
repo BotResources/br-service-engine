@@ -6,7 +6,7 @@ use futures_util::future::BoxFuture;
 use crate::chain::describe;
 use crate::error::EngineError;
 use crate::lanes::LaneChannel;
-use crate::nats::{Nats, NatsCondition, NatsHealth};
+use crate::nats::{Nats, NatsHealth};
 
 pub(crate) trait ResetAll: Send + Sync {
     fn reset_all(&self) -> BoxFuture<'_, Result<usize, EngineError>>;
@@ -38,13 +38,14 @@ impl LaneSupervisor {
 
     pub(crate) async fn tick(&mut self) {
         let condition = self.health.observe(self.nats.reachable(), Instant::now());
-        let should_pause = matches!(condition, NatsCondition::PastGrace);
+        let should_pause = !condition.is_up();
         if should_pause && !self.paused {
             self.paused = true;
             self.channel.set_paused(true);
             tracing::warn!(
-                "nats has been unreachable past its grace window; the accumulated and presence \
-                 lanes pause and every session that watches one is told so on its subscription",
+                "nats is unreachable; the accumulated and presence lanes pause from this first \
+                 beat that observes it and every session that watches one is told so on its \
+                 subscription, while nats_grace still governs readiness",
             );
         } else if !should_pause && self.paused {
             self.paused = false;

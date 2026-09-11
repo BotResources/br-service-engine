@@ -3,7 +3,9 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use tokio::sync::OnceCell;
 
-use crate::blobs::{BlobRef, BlobStore, DownloadUrl};
+#[cfg(feature = "test-support")]
+use crate::blobs::DownloadUrl;
+use crate::blobs::{BlobRef, BlobStore};
 use crate::engine::Engine;
 use crate::erase::PersonId;
 use crate::error::EngineError;
@@ -16,6 +18,7 @@ pub struct BlobReader {
 }
 
 impl BlobReader {
+    #[cfg(feature = "test-support")]
     pub async fn download_url(
         &self,
         reference: BlobRef,

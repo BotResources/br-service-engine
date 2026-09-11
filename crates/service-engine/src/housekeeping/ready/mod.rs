@@ -16,8 +16,8 @@ use crate::observe::{
 
 use verdict::verdict;
 pub use verdict::{
-    REASON_INBOUND_STOPPED, REASON_NATS_UNREACHABLE, REASON_RELAY_DEGRADED, REASON_SHUTTING_DOWN,
-    REASON_WORKER_STOPPED,
+    REASON_INBOUND_STOPPED, REASON_NATS_UNREACHABLE, REASON_RELAY_DEGRADED,
+    REASON_SCHEMA_VERSION_DISPLACED, REASON_SHUTTING_DOWN, REASON_WORKER_STOPPED,
 };
 
 struct NatsProbe {
@@ -43,6 +43,7 @@ pub struct ReadinessAssembly {
     listener: Option<watch::Receiver<bool>>,
     inbound: Option<watch::Receiver<bool>>,
     nats: Option<NatsProbe>,
+    schema_displaced: Option<watch::Receiver<bool>>,
 }
 
 impl ReadinessAssembly {
@@ -56,7 +57,13 @@ impl ReadinessAssembly {
             listener: None,
             inbound: None,
             nats: None,
+            schema_displaced: None,
         }
+    }
+
+    pub fn with_schema_version(mut self, displaced: watch::Receiver<bool>) -> Self {
+        self.schema_displaced = Some(displaced);
+        self
     }
 
     pub fn with_relays(mut self, relays: RelaysHealthReceiver) -> Self {
@@ -92,6 +99,13 @@ impl ReadinessAssembly {
     }
 
     pub fn verdict(&self) -> Option<&'static str> {
+        if self
+            .schema_displaced
+            .as_ref()
+            .is_some_and(|rx| *rx.borrow())
+        {
+            return Some(REASON_SCHEMA_VERSION_DISPLACED);
+        }
         let fabric: Vec<RelayHealth> = self
             .fabric
             .iter()

@@ -37,6 +37,10 @@ pub struct MessageMetadata {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Unidentified {
     #[error(
+        "the frame carries no br-core-integration envelope: the frontier accepts only an integration command or event, so a bare body is refused as terminal"
+    )]
+    NotEnveloped,
+    #[error(
         "the message carries no resolvable id: neither a {HEADER_MESSAGE_ID} header, an integration envelope id, nor a uuid Nats-Msg-Id is present"
     )]
     NoMessageId,
@@ -65,8 +69,10 @@ impl Incoming {
         delivered: u32,
     ) -> Result<Self, Unidentified> {
         let decoded = Decoded::from(&payload);
+        let Some(body) = decoded.body else {
+            return Err(Unidentified::NotEnveloped);
+        };
         let message_id = message_id(headers, decoded.id).ok_or(Unidentified::NoMessageId)?;
-        let body = decoded.body.unwrap_or_else(|| payload.clone());
         Ok(Self {
             reaction: reaction.to_string(),
             source,

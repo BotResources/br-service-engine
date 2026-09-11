@@ -35,6 +35,9 @@ pub async fn fire_due(
     batch: i64,
     budget: u32,
 ) -> Result<ScheduledRound, EngineError> {
+    if !nats.reachable() {
+        return Ok(ScheduledRound::default());
+    }
     let mut tx = pool.begin().await?;
     let rows: Vec<Row> = sqlx::query_as(&format!(
         "SELECT id, subject, message_id, payload, attempts FROM {TABLE_SCHEDULED_MESSAGE} \
@@ -57,6 +60,7 @@ pub async fn fire_due(
                 delete_ids.push(row.id);
                 round.fired += 1;
             }
+            Err(_) if !nats.reachable() => break,
             Err(error) => {
                 let attempts = row.attempts.saturating_add(1);
                 if attempts as u32 >= budget {

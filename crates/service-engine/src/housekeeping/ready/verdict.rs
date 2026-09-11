@@ -8,6 +8,8 @@ pub const REASON_WORKER_STOPPED: &str = "a background worker stopped";
 pub const REASON_NATS_UNREACHABLE: &str = "nats has been unreachable past its grace window";
 pub const REASON_INBOUND_STOPPED: &str = "an inbound or streaming consumer stopped consuming";
 pub const REASON_SHUTTING_DOWN: &str = "the pod is shutting down";
+pub const REASON_SCHEMA_VERSION_DISPLACED: &str =
+    "another engine or service version owns the store";
 
 pub(crate) fn verdict(
     listener_up: Option<bool>,
