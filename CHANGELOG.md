@@ -553,7 +553,12 @@ authorized against the caller's `Passport`: the engine serves only a live sessio
 not hold, or one held for a different principal, with `EngineError::NoLiveSession`
 (knowing another session's id buys nothing). `attach_with_session` / a
 client-supplied `SessionId` correlates the subscription and the `page` mutation.
-The reference `card` slice ships the pair (`cardPageDeltas` + `pageCards`).
+The reference `card` slice ships the pair (`cardPageDeltas` + `pageCards`). A
+page renders its appended keys outside the session lock, so the final delivery
+under the lock skips any paged key a concurrent render pass has already
+delivered (its `last_sent` is present): a key scrolled in while it is being
+written settles on the committed view, never a stale page render that lost the
+race to the pass (`s183`).
 
 **Engine-owned NATS, Postgres connect and readiness.** The engine's internal
 loops run on `async-nats` directly through the `nats` module (`Nats`, `KvBucket`,

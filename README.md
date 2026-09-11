@@ -484,7 +484,11 @@ supplying its own `SessionId`: `attach_with_session` (kit) / a `session` argumen
 on the subscription pins the id the `page` mutation then names. The
 reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
 size)` opens the head window and `pageCards(session, boardId, before, size)`
-appends an older page behind it.
+appends an older page behind it. A page renders its appended keys **outside the
+session lock**, so its final delivery — taken back under the lock — skips any
+paged key a concurrent render pass has already delivered (its `last_sent` is
+present): a key scrolled in while it is being written settles on the committed
+view, never a stale page render that lost the race to the pass.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
