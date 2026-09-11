@@ -50,27 +50,30 @@ pub async fn expect_event(stream: &mut EventStream, within: Duration) -> Transpo
         .expect("the transport event is not a fatal error")
 }
 
-pub async fn backends_named(db: &TestDb, application_name: &str) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND application_name = $2",
-    )
-    .bind(db.database())
-    .bind(application_name)
-    .fetch_one(db.admin_pool())
-    .await
-    .expect("read pg_stat_activity")
+pub async fn pids_still_alive(db: &TestDb, pids: &[i32]) -> i64 {
+    if pids.is_empty() {
+        return 0;
+    }
+    sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE pid = ANY($1)")
+        .bind(pids)
+        .fetch_one(db.admin_pool())
+        .await
+        .expect("read pg_stat_activity")
 }
 
 pub async fn terminate_and_wait(db: &TestDb, application_name: &str) {
-    db.terminate_backends(application_name).await;
+    let terminated = db.terminate_backends(application_name).await;
+    if terminated.is_empty() {
+        return;
+    }
     let deadline = tokio::time::Instant::now() + BACKEND_GONE_TIMEOUT;
     loop {
-        if backends_named(db, application_name).await == 0 {
+        if pids_still_alive(db, &terminated).await == 0 {
             return;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "backends named {application_name} outlived pg_terminate_backend"
+            "backends {terminated:?} named {application_name} outlived pg_terminate_backend"
         );
         tokio::time::sleep(BACKEND_SETTLE).await;
     }

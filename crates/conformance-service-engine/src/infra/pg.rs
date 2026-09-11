@@ -214,14 +214,22 @@ impl TestDb {
         pool
     }
 
-    pub async fn terminate_backends(&self, application_name: &str) {
-        let sql = "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+    pub async fn terminate_backends(&self, application_name: &str) -> Vec<i32> {
+        let sql = "SELECT pid FROM pg_stat_activity \
                    WHERE datname = $1 AND application_name = $2 AND pid <> pg_backend_pid()";
-        let _ = sqlx::query(sql)
+        let pids: Vec<i32> = sqlx::query_scalar(sql)
             .bind(&self.database)
             .bind(application_name)
-            .execute(&self.admin)
-            .await;
+            .fetch_all(&self.admin)
+            .await
+            .unwrap_or_default();
+        for pid in &pids {
+            let _ = sqlx::query("SELECT pg_terminate_backend($1)")
+                .bind(pid)
+                .execute(&self.admin)
+                .await;
+        }
+        pids
     }
 
     pub async fn cleanup(self) {
