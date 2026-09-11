@@ -6,3 +6,30 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[dependencies]
+async-graphql = { workspace = true }
+async-nats = { workspace = true }
+br-core-auth = { workspace = true }
+bytes = { workspace = true }
+br-core-integration = { workspace = true }
+br-core-kernel = { workspace = true }
+br-core-scope = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+metrics = { workspace = true }
+reqwest = { workspace = true }
+rusty-s3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+service-engine = { workspace = true, features = ["test-support"] }
+sqlx = { workspace = true, features = ["chrono", "json", "macros", "migrate", "uuid"] }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+example-contract = { workspace = true }
+example-service = { workspace = true }
+example-twin = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }

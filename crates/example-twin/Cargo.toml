@@ -1,0 +1,22 @@
+[package]
+name = "example-twin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+br-core-integration = { workspace = true }
+chrono = { workspace = true }
+example-contract = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+service-engine = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[[bin]]
+name = "example-twin"
+path = "src/bin/twin.rs"

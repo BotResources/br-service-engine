@@ -1,0 +1,63 @@
+use std::sync::Arc;
+
+use tokio::sync::Notify;
+use tokio::task::JoinHandle;
+
+use crate::accumulator::AccumulatorRuntime;
+use crate::accumulator::lane_a_loop::spawn_lane_a;
+use crate::config::EngineConfig;
+use crate::error::EngineError;
+use crate::nats::Nats;
+
+pub(crate) struct LaneATasks {
+    pub stop_ingress: Arc<Notify>,
+    pub stop_purge: Arc<Notify>,
+    pub ingress_task: Option<JoinHandle<()>>,
+    pub purge_task: Option<JoinHandle<()>>,
+}
+
+pub(crate) fn ingress_reason(error: &EngineError) -> &'static str {
+    match error {
+        EngineError::SealRetentionTooShort { .. } => crate::boot::REASON_SEAL_RETENTION,
+        EngineError::AccumulatorWithoutService => crate::boot::REASON_ACCUMULATOR_NO_SERVICE,
+        _ => crate::boot::REASON_STREAMING_STREAM,
+    }
+}
+
+pub(crate) async fn spawn_if_registered(
+    nats: &Nats,
+    config: &EngineConfig,
+    accumulators: &Arc<AccumulatorRuntime>,
+    health: crate::inbound::InboundHealth,
+) -> Result<LaneATasks, EngineError> {
+    let stop_ingress = Arc::new(Notify::new());
+    let stop_purge = Arc::new(Notify::new());
+    let (ingress_task, purge_task) = if accumulators.registered() > 0 {
+        let Some(service) = config.service.clone() else {
+            return Err(EngineError::AccumulatorWithoutService);
+        };
+        accumulators.bind_lane_a_purge(nats.clone(), service.clone());
+        let (ingress, purge) = spawn_lane_a(
+            nats,
+            service,
+            config.seal_retention,
+            accumulators.clone(),
+            config.beat,
+            config.ack_wait,
+            config.max_ack_pending,
+            health,
+            stop_ingress.clone(),
+            stop_purge.clone(),
+        )
+        .await?;
+        (Some(ingress), Some(purge))
+    } else {
+        (None, None)
+    };
+    Ok(LaneATasks {
+        stop_ingress,
+        stop_purge,
+        ingress_task,
+        purge_task,
+    })
+}

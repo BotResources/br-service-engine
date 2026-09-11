@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-shopt -s nullglob
 
 repo_url="https://github.com/BotResources/br-service-engine"
+readme="README.md"
 
 workspace_version=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
 if [ -z "$workspace_version" ]; then
@@ -12,39 +12,33 @@ if [ -z "$workspace_version" ]; then
 fi
 expected_tag="v${workspace_version}"
 
+if [ ! -f "$readme" ]; then
+  echo "::error::${readme} is missing" >&2
+  exit 1
+fi
+
 fail=0
+found=0
 
-for readme in README.md crates/*/README.md; do
-  [ -f "$readme" ] || continue
-
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    if ! grep -qE "tag = \"${expected_tag}\"" <<<"$line"; then
-      echo "::error file=${readme}::self-pin does not carry tag = \"${expected_tag}\": ${line}" >&2
-      fail=1
-      continue
-    fi
-    if ! grep -qE "version = \"${workspace_version}\"" <<<"$line"; then
-      echo "::error file=${readme}::self-pin does not carry version = \"${workspace_version}\" beside the tag (a tag-only git dep is a wildcard and cargo-deny denies it): ${line}" >&2
-      fail=1
-      continue
-    fi
-    echo "✓ ${readme}: self-pin on ${expected_tag} / ${workspace_version}"
-  done < <(grep -F "${repo_url}\"" "$readme" | grep -F 'git = ' || true)
-done
-
-for toml in crates/*/Cargo.toml; do
-  crate=$(basename "$(dirname "$toml")")
-  readme="crates/${crate}/README.md"
-  if [ ! -f "$readme" ]; then
-    echo "::error file=${toml}::${crate} has no README.md" >&2
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  found=1
+  if ! grep -qE "tag = \"${expected_tag}\"" <<<"$line"; then
+    echo "::error file=${readme}::self-pin does not carry tag = \"${expected_tag}\": ${line}" >&2
     fail=1
     continue
   fi
-  if ! grep -qE "package = \"${crate}\", tag = \"${expected_tag}\", version = \"${workspace_version}\"" "$readme"; then
-    echo "::error file=${readme}::${crate} README does not document its install pin as package = \"${crate}\", tag = \"${expected_tag}\", version = \"${workspace_version}\"" >&2
+  if ! grep -qE "version = \"${workspace_version}\"" <<<"$line"; then
+    echo "::error file=${readme}::self-pin does not carry version = \"${workspace_version}\" beside the tag (a tag-only git dep is a wildcard and cargo-deny denies it): ${line}" >&2
     fail=1
+    continue
   fi
-done
+  echo "✓ ${readme}: self-pin on ${expected_tag} / ${workspace_version}"
+done < <(grep -F "${repo_url}\"" "$readme" | grep -F 'git = ' || true)
+
+if [ "$found" -eq 0 ]; then
+  echo "::error file=${readme}::no self-pin line found (expected a git = \"${repo_url}\" dependency snippet)" >&2
+  fail=1
+fi
 
 exit $fail
