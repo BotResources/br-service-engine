@@ -169,8 +169,8 @@ impl Nats {
                 subject,
                 kind: PublishFailure::Transient,
                 detail: format!(
-                    "publish ack did not return within {}s; the broker is unreachable or wedged",
-                    self.publish_ack_timeout.as_secs()
+                    "publish ack did not return within {:?}; the broker is unreachable or wedged",
+                    self.publish_ack_timeout
                 ),
             }),
         }
@@ -219,8 +219,8 @@ impl Nats {
                 subject: subject.to_string(),
                 kind: PublishFailure::Transient,
                 detail: format!(
-                    "publish ack did not return within {}s; the broker is unreachable or wedged",
-                    self.publish_ack_timeout.as_secs()
+                    "publish ack did not return within {:?}; the broker is unreachable or wedged",
+                    self.publish_ack_timeout
                 ),
             }),
         }
