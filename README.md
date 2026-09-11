@@ -821,8 +821,11 @@ by `service` and `pod`; each dependency of the degrade table is a
 readiness moves. `service_engine_impacts_committed_total` is the notify-budget
 counter watched at the Postgres-cluster level; it counts impacts of committed
 transactions only, recorded after the commit, never a rolled-back mutation. The
-four shipped alerts are in
-[`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml).
+five shipped alerts are in
+[`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
+a filling notification queue, the per-cluster notify budget nearing its ceiling,
+a sustained reset rate, an aging outbox backlog, and dead-lettered work waiting on
+a human.
 
 ## AI disclosure
 

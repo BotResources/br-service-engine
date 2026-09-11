@@ -7,7 +7,7 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ## 0.1.0 - unreleased
 
-Prepared 2026-09-09 (UTC); unreleased — the `v0.1.0` tag is cut when this lands
+Prepared 2026-09-11 (UTC); unreleased — the `v0.1.0` tag is cut when this lands
 on `main`. This is the first functional engine release: `service-engine` ships
 the reactive personalized delivery and process skeleton, and
 `conformance-service-engine` its conformance battery in two modes — in-crate
@@ -101,10 +101,10 @@ durable name, so a message is owned by one pod at a time.
 - A reaction handler that panics is caught at dispatch, rolled back and routed to
   the dead-letter table as a terminal frame, so the consumer keeps serving instead
   of redelivering the panicking frame every `ack_wait` forever with readiness UP.
-  `cx.principal` no longer panics when no sender principal has been resolved: it
-  returns a typed `PrincipalUnresolved` (terminal disposition) that a handler
-  propagates like any other reaction error, and `cx.try_principal` stays the
-  fallible accessor.
+  `cx.principal` returns a typed `PrincipalUnresolved` (terminal disposition) when
+  no sender principal has been resolved, rather than panicking — a handler
+  propagates it like any other reaction error, and `cx.try_principal` is the
+  fallible accessor a reaction that needs no sender uses instead.
 - `Disposition` (Retry / Park / Terminal) routed against per-reaction budgets;
   `sqlx_is_terminal` classifies a Postgres integrity (SQLSTATE class 23) or data
   (class 22) violation as terminal on the engine's own authority, ahead of the
@@ -181,11 +181,12 @@ the scope-declaration handshake carry the same shape. The actor is the acting
 principal's passport actor for a mutation and the engine's own v5 service identity
 for a reaction, cron or erasure; the correlation and causation ids propagate from
 the inbound message that caused the effect (its envelope id is the causation).
-`OutboundEvent` / `OutboundCommand` gained `sequence()`, which derives the
-producer sequence `(producer = service, seq_key = aggregate key, seq = aggregate
-version)` at emit time; the engine persists it on the outbox row
-(`integration_outbox.producer` / `seq_key` / `seq`) and renders the three
-`Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
+`OutboundEvent` / `OutboundCommand` carry `sequence()`, which an author overrides
+to **declare** a producer sequence — the default is `None`, and the convention
+when it is declared is `(producer = service, seq_key = aggregate key, seq =
+aggregate version)`. When a sequence is declared the engine persists it on the
+outbox row (`integration_outbox.producer` / `seq_key` / `seq`) and renders the
+three `Br-Producer` / `Br-Seq-Key` / `Br-Seq` headers on publish, so engine→engine
 traffic is ordered and the per-`(producer, reaction, seq_key)` sequence guard is
 reachable. A declared sequence with no configured service (`producer`) is refused
 with a configuration error at emit and recorded as a terminal violation, so the
@@ -556,9 +557,10 @@ fact, bulk rides the view.
 cursor and appends the older keys to the window the session holds, delivering them
 as `Upsert`s on the contiguous revision — scrolling back never sends a `Reset`. A
 `Remove` leaves a window only when the row is deleted or becomes invisible, never
-because it fell off a page bound. `window_capacity` (validated at boot) is now
-**enforced**: once appending a page would exceed it the oldest appended page is
-released from the window and `last_sent` with no `Remove` delta (the client that
+because it fell off a page bound. `window_capacity` (validated at boot) bounds the
+keys a session holds across its pages: once appending a page would exceed it the
+oldest appended page is released from the window and `last_sent` with no `Remove`
+delta (the client that
 asked for the page drops it too), while the live head is always retained; a paged
 history survives a principal refresh and a reconnect `Reset`. The gesture is
 authorized against the caller's `Passport`: the engine serves only a live session
@@ -587,11 +589,12 @@ bound of the intent's config table at boot (`session_max_age`, `lock_timeout`,
 `nats_grace`, `listener_queue_threshold`, `window_capacity`, `impacts_per_commit`,
 `listener_channel_capacity`, the `lease` outlasting the `beat`, `session_max_age`
 outlasting `session_ttl`, `listener_queue_threshold` in `(0.0, 1.0]`,
-`lock_timeout` strictly below `ack_wait`, `max_ack_pending` positive) and carries
-an optional `service` label and `http_addr`. `ack_wait` (30 s) and
-`max_ack_pending` (256) are fields on `EngineConfig` that build the inbound
-consumer, so the lock-timeout-below-ack-wait relation is enforced rather than
-assumed. A session lives at most `session_max_age` (ended with the
+`lock_timeout` and `publish_ack_timeout` each strictly below `ack_wait`,
+`max_ack_pending` positive) and carries an optional `service` label and
+`http_addr`. `ack_wait` (30 s), `max_ack_pending` (256) and `publish_ack_timeout`
+(2 s) are fields on `EngineConfig` that build the inbound consumer and bound a
+JetStream publish, so the lock-timeout-below-ack-wait and
+publish-ack-below-ack-wait relations are enforced rather than assumed. A session lives at most `session_max_age` (ended with the
 stream-closing signal so the client reconnects with a fresh passport, distinct
 from `session_ttl`); the WebSocket connection carrying it is closed at the same
 bound measured from the handshake, so the bound holds even when a client keeps
@@ -609,8 +612,10 @@ and `pod`; `impacts_committed_total` is the notify-budget counter,
 `outbox_oldest_age_seconds` gauge the outbox backlog and the age of its oldest
 waiting row, and each degrade-table
 dependency (postgres, listener, nats, mirrors, inbound) is a `dependency_up`
-gauge. Four alerts ship as a `PrometheusRule` in
-`observability/service-engine-alerts.yaml`.
+gauge. Five alerts ship as a `PrometheusRule` in
+`observability/service-engine-alerts.yaml`: a filling notification queue, the
+per-cluster notify budget nearing its ceiling, a sustained reset rate, an aging
+outbox backlog, and dead-lettered work waiting on a human.
 
 **Postgres schema (reserved range),** applied by `schema::migrate`
 (`ignore_missing`) with `grant_engine_access`: `scheduled_impact`, `leader_slot`,
@@ -624,7 +629,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s182` — drives the real engine through an in-crate `sample` service and
+`s001`–`s187` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, a one-shot offer-drain pause, direct impact-bus/transport
 assertions): shared-consumer ownership
