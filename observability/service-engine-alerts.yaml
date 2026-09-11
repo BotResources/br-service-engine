@@ -1,0 +1,83 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: service-engine-alerts
+  labels:
+    role: service-engine
+spec:
+  groups:
+    - name: service-engine.rules
+      rules:
+        - alert: ServiceEngineNotificationQueueFilling
+          expr: max by (service, pod) (service_engine_notification_queue_usage) > 0.5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: A pod's LISTEN/NOTIFY queue is filling
+            description: >-
+              service_engine_notification_queue_usage on {{ $labels.service }}/{{ $labels.pod }}
+              has stayed above listener_queue_threshold. Past capacity every notifying commit on
+              the whole Postgres cluster fails, so at that same threshold the beat closes the pod's
+              listener, takes it DOWN and reconnects it once usage falls back below the threshold,
+              resetting its sessions; a sustained warning therefore means the brake has been
+              engaging, and names the filling queue behind the reconnects rather than only their
+              consequence.
+        - alert: ServiceEngineNotifyBudgetNearCeiling
+          expr: >-
+            sum by (postgres_cluster) (rate(service_engine_impacts_committed_total[1m])) > 2000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Notifying commits per second are nearing the per-cluster lock ceiling
+            description: >-
+              Postgres serialises notifying commits behind one global lock at roughly 3000/s per
+              cluster, a budget shared by every service on it. The sum of impacts committed per
+              second on postgres_cluster {{ $labels.postgres_cluster }} is nearing that ceiling.
+              A service found notify-bound is the trigger to move it to another bus. The
+              postgres_cluster label is relabelled onto engine metrics per product Postgres
+              cluster by the scrape config.
+        - alert: ServiceEngineResetsSustained
+          expr: sum by (service) (rate(service_engine_resets_total[5m])) > 5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: A service is resetting sessions at a sustained rate
+            description: >-
+              service_engine_resets_total on {{ $labels.service }} is climbing steadily. A Reset is
+              the recovery path for a listener reconnect, a per-session lag or a window churn; a
+              sustained rate means one of those is recurring rather than repairing, and clients are
+              paying full re-snapshots instead of deltas.
+        - alert: ServiceEngineOutboxBacklogAging
+          expr: max by (service) (service_engine_outbox_oldest_age_seconds) > 120
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: A service's outbox has rows that are not draining
+            description: >-
+              service_engine_outbox_oldest_age_seconds on {{ $labels.service }} has stayed above
+              two minutes. The leader publishes committed outbox rows every beat and after every
+              render pass, and skips the relay while NATS is unreachable, so a persistently aging
+              oldest row means publishing is not keeping up: the broker is unreachable or wedged,
+              or the publish rate is below the commit rate. The state change already committed, so
+              nothing is lost, but the confirmation events and downstream commands it carries are
+              delayed; service_engine_outbox_pending shows the depth behind it.
+        - alert: ServiceEngineDeadLettersPresent
+          expr: sum by (service, source) (service_engine_dead_letters_total) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: A service has dead-lettered work waiting on a human
+            description: >-
+              service_engine_dead_letters_total on {{ $labels.service }} for source
+              {{ $labels.source }} is above zero. A poison message, a failing scheduled row, a
+              failing cron tick, a mirror stuck past its restart threshold or an outbox row that
+              kept failing to publish against a reachable broker has been parked for a human to
+              retry or discard from the ops view. The counter is emitted for every source of work
+              the engine runs, labelled by source; service_engine_outbox_pending and
+              service_engine_outbox_oldest_age_seconds show a backlog that is still draining before
+              any of it is parked.
