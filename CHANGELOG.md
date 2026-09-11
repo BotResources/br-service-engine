@@ -145,10 +145,13 @@ durable name, so a message is owned by one pod at a time.
   the rest of their batch, so one message that cannot publish against a reachable
   broker is dead-lettered past its delivery budget while the rest of the batch and
   the next beat still fire, rather than one poison row rolling back and re-blocking
-  the queue forever. A failure observed while `Nats::reachable()` is false costs no
-  attempt — the beat skips `fire_due` under an outage, the same broker-state gate
-  the outbox relay reads — so a scheduled row waits out a broker outage without
-  spending its budget and fires on return.
+  the queue forever. It claims one row per transaction and publishes through the
+  same ack-timeout seam as the outbox. A failure observed while `Nats::reachable()`
+  is false — or an `Unanswered` publish against a connected broker whose JetStream
+  cannot answer — costs no attempt (the beat skips `fire_due` under an outage, the
+  same broker-state gate the outbox relay reads), so a scheduled row waits out a
+  broker outage or an unavailable-JetStream window without spending its budget and
+  fires on return.
 
 **Direct write pipeline and handler contexts.** A GraphQL mutation and a NATS
 command run **one** pipeline: load, gate (the affordance function in deny mode,
@@ -319,7 +322,8 @@ version (a per-key watermark in the engine's own schema survives restarts, so a
 stale `Put` after a newer `Retract` is a no-op). The hosted outbox relay drains
 in batches whose cap equals its drain bound, so a backlog bursts within one beat
 instead of one batch per beat, and a periodic hygiene pass (`with_sweep_every`)
-deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
+deletes rows that reached `PUBLISHED` or a terminal `FAILED` (whose audit copy
+already lives in the dead-letter table) and sweeps `message_claim` rows older than
 `with_message_retention`; because a durable replays from the start of its stream,
 the engine refuses at boot a `message_retention` below the `max_age` of any
 integration stream an inbound reaction binds (an unlimited `max_age` is refused
@@ -330,22 +334,27 @@ costs nothing per beat and never freezes the single beat task (heartbeat, cron,
 scheduled boundaries and the readiness refresh keep running; the `nats_grace`
 probe alone takes the pod DOWN); each publish is bounded by `PUBLISH_ACK_TIMEOUT`.
 A transient publish failure never counts an attempt while the broker is
-unreachable, so a committed row is retried forever through an outage rather than
-exhausting a budget; only a row that keeps failing against a reachable broker is
-bounded and, at the bound, is dead-lettered (`DeadLetterSource::Outbox`) in the
-same transaction that marks it `FAILED`. `service_engine_outbox_pending` and
+unreachable — nor while a connected broker's JetStream cannot answer (a timeout,
+a broken pipe or the engine's own ack-timeout, classified `Unanswered`), which the
+relay halts on exactly like an outage — so a committed row waits out an outage or
+an unavailable-JetStream window rather than exhausting a budget; only a genuine
+broker rejection (a size or limit refusal, a wrong sequence) is bounded and, at
+the bound, is dead-lettered (`DeadLetterSource::Outbox`) in the same transaction
+that marks it `FAILED`. `service_engine_outbox_pending` and
 `service_engine_outbox_oldest_age_seconds` gauge the backlog depth and its oldest
 waiting row. `Offer` (`Row`, `Published`, `NAME`, `PREFIX`, `key`,
 `publish`) and `register_offer::<O>()`: a saved or `cx.delete`'d noun that
 carries an offer stages its dirty key (`service_engine.offer_dirty`) in the same
 transaction as the write; the pod holding the offer's single fixed-slot lease
 (renewed on the beat, taken over by another pod only once it expires) drains
-dirty keys, claiming them skip-locked and resolving them in a short transaction,
-then doing the KV round-trips outside any transaction — a `create` for an absent
-key or a compare-and-set on the revision the leader read at resolve, a failed set
-leaving the key dirty for the next drain — and finally raising the per-key
-watermark and deleting the marker in a small fenced transaction that asserts the
-lease. So a concurrent mutation on an offered noun never waits on the drain, and
+dirty keys, claiming them skip-locked, reading each key's current bucket revision,
+then resolving the row image in a short fenced transaction — the revision is
+observed before the image, so a write landing between the two bumps the revision
+and loses the compare-and-set rather than regressing the bucket. It then does the
+KV round-trip outside any transaction — a `create` for an absent key or a
+compare-and-set on that observed revision, a failed set leaving the key dirty for
+the next drain — and finally raises the per-key watermark and deletes the marker
+in a small fenced transaction that asserts the lease. So a concurrent mutation on an offered noun never waits on the drain, and
 a leader frozen past its lease fails its writes instead of regressing the bucket.
 It reconciles the bucket against the store on its first drain after boot and
 every `with_offer_reconcile` period, so a rebuilt or drifted bucket is repaired
@@ -629,7 +638,7 @@ schema's sequences.
 **`conformance-service-engine`.** The battery runs in **two modes** against real
 infra (a fresh database and a spawned `nats-server` per test, plus a spawned
 `minio` for the blob scenarios). **In-crate mode** — the named scenarios
-`s001`–`s187` — drives the real engine through an in-crate `sample` service and
+`s001`–`s190` — drives the real engine through an in-crate `sample` service and
 keeps the properties that need the `test-support` seam (a driven clock, fault
 injection, a one-shot offer-drain pause, direct impact-bus/transport
 assertions): shared-consumer ownership

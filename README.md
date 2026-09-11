@@ -113,14 +113,16 @@ redelivers the frame. The synchronous channel answers `{ success }`, a typed
 `MutationError` carrying the gate's `Reason` code, or a typed `OneShot` secret
 (which never enters a view, impact, offer or event). `cx.schedule_at` stages a
 scheduled reaction the beat fires on the database clock; a scheduled row carries
-a per-row `attempts` count and is published isolated from the rest of its batch,
-so one message that cannot publish against a reachable broker is dead-lettered
-past its delivery budget rather than blocking every message behind it at every
-beat, and the next due row still fires. A publish failure observed while the
-broker is unreachable costs the row no attempt — the beat skips `fire_due` while
-`Nats::reachable()` is false, the same broker-state gate the outbox relay reads,
-so a scheduled row waits out an outage without spending its budget and fires on
-return. A cron tick that fails is dead-lettered once per slot (it is never
+a per-row `attempts` count and is published isolated from the rest of its batch —
+one row claimed per transaction, published through the same ack-timeout seam as
+the outbox — so one message that cannot publish against a reachable broker is
+dead-lettered past its delivery budget rather than blocking every message behind
+it at every beat, and the next due row still fires. A publish failure observed
+while the broker is unreachable — or an `Unanswered` publish against a connected
+broker whose JetStream cannot answer — costs the row no attempt (the beat skips
+`fire_due` while `Nats::reachable()` is false, the same broker-state gate the
+outbox relay reads), so a scheduled row waits out an outage or an
+unavailable-JetStream window without spending its budget and fires on return. A cron tick that fails is dead-lettered once per slot (it is never
 re-run, the slot is already claimed and completed), and a mirror stuck past its
 restart threshold records too — all into the one dead-letter table with an
 ops-view impact. The engine starts the inbound loop at boot, after
@@ -222,13 +224,15 @@ a saved or deleted noun that carries an offer stages the offer's dirty key in
 the same transaction as the write (`service_engine.offer_dirty`; `cx.delete`
 stages the same key so a deleted row retracts), the pod that holds the offer's
 single leader lease — one fixed-slot row it renews on the beat, taken over by
-another pod only once it expires — drains those keys, claiming them skip-locked
-and resolving them in a short transaction, then putting or retracting the
-published value on the `PUBLISHED_LANGUAGE` bucket outside any transaction (a
-`create` for an absent key or a compare-and-set on the revision it read at
-resolve, a failed set left dirty for the next drain), and finally raising the
-per-key watermark and deleting the marker in a small fenced transaction that
-asserts the lease — so a concurrent write to an offered noun never waits on the
+another pod only once it expires — drains those keys, claiming them skip-locked,
+reading each key's current bucket revision, then resolving the row image in a
+short fenced transaction — the revision is observed before the image, so a write
+landing between the two bumps the revision and loses the compare-and-set rather
+than regressing the bucket — then putting or retracting the published value on the
+`PUBLISHED_LANGUAGE` bucket outside any transaction (a `create` for an absent key
+or a compare-and-set on that observed revision, a failed set left dirty for the
+next drain), and finally raising the per-key watermark and deleting the marker in
+a small fenced transaction that asserts the lease — so a concurrent write to an offered noun never waits on the
 drain and a leader frozen past its lease fails its writes rather than regressing
 the bucket. It reconciles the
 bucket against the store on its first drain after boot and then every
@@ -548,7 +552,8 @@ The hosted outbox relay drains a backlog within one beat (its batch cap equals i
 drain bound, so
 a full batch signals the beat to come back), and a periodic hygiene pass
 (`EngineConfig::with_message_retention`, swept on `HostedOutboxRelay::with_sweep_every`)
-deletes rows that reached `PUBLISHED` and sweeps `message_claim` rows older than
+deletes rows that reached `PUBLISHED` or a terminal `FAILED` (whose audit copy
+already lives in the dead-letter table) and sweeps `message_claim` rows older than
 the retention. Because an inbound durable replays from the start of its stream,
 the engine refuses at boot a `message_retention` below the `max_age` of any
 integration stream a reaction binds (an unlimited `max_age` is refused too), so a
@@ -560,11 +565,14 @@ wait") and the single beat keeps ticking — heartbeat, cron, scheduled boundari
 and the readiness refresh run every beat and the `nats_grace` probe alone takes
 the pod DOWN, never a beat frozen on a full outbox. A publish is bounded by
 `PUBLISH_ACK_TIMEOUT` so a send to a just-died broker cannot hang the beat. A
-transient failure never counts an attempt while the broker is unreachable, so an
-outage of any length is retried forever rather than exhausting a budget; only a
-row that keeps failing to publish against a *reachable* broker is bounded, and at
-the bound it is dead-lettered (`DeadLetterSource::Outbox`, with an ops-view
-impact) in the same transaction that marks it `FAILED`, never abandoned silently.
+transient failure never counts an attempt while the broker is unreachable — nor
+while a connected broker's JetStream cannot answer (a timeout, a broken pipe or
+the engine's own ack-timeout, classified `Unanswered`), which the relay halts on
+exactly like an outage — so an outage or an unavailable-JetStream window of any
+length is retried rather than exhausting a budget; only a genuine broker rejection
+(a size or limit refusal, a wrong sequence) is bounded, and at the bound it is
+dead-lettered (`DeadLetterSource::Outbox`, with an ops-view impact) in the same
+transaction that marks it `FAILED`, never abandoned silently.
 `service_engine_outbox_pending` and `service_engine_outbox_oldest_age_seconds`
 export the backlog depth and the age of its oldest waiting row. To recover a `KvDrainRelay`'s published-language
 bucket that an operator truncated and rebuilt, call `reset_watermarks` and have
