@@ -218,7 +218,8 @@ impl Nats {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id);
         headers.insert(crate::inbound::HEADER_MESSAGE_ID, message_id);
-        self.publish_encoded(subject, headers, payload.to_vec()).await
+        self.publish_encoded(subject, headers, payload.to_vec())
+            .await
     }
 
     async fn publish_encoded(

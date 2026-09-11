@@ -19,12 +19,21 @@ pub struct TestNats {
     port: u16,
     store: PathBuf,
     name: String,
+    jetstream: bool,
 }
 
 impl TestNats {
     pub async fn spawn() -> Self {
+        Self::spawn_with(true).await
+    }
+
+    pub async fn spawn_plain() -> Self {
+        Self::spawn_with(false).await
+    }
+
+    async fn spawn_with(jetstream: bool) -> Self {
         for _ in 0..SPAWN_ATTEMPTS {
-            if let Some(server) = Self::try_spawn().await {
+            if let Some(server) = Self::try_spawn(jetstream).await {
                 return server;
             }
         }
@@ -34,34 +43,25 @@ impl TestNats {
         );
     }
 
-    async fn try_spawn() -> Option<Self> {
+    pub async fn enable_jetstream(&mut self) {
+        self.jetstream = true;
+        self.restart().await;
+        self.provision().await;
+    }
+
+    async fn try_spawn(jetstream: bool) -> Option<Self> {
         let port = free_port();
         let name = format!("se-nats-{}", Uuid::now_v7().simple());
         let store = std::env::temp_dir().join(&name);
         std::fs::create_dir_all(&store).expect("create the ephemeral JetStream store");
 
-        let child = Command::new("nats-server")
-            .args([
-                "-js",
-                "-a",
-                "127.0.0.1",
-                "-p",
-                &port.to_string(),
-                "-n",
-                &name,
-                "-sd",
-                store.to_str().expect("a utf-8 store path"),
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("nats-server must be on PATH for the conformance battery");
-
+        let child = spawn_child(port, &name, &store, jetstream);
         let mut server = Self {
             child,
             port,
             store,
             name,
+            jetstream,
         };
         server.await_ready().await.then_some(server)
     }
@@ -77,23 +77,7 @@ impl TestNats {
 
     pub async fn restart(&mut self) {
         self.stop();
-        let child = Command::new("nats-server")
-            .args([
-                "-js",
-                "-a",
-                "127.0.0.1",
-                "-p",
-                &self.port.to_string(),
-                "-n",
-                &self.name,
-                "-sd",
-                self.store.to_str().expect("a utf-8 store path"),
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("nats-server must be on PATH to restart the broker in place");
-        self.child = child;
+        self.child = spawn_child(self.port, &self.name, &self.store, self.jetstream);
         if !self.await_ready().await {
             panic!("nats-server did not come back up on port {}", self.port);
         }
@@ -197,6 +181,28 @@ impl Drop for TestNats {
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.store);
     }
+}
+
+fn spawn_child(port: u16, name: &str, store: &std::path::Path, jetstream: bool) -> Child {
+    let mut command = Command::new("nats-server");
+    if jetstream {
+        command.arg("-js");
+    }
+    command
+        .args([
+            "-a",
+            "127.0.0.1",
+            "-p",
+            &port.to_string(),
+            "-n",
+            name,
+            "-sd",
+            store.to_str().expect("a utf-8 store path"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("nats-server must be on PATH for the conformance battery")
 }
 
 fn free_port() -> u16 {

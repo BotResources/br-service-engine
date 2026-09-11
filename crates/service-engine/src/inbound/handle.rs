@@ -60,8 +60,7 @@ impl InboundConsumer {
             reaction: self.subscription.reaction.clone(),
             source,
             subject,
-            message_id: crate::inbound::message::resolved_id(headers)
-                .unwrap_or_else(Uuid::now_v7),
+            message_id: crate::inbound::message::resolved_id(headers).unwrap_or_else(Uuid::now_v7),
             sequence: None,
             metadata: crate::inbound::MessageMetadata::default(),
             body: payload.clone(),
