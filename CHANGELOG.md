@@ -7,6 +7,8 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ## Unreleased
 
+- Expose `Reaction::message_id()` for domain deduplication beyond delivery-claim retention.
+
 ### Added
 
 - `Consumed::ALLOW_EMPTY` makes an authoritative empty catalog an explicit opt-in. Optional catalogs can bootstrap empty, process their last key retraction, and remove stale projections on restart. Required sources preserve their existing fail-closed policy.
