@@ -141,10 +141,16 @@ impl ReadinessAssembly {
                 Readiness::Ready
             }
             Some(reason) => {
-                self.handle.set_not_ready(reason);
-                Readiness::NotReady {
-                    reason: reason.to_string(),
+                let mut reason = reason.to_string();
+                if reason == REASON_MIRRORS {
+                    for (name, condition) in self.mirrors.borrow().iter() {
+                        if let Some(detail) = condition.reason() {
+                            reason.push_str(&format!("; {name}: {detail}"));
+                        }
+                    }
                 }
+                self.handle.set_not_ready(reason.clone());
+                Readiness::NotReady { reason }
             }
         }
     }

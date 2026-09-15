@@ -5,10 +5,34 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
-## 0.1.0 - unreleased
+## Unreleased
 
-Prepared 2026-09-11 (UTC); unreleased — the `v0.1.0` tag is cut when this lands
-on `main`. This is the first functional engine release: `service-engine` ships
+### Added
+
+- `Consumed::ALLOW_EMPTY` opts into authoritative empty prefixes and requires
+  `reconcile_keys` at mirror startup. Empty snapshots and final optional-key
+  deletions reconcile persisted projection keys, including keys carried only by
+  a deleted payload. Required prefixes preserve projections while absent and
+  recover through the mirror supervisor when republished.
+- Per-bucket stream identities and snapshot boundaries, captured before scanning.
+  Mirrors require KV history 1, apply all scanned values, then replay from the
+  captured boundary so concurrent writes are not skipped. An additive migration
+  preserves existing watermarks until their first identity adoption.
+- Replacement and sequence-rollback detection that preserves projections and
+  watermarks, with the exact scoped recovery SQL in the readiness reason.
+
+### Fixed
+
+- Empty-prefix and standby synchronization uses the bucket boundary, including
+  an explicit committed watermark for revision zero. Watches reopen after each
+  periodic scan; future-only empty-bucket watches also close the scan/watch gap.
+- Conformance CI builds the pinned MinIO release from source because its former
+  binary download URL no longer serves the fixture.
+- Update the locked rustls dependency to 0.23.45 for the advisory gate.
+
+## 0.1.0 - 2026-09-11
+
+This is the first functional engine release: `service-engine` ships
 the reactive personalized delivery and process skeleton, and
 `conformance-service-engine` its conformance battery in two modes — in-crate
 against the real engine through a sample service, and black-box against the real

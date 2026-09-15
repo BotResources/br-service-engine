@@ -251,15 +251,72 @@ with the `Projection` helpers (`replace_one`, `replace`, `remove`, over the
 `Known` / `KnownScope` traits) so the projector carries no SQL of its own; its
 projection is leader-gated: only the pod holding the mirror lease projects,
 standby pods keep their shadows current and take over on lease loss. The mirror
-persists a per-bucket watermark — the bucket revision it has projected up to,
-which the leader advances as it projects — so a standby reports converged only
-once its shadows are loaded **and** the watermark has reached the revision its
-boot read reached, and the watch resumes from that revision (not from now), so a
-put or retract that lands between the boot read and the watch is not lost. A
-periodic reconcile on `EngineConfig::with_mirror_reconcile` repairs drift, and a
-consumed prefix that reads empty — at boot or during a run, including a change
-that would empty it — holds readiness DOWN with the prefix's name and never
-erases `known_*`. Scopes are assembled from the slices: each
+persists a stream identity and watermark **per bucket** within each mirror.
+
+#### Mirror snapshots and empty prefixes
+
+Every consumed bucket must retain **one revision per key** (`history: 1`). The
+engine validates this using fresh JetStream `get_info()` metadata before scanning
+any prefixes. For each distinct bucket it captures the stream creation timestamp
+and last sequence `S`, applies **every** scanned entry (including revisions above
+`S`), reconciles, and commits the identity and `S` with the projections. Failure
+rolls back both projections and the watermark. Standbys wait for the leader's
+committed bucket watermark before reporting convergence, even when `S == 0`.
+
+Watches start at `S + 1`. Only an actually zero boundary uses `watch_all()`.
+Because the pinned client makes that watch future-only, the engine checks bucket
+metadata again after establishing the watches; if writes arrived in the gap, it
+rescans and reopens from the new boundary. A periodic reconciliation on
+`EngineConfig::with_mirror_reconcile` also reopens its watches, discarding events
+buffered before the new scan. Scan/watch overlap may repeat a current value, so
+projectors must tolerate idempotent upserts. History greater than one is rejected:
+an older retained delete could otherwise replay after a newer scanned put.
+
+A consumed prefix defaults to required (`Consumed::ALLOW_EMPTY = false`). An
+empty required prefix holds readiness DOWN and preserves existing projections.
+Deleting its final entry has the same effect. Republish the required entry and
+the supervisor reconciles and returns to readiness without a service restart.
+
+`Consumed::ALLOW_EMPTY = true` means only that an empty prefix is valid and
+authoritative. Such a mirror **must** configure `reconcile_keys`, or startup
+returns a configuration error. An empty scan reconciles existing local keys; when
+a deletion removes the final optional entry, the engine removes it from the
+shadow first, invokes `reconcile_keys`, then projects those keys against the empty
+shadow. This also removes rows whose projection keys existed only in the deleted
+payload and cannot be recovered by `keyed_by`.
+
+Optional emptiness does not prove that a producer started or finished
+reconciliation. A service needing producer presence can declare a marker as
+another ordinary required consumption. A required marker guards only the mirror
+in which it is declared: the implementer must declare it in **each** affected
+mirror or slice. Without that declaration, optional catalogs accept the
+fresh-bucket or producer-silence window. The engine neither interprets manifests
+nor connects cross-slice dependencies.
+
+#### Mirror bucket recovery
+
+A changed stream creation identity or a last sequence below the persisted
+watermark holds readiness DOWN. The engine preserves local projections and the
+persisted watermark; the readiness reason identifies the mirror, bucket, failure
+and exact recovery SQL. After verifying that the current bucket is authoritative,
+run that SQL as the service database owner. For example, to reset only the
+`catalog` mirror's `PUBLISHED_LANGUAGE` watermark:
+
+```sh
+psql "$DATABASE_URL_OWNER" -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM service_engine.mirror_watermark WHERE mirror = 'catalog' AND bucket = 'PUBLISHED_LANGUAGE';"
+```
+
+The next supervisor reconciliation adopts that bucket identity and reconciles its
+contents. This command deletes only the watermark row; it does not directly
+remove projections or reset other mirrors or buckets. The identity migration is
+additive: existing rows keep their revision and receive a nullable identity.
+**First adoption limitation:** if no identity has been persisted (including an
+upgraded row with a NULL identity), the engine trusts the current bucket contents,
+even when the service already has local projected rows. Those rows may therefore
+be removed by an authoritative empty optional snapshot.
+
+Scopes are assembled from the slices: each
 slice contributes its keys with `engine.contribute_scopes(&[..])`, and
 `declare_contributed_scopes` unions them into one `ScopeManifest` and runs
 the boot scope-declaration handshake that gates readiness until Identity confirms

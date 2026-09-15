@@ -25,6 +25,7 @@ pub(super) type ReconcileKeysFn<K> =
     Arc<dyn Fn(PgPool) -> BoxFuture<'static, Result<Vec<K>, EngineError>> + Send + Sync>;
 
 pub(super) struct Update {
+    pub(super) bucket: &'static str,
     pub(super) change: Change,
     pub(super) apply: Applier,
     pub(super) revision: u64,
@@ -32,7 +33,6 @@ pub(super) struct Update {
 
 pub(super) struct Loaded {
     pub(super) entries: Vec<(KvKey, Applier)>,
-    pub(super) read_revision: u64,
 }
 
 type LoadFn = Arc<dyn Fn(Nats) -> BoxFuture<'static, Result<Loaded, EngineError>> + Send + Sync>;
@@ -52,6 +52,7 @@ type ContainsFn = Arc<dyn Fn(&Shadows, &KvKey) -> bool + Send + Sync>;
 
 pub(super) struct Consumption {
     pub(super) prefix: &'static str,
+    pub(super) allow_empty: bool,
     pub(super) bucket: &'static str,
     pub(super) load: LoadFn,
     pub(super) open_watch: OpenWatchFn,
@@ -70,10 +71,7 @@ impl Consumption {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
                 let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
-                let (entries, read_revision) = bucket
-                    .entries_with_revision(&prefix)
-                    .await
-                    .map_err(service)?;
+                let entries = bucket.entries(&prefix).await.map_err(service)?;
                 let entries = entries
                     .into_iter()
                     .map(|(key, value)| {
@@ -83,10 +81,7 @@ impl Consumption {
                         (shadow_key, applier)
                     })
                     .collect();
-                Ok(Loaded {
-                    entries,
-                    read_revision,
-                })
+                Ok(Loaded { entries })
             }) as BoxFuture<'static, Result<Loaded, EngineError>>
         });
         let open_watch: OpenWatchFn = Arc::new(|nats: Nats, from: u64| {
@@ -128,6 +123,7 @@ impl Consumption {
             Arc::new(|shadows: &Shadows, key: &KvKey| shadows.shadow::<C>().get(key).is_some());
         Self {
             prefix: C::PREFIX,
+            allow_empty: C::ALLOW_EMPTY,
             bucket: C::bucket(),
             load,
             open_watch,
@@ -157,6 +153,7 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
         None => Box::new(move |shadows: &mut Shadows| shadows.remove::<C>(&key)),
     };
     Update {
+        bucket: C::bucket(),
         change,
         apply,
         revision: revision.get(),
