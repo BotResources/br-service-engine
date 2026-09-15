@@ -1,6 +1,6 @@
 mod lead;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,7 +13,7 @@ use tokio::time::MissedTickBehavior;
 use crate::config::DEFAULT_BEAT;
 use crate::error::EngineError;
 use crate::name::MirrorName;
-use crate::nats::{KvKey, Nats, NatsError};
+use crate::nats::{Nats, NatsError};
 use crate::transport::ImpactTransport;
 
 const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -25,9 +25,10 @@ use super::handle::MirrorRun;
 use super::leader::MirrorGate;
 use super::projection::Project;
 use super::shadow::Shadows;
+use super::watermark::{self, Snapshot};
 
 type KeyedByFn<K> = Arc<dyn Fn(&Shadows, &Change) -> Vec<K> + Send + Sync>;
-type Revisions = HashMap<String, u64>;
+type Revisions = std::collections::BTreeMap<String, Snapshot>;
 
 pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
     name: MirrorName,
@@ -103,63 +104,111 @@ where
     }
 
     async fn watch_forever(&self) -> Result<(), EngineError> {
-        let resume = self.read_revision.read().await.clone();
-        let mut streams = Vec::new();
-        for consumption in self.consumptions.iter() {
-            let from = match resume.get(consumption.bucket).copied() {
-                Some(revision) => revision.saturating_add(1),
-                None => 0,
-            };
-            streams.push((consumption.open_watch)(self.nats.clone(), from).await?);
+        if self.read_revision.read().await.is_empty() {
+            self.boot_reconcile().await?;
         }
-        let mut merged = futures_util::stream::select_all(streams);
-        let mut beat = tokio::time::interval(self.renew_period());
-        beat.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        beat.tick().await;
-        let mut reconcile = tokio::time::interval(self.reconcile_deadline);
-        reconcile.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        reconcile.tick().await;
-        let mut was_leader = false;
         loop {
-            tokio::select! {
-                _ = beat.tick() => {
-                    self.heartbeat().await?;
-                    self.on_beat(&mut was_leader).await?;
+            let resume = self.read_revision.read().await.clone();
+            let mut streams = Vec::new();
+            for consumption in self.consumptions.iter() {
+                let from = match resume.get(consumption.bucket) {
+                    Some(snapshot) if snapshot.revision > 0 => snapshot.revision.saturating_add(1),
+                    _ => 0,
+                };
+                streams.push((consumption.open_watch)(self.nats.clone(), from).await?);
+            }
+            // async-nats watch_all() is future-only. For a truly empty boundary,
+            // establish watches first and then check whether the bucket gained
+            // data in the scan/watch gap. If so, rescan and reopen from the now
+            // nonzero boundary; never leave gap writes behind a future-only watch.
+            let mut zero_gap = false;
+            for (bucket, snapshot) in &resume {
+                if snapshot.revision == 0 {
+                    let current =
+                        watermark::snapshot(&self.nats, self.name.as_str(), bucket).await?;
+                    self.validate_current(bucket, &current).await?;
+                    zero_gap |= current.revision > 0;
                 }
-                _ = reconcile.tick() => {
-                    self.periodic_reconcile().await?;
-                }
-                item = merged.next() => {
-                    let Some(item) = item else { break };
-                    self.on_watch_event(item?).await?;
+            }
+            if zero_gap {
+                self.periodic_reconcile().await?;
+                continue;
+            }
+            let mut merged = futures_util::stream::select_all(streams);
+            let mut beat = tokio::time::interval(self.renew_period());
+            beat.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            beat.tick().await;
+            let mut reconcile = tokio::time::interval(self.reconcile_deadline);
+            reconcile.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            reconcile.tick().await;
+            let mut was_leader = false;
+            loop {
+                tokio::select! {
+                    _ = beat.tick() => {
+                        self.heartbeat().await?;
+                        self.on_beat(&mut was_leader).await?;
+                    }
+                    _ = reconcile.tick() => {
+                        self.periodic_reconcile().await?;
+                        // Discard events buffered by the old watch. A new scan can
+                        // be newer than queued deletes even with bucket history 1.
+                        break;
+                    }
+                    item = merged.next() => {
+                        let Some(item) = item else { return Ok(()) };
+                        self.on_watch_event(item?).await?;
+                    }
                 }
             }
         }
-        Ok(())
     }
 
     async fn on_watch_event(&self, update: Update) -> Result<(), EngineError> {
-        if update.change.is_delete()
-            && self
-                .would_empty(update.change.prefix, &update.change.key)
-                .await
-        {
-            return Err(empty_prefix(self.prefix_of(update.change.prefix)));
+        let consumption = self
+            .consumptions
+            .iter()
+            .find(|c| c.prefix == update.change.prefix && c.bucket == update.bucket)
+            .expect("registered watch consumption");
+        let becomes_empty = {
+            let shadows = self.shadows.read().await;
+            update.change.is_delete()
+                && (consumption.contains)(&shadows, &update.change.key)
+                && (consumption.count)(&shadows) == 1
+        };
+        if becomes_empty && !consumption.allow_empty {
+            return Err(empty_prefix(consumption.prefix));
         }
-        let bucket = self.bucket_of(update.change.prefix).to_string();
-        let revision = update.revision;
-        let touched = {
+        let current = self
+            .read_revision
+            .read()
+            .await
+            .get(consumption.bucket)
+            .cloned()
+            .expect("watch follows a bucket snapshot");
+        let mut touched = {
             let mut shadows = self.shadows.write().await;
             (update.apply)(&mut shadows);
             dedup((self.keyed_by)(&shadows, &update.change))
         };
-        {
-            let mut seen = self.last_seen.write().await;
-            let entry = seen.entry(bucket.clone()).or_insert(0);
-            *entry = (*entry).max(revision);
+        if becomes_empty {
+            // The deleted payload may have carried the only projection key.
+            // Consult persisted keys after removal, against the empty shadow.
+            let keys = self
+                .reconcile_keys
+                .as_ref()
+                .expect("optional catalogs validate reconciliation keys at startup");
+            touched.extend(keys(self.pool.clone()).await?);
+            touched = dedup(touched);
         }
         let mut advance = Revisions::new();
-        advance.insert(bucket, revision);
+        advance.insert(
+            consumption.bucket.to_string(),
+            Snapshot {
+                created: current.created,
+                revision: update.revision,
+            },
+        );
+        merge_forward(&mut *self.last_seen.write().await, &advance);
         self.project_under_lease(touched, &advance).await?;
         Ok(())
     }
@@ -178,41 +227,40 @@ where
         Ok(())
     }
 
-    async fn would_empty(&self, prefix: &str, key: &KvKey) -> bool {
-        let shadows = self.shadows.read().await;
-        self.consumptions
-            .iter()
-            .find(|c| c.prefix == prefix)
-            .is_some_and(|c| (c.contains)(&shadows, key) && (c.count)(&shadows) == 1)
-    }
-
-    fn prefix_of(&self, prefix: &str) -> &'static str {
-        self.consumptions
-            .iter()
-            .find(|c| c.prefix == prefix)
-            .map_or("", |c| c.prefix)
-    }
-
-    fn bucket_of(&self, prefix: &str) -> &'static str {
-        self.consumptions
-            .iter()
-            .find(|c| c.prefix == prefix)
-            .map_or("", |c| c.bucket)
+    async fn validate_current(&self, bucket: &str, current: &Snapshot) -> Result<(), EngineError> {
+        let mut conn = self.pool.acquire().await?;
+        if let Some(held) = watermark::read(&mut conn, self.name.as_str(), bucket).await? {
+            watermark::compatible(self.name.as_str(), bucket, &held, current)?;
+        }
+        Ok(())
     }
 
     async fn full_read(&self) -> Result<Read, EngineError> {
+        if self.reconcile_keys.is_none() && self.consumptions.iter().any(|c| c.allow_empty) {
+            return Err(EngineError::Config(format!(
+                "mirror {}: ALLOW_EMPTY requires reconcile_keys",
+                self.name
+            )));
+        }
+        let mut read_revision = Revisions::new();
+        // Capture every distinct bucket before scanning any consumed prefix.
+        for consumption in self.consumptions.iter() {
+            if !read_revision.contains_key(consumption.bucket) {
+                let snapshot =
+                    watermark::snapshot(&self.nats, self.name.as_str(), consumption.bucket).await?;
+                self.validate_current(consumption.bucket, &snapshot).await?;
+                read_revision.insert(consumption.bucket.to_string(), snapshot);
+            }
+        }
         let mut shadows = Shadows::new();
         let mut changes = Vec::new();
-        let mut read_revision = Revisions::new();
         for consumption in self.consumptions.iter() {
             let loaded = (consumption.load)(self.nats.clone()).await?;
-            if loaded.entries.is_empty() {
+            if loaded.entries.is_empty() && !consumption.allow_empty {
                 return Err(empty_prefix(consumption.prefix));
             }
-            let entry = read_revision
-                .entry(consumption.bucket.to_string())
-                .or_insert(0);
-            *entry = (*entry).max(loaded.read_revision);
+            // Include every returned entry, even one newer than the boundary S.
+            // With history 1, scan/watch overlap is an idempotent current upsert.
             for (key, apply) in loaded.entries {
                 changes.push(Change {
                     prefix: consumption.prefix,
@@ -221,6 +269,19 @@ where
                 });
                 apply(&mut shadows);
             }
+        }
+        // Refuse a replacement/configuration change during the scan as well.
+        for (bucket, held) in &read_revision {
+            let current = watermark::snapshot(&self.nats, self.name.as_str(), bucket).await?;
+            watermark::compatible(
+                self.name.as_str(),
+                bucket,
+                &watermark::Watermark {
+                    stream_created_at: Some(held.created.clone()),
+                    revision: held.revision as i64,
+                },
+                &current,
+            )?;
         }
         Ok(Read {
             shadows,
@@ -274,9 +335,15 @@ struct Read {
 }
 
 fn merge_forward(into: &mut Revisions, from: &Revisions) {
-    for (bucket, revision) in from {
-        let entry = into.entry(bucket.clone()).or_insert(0);
-        *entry = (*entry).max(*revision);
+    for (bucket, snapshot) in from {
+        let entry = into
+            .entry(bucket.clone())
+            .or_insert_with(|| snapshot.clone());
+        if entry.created == snapshot.created {
+            entry.revision = entry.revision.max(snapshot.revision);
+        } else {
+            *entry = snapshot.clone();
+        }
     }
 }
 

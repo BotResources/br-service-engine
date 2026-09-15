@@ -104,13 +104,16 @@ async fn s144_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revi
         "a standby projects nothing; only the leader writes known_users"
     );
 
-    sqlx::query(
-        "INSERT INTO service_engine.mirror_watermark (mirror, bucket, revision) \
-         VALUES ('directory', 'PUBLISHED_LANGUAGE', 9223372036854775807)",
-    )
-    .execute(&pool)
-    .await
-    .expect("the leader advances the watermark past the bucket revision");
+    directory_mirror()
+        .build_led(
+            fabric.clone(),
+            pool.clone(),
+            StagingTransport::silent(),
+            MirrorLeader::new(PodId::new("pod-a").unwrap(), LEASE, BEAT),
+        )
+        .reconcile()
+        .await
+        .expect("the real leader projects and commits its bucket identity and boundary");
 
     let outcome = tokio::time::timeout(OBSERVED_WITHIN, converge)
         .await

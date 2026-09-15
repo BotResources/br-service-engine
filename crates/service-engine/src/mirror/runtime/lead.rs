@@ -59,6 +59,21 @@ where
                 return Ok(false);
             }
         }
+        for (bucket, snapshot) in advance {
+            let current = watermark::snapshot(&self.nats, self.name.as_str(), bucket).await?;
+            watermark::compatible(
+                self.name.as_str(),
+                bucket,
+                &watermark::Watermark {
+                    stream_created_at: Some(snapshot.created.clone()),
+                    revision: snapshot.revision as i64,
+                },
+                &current,
+            )?;
+            if let Some(held) = watermark::read(&mut tx, self.name.as_str(), bucket).await? {
+                watermark::compatible(self.name.as_str(), bucket, &held, &current)?;
+            }
+        }
         let mut impacts = Vec::new();
         {
             let shadows = self.shadows.read().await;
@@ -66,7 +81,7 @@ where
                 .await?;
         }
         for (bucket, revision) in advance {
-            watermark::advance(&mut tx, self.name.as_str(), bucket, *revision).await?;
+            watermark::advance(&mut tx, self.name.as_str(), bucket, revision).await?;
         }
         let committed = impacts.len();
         if !impacts.is_empty() {
@@ -80,7 +95,14 @@ where
     async fn watermark_caught_up(&self, read_revision: &Revisions) -> Result<bool, EngineError> {
         let mut conn = self.pool.acquire().await?;
         for (bucket, target) in read_revision {
-            if watermark::read(&mut conn, self.name.as_str(), bucket).await? < *target {
+            let current = watermark::snapshot(&self.nats, self.name.as_str(), bucket).await?;
+            let Some(held) = watermark::read(&mut conn, self.name.as_str(), bucket).await? else {
+                return Ok(false);
+            };
+            watermark::compatible(self.name.as_str(), bucket, &held, &current)?;
+            if held.stream_created_at.as_deref() != Some(target.created.as_str())
+                || (held.revision.max(0) as u64) < target.revision
+            {
                 return Ok(false);
             }
         }
