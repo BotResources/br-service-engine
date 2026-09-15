@@ -712,8 +712,28 @@ async fn writes_during_scan_are_not_skipped_or_mistaken_for_orphans_and_replay_c
             .0,
         s as i64
     );
+    let replay_revision = bucket
+        .get_with_revision(&KvKey::new("scan/scanned").unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .1
+        .get();
     let watching = tokio::spawn(mirror.watch());
-    await_count(db.app_pool(), 3).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let held = watermark(db.app_pool(), "scan_catalog", "PUBLISHED_LANGUAGE")
+                .await
+                .unwrap();
+            if held.0 >= replay_revision as i64 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the watch commits the replayed scanned value, not only the gap write");
+    assert_eq!(count(db.app_pool()).await, 3);
     // Replaying the scanned value may project it again; only convergence matters.
     let value: String = sqlx::query_scalar("SELECT email FROM known_users WHERE user_id=$1")
         .bind(scanned)
