@@ -177,7 +177,13 @@ impl DirectPipeline {
                 time::now(),
             )
             .with_outbound(outbound);
-            let mut cx = Reaction::new(ops, principal, msg.metadata.clone(), msg.delivered);
+            let mut cx = Reaction::new(
+                ops,
+                principal,
+                msg.metadata.clone(),
+                msg.message_id,
+                msg.delivered,
+            );
             invoke(invoker.as_ref(), &mut cx, &msg.body).await
         };
         if let Err(error) = handler {

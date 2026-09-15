@@ -5,10 +5,16 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
-## 0.1.0 - unreleased
+## Unreleased
 
-Prepared 2026-09-11 (UTC); unreleased — the `v0.1.0` tag is cut when this lands
-on `main`. This is the first functional engine release: `service-engine` ships
+### Added
+
+- `Reaction::message_id()` exposes the stable inbound message identity to handlers,
+  enabling domain deduplication that outlives the engine's delivery-claim retention.
+
+## 0.1.0 - 2026-09-11
+
+This is the first functional engine release: `service-engine` ships
 the reactive personalized delivery and process skeleton, and
 `conformance-service-engine` its conformance battery in two modes — in-crate
 against the real engine through a sample service, and black-box against the real

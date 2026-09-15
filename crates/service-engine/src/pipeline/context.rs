@@ -20,6 +20,7 @@ pub struct Reaction<'a> {
     ops: Ops<'a>,
     principal: Option<ErasedPrincipal>,
     metadata: MessageMetadata,
+    message_id: Uuid,
     delivered: u32,
 }
 
@@ -28,14 +29,22 @@ impl<'a> Reaction<'a> {
         ops: Ops<'a>,
         principal: Option<ErasedPrincipal>,
         metadata: MessageMetadata,
+        message_id: Uuid,
         delivered: u32,
     ) -> Self {
         Self {
             ops,
             principal,
             metadata,
+            message_id,
             delivered,
         }
+    }
+
+    /// Stable inbound identity, for domain deduplication that must outlive the
+    /// engine's bounded delivery-claim retention (for example human-cleared flags).
+    pub fn message_id(&self) -> Uuid {
+        self.message_id
     }
 
     pub fn metadata(&self) -> &MessageMetadata {
