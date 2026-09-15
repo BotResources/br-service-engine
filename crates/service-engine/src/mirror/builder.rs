@@ -52,6 +52,7 @@ type ContainsFn = Arc<dyn Fn(&Shadows, &KvKey) -> bool + Send + Sync>;
 
 pub(super) struct Consumption {
     pub(super) prefix: &'static str,
+    pub(super) allow_empty: bool,
     pub(super) bucket: &'static str,
     pub(super) load: LoadFn,
     pub(super) open_watch: OpenWatchFn,
@@ -128,6 +129,7 @@ impl Consumption {
             Arc::new(|shadows: &Shadows, key: &KvKey| shadows.shadow::<C>().get(key).is_some());
         Self {
             prefix: C::PREFIX,
+            allow_empty: C::ALLOW_EMPTY,
             bucket: C::bucket(),
             load,
             open_watch,

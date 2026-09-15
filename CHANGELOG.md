@@ -5,6 +5,12 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
+## Unreleased
+
+### Added
+
+- `Consumed::ALLOW_EMPTY` makes an authoritative empty catalog an explicit opt-in. Optional catalogs can bootstrap empty, process their last key retraction, and remove stale projections on restart. Required sources preserve their existing fail-closed policy.
+
 ## 0.1.0 - unreleased
 
 Prepared 2026-09-11 (UTC); unreleased — the `v0.1.0` tag is cut when this lands

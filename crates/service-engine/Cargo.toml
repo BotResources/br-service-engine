@@ -9,6 +9,8 @@ repository.workspace = true
 
 [features]
 test-support = []
+# Real PostgreSQL/NATS mirror regressions run in the e2e CI job.
+e2e-tests = []
 
 [dependencies]
 async-graphql = { workspace = true }
@@ -45,3 +47,7 @@ required-features = ["test-support"]
 [[test]]
 name = "erasure_spike"
 required-features = ["test-support"]
+
+[dev-dependencies]
+br-test-harness = { git = "https://github.com/BotResources/br-e2e-harness", tag = "v1.2.0", version = "1.2.0", default-features = false, features = ["e2e-db", "nats-fabric"] }
+br-util-nats-fabric = { git = "https://github.com/BotResources/br-rust-common", tag = "v1.3.0", version = "1.3.0" }

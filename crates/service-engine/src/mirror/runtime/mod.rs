@@ -183,7 +183,9 @@ where
         self.consumptions
             .iter()
             .find(|c| c.prefix == prefix)
-            .is_some_and(|c| (c.contains)(&shadows, key) && (c.count)(&shadows) == 1)
+            .is_some_and(|c| {
+                !c.allow_empty && (c.contains)(&shadows, key) && (c.count)(&shadows) == 1
+            })
     }
 
     fn prefix_of(&self, prefix: &str) -> &'static str {
@@ -206,7 +208,7 @@ where
         let mut read_revision = Revisions::new();
         for consumption in self.consumptions.iter() {
             let loaded = (consumption.load)(self.nats.clone()).await?;
-            if loaded.entries.is_empty() {
+            if loaded.entries.is_empty() && !consumption.allow_empty {
                 return Err(empty_prefix(consumption.prefix));
             }
             let entry = read_revision

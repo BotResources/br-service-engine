@@ -257,9 +257,11 @@ once its shadows are loaded **and** the watermark has reached the revision its
 boot read reached, and the watch resumes from that revision (not from now), so a
 put or retract that lands between the boot read and the watch is not lost. A
 periodic reconcile on `EngineConfig::with_mirror_reconcile` repairs drift, and a
-consumed prefix that reads empty — at boot or during a run, including a change
-that would empty it — holds readiness DOWN with the prefix's name and never
-erases `known_*`. Scopes are assembled from the slices: each
+consumed prefix that reads empty defaults to holding readiness DOWN without erasing
+`known_*`. A source whose contract permits zero entries opts in with
+`Consumed::ALLOW_EMPTY = true`: empty bootstrap snapshots and last-key retractions
+then reconcile normally. Supply `reconcile_keys` so a restart with an empty source
+can remove stale local rows. Required singleton sources keep the default. Scopes are assembled from the slices: each
 slice contributes its keys with `engine.contribute_scopes(&[..])`, and
 `declare_contributed_scopes` unions them into one `ScopeManifest` and runs
 the boot scope-declaration handshake that gates readiness until Identity confirms

@@ -16,3 +16,6 @@ pub use handle::{MirrorHandle, MirrorRun};
 pub use leader::MirrorLeader;
 pub use projection::{Known, KnownScope, Project, Projection};
 pub use shadow::{Shadow, Shadows};
+
+#[cfg(all(test, feature = "e2e-tests"))]
+mod tests;

@@ -243,6 +243,8 @@ jobs:
         run: cargo test -p conformance-service-engine --all-targets --locked
       - name: example service e2e
         run: cargo test -p example-service --all-targets --locked -- --test-threads=3
+      - name: Engine mirror regressions (real PostgreSQL and NATS)
+        run: cargo test -p service-engine --lib --features e2e-tests mirror::tests --locked
 
   conformance-blackbox:
     name: conformance-service-engine black-box (real binary)
