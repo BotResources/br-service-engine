@@ -1,6 +1,5 @@
 use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
-use service_engine::graphql::SliceFragment;
 use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
@@ -14,12 +13,6 @@ service_engine::subscription_union! {
     delta = LedgerDelta { reset = LedgerReset, upsert = LedgerUpsert, remove = LedgerRemove };
     Ledger => service_engine::view::ViewProjector<LedgersView> => LedgerView,
 }
-
-pub const FRAGMENT: SliceFragment = SliceFragment {
-    slice: "ledger",
-    root_fields: &["ledger", "ledgerDeltas", "recordEntry"],
-    types: &["LedgerView"],
-};
 
 #[derive(Default)]
 pub struct LedgerQuery;

@@ -56,7 +56,7 @@ battery-backed.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud); each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -401,20 +401,30 @@ opaque JSON. The subscription is one typed union member per projector: the
 `subscription_union!` macro takes a service's `Projector => View` mapping once
 and emits the `Reset`/`Upsert`/`Remove` payloads over a typed view union (so a
 client subscribing to one projector's field receives only that member's deltas)
-with the contiguous revision and the causing event. Each slice declares its
-root fields and types as a `SliceFragment` and registers it with
-`Engine::register_schema_slice`; the engine assembles the registered fragments
-at the start of `run` (so through `run_with` too) and fails boot loud with
-`EngineError::DuplicateSchemaMember`, naming both slices, if two claim the same
-root field or GraphQL type — the pod never serves an ambiguous schema. The gate
-does not trust the declarations blindly: when the service feeds the composed
-schema's SDL with `Engine::set_schema_sdl(schema.sdl())` before `run`, the engine
-derives the actual root fields from the async-graphql schema and fails boot with
-`EngineError::UndeclaredSchemaMember` if the schema exposes a root field no slice
-declared, so an under-declared fragment cannot leave a real root field outside
-the collision gate. (Object *types* keep the declared gate only: the engine
-injects payload, union and scalar types no slice owns, so the schema's type set
-is not slice-only.) The axum layer resolves the principal from the
+with the contiguous revision and the causing event. Each capability builds a
+`SliceFragment` with `SliceFragment::derive::<Query, Mutation, Subscription>(slice)`
+— its root fields and owned object types are read from the capability's own
+`#[Object]`/`#[SimpleObject]` impls through async-graphql's type registry, never
+restated in a hand-maintained table — and registers it with
+`Engine::register_schema_slice`. A slice may register **several** capability
+fragments over one aggregate (a capability file per fragment, all naming the
+same aggregate); capabilities of one aggregate legitimately share its owned
+types, while two *different* aggregates claiming one type name is a collision.
+The engine assembles the registered fragments at the start of `run` (so through
+`run_with` too) and fails boot loud with `EngineError::DuplicateSchemaMember`,
+naming both aggregates, if two claim the same root field or object type — the pod
+never serves an ambiguous schema. The gate does not trust the fragments blindly:
+when the service feeds the composed schema's SDL with
+`Engine::set_schema_sdl(schema.sdl())` before `run`, the engine parses that SDL
+with the real GraphQL parser (so a block-string description that wraps onto a
+field-shaped line is never mistaken for a phantom root field) and fails boot with
+`EngineError::UndeclaredSchemaMember` for a root field, or
+`EngineError::UndeclaredSchemaType` for an object type, that the schema exposes
+but no fragment claims — the seam of a capability merged into the composed roots
+yet never registered. The engine's own injected object types (the mutation ack,
+the lane payloads) are themselves derived from the engine's wrapper types and
+allowed unclaimed, so the completeness gate is exactly "every non-engine object
+type is owned by a fragment". The axum layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
 kit does authZ only, never authN.
 
@@ -693,8 +703,11 @@ bootable reference service built only on this crate's public authoring surface �
 no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
 `kernel/` (the principal and its generic fact bag, the error base — and no scope
 registry, since scopes belong to the slices), one folder per slice under `slices/`
-(each owning its aggregate, store, view, handlers, offer/mirror and SDL
-fragment + its committed `schema.graphql`), a `slices/mod.rs` that lists the
+(each owning its aggregate, store, view, handlers, offer/mirror and its GraphQL
+capability fragments + its committed `schema.graphql`; a slice over one aggregate
+may split its surface into several capability files — the example `card` slice
+splits into `graphql/item.rs` and `graphql/board.rs`, each a fragment), a
+`slices/mod.rs` that lists the
 slices once through the `compose_service!` macro, a `register.rs` and a
 `graphql.rs` that are slice-agnostic, and a `src/bin/service.rs` that boots.
 `compose_service!` takes each slice's module, cargo feature and root objects on

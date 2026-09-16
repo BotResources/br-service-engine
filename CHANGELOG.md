@@ -95,6 +95,23 @@ and a single git tag `v{version}` releases the set. Format follows
 - `SessionRuntime::set_dead_letters` installs the store the render pass records
   poison documents into; the engine wires the transport-backed store at boot so
   render dead-letters raise the ops-view impact like every other source.
+- `SliceFragment::derive::<Query, Mutation, Subscription>(slice)` reads a
+  capability's root fields and owned object types from its `#[Object]` /
+  `#[SimpleObject]` impls (through async-graphql's type registry), replacing the
+  hand-maintained `root_fields` / `types` tables. **A slice may register several
+  capability fragments over one aggregate** — one `#[Object]` per capability
+  file, all naming the same aggregate. Capabilities of one aggregate share its
+  owned types; two *different* aggregates claiming one type name is a collision.
+  The example `card` slice now demonstrates this, split into `graphql/item.rs`
+  and `graphql/board.rs`.
+- The composed-schema boot gate now also gates **object types**, not only root
+  fields: `EngineError::UndeclaredSchemaType` fails boot when the composed SDL
+  exposes an object type that no fragment owns and the engine does not inject —
+  the seam of a capability merged into the roots yet never registered. The
+  engine-injected object types (mutation ack, lane payloads) are derived from the
+  engine's own wrappers, so they are allowed unclaimed.
+- `EngineError::SchemaParse` — raised if the composed SDL cannot be parsed during
+  the boot gate.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit
@@ -130,6 +147,23 @@ and a single git tag `v{version}` releases the set. Format follows
   and change `type Visibility = Unrestricted<Row, Principal>` to
   `Unrestricted<Row, Principal, MyReason>`. The marker's visibility must be at
   least that of the view. An empty reason is refused at `register_view`.
+- **`SliceFragment` is now a derived, owned value, not a struct literal.** Its
+  fields are private and `SliceFragment::new(slice, &[..], &[..])` is gone.
+  *Migration:* build fragments with `SliceFragment::derive::<Q, M, S>(slice)` from
+  the capability's root objects (use `async_graphql::EmptyMutation` /
+  `EmptySubscription` for an absent slot); for a synthetic fragment whose claims
+  cannot be read from a schema, `SliceFragment::from_claims(slice, root_fields,
+  owned_types)` is the explicit primitive `derive` is built on.
+- `SchemaSlices::verify_root_fields(sdl)` is renamed `SchemaSlices::verify(sdl)`
+  and now gates object types in addition to root fields. `SchemaSlices::add` takes
+  `&SliceFragment` (the fragment is no longer `Copy`). Services that call the
+  standard boot path (`Engine::run` / `run_with`) need no change; the engine calls
+  it internally.
+- **The boot gate parses the composed SDL with the real GraphQL parser** instead
+  of a line-oriented scan. A root-field description that wraps onto a line
+  beginning `word (` or `word:` (block strings included) is no longer mistaken for
+  a phantom root field, so a wrapped doc-comment can no longer abort boot with a
+  spurious `UndeclaredSchemaMember`.
 - **A mirror no longer judges the producer's content.** Converged means the bucket
   is bound and one full read completed with the watch attached at the revision that
   read reached — nothing more. A consumed prefix that reads empty is a converged

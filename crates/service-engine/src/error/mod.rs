@@ -292,6 +292,15 @@ pub enum EngineError {
     UnhonouredSeam { aggregate: &'static str },
 
     #[error(
+        "the composed schema exposes the graphql object type `{ty}` that no slice fragment owns \
+         and the engine does not inject"
+    )]
+    UndeclaredSchemaType { ty: String },
+
+    #[error("the composed graphql schema could not be parsed for slice verification: {detail}")]
+    SchemaParse { detail: String },
+
+    #[error(
         "no live session {session} on this pod, so its window cannot be paged; a page request \
          must be issued over the session's own connection, which pins it to the pod that holds it"
     )]

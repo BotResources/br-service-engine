@@ -1,34 +1,21 @@
+//! The board capability: the board-scoped view of cards and the delta
+//! subscriptions over one board's window.
+
 use async_graphql::{Context, Object, Result, SimpleObject, Subscription};
 use futures_util::{Stream, StreamExt};
-use service_engine::graphql::SliceFragment;
 use service_engine::session::{SessionId, WindowSpec};
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
 
-use super::mutations::{AdvanceCard, ImportCards, ScheduleCardDeadline};
-use super::view::{BoardWindow, CardView, CardsView};
 use crate::kernel::AppPrincipal;
+use crate::slices::card::mutations::ImportCards;
+use crate::slices::card::view::{BoardWindow, CardView, CardsView};
 
 service_engine::subscription_union! {
     view = CardViewUnion;
     delta = CardDelta { reset = CardReset, upsert = CardUpsert, remove = CardRemove };
     Card => service_engine::view::ViewProjector<CardsView> => CardView,
 }
-
-pub const FRAGMENT: SliceFragment = SliceFragment {
-    slice: "card",
-    root_fields: &[
-        "card",
-        "cards",
-        "cardDeltas",
-        "cardPageDeltas",
-        "advanceCard",
-        "scheduleCardDeadline",
-        "importCards",
-        "pageCards",
-    ],
-    types: &["CardView"],
-};
 
 #[derive(SimpleObject, Debug, Clone, Copy)]
 pub struct CardPage {
@@ -38,16 +25,10 @@ pub struct CardPage {
 }
 
 #[derive(Default)]
-pub struct CardQuery;
+pub struct CardBoardQuery;
 
 #[Object]
-impl CardQuery {
-    async fn card(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<CardView>> {
-        Query::<AppPrincipal>::new(ctx)?
-            .fetch_view::<CardsView>(&id)
-            .await
-    }
-
+impl CardBoardQuery {
     async fn cards(&self, ctx: &Context<'_>, board_id: Uuid) -> Result<Vec<CardView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view_window::<CardsView>(&BoardWindow::of(board_id))
@@ -56,27 +37,10 @@ impl CardQuery {
 }
 
 #[derive(Default)]
-pub struct CardMutation;
+pub struct CardBoardMutation;
 
 #[Object]
-impl CardMutation {
-    async fn advance_card(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
-        service_engine::ack::<AppPrincipal, AdvanceCard>(ctx, AdvanceCard { id }).await
-    }
-
-    async fn schedule_card_deadline(
-        &self,
-        ctx: &Context<'_>,
-        id: Uuid,
-        in_seconds: i64,
-    ) -> Result<MutationAck> {
-        service_engine::ack::<AppPrincipal, ScheduleCardDeadline>(
-            ctx,
-            ScheduleCardDeadline { id, in_seconds },
-        )
-        .await
-    }
-
+impl CardBoardMutation {
     async fn import_cards(
         &self,
         ctx: &Context<'_>,
@@ -110,10 +74,10 @@ impl CardMutation {
 }
 
 #[derive(Default)]
-pub struct CardSubscription;
+pub struct CardBoardSubscription;
 
 #[Subscription]
-impl CardSubscription {
+impl CardBoardSubscription {
     async fn card_deltas(
         &self,
         ctx: &Context<'_>,

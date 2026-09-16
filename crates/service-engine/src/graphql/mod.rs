@@ -6,6 +6,7 @@ mod principal;
 mod query;
 mod router;
 mod schema;
+mod sdl;
 mod slices;
 mod state;
 mod subscription;

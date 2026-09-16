@@ -23,7 +23,7 @@ impl<P: Principal> Engine<P> {
     pub async fn run(self) -> Result<(), EngineError> {
         let slices = crate::graphql::SchemaSlices::assemble(&self.schema_slices)?;
         if let Some(sdl) = &self.schema_sdl {
-            slices.verify_root_fields(sdl)?;
+            slices.verify(sdl)?;
         }
         // Every declared subjection must be honoured by a registered policy, or
         // boot fails loudly here — the same registration gate the schema type
