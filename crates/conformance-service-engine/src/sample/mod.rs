@@ -3,6 +3,7 @@ pub mod blob;
 pub mod blob_view;
 pub mod counter;
 pub mod cron;
+pub mod declarative;
 pub mod engine;
 pub mod engine_persistence;
 pub mod engine_pipeline;
@@ -80,6 +81,10 @@ pub use counter::{
     CounterFault, CounterState, CounterView, CrudCounter, FullCounter, FullCounterProjector,
     OpenCrud, OpenFull, OpenSoft, SoftCounter, bump_full_coords, erase_author, open_crud,
     open_full, open_soft, replay_from_scratch,
+};
+pub use declarative::{
+    DECLARATIVE_MIRROR, DeclKey, declarative_mirror, known_group_name as declarative_group_name,
+    known_user_email as declarative_user_email,
 };
 
 pub use cron::{

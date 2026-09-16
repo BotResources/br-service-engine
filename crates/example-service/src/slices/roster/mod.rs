@@ -1,3 +1,4 @@
+pub mod extension;
 pub mod graphql;
 mod mirror;
 mod view;
