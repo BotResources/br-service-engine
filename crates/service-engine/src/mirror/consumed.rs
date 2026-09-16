@@ -13,15 +13,17 @@ pub trait Consumed: Serialize + DeserializeOwned + Clone + Send + Sync + 'static
     /// The key prefix this consumer reads under. The offer's version travels in
     /// its key for a breaking change, so two versions of one offer are two
     /// prefixes; [`Consumed::VERSION`] then names the wire this code is written
-    /// against, and the manifest check makes a producer that reused a prefix for
-    /// an incompatible version a nameable dead letter instead of silent
+    /// against, and the manifest check will make a producer that reused a prefix
+    /// for an incompatible version a nameable dead letter instead of silent
     /// mis-decoding.
     const PREFIX: &'static str;
 
     /// The wire version of the offer this consumer is coded against. The engine
-    /// compares it to the producer-owned manifest at scan and at watch; a
-    /// mismatch dead-letters that key and never touches readiness, because
-    /// content is never a readiness input and an empty prefix stays converged.
+    /// will compare it to the producer-owned manifest at scan and at watch (the
+    /// verdict is [`ConsumedManifest::accepts`]; the scan/watch enforcement that
+    /// applies it is not yet wired — it lands in the mirror runtime); a mismatch
+    /// dead-letters that key and never touches readiness, because content is
+    /// never a readiness input and an empty prefix stays converged.
     const VERSION: u16 = 1;
 
     /// Escape hatch for a value that is deliberately raw JSON because the
@@ -30,6 +32,13 @@ pub trait Consumed: Serialize + DeserializeOwned + Clone + Send + Sync + 'static
     /// cannot silently opt out of typing the whole value. A typed struct that
     /// merely holds a `serde_json::Value` *field* needs no escape hatch — only a
     /// consumption whose entire value is untyped does.
+    ///
+    /// The refusal is [`is_raw_json`], which matches the **bare**
+    /// `serde_json::Value` by type id. A `#[serde(transparent)]` newtype wrapping
+    /// a `Value` (`struct Raw(serde_json::Value)`) is a distinct type, so it is
+    /// not caught and is an unpoliced whole-value untyped consumption — treat it
+    /// as taking this escape without setting the flag, and prefer a real typed
+    /// struct or this hatch on the bare value instead.
     const RAW_JSON_ESCAPE_HATCH: bool = false;
 
     fn bucket() -> &'static str {
@@ -42,9 +51,11 @@ pub trait Consumed: Serialize + DeserializeOwned + Clone + Send + Sync + 'static
     }
 }
 
-/// True when the consumed value is `serde_json::Value` itself — the untyped
-/// escape a mirror must not take unless it says so explicitly. A `Consumed`
-/// bound is `'static`, so the type id is always available.
+/// True when the consumed value is the **bare** `serde_json::Value` — the
+/// untyped escape a mirror must not take unless it says so explicitly. A
+/// `Consumed` bound is `'static`, so the type id is always available. This
+/// matches the type id exactly: a `#[serde(transparent)]` newtype over `Value`
+/// is a distinct type and is not caught (see [`Consumed::RAW_JSON_ESCAPE_HATCH`]).
 pub fn is_raw_json<C: Consumed>() -> bool {
     TypeId::of::<C>() == TypeId::of::<serde_json::Value>()
 }

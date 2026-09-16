@@ -260,9 +260,12 @@ single-key upsert. A producer that extends a shared type is consumed with
 `Extended<Core, Ext>`: the project names its own extension as the second type
 parameter and an unknown extension is denied at deserialization, never mirrored
 as opaque JSON. `Consumed::VERSION` and `manifest()` carry the offer's wire
-version so a producer that reused a prefix for an incompatible version becomes a
-nameable dead letter (`ManifestMismatch`) rather than a silent mis-decode. The
-projection is leader-gated: only the pod holding the mirror lease projects,
+version, and `ConsumedManifest::accepts` is the pure verdict (`ManifestMismatch`)
+the engine *will* apply at scan and watch so a producer that reused a prefix for
+an incompatible version becomes a nameable dead letter rather than a silent
+mis-decode — the scan/watch enforcement that reads the producer manifest and
+dead-letters the key is not yet wired (it lands in the mirror runtime, reworked
+in parallel). The projection is leader-gated: only the pod holding the mirror lease projects,
 standby pods keep their shadows current and take over on lease loss. The mirror
 persists a per-bucket watermark — the consumed stream's creation identity and
 the last sequence `S` its read reached, committed with the projections in one
