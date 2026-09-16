@@ -3,9 +3,9 @@ use super::*;
 mod reasons {
     use super::Reason;
 
-    pub const NO_SCOPE: Reason = Reason::new("missing_scope");
-    pub const ALREADY_CLOSED: Reason = Reason::new("already_closed");
-    pub const NOT_CLOSED: Reason = Reason::new("not_closed");
+    pub const NO_SCOPE: Reason = Reason::new("MISSING_SCOPE");
+    pub const ALREADY_CLOSED: Reason = Reason::new("ALREADY_CLOSED");
+    pub const NOT_CLOSED: Reason = Reason::new("NOT_CLOSED");
 }
 
 struct Doc {
@@ -43,8 +43,8 @@ crate::gated! {
 fn a_blocked_gate_carries_a_stable_code_that_require_surfaces_verbatim() {
     let gate = Gate::blocked(reasons::ALREADY_CLOSED);
     assert!(!gate.is_allowed());
-    assert_eq!(gate.reason().map(|r| r.code()), Some("already_closed"));
-    assert_eq!(gate.require().unwrap_err().as_str(), "already_closed");
+    assert_eq!(gate.reason().map(|r| r.code()), Some("ALREADY_CLOSED"));
+    assert_eq!(gate.require().unwrap_err().as_str(), "ALREADY_CLOSED");
     assert!(Gate::allowed().require().is_ok());
 }
 
@@ -69,7 +69,7 @@ fn a_blocked_affordance_and_the_gate_that_refuses_the_mutation_share_one_reason_
     let refused = closed.close_gate(&scoped).require().unwrap_err();
 
     assert_eq!(shown.reason().unwrap().code(), refused.code());
-    assert_eq!(refused.code(), "already_closed");
+    assert_eq!(refused.code(), "ALREADY_CLOSED");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn an_allowed_gate_serializes_as_allowed_and_a_blocked_one_carries_its_code() {
     );
     assert_eq!(
         serde_json::to_value(Gate::blocked(reasons::NOT_CLOSED)).unwrap(),
-        serde_json::json!({ "allowed": false, "reason": "not_closed" })
+        serde_json::json!({ "allowed": false, "reason": "NOT_CLOSED" })
     );
 }
 
@@ -138,8 +138,46 @@ fn an_affordance_set_serializes_as_a_map_from_action_name_to_verdict() {
     assert_eq!(
         serde_json::to_value(doc.affordances(&actor)).unwrap(),
         serde_json::json!({
-            "close": { "allowed": false, "reason": "missing_scope" },
+            "close": { "allowed": false, "reason": "MISSING_SCOPE" },
             "reopen": { "allowed": true },
         })
     );
+}
+
+#[test]
+#[should_panic(expected = "SCREAMING_SNAKE_CASE")]
+fn constructing_a_reason_from_a_non_screaming_code_panics() {
+    // `Reason::new` is `const`, so at a `const` site this panic is a compile
+    // error; called at runtime with a bad code it panics, which this asserts.
+    let _ = Reason::new("already_closed");
+}
+
+#[test]
+fn parse_accepts_screaming_snake_and_refuses_every_other_shape() {
+    assert!(Reason::parse("ALREADY_CLOSED").is_ok());
+    assert!(Reason::parse("A1_B2").is_ok());
+    // one leading capital then one-or-more capitals/digits/underscores
+    assert!(Reason::parse("AB").is_ok());
+    // rejects lower-case, the pre-0.2 convention
+    assert!(Reason::parse("already_closed").is_err());
+    // rejects a single character (the `+` demands at least two)
+    assert!(Reason::parse("A").is_err());
+    // rejects a leading digit, a leading underscore, punctuation and spaces
+    assert!(Reason::parse("1_BAD").is_err());
+    assert!(Reason::parse("_BAD").is_err());
+    assert!(Reason::parse("NOT-CLOSED").is_err());
+    assert!(Reason::parse("NOT CLOSED").is_err());
+    assert!(Reason::parse("").is_err());
+}
+
+#[test]
+fn a_reason_decoded_from_the_wire_is_rejected_unless_it_is_screaming_snake() {
+    // the shape a blocked gate carries; a lower-case code from an older peer is
+    // refused at the deserialization boundary rather than trusted.
+    let ok: Result<Gate, _> =
+        serde_json::from_value(serde_json::json!({ "allowed": false, "reason": "ALREADY_CLOSED" }));
+    assert!(ok.is_ok());
+    let bad: Result<Gate, _> =
+        serde_json::from_value(serde_json::json!({ "allowed": false, "reason": "already_closed" }));
+    assert!(bad.is_err());
 }

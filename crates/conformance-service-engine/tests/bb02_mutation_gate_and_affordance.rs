@@ -66,7 +66,7 @@ async fn bb02_the_mutation_gate_refuses_exactly_what_the_affordance_forbids() {
         .await;
     assert_eq!(
         error_code(&refused),
-        "board_not_active",
+        "BOARD_NOT_ACTIVE",
         "the mutation the affordance forbids is refused by the same gate, with a typed code"
     );
 

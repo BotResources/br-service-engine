@@ -82,8 +82,13 @@ impl<P: Principal, Pr: Presence> Projector for PresenceProjector<P, Pr> {
         Box::pin(async move { Ok(self.store.get_many(scope.keys())) })
     }
 
-    fn project(&self, facts: &Self::Facts, key: &Self::Key, _principal: &P) -> Option<Self::View> {
-        facts.get(key).map(|value| Pr::view(key, value))
+    fn project(
+        &self,
+        facts: &Self::Facts,
+        key: &Self::Key,
+        _principal: &P,
+    ) -> Result<Option<Self::View>, EngineError> {
+        Ok(facts.get(key).map(|value| Pr::view(key, value)))
     }
 
     fn cohort(&self, _principal: &P) -> CohortKey {

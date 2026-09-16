@@ -217,8 +217,13 @@ impl Projector for Ghosts {
         Box::pin(async move { Ok(()) })
     }
 
-    fn project(&self, _facts: &(), _key: &UnencodableKey, _principal: &Viewer) -> Option<()> {
-        None
+    fn project(
+        &self,
+        _facts: &(),
+        _key: &UnencodableKey,
+        _principal: &Viewer,
+    ) -> Result<Option<()>, EngineError> {
+        Ok(None)
     }
 
     fn cohort(&self, principal: &Viewer) -> CohortKey {

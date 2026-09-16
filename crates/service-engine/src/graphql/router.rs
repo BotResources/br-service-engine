@@ -6,9 +6,11 @@ use async_graphql::{Data, ObjectType, Schema, SubscriptionType};
 use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse};
 use axum::Router;
 use axum::extract::{State, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{MethodRouter, get, post};
+use br_util_observability::{MetricsHandle, http_metrics_layer, liveness_route, metrics_route};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 
@@ -45,6 +47,37 @@ where
         .route("/graphql/ws", get(graphql_ws::<P, Q, M, S>))
         .route("/readyz", readiness_route(readiness))
         .with_state(AppState { schema, engine })
+}
+
+const SDL_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
+
+/// Mount the operational edge — `/livez` (always 200), `/metrics` (Prometheus text),
+/// `/sdl` (the composed schema) — beside a service's [`app`] router, and wrap the whole
+/// router in the HTTP metrics layer. These endpoints ride the trusted internal network
+/// and carry no auth: liveness must answer even when a dependency is down, and the SDL
+/// and metrics are non-secret operational reads.
+pub fn with_edge_observability(app: Router, sdl: String, metrics: MetricsHandle) -> Router {
+    app.route("/livez", liveness_route())
+        .route("/metrics", metrics_route(metrics))
+        .route("/sdl", sdl_route(sdl))
+        .layer(http_metrics_layer())
+}
+
+fn sdl_route<S>(sdl: String) -> MethodRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    get(move || {
+        let sdl = sdl.clone();
+        async move {
+            (
+                StatusCode::OK,
+                [(CONTENT_TYPE, HeaderValue::from_static(SDL_CONTENT_TYPE))],
+                sdl,
+            )
+                .into_response()
+        }
+    })
 }
 
 pub async fn serve(

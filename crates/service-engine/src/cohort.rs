@@ -25,6 +25,17 @@ impl CohortKey {
         Self(image.0.into())
     }
 
+    /// The lossless byte image of the key.
+    ///
+    /// A [`crate::persistence::CohortIndex`] store binds these bytes to answer
+    /// `keys_in_cohorts`: it stores each row's cohort keys as a column (or an
+    /// index row) and matches the caller's membership keys with a single
+    /// `WHERE cohort_key = ANY(...)`. The image embeds every part verbatim, so
+    /// two distinct cohorts never collide (see the crate's injectivity caveat).
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
     #[cfg(test)]
     pub(crate) fn image(&self) -> &[u8] {
         &self.0

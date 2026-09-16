@@ -3,6 +3,7 @@ pub mod blob;
 pub mod blob_view;
 pub mod counter;
 pub mod cron;
+pub mod declarative;
 pub mod engine;
 pub mod engine_persistence;
 pub mod engine_pipeline;
@@ -81,6 +82,10 @@ pub use counter::{
     OpenCrud, OpenFull, OpenSoft, SoftCounter, bump_full_coords, erase_author, open_crud,
     open_full, open_soft, replay_from_scratch,
 };
+pub use declarative::{
+    DECLARATIVE_MIRROR, DeclKey, declarative_mirror, known_group_name as declarative_group_name,
+    known_user_email as declarative_user_email,
+};
 
 pub use cron::{
     FailingCronJob, SampleCronJob, claimed_slots, completed_slots, cron_pods, cron_runs,
@@ -105,7 +110,7 @@ pub use engine::{
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 pub use engine_pipeline::{
     boot_blob_engine, boot_offer_engine, boot_offer_engine_leased, boot_offer_engine_reconciling,
-    boot_panic_engine, boot_pipeline_engine,
+    boot_panic_engine, boot_pipeline_engine, boot_policy_engine, boot_unhonoured_seam_engine,
 };
 
 pub use assignment::{
@@ -124,7 +129,8 @@ pub use offer::{
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use paged::{
-    AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
+    AssignmentPage, CohortAssignments, CohortIndexedAssignments, PagedAssignments,
+    PerImpactAssignments, ThresholdAssignments,
 };
 pub use pipeline::{
     CloseWidget, CreateWidget, DeleteWidget, DetonateWidget, ImportWidgets, LockWidget, MintSecret,

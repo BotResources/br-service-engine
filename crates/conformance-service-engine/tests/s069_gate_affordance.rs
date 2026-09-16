@@ -79,9 +79,9 @@ fn s069_a_blocked_affordance_and_the_rejected_mutation_carry_the_same_reason_cod
 
     assert_eq!(
         shown.reason().expect("the shown gate is blocked").code(),
-        "already_closed"
+        "ALREADY_CLOSED"
     );
-    assert_eq!(refused.code(), "already_closed");
+    assert_eq!(refused.code(), "ALREADY_CLOSED");
     assert_eq!(shown.reason().map(|r| r.code()), Some(refused.code()));
 }
 
@@ -132,7 +132,7 @@ async fn s069_engine_an_affordance_flip_on_a_state_change_reaches_the_session_as
     assert!(!opened.affordances["reopen"].allowed);
     assert_eq!(
         opened.affordances["reopen"].reason.as_deref(),
-        Some("not_closed")
+        Some("NOT_CLOSED")
     );
 
     sqlx::query("UPDATE sample_assignment SET closed = true WHERE id = $1")
@@ -162,7 +162,7 @@ async fn s069_engine_an_affordance_flip_on_a_state_change_reaches_the_session_as
     );
     assert_eq!(
         flipped.affordances["close"].reason.as_deref(),
-        Some("already_closed"),
+        Some("ALREADY_CLOSED"),
         "the flipped affordance carries the same code the mutation would refuse with"
     );
     assert!(

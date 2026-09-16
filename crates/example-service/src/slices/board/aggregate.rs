@@ -10,9 +10,9 @@ use super::BoardMemberships;
 use super::BOARD_ARCHIVE;
 use crate::kernel::AppPrincipal;
 
-pub const NOT_ACTIVE: Reason = Reason::new("board_not_active");
-pub const MISSING_SCOPE: Reason = Reason::new("missing_archive_scope");
-pub const NOT_A_MEMBER: Reason = Reason::new("not_a_board_member");
+pub const NOT_ACTIVE: Reason = Reason::new("BOARD_NOT_ACTIVE");
+pub const MISSING_SCOPE: Reason = Reason::new("MISSING_ARCHIVE_SCOPE");
+pub const NOT_A_MEMBER: Reason = Reason::new("NOT_A_BOARD_MEMBER");
 
 pub struct Board;
 

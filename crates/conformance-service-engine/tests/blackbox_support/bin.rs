@@ -63,16 +63,28 @@ pub fn free_port() -> u16 {
 
 pub struct SpawnEnv {
     pub database_url: String,
+    pub owner_database_url: String,
+    pub app_role: String,
     pub nats_url: String,
     pub pod: String,
     pub port: u16,
     pub blobs: Option<BlobEnv>,
     pub session_bounds: Option<SessionBounds>,
+    pub mirror: Option<MirrorBounds>,
 }
 
 pub struct SessionBounds {
     pub ttl: Duration,
     pub max_age: Duration,
+}
+
+/// The lease and beat the spawned binary runs its leader elections and beat loop
+/// under. Production leaves both at the engine defaults (30 s lease, 1 s beat); a
+/// multi-pod failover scenario shortens them so a lease expires inside a test's
+/// bounded wait instead of after half a minute.
+pub struct MirrorBounds {
+    pub lease: Duration,
+    pub beat: Duration,
 }
 
 pub struct BlobEnv {
@@ -98,6 +110,8 @@ impl Spawned {
         let mut command = Command::new(example_service_bin());
         command
             .env("DATABASE_URL", &env.database_url)
+            .env("DATABASE_URL_OWNER", &env.owner_database_url)
+            .env("APP_ROLE", &env.app_role)
             .env("NATS_URL", &env.nats_url)
             .env("ENGINE_CHANNEL", "example")
             .env("POD_ID", &env.pod)
@@ -117,6 +131,11 @@ impl Spawned {
             command
                 .env("SESSION_TTL_MS", bounds.ttl.as_millis().to_string())
                 .env("SESSION_MAX_AGE_MS", bounds.max_age.as_millis().to_string());
+        }
+        if let Some(mirror) = &env.mirror {
+            command
+                .env("ENGINE_LEASE_MS", mirror.lease.as_millis().to_string())
+                .env("ENGINE_BEAT_MS", mirror.beat.as_millis().to_string());
         }
 
         let child = command.spawn().expect("spawn the example-service binary");
@@ -180,6 +199,14 @@ impl Spawned {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.log);
+    }
+
+    /// Kill this pod without consuming its handle — the way Kubernetes takes a pod
+    /// down under it during a rolling roll or a node loss. A later `shutdown` on the
+    /// same handle is a harmless no-op: the child is already reaped.
+    pub fn kill_now(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 

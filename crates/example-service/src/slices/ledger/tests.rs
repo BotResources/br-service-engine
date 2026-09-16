@@ -16,7 +16,7 @@ fn an_entry_that_would_drive_the_total_below_zero_is_refused() {
     let mut ledger = LedgerState::open(Uuid::now_v7(), Uuid::now_v7());
     ledger.record(5, Uuid::now_v7()).unwrap();
     let refused = ledger.record(-100, Uuid::now_v7()).expect_err("gated");
-    assert_eq!(refused.code(), "ledger_would_go_negative");
+    assert_eq!(refused.code(), "LEDGER_WOULD_GO_NEGATIVE");
     assert_eq!(ledger.total, 5);
 }
 

@@ -104,14 +104,16 @@ impl Projector for RlsAssignmentProjector {
         facts: &AssignmentFacts,
         key: &Uuid,
         _principal: &SamplePrincipal,
-    ) -> Option<AssignmentView> {
-        let row = facts.rows.get(key)?;
-        Some(AssignmentView {
+    ) -> Result<Option<AssignmentView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
+        Ok(Some(AssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             can_close: !row.closed,
-        })
+        }))
     }
 }
 

@@ -131,12 +131,12 @@ impl Projector for NoteProjector {
         facts: &NoteFacts,
         key: &NoteKey,
         _principal: &SamplePrincipal,
-    ) -> Option<NoteView> {
-        facts.bodies.get(key).map(|body| NoteView {
+    ) -> Result<Option<NoteView>, EngineError> {
+        Ok(facts.bodies.get(key).map(|body| NoteView {
             assignment_id: key.assignment_id,
             seq: key.seq,
             body: body.clone(),
-        })
+        }))
     }
 }
 

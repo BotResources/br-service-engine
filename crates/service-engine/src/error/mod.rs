@@ -60,11 +60,25 @@ pub enum EngineError {
     #[error("no projector is registered under {0}")]
     UnboundProjector(ProjectorName),
 
+    #[error(
+        "view {view} declares Unrestricted visibility with an empty reason; \
+         state why no cohort gate applies (open_access!)"
+    )]
+    EmptyAccessReason { view: ProjectorName },
+
     #[error("no principal resolver is registered, so a principal cannot be refreshed")]
     MissingPrincipalResolver,
 
     #[error("facts loaded for another projector were handed to {projector}")]
     FactsMismatch { projector: ProjectorName },
+
+    #[error("projector {projector} could not project key {key}")]
+    Projection {
+        projector: ProjectorName,
+        key: String,
+        #[source]
+        source: BoxedError,
+    },
 
     #[error(
         "the Query window on {projector} declares an empty Interest, so no impact can reach it"
@@ -95,6 +109,16 @@ pub enum EngineError {
 
     #[error("mirror name {name} is already registered, so its health board would be overwritten")]
     DuplicateMirrorName { name: MirrorName },
+
+    #[error(
+        "mirror {mirror} consumes prefix {prefix} as a raw serde_json::Value; a consumed value \
+         must be typed, or set Consumed::RAW_JSON_ESCAPE_HATCH when the producer's column is \
+         itself JSON"
+    )]
+    RawJsonConsumption {
+        mirror: MirrorName,
+        prefix: &'static str,
+    },
 
     #[error("chunk sequence {seq} is above {max}, the largest a bigint column stores faithfully")]
     ChunkSeqOutOfRange { seq: u64, max: u64 },
@@ -266,6 +290,25 @@ pub enum EngineError {
         "the composed schema exposes the graphql root field `{member}` that no slice fragment declared"
     )]
     UndeclaredSchemaMember { member: String },
+
+    #[error("a post-save policy refused the write with reason {code}")]
+    PolicyRefused { code: &'static str },
+
+    #[error(
+        "a slice declared aggregate `{aggregate}` subject to a post-save policy, but no slice \
+         registered one; the seam is unhonoured, so the write path it must guard would run \
+         unguarded"
+    )]
+    UnhonouredSeam { aggregate: &'static str },
+
+    #[error(
+        "the composed schema exposes the graphql object type `{ty}` that no slice fragment owns \
+         and the engine does not inject"
+    )]
+    UndeclaredSchemaType { ty: String },
+
+    #[error("the composed graphql schema could not be parsed for slice verification: {detail}")]
+    SchemaParse { detail: String },
 
     #[error(
         "no live session {session} on this pod, so its window cannot be paged; a page request \

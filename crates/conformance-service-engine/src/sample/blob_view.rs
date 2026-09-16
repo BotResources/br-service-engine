@@ -126,12 +126,14 @@ impl Projector for DocProjector {
         facts: &DocFacts,
         key: &Uuid,
         _principal: &SamplePrincipal,
-    ) -> Option<DocView> {
-        let row = facts.rows.get(key)?;
-        Some(DocView {
+    ) -> Result<Option<DocView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
+        Ok(Some(DocView {
             id: row.id,
             name: row.name.clone(),
             blob_ref: row.blob_ref,
-        })
+        }))
     }
 }

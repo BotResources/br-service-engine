@@ -30,6 +30,12 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine
         .register_mutation::<mutations::SetBoardMembership, _>(mutations::set_board_membership)?;
     engine.register_erasable(erase::BoardEraser)?;
-    engine.register_schema_slice(graphql::FRAGMENT)?;
+    engine.register_schema_slice(
+        service_engine::graphql::SliceFragment::derive::<
+            graphql::BoardQuery,
+            graphql::BoardMutation,
+            graphql::BoardSubscription,
+        >("board"),
+    )?;
     Ok(())
 }

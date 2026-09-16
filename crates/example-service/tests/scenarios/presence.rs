@@ -71,7 +71,7 @@ async fn set_typing_by_a_non_member_is_refused() {
         .await;
     assert_eq!(
         error_code(&refused),
-        "not_a_board_member",
+        "NOT_A_BOARD_MEMBER",
         "a person who is not a member of the board cannot signal typing on it"
     );
 

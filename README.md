@@ -16,7 +16,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.1.0", version = "0.1.0" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.2.0", version = "0.2.0" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -26,6 +26,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.2.0 | `v1.3.0` |
 | 0.1.0 | `v1.3.0` |
 
 ## Module map
@@ -38,13 +39,13 @@ battery-backed.
 
 | Module | Responsibility |
 |---|---|
-| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface |
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that does logging, the owner→migrate→grant→app-pool split, `/livez` + `/metrics` + `/sdl`, the `schema` subcommand, and serving |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `SELECT … FOR UPDATE` as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises); log-style events reach `save` via `Aggregate::pending_events` |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
-| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
+| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
@@ -56,7 +57,7 @@ battery-backed.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, per-slice SDL assembly checked against the composed schema at boot; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, `with_edge_observability` (mounts `/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud); each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -86,9 +87,10 @@ frontier itself refuses a frame with no `br-core-integration` envelope at
 `Incoming::identify` (terminal — one dead-letter row and a `Term`), so a reaction
 never runs on a frame that carries no sender at all. The `service_engine.dead_letter`
 table is the one table for every source of work: inbound reactions, scheduled
-messages, cron ticks, a persistently stuck mirror and an outbox row that keeps
-failing to publish against a reachable broker all record there
-(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox}`), each staging an
+messages, cron ticks, a persistently stuck mirror, an outbox row that keeps
+failing to publish against a reachable broker, and a render frame that hit a
+stored document a projector could not render all record there
+(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox, Render}`), each staging an
 ops-view impact and incrementing `service_engine_dead_letters_total` by source. A
 frame is terminated only once its dead-letter row is durably written: if that
 write fails (Postgres unreachable) the frame is nak'ed, not terminated, and the
@@ -161,6 +163,32 @@ with a single batched read of the same table `load` reads, so the author writes
 no render load SQL; a full-EDA store keeps the default `read_many` (a `load` per
 key) because the current state is the snapshot replayed forward, not a column
 read.
+
+`cx.load_many::<A>(&keys)` loads several aggregates of one noun in the one
+pipeline transaction, each locked for the transaction, so a handler can judge
+their invariants and commit their writes together with no partial visibility and
+**without a global advisory lock of its own**. The keys are deduplicated and then
+locked in ascending order of their encoded bytes before any row is read; because
+every transaction that touches an overlapping set takes the shared locks in that
+one order, two concurrent multi-aggregate writes cannot deadlock. That ascending
+`(store type, encoded key)` order is the engine's global aggregate-lock
+discipline: to hold aggregates of *different* nouns in one transaction, call
+`load`/`load_many` in that same order. Absent keys are omitted from the result,
+as for a batched read.
+
+After every `save`/`create`, inside the transaction and before the commit, the
+engine runs the **post-save policy** registered for that aggregate, if any
+(`register_post_save_policy::<A>`). The policy is pure domain logic over the
+aggregate the pipeline just saved (principle 18): it can stage impacts, commands
+and events, or `PostSave::refuse(reason)` the write — a refusal rolls the
+transaction back and answers the mutation with that `Reason` code (a refusing
+reaction is dead-lettered with it). It cannot save, so it cannot recurse. This is
+the engine's answer to cross-slice wiring that a slice was meant to call and
+never did: a slice declares its aggregate *subject* to a policy with
+`require_post_save_policy::<A>`, and boot fails with `EngineError::UnhonouredSeam`
+unless some slice registered one — the same registration gate the schema type
+check applies, so a missing interlock is a loud boot error instead of a silent
+absent call.
 
 Full EDA does not hand-roll that log. The `full_eda` kit owns it: a slice
 declares an `EventSourced` aggregate (its `NOUN`, `EVENT_VERSION`, the
@@ -246,10 +274,26 @@ scheduled commitment, so an extra reconcile after a takeover is harmless. The
 version
 lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
-`known_*` through the direct lane, joined by a `keyed_by` function and written
-with the `Projection` helpers (`replace_one`, `replace`, `remove`, over the
-`Known` / `KnownScope` traits) so the projector carries no SQL of its own; its
-projection is leader-gated: only the pod holding the mirror lease projects,
+`known_*` through the direct lane, joined by a `keyed_by` function. A consumed
+value is a typed `Consumed`, never raw JSON: a mirror that consumes
+`serde_json::Value` is refused at registration (`EngineError::RawJsonConsumption`)
+unless it sets `Consumed::RAW_JSON_ESCAPE_HATCH`, so the join always reads typed
+rows (a typed value may still hold a `serde_json::Value` field). A `known_*` row
+is written either declaratively — implement `KnownRow` (table, key columns, value
+columns) and the engine generates the upsert and the delete behind
+`Projection::upsert` / `Projection::retire`, the documented path with no SQL in
+the projector — or manually through `replace_one` / `replace` / `remove` over the
+`Known` / `KnownScope` traits, the escape hatch for a write that is not a plain
+single-key upsert. A producer that extends a shared type is consumed with
+`Extended<Core, Ext>`: the project names its own extension as the second type
+parameter and an unknown extension is denied at deserialization, never mirrored
+as opaque JSON. `Consumed::VERSION` and `manifest()` carry the offer's wire
+version, and `ConsumedManifest::accepts` is the pure verdict (`ManifestMismatch`)
+the engine *will* apply at scan and watch so a producer that reused a prefix for
+an incompatible version becomes a nameable dead letter rather than a silent
+mis-decode — the scan/watch enforcement that reads the producer manifest and
+dead-letters the key is not yet wired (it lands in the mirror runtime, reworked
+in parallel). The projection is leader-gated: only the pod holding the mirror lease projects,
 standby pods keep their shadows current and take over on lease loss. The mirror
 persists a per-bucket watermark — the consumed stream's creation identity and
 the last sequence `S` its read reached, committed with the projections in one
@@ -374,20 +418,30 @@ opaque JSON. The subscription is one typed union member per projector: the
 `subscription_union!` macro takes a service's `Projector => View` mapping once
 and emits the `Reset`/`Upsert`/`Remove` payloads over a typed view union (so a
 client subscribing to one projector's field receives only that member's deltas)
-with the contiguous revision and the causing event. Each slice declares its
-root fields and types as a `SliceFragment` and registers it with
-`Engine::register_schema_slice`; the engine assembles the registered fragments
-at the start of `run` (so through `run_with` too) and fails boot loud with
-`EngineError::DuplicateSchemaMember`, naming both slices, if two claim the same
-root field or GraphQL type — the pod never serves an ambiguous schema. The gate
-does not trust the declarations blindly: when the service feeds the composed
-schema's SDL with `Engine::set_schema_sdl(schema.sdl())` before `run`, the engine
-derives the actual root fields from the async-graphql schema and fails boot with
-`EngineError::UndeclaredSchemaMember` if the schema exposes a root field no slice
-declared, so an under-declared fragment cannot leave a real root field outside
-the collision gate. (Object *types* keep the declared gate only: the engine
-injects payload, union and scalar types no slice owns, so the schema's type set
-is not slice-only.) The axum layer resolves the principal from the
+with the contiguous revision and the causing event. Each capability builds a
+`SliceFragment` with `SliceFragment::derive::<Query, Mutation, Subscription>(slice)`
+— its root fields and owned object types are read from the capability's own
+`#[Object]`/`#[SimpleObject]` impls through async-graphql's type registry, never
+restated in a hand-maintained table — and registers it with
+`Engine::register_schema_slice`. A slice may register **several** capability
+fragments over one aggregate (a capability file per fragment, all naming the
+same aggregate); capabilities of one aggregate legitimately share its owned
+types, while two *different* aggregates claiming one type name is a collision.
+The engine assembles the registered fragments at the start of `run` (so through
+`run_with` too) and fails boot loud with `EngineError::DuplicateSchemaMember`,
+naming both aggregates, if two claim the same root field or object type — the pod
+never serves an ambiguous schema. The gate does not trust the fragments blindly:
+when the service feeds the composed schema's SDL with
+`Engine::set_schema_sdl(schema.sdl())` before `run`, the engine parses that SDL
+with the real GraphQL parser (so a block-string description that wraps onto a
+field-shaped line is never mistaken for a phantom root field) and fails boot with
+`EngineError::UndeclaredSchemaMember` for a root field, or
+`EngineError::UndeclaredSchemaType` for an object type, that the schema exposes
+but no fragment claims — the seam of a capability merged into the composed roots
+yet never registered. The engine's own injected object types (the mutation ack,
+the lane payloads) are themselves derived from the engine's wrapper types and
+allowed unclaimed, so the completeness gate is exactly "every non-engine object
+type is owned by a fragment". The axum layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
 kit does authZ only, never authN.
 
@@ -437,7 +491,10 @@ The authoring ergonomics follow the intent. A projector is
 written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
 names its `type Noun` and `type Store`, a typed `Query`, its `type Visibility`, and
 writes only a native `async fn populate(cx, q)` over a `Populate` context and
-`project(row, principal)`.
+`project(row, principal) -> Result<Out, EngineError>`. `project` is fallible: a
+stored row it cannot render (a nested blob that will not deserialize) returns
+`Err`, and the engine dead-letters that poison with the projector as source and
+repairs, then ends, the faulted sessions rather than panicking the pod.
 No hand-written future plumbing and no render load SQL live in the view: the engine
 loads the noun's rows through the store's `Persistence::read_many` and owns the
 `Facts` type, the `LoadScope::{Bulk, PerPrincipal}` match and the derived
@@ -453,11 +510,36 @@ that leaves the principal's cohorts is delivered as a `Remove` and one that ente
 as an `Upsert`. When a principal's own facts change (a membership granted or
 revoked, staged with `Ops::impact_principal_facts`), the engine re-resolves the
 principal and repopulates every window shape — a `Population::Keys` window
-included — so both directions reach a live session then and there. A projector
-that filters through Postgres RLS instead of cohorts, or one that is open to every
-viewer, declares `type Visibility = Unrestricted<Row, Principal>`, a conscious
-"no cohort gate here" that keeps the render-time gate off rather than defaulting
-it open. Whether a projector renders under RLS is the **projector's** declaration,
+included — so both directions reach a live session then and there.
+
+The **window shape is derived from the declaration**, not hand-picked per
+`populate`: `Visibility::LIVE` (the read-side default) makes a cohort view a
+live surface, so `view::windowed` and `view::cohort_window` return a
+`Population::Query` carrying an `Interest` on the view's noun and
+`Visibility::DEPS` — a newly created in-cohort row then reaches an open session
+(a `Keys`/`Fixed` window would never deliver it, since a fresh key is not yet a
+member) and a membership change repopulates the window. `LIVE = false` is the
+explicit override for a closed `Keys` snapshot; returning a `Population` from
+`populate` directly bypasses inference. A cohort view reads **only the caller's
+rows** through the store's `CohortIndex` seam
+(`keys_in_cohorts(conn, &memberships)`) — one indexed query on the cohort
+column, never a table scan filtered in memory. The rule the seam enforces: a
+**cohort key must be a stored column on the row** (an `org_id`, an `is_public`,
+or a `(row, cohort_key)` index row written on save); a cohort that would need a
+per-row lookup is not a cohort.
+
+A projector that filters through Postgres RLS instead of cohorts, or one that is
+open to every viewer, declares `type Visibility = Unrestricted<Row, Principal,
+Why>` — where `Why` is an `AccessReason` marker (declare it with the
+`open_access!` macro) stating why no cohort gate applies. The reason is surfaced
+through `Visibility::OPEN_ACCESS_REASON` and **refused non-empty at
+registration** (`EngineError::EmptyAccessReason`) — the guard sits in
+`register_projector`, the sink every path funnels through (via the
+`projector::Projector::open_access_reason` method that `ViewProjector`
+overrides), so a hand-built `ViewProjector` handed to `register_projector`
+directly is checked exactly like a view registered through `register_view`. So
+opting out of the cohort gate is a deliberate, reviewable statement rather than
+a silent default. Whether a projector renders under RLS is the **projector's** declaration,
 not the call's: `view::Projector` carries `const RLS` (the raw
 `projector::Projector` overrides `renders_under_rls`), and the engine reads it on
 every path — the snapshot, the render pass, the repair and `Query::fetch*`. So a
@@ -499,7 +581,11 @@ global default. `fn emission(&Impact) -> Emission` lets a projector ask for
 default `Coalesced`; a `PerImpact` projector never faults on a **causeless**
 impact (a principal-facts change, a foreign change, a scheduled impact) — those
 fold coalesced, because only an impact that carries a cause can be delivered per
-impact. A `Cause` that does not fit one 8000-byte notification fails the **write**
+impact. A `Coalesced` delta also carries a `cause`: the fold keeps the cause of
+the **last** impact it folds (the one latest in the frame that carries one),
+so a coalesced view attributes its delta to the most recent causing fact —
+causeless impacts in the fold contribute none, and a fold with no cause at all
+carries `None`. A `Cause` that does not fit one 8000-byte notification fails the **write**
 transaction fail-closed (`TransportError`): the write is refused rather than the
 cause silently dropped, so a service that attaches a large payload as a cause
 learns at the mutation, not by a viewer missing it — keep a cause to a small fact
@@ -634,10 +720,19 @@ bootable reference service built only on this crate's public authoring surface �
 no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
 `kernel/` (the principal and its generic fact bag, the error base — and no scope
 registry, since scopes belong to the slices), one folder per slice under `slices/`
-(each owning its aggregate, store, view, handlers, offer/mirror and SDL
-fragment + its committed `schema.graphql`), a `slices/mod.rs` that lists the
+(each owning its aggregate, store, view, handlers, offer/mirror and its GraphQL
+capability fragments + its committed `schema.graphql`; a slice over one aggregate
+may split its surface into several capability files — the example `card` slice
+splits into `graphql/item.rs` and `graphql/board.rs`, each a fragment), a
+`slices/mod.rs` that lists the
 slices once through the `compose_service!` macro, a `register.rs` and a
-`graphql.rs` that are slice-agnostic, and a `src/bin/service.rs` that boots.
+`graphql.rs` that are slice-agnostic, and a `src/bin/service.rs` whose `main`
+builds `EngineConfig` from the environment and hands it, the composed roots, the
+service migrator and `register::all` to the engine boot kit `run_service(BootPlan { .. })`
+— the one call that installs JSON logging, runs the owner→migrate→grant→app-pool
+sequence, mounts `/livez` + `/metrics` + `/sdl`, answers the `schema` subcommand,
+and serves. `main` holds no infra wiring of its own; it is the reference for how a
+service boots.
 `compose_service!` takes each slice's module, cargo feature and root objects on
 **one line** and generates, for the whole set, the `pub mod` declarations, the
 `QueryRoot`/`MutationRoot`/`SubscriptionRoot` merged objects and the `register`
@@ -708,7 +803,18 @@ whichever mode it lives:
   replay the chunks, verify the hash, commit the record and deliver it, read back
   over GraphQL (`bb05`); and the `graphql-transport-ws` socket is closed by the
   binary at `session_max_age` measured from the handshake, so a client that holds
-  it open must reconnect with a fresh passport (`bb06`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  it open must reconnect with a fresh passport (`bb06`); and `main`'s one call to
+  the boot kit installs logging, the owner→migrate→grant→app-pool sequence, and the
+  `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`). A **multi-pod set**
+  boots two instances of the binary against one Postgres and one NATS and proves the
+  fleet behaviour §F called untested: a mutation committed on pod A produces the
+  delta on a session attached to pod B (`bb08`), a client mid-session survives its
+  pod being rolled and reconnects to another for a fresh `Reset` from committed state
+  (`bb09`), an outbox row staged on one pod is published exactly once though both pods
+  run the relay (`bb10`), and the mirror leader projects while a standby converges to
+  readiness from the KV bucket and then takes over the expired lease to project a
+  change published after the leader died (`bb11`, which shortens the lease and beat
+  through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
   and built on demand otherwise, so the mode is self-sufficient locally. `bb05`
   drives the real lane-A ingress: the `example-twin` binary streams the reply's
@@ -735,7 +841,12 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb03_subscription_reset_and_reconnect \
     --test bb04_cross_service_cycle_twin_binary \
     --test bb05_seal_streamed_reply \
-    --test bb06_session_max_age_closes_the_socket
+    --test bb06_session_max_age_closes_the_socket \
+    --test bb07_boot_kit \
+    --test bb08_reconcile_relay_cross_pod \
+    --test bb09_rolling_roll_reconnect \
+    --test bb10_outbox_published_once_across_pods \
+    --test bb11_mirror_leader_standby_failover
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -852,10 +963,28 @@ exposes the raw signal to a service or a test; `graphql::lane_notice_stream` and
 the union's generated `subscribe(deltas, notices)` merge it into a subscription
 (the reference `replyDeltas` / `typingDeltas` do this).
 
-Every engine metric is exported on the shared observability endpoint labelled
-by `service` and `pod`; each dependency of the degrade table is a
-`service_engine_dependency_up` gauge, so a not-UP state is visible before
-readiness moves. `service_engine_impacts_committed_total` is the notify-budget
+The boot kit (`run_service` / `BootPlan`) installs the observability the whole
+platform shares, so a service `main` never re-adds it by hand. It reuses the
+`br-rust-common` crates the engine pins (`br-util-observability`,
+`br-util-postgres`): `init_logging` for a structured JSON tracing subscriber
+(level from `RUST_LOG`), `init_metrics` for the process-global Prometheus
+recorder, and `br-util-postgres` for the owner/app pool split. Beside the
+engine's own `/readyz` (from `crate::readiness`, not `br-util-axum-readiness`),
+`with_edge_observability` mounts `/livez` (always 200, never gated on a
+dependency), `/metrics` (Prometheus text — every engine metric already emits
+against the global recorder, so it is exported here without extra wiring), and
+`/sdl` (the composed schema as `text/plain`); the whole router carries the HTTP
+metrics layer. The `schema` argv subcommand prints that same SDL and exits
+without touching Postgres or NATS, so a build step can extract the schema from
+the binary alone. The database follows the engine's posture rule (the runtime
+role must not own its schema): the kit runs the engine and service migration
+sets, then grants the app role, under the **owner** role named by
+`DATABASE_URL_OWNER` before it ever connects the RLS-subject **app** pool named
+by `DATABASE_URL` (the app role is named by `APP_ROLE`); role and database
+provisioning stay in GitOps. Every engine metric is exported labelled
+by `service` and `pod` (with the boot kit's `component` global label); each
+dependency of the degrade table is a `service_engine_dependency_up` gauge, so a
+not-UP state is visible before readiness moves. `service_engine_impacts_committed_total` is the notify-budget
 counter watched at the Postgres-cluster level; it counts impacts of committed
 transactions only, recorded after the commit, never a rolled-back mutation. The
 five shipped alerts are in

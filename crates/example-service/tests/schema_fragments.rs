@@ -37,9 +37,13 @@ fn card_slice_sdl_matches_its_committed_fragment() {
     use example_service::slices::card::graphql::{CardMutation, CardQuery, CardSubscription};
     check(
         "card",
-        Schema::build(CardQuery, CardMutation, CardSubscription)
-            .finish()
-            .sdl(),
+        Schema::build(
+            CardQuery::default(),
+            CardMutation::default(),
+            CardSubscription::default(),
+        )
+        .finish()
+        .sdl(),
     );
 }
 

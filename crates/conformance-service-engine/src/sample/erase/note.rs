@@ -217,11 +217,11 @@ impl Projector for EraseNoteProjector {
         facts: &Self::Facts,
         key: &Uuid,
         _principal: &SamplePrincipal,
-    ) -> Option<EraseNoteView> {
-        facts.get(key).map(|body| EraseNoteView {
+    ) -> Result<Option<EraseNoteView>, EngineError> {
+        Ok(facts.get(key).map(|body| EraseNoteView {
             id: *key,
             body: body.clone(),
-        })
+        }))
     }
 }
 

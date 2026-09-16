@@ -19,7 +19,7 @@ use crate::sample::principal::SamplePrincipal;
 pub mod reasons {
     use service_engine::gate::Reason;
 
-    pub const ALREADY_CLOSED: Reason = Reason::new("already_closed");
+    pub const ALREADY_CLOSED: Reason = Reason::new("ALREADY_CLOSED");
 }
 
 pub struct Widget;
@@ -256,13 +256,15 @@ impl Projector for WidgetProjector {
         facts: &WidgetFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<WidgetView> {
-        let row = facts.rows.get(key)?;
-        Some(WidgetView {
+    ) -> Result<Option<WidgetView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
+        Ok(Some(WidgetView {
             id: row.id,
             label: row.label.clone(),
             closed: row.closed,
             affordances: row.affordances(principal),
-        })
+        }))
     }
 }

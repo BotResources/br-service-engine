@@ -2,11 +2,27 @@ use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use service_engine::error::EngineError;
 use service_engine::gate::Reason;
-use service_engine::pipeline::{Bulk, Mutation, MutationFault, MutationInput, OneShot};
+use service_engine::pipeline::{
+    Bulk, Mutation, MutationFault, MutationInput, OneShot, PostSave, Refused,
+};
 use uuid::Uuid;
 
 use crate::sample::principal::SamplePrincipal;
 use crate::sample::widget::{Widget, WidgetProjector, WidgetRow};
+
+/// A post-save policy reason: a widget whose label starts with `BREACH` is
+/// refused. It stands in for the Services breach interlock — a pure check over
+/// the aggregate the pipeline just saved, enforced by the engine after every
+/// save with no per-handler call site.
+pub const BREACH_LABEL: Reason = Reason::new("BREACH_LABEL");
+
+pub fn refuse_breach_label(widget: &WidgetRow, ps: &mut PostSave<'_, '_>) -> Result<(), Refused> {
+    if widget.label.starts_with("BREACH") {
+        Err(ps.refuse(BREACH_LABEL))
+    } else {
+        Ok(())
+    }
+}
 
 pub use crate::sample::pipeline_support::{
     insert_widget, publish_command, publish_raw, wait_for_widget, widget_count, widget_label,
@@ -228,6 +244,44 @@ pub fn schedule_create<'m>(
                 label: input.label,
             },
         )?;
+        Ok(())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RelabelBoth {
+    pub first: Uuid,
+    pub second: Uuid,
+    pub label: String,
+}
+
+impl MutationInput for RelabelBoth {
+    type Output = ();
+    type Error = SampleFault;
+    const NAME: &'static str = "relabel_both";
+}
+
+/// Relabel two widgets in one transaction through a single `load_many`: both
+/// are locked in the engine's deterministic order, mutated, and saved together,
+/// so no global advisory lock is needed and the write is atomic.
+pub fn relabel_both<'m>(
+    cx: &'m mut Mutation<'m, SamplePrincipal>,
+    input: RelabelBoth,
+) -> BoxFuture<'m, Result<(), SampleFault>> {
+    Box::pin(async move {
+        let mut widgets = cx
+            .load_many::<WidgetRow>(&[input.first, input.second])
+            .await?;
+        if widgets.len() != 2 {
+            return Err(SampleFault::NotFound);
+        }
+        for widget in widgets.iter_mut() {
+            widget.label = input.label.clone();
+        }
+        for widget in &widgets {
+            cx.save(widget).await?;
+            cx.impact_caused::<Widget, _>(&widget.id, "relabelled")?;
+        }
         Ok(())
     })
 }

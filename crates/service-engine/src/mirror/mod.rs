@@ -1,17 +1,21 @@
 mod builder;
 mod change;
 mod consumed;
+mod extension;
 mod handle;
+mod known;
 mod leader;
 mod projection;
 mod runtime;
 mod shadow;
 mod watermark;
 
-pub use builder::{Mirror, MirrorKeyed, MirrorReady};
+pub use builder::{ConsumedGuard, Mirror, MirrorKeyed, MirrorReady};
 pub use change::{Change, ChangeOp};
-pub use consumed::Consumed;
+pub use consumed::{Consumed, ConsumedManifest, ManifestMismatch, is_raw_json};
+pub use extension::Extended;
 pub use handle::{MirrorHandle, MirrorRun};
+pub use known::{Bind, Column, KnownRow, col};
 pub use leader::MirrorLeader;
 pub use projection::{Known, KnownScope, Project, Projection};
 pub use shadow::{Shadow, Shadows};

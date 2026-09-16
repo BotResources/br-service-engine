@@ -77,6 +77,9 @@ impl<P: Principal> Engine<P> {
         &mut self,
         view: V,
     ) -> Result<(), EngineError> {
+        // The empty-reason guard lives in `register_projector` (the common
+        // sink), so it fires whether a view arrives here or through a
+        // hand-built `ViewProjector` passed to `register_projector` directly.
         self.register_projector(crate::view::ViewProjector::new(view))
     }
 
@@ -100,6 +103,7 @@ impl<P: Principal> Engine<P> {
         K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
         Pr: Project<K>,
     {
+        mirror.validate()?;
         let handle = mirror
             .with_reconcile_deadline(self.config.mirror_reconcile)
             .build_led(
@@ -156,6 +160,37 @@ impl<P: Principal> Engine<P> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .subscriptions()
+    }
+
+    /// Register the post-save policy for aggregate `A`: the engine runs it after
+    /// every `save`/`create` of `A`, inside the transaction, before the commit.
+    /// The policy observes the saved aggregate and either refuses the write
+    /// through [`crate::pipeline::PostSave::refuse`] or stages impacts, commands
+    /// and events. This honours a subjection a slice declared with
+    /// [`Engine::require_post_save_policy`]; there is no per-handler call site to
+    /// add, so none to forget.
+    pub fn register_post_save_policy<A, F>(&mut self, policy: F) -> Result<(), EngineError>
+    where
+        A: crate::persistence::Aggregate,
+        F: Fn(&A, &mut crate::pipeline::PostSave<'_, '_>) -> Result<(), crate::pipeline::Refused>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.post_save.register::<A, F>(policy)
+    }
+
+    /// Declare that aggregate `A` is subject to a post-save policy. Boot fails
+    /// with [`EngineError::UnhonouredSeam`] unless some slice registered one with
+    /// [`Engine::register_post_save_policy`]. A slice that owns an aggregate a
+    /// later slice must guard uses this to make the missing guard a boot error
+    /// rather than a silent gap.
+    pub fn require_post_save_policy<A>(&mut self) -> Result<(), EngineError>
+    where
+        A: crate::persistence::Aggregate,
+    {
+        self.post_save_seams.require::<A>();
+        Ok(())
     }
 
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {

@@ -5,71 +5,357 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
-## Unreleased
+## 0.2.0 - 2026-09-16
 
-### Added
+This release answers `ws-cc-platform#126`. The `services`-rewrite experiment and
+the Runners adoption proved the engine composes across independently-authored
+slices but leaks at the seams: every serious defect was cross-slice wiring a
+slice was meant to call and never did. 0.2 makes those seams **declarative** —
+a missing interlock is now a loud boot error, not silent nothing — closes the
+contained render/parse/observability bugs, reworks the mirror so that empty is a
+converged state, and proves the multi-pod fleet behaviour that was untested. The
+entry is organised by the issue's items; every public API change is listed with
+its one-line fix under **Adopter migration** at the end.
 
-- `Reaction::message_id()` exposes the stable inbound message identity to handlers,
-  enabling domain deduplication that outlives the engine's delivery-claim retention.
-- Mirrors persist a per-bucket **stream identity** beside the watermark and commit
-  both with the projections in one transaction. The boundary is the last sequence
-  the read captured, taken from fresh `get_info()` metadata before the first scan;
-  every scanned entry is applied, the watch resumes at `S + 1`, and a genuinely
-  zero boundary rescans before it opens a future-only `watch_all()`. A standby
+### A1. `Emission::Coalesced` no longer drops the delta cause
+
+The coalesced branch of the render plan hard-coded `cause: None`, so a coalesced
+view's subscribers received `Upsert`/`Remove` deltas with no causal attribution
+even when the impact carried a `FactRef`. A coalesced delta now carries the cause
+of the **last** impact it folds (the latest in the frame that carries one);
+causeless impacts contribute none, and a fold with no cause at all stays `None`.
+This makes coalesced-with-cause — one delta per key carrying the causing fact —
+expressible, which `PerImpact` could not stand in for. Bug fix only, no API
+change.
+
+### A2. The boot gate parses the composed SDL with the real GraphQL parser
+
+`SchemaSlices` verification walked the SDL line-by-line and was blind to `"""`
+block strings, so a root-field description that wrapped onto a line beginning
+`word (` or `word:` was read as a phantom root field and aborted boot with
+`EngineError::UndeclaredSchemaMember`. The gate now parses the composed SDL with
+the real GraphQL parser, so a wrapped doc-comment can no longer abort boot.
+`SchemaSlices::verify_root_fields(sdl)` is renamed `SchemaSlices::verify(sdl)`.
+New `EngineError::SchemaParse` is raised if the composed SDL cannot be parsed
+during the gate.
+
+### H0. Mirror rework — empty is a converged state
+
+Per the amended doctrine (`docs/service-engine/intent.md`): a consumed prefix
+that reads empty is a **converged** prefix with nothing in it — `known_*` follows
+the source to empty, at boot or during a run — and a replaced bucket is
+first-adoption, never a readiness failure and never an operator SQL. This
+withdraws the 0.1.0 rule that an empty consumed prefix held readiness DOWN, which
+made the first deploy of every consumer fail (every producer's bucket is empty
+until it publishes). A mirror no longer judges the producer's content, no longer
+validates the producer's bucket history (`max_messages_per_subject`), and drops
+the `ALLOW_EMPTY` flag, the required marker, the stream-identity equality gate
+and the history check.
+
+- **Per-bucket stream identity + boundary watermark.** A mirror persists the
+  consumed stream's creation identity and the last sequence `S` its read reached
+  beside the watermark, committing both with the projections in one transaction.
+  The boundary is taken from fresh `get_info()` metadata before the first scan;
+  every scanned entry is applied and the watch resumes at `S + 1`. A standby
   reports converged once the leader has committed the boundary the standby's own
   boot read captured, with no broker round-trip per beat. Migration
   `9113000023_mirror_stream_identity.sql` adds the nullable column; existing
   watermark rows keep their revision and adopt an identity on their next read.
-
-### Changed
-
-- **A mirror no longer judges the producer's content.** Converged means the bucket
-  is bound and one full read completed with the watch attached at the revision that
-  read reached — nothing more. A consumed prefix that reads empty is a converged
-  prefix with nothing in it: `known_*` follows the source and is projected to
-  empty, at boot or during a run. Only a read that fails or does not complete
-  projects nothing. This withdraws the 0.1.0 rule that an empty consumed prefix
-  holds readiness DOWN, which made the first deploy of every consumer fail, since
-  every producer's bucket is empty until it publishes.
-- A consumed bucket whose stream identity changed, or whose sequence is below the
-  held watermark, is the **first-adoption** case: full read, reconcile, adopt the
-  new identity and boundary. It never holds readiness DOWN and never asks an
-  operator to run SQL. The engine also no longer validates the producer's bucket
-  history (`max_messages_per_subject`); it keeps the latest value per key whatever
-  the bucket retains.
+- A bucket whose stream identity changed, or whose sequence is below the held
+  watermark, is the first-adoption case: full read, reconcile, adopt the new
+  identity and boundary. It never holds readiness DOWN.
 - Reconciling the persisted projection keys against the snapshot is now the one
-  behaviour of every scan, with no opt-in. On a watch event the engine keys the
+  behaviour of every scan, with no opt-in; on a watch event the engine keys the
   change against the shadows both before and after it is applied, so a retract
   whose projection key lived only in the retracted payload still reaches `known_*`.
-
-### Fixed
-
-- No NATS round-trip inside the mirror's leader transaction, and no `STREAM.INFO`
-  per beat while a standby waits: a slow broker no longer pins the advisory lock
-  and the `leader_slot` row, nor polls the broker once per beat per bucket.
-- `/readyz` names the mirror and its own failure after the fixed operator copy,
-  read from one sample of the health board rather than two.
-- A mirror resuming a bucket from sequence zero no longer owns a window it cannot
-  see: the watch it opens there is future-only, so the engine re-reads the
-  bucket's metadata after the subscription exists and reconciles when the bucket
-  gained a sequence. Zero is the boundary of every consumer's first boot, so a
-  producer's first key reached `known_*` only at the next periodic reconcile.
+- No NATS round-trip inside the leader transaction, and no `STREAM.INFO` per beat
+  while a standby waits: a slow broker no longer pins the advisory lock and the
+  `leader_slot` row.
+- A mirror resuming a bucket from sequence zero opens a future-only watch, then
+  re-reads the bucket's metadata after the subscription exists and reconciles if
+  the bucket gained a sequence — closing the window on the boot where every
+  consumer's bucket is still empty.
 - A standby no longer stalls a rolling upgrade on a leader watermark that carries
-  no identity: a row written before the identity column is compared by its
-  sequence alone — the semantics it was written with — and takes an identity when
-  this pod holds the lease.
-- A leader holding a stream identity the standby never read is an adoption, not an
-  `EngineError::Config`: the standby re-reads once and waits, instead of failing
-  into the supervisor's restart counter, backoff, `Restarting` on `/readyz` and
-  dead letter.
+  no identity (a pre-column row is compared by sequence alone and takes an
+  identity when this pod holds the lease), and a leader holding an identity the
+  standby never read is an adoption (re-read once and wait), not an
+  `EngineError::Config` that would count against the supervisor's restart budget.
 - A single mirror watch that ends is logged and reopens the watches, instead of
-  being dropped silently by `select_all` and leaving that bucket unwatched until
-  the next periodic reconcile.
+  being dropped silently by `select_all` and leaving that bucket unwatched.
 - A shadow keeps the revision it holds and refuses an older one, so the overlap
   between the scan and the watch can never write a stale value over a newer one.
-  The new `Shadows::put_at`/`remove_at` carry that revision guard (`put`/`remove`
-  keep their 0.1.0 unconditional signatures for compatibility), and
-  `KvBucket::entries_with_revisions` reads the revision per key.
+  New `Shadows::put_at`/`remove_at` carry the revision guard (`put`/`remove` keep
+  their 0.1.0 unconditional signatures); `KvBucket::entries_with_revisions` reads
+  the revision per key.
+- `/readyz` names the mirror and its own failure after the fixed operator copy,
+  read from one sample of the health board rather than two.
+
+### H1. Boot kit — one call from `main` (subsumes A3)
+
+`run_service(BootPlan { .. })` (re-exported at the crate root) is the one call
+from a service `main`. It installs structured JSON logging
+(`br-util-observability::init_logging`), short-circuits a `schema` argv
+subcommand by printing the composed SDL and exiting without touching infra, runs
+the engine and service migration sets and grants the app role under the **owner**
+role (`DATABASE_URL_OWNER`) before connecting the RLS-subject **app** pool
+(`DATABASE_URL`, role `APP_ROLE`) via `br-util-postgres`, installs the
+process-global Prometheus recorder (`init_metrics`), boots the engine and serves.
+`BootPlan` carries `component`, `app_role`, the service `Migrator`,
+`EngineConfig`, `nats_url`, the three GraphQL roots, `declare_scopes` and a
+`register` closure.
+
+- `graphql::with_edge_observability(app, sdl, metrics)` (crate root) mounts
+  `/livez` (always 200), `/metrics` (Prometheus text of the engine's metric set)
+  and `/sdl` (the composed schema as `text/plain`) beside a service's `app`
+  router, and wraps the whole router in the HTTP metrics layer. This closes
+  engine defect A3: a deployed pod previously mounted only `/graphql`,
+  `/graphql/ws` and `/readyz` and installed no tracing subscriber, so it emitted
+  no logs and exposed no `/livez` or `/metrics`.
+- The engine gains `br-util-observability` and `br-util-postgres` dependencies
+  (both at the pinned `br-rust-common` `v1.3.0`).
+- `example_service::db::migrator()` is now public: the reference service hands
+  its migration set to the boot kit rather than running it itself.
+
+### H2. Fallible `Projector::project`
+
+`view::Projector::project` and the low-level `projector::Projector::project` now
+return `Result<_, EngineError>` (`Result<Out, _>` and `Result<Option<View>, _>`
+respectively). A projector that hits a stored document it cannot render — a
+nested blob that will not deserialize, a value the view type cannot represent —
+returns `Err` instead of panicking. The render pass dead-letters that poison and
+takes the existing repair-then-end-session path for the faulted sessions, so one
+malformed row no longer takes the pod down.
+
+- `EngineError::Projection { projector, key, source }` reports the projector and
+  key that faulted; the erased projector wraps the implementor's error into it.
+- `DeadLetterSource::Render` (`"render"`) and `DeadLetters::record_render` land a
+  render-frame projection failure in `service_engine.dead_letter` with the
+  projector as the row's reaction and the failing key as its subject, deduped by
+  a name-based (UUIDv5) message id so a repeatedly failing key folds into one row.
+- `SessionRuntime::set_dead_letters` installs the store the render pass records
+  poison into; the engine wires the transport-backed store at boot.
+
+### H3. Capability fragments over one aggregate
+
+`SliceFragment::derive::<Query, Mutation, Subscription>(slice)` reads a
+capability's root fields and owned object types from its `#[Object]` /
+`#[SimpleObject]` impls (through async-graphql's type registry), replacing the
+hand-maintained `root_fields` / `types` tables a single-aggregate service used to
+carry. **A slice may register several capability fragments over one aggregate** —
+one `#[Object]` per capability file, all naming the same aggregate; capabilities
+of one aggregate share its owned types, while two *different* aggregates claiming
+one type name is a collision. The example `card` slice demonstrates this, split
+into `graphql/item.rs` and `graphql/board.rs`.
+
+- `SliceFragment` is now a derived, owned value: its fields are private, it is no
+  longer `Copy`, and `SliceFragment::new(slice, &[..], &[..])` is gone.
+  `SliceFragment::from_claims(slice, root_fields, owned_types)` is the explicit
+  primitive `derive` is built on, for a synthetic fragment whose claims cannot be
+  read from a schema.
+- The composed-schema boot gate now gates **object types**, not only root fields:
+  `EngineError::UndeclaredSchemaType` fails boot when the composed SDL exposes an
+  object type that no fragment owns and the engine does not inject. The
+  engine-injected object types (mutation ack, lane payloads) are derived from the
+  engine's own wrappers and allowed unclaimed.
+- `SchemaSlices::add` takes `&SliceFragment` (the fragment is no longer `Copy`).
+  Services on the standard boot path (`Engine::run` / `run_with`) need no change;
+  the engine calls verification internally.
+
+### H4. Typed consumption — the law and the kit
+
+- **Raw `serde_json::Value` is refused.** A mirror that consumes the bare
+  `serde_json::Value` is rejected at `register_mirror` with the new
+  `EngineError::RawJsonConsumption`, so the join always reads a typed value. A
+  value that is deliberately raw JSON (the producer's own column is JSON) opts in
+  with `Consumed::RAW_JSON_ESCAPE_HATCH = true`; a typed struct holding a
+  `serde_json::Value` *field* needs nothing. `MirrorReady::{validate, guards}` and
+  `ConsumedGuard` expose the check.
+- **Declarative `known_*` rows.** A mirror row that implements `KnownRow` (its
+  `TABLE`, `NAMESPACE`, key columns and value columns) is written by the engine:
+  `Projection::upsert` generates the `INSERT … ON CONFLICT … DO UPDATE` and
+  `Projection::retire` the `DELETE … WHERE key = …`, both staging the impact under
+  the same foreign key — a projector using it carries no hand-written SQL. New
+  public API: `KnownRow`, `Column`, `Bind`, `col`, `Projection::{upsert, retire}`.
+  The manual `Known`/`KnownScope` impls (`replace_one`/`replace`/`remove`) stay as
+  the escape hatch for a write that is not a plain single-key upsert.
+- **Consumed manifest / version.** `Consumed` gains `const VERSION: u16 = 1` and
+  `manifest() -> ConsumedManifest`; `ConsumedManifest::accepts` is the pure verdict
+  (`ManifestMismatch::{Offer, Version}`) the engine *will* apply to a
+  producer-owned manifest at scan and watch — a mismatch dead-letters that key and
+  never touches readiness. The scan/watch enforcement that turns a mismatch into a
+  per-key dead letter is not yet wired (it lands in the mirror runtime).
+- **Project-specific extension pattern.** `Extended<Core, Ext>` composes a
+  producer's shared `core` with a project-owned `extension` given as the second
+  type parameter; an extension shape this project does not model fails to
+  deserialize — an unknown extension is denied, not mirrored as opaque JSON. A
+  consumer implements `Consumed` on the concrete `Extended<Core, Ext>` (wrap it in
+  a newtype when `Core` is foreign). `example-service` carries the reference
+  (`slices::roster::extension`).
+
+### H5. Principal facts → cohorts → populate
+
+- **Read-side cohort seam (`persistence::CohortIndex`).** A store may implement
+  `keys_in_cohorts(conn, &[CohortKey]) -> Vec<Key>` so a cohort view's window is
+  read with **one indexed query on the cohort column**, only the caller's rows,
+  instead of scanning the table and filtering in memory. The rule the seam
+  enforces: a cohort key MUST be a stored column on the row (an `org_id`, an
+  `is_public`, or a `(row, cohort_key)` index row written on save) — a cohort
+  needing a per-row lookup is not a cohort. `CohortKey::as_bytes` exposes the
+  lossless key image for binding.
+- **`view::cohort_window` / `view::windowed`.** `cohort_window::<V>(cx)` populates
+  a view through the `CohortIndex` seam from the caller's `Visibility::memberships`
+  (rebuilt from freshly loaded principal facts) and derives the window shape from
+  the declaration; `windowed::<V>(keys)` turns a key set into that inferred shape.
+- **Inferred window shape (`Visibility::LIVE` + `Visibility::DEPS`).** The
+  `Keys`-vs-`Query` choice is derived from the declared visibility, not hand-picked
+  per `populate`: a `LIVE` visibility (the default) yields a `Population::Query`
+  carrying an `Interest` on the view's noun and `DEPS`, so a newly created
+  in-cohort row reaches an open session and a membership change repopulates the
+  window; `LIVE = false` is the explicit override for a closed `Keys` snapshot.
+  Returning a `Population` directly from `populate` still bypasses inference. This
+  closes issue defect #4 (a freshly created key never reached open subscribers
+  under a `Population::Keys`/`Fixed` window) — a bug class the engine introduced —
+  and is now the engine's own presence-projector idiom.
+
+### H6. `Unrestricted` visibility requires a stated reason
+
+A view that renders every row must name why it needs no cohort gate.
+`visibility::Unrestricted` now takes a third type parameter `Why: AccessReason`;
+declare the marker with `service_engine::open_access!(pub MyReason = "why no
+cohort gate applies");`. The reason is surfaced through
+`Visibility::OPEN_ACCESS_REASON` and **refused non-empty at registration**
+(`EngineError::EmptyAccessReason`). The guard sits in
+`RenderRegistry::register_projector` — the common sink every registration path
+funnels through, via the new `projector::Projector::open_access_reason` method
+(default `None`, overridden by `ViewProjector` to surface its view's
+`OPEN_ACCESS_REASON`) — so a `ViewProjector` handed to `register_projector`
+directly is checked exactly like one registered through `register_view`. Opting
+out of the cohort gate is now a deliberate, reviewable statement (per constitution
+principle 15, amended in workspace `d8bdc0b`).
+
+### B. Declarative cross-slice seams
+
+The design change the issue calls "the part that decides whether this engine
+reduces bugs over time": make missing wiring a boot error rather than silent
+nothing.
+
+- **Post-save policies (declared subjection).** `Engine::register_post_save_policy::<A>(f)`
+  registers a policy the engine runs after every `save`/`create` of aggregate `A`,
+  inside the transaction and before the commit. The policy (`Fn(&A, &mut PostSave)
+  -> Result<(), Refused>`) is pure domain logic over the just-saved aggregate: it
+  stages impacts/commands/events through `PostSave`, or `PostSave::refuse(reason)`
+  to roll the write back and answer the mutation with that `Reason` code (a
+  refusing reaction is dead-lettered with it). It cannot save, so it cannot
+  recurse. This generalises the cross-slice interlocks the 0.1 rewrite left
+  unwired — the two known uses are the Services breach interlock and the Runners
+  reconcile-journal impact. New public exports: `service_engine::{PostSave,
+  Refused}`; new `EngineError::PolicyRefused { code }`.
+- **Seam completeness at registration.** `Engine::require_post_save_policy::<A>()`
+  declares aggregate `A` *subject* to a post-save policy; `Engine::run` fails at
+  boot with `EngineError::UnhonouredSeam { aggregate }` unless some slice
+  registered one — the same registration gate the schema type check applies, so a
+  missing interlock is a loud boot error, not a silent absent call.
+
+(The read-side declarative seams the issue groups with B — typed consumption,
+principal-facts cohorts, the `Unrestricted` reason, and the inferred window shape
+that removes the `Keys`-vs-`Query` choice — ship under H4, H5, H6 above.)
+
+### D. Operator decisions settled
+
+- **Multi-aggregate transaction (not a cascade).** `Ops::load_many::<A>(&keys)`
+  loads several aggregates of one noun in one pipeline transaction, each locked for
+  the transaction, so a service mutates several aggregates atomically **without a
+  global advisory lock of its own**. The keys are deduplicated and locked in
+  ascending order of their encoded bytes; that ascending `(store type, encoded
+  key)` order is the engine's documented global aggregate-lock discipline (call
+  `load`/`load_many` in it to hold different nouns in one transaction), and it
+  makes two concurrent multi-aggregate writes deadlock-free. Absent keys are
+  omitted, as for a batched read. This is the answer to the synchronous
+  cross-slice write the issue flagged — the Runners retirement-blocker case that
+  took a global advisory lock at six sites.
+- **Reason codes are `SCREAMING_SNAKE_CASE`.** `Reason::new` validates its argument
+  against `^[A-Z][A-Z0-9_]+$` (a leading capital, then capitals, digits or
+  underscores); a mistyped literal is a compile error at the `const` site, and a
+  code decoded from the wire that fails the shape is rejected at deserialization
+  rather than trusted. This aligns the engine with the frozen `br-test-harness`
+  `verdict::expect_code_shaped` and with a consumer that assumes the casing. All
+  in-tree codes were migrated (e.g. `already_closed` → `ALREADY_CLOSED`). New
+  `Reason::parse(&'static str) -> Result<Reason, ReasonFormat>` is the fallible
+  sibling of `Reason::new` for a `'static` code whose shape is only known at
+  runtime; `service_engine::{ReasonFormat, is_reason_code}` are exposed. The wire
+  encoding is unchanged; only the accepted alphabet narrowed.
+
+### F. Multi-pod behaviour, now verified
+
+- **Multi-pod black-box conformance (`bb08`–`bb11`).** Four scenarios boot two
+  instances of the `example-service` binary against one Postgres and one NATS and
+  prove the fleet behaviour issue §F flagged as untested: cross-pod reconcile relay
+  (a mutation on pod A produces the delta on a session attached to pod B), the
+  rolling roll (a client mid-session reconnects to another pod for a fresh `Reset`
+  from committed state), outbox exactly-once across pods (a row staged on one pod
+  is published once though both relay, guaranteed by the outbox relay's `FOR UPDATE
+  SKIP LOCKED` row claim), and mirror leader/standby failover (the leader projects,
+  the standby converges to readiness from the KV bucket with no RPC, and on lease
+  loss takes over and resumes its watch without a reload). Test-only; no library
+  API change. The reference binary now reads `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS`
+  to run leader elections under a short lease, so a failover is observable inside a
+  bounded wait; unset, both keep the engine defaults (30 s lease, 1 s beat).
+- `Reaction::message_id()` exposes the stable inbound message identity to handlers,
+  enabling domain deduplication that outlives the engine's delivery-claim
+  retention — the durable dedup key a multi-pod fleet needs when a claim has been
+  swept.
+
+### Adopter migration
+
+Every public API change in 0.2.0, with its one-line fix. `EngineError` is
+`#[non_exhaustive]`, so its new variants (`PolicyRefused`, `UnhonouredSeam`,
+`Projection`, `SchemaParse`, `UndeclaredSchemaType`, `RawJsonConsumption`,
+`EmptyAccessReason`) are not adopter breaks on their own.
+
+- **`Reason::new` casing (D).** Rename every reason-code literal to
+  `SCREAMING_SNAKE_CASE` — a lower-case literal that compiled under 0.1 is now a
+  compile-time panic in `Reason::new`. Any client, test or fixture that matched a
+  reason code as a string (e.g. `"already_closed"`) must match the upper-case code.
+- **`Projector::project` is fallible (H2).** Wrap every `project` return in
+  `Ok(...)` — `Ok(view)` for `view::Projector`, `Ok(Some(view))` / `Ok(None)` for
+  the raw `projector::Projector`; a total projection that cannot fail never returns
+  `Err`.
+- **`DeadLetterSource` gains `Render` (H2).** An exhaustive match on
+  `DeadLetterSource` gains a `Render` arm.
+- **`Unrestricted` third type parameter (H6).** Declare a marker with
+  `open_access!(pub MyReason = "…")` and change `Unrestricted<Row, Principal>` to
+  `Unrestricted<Row, Principal, MyReason>`; the marker's visibility must be at
+  least the view's, and an empty reason is refused at `register_view`.
+- **`SliceFragment` is derived and no longer `Copy` (A2, H3).** Build fragments
+  with `SliceFragment::derive::<Q, M, S>(slice)` (use `EmptyMutation` /
+  `EmptySubscription` for an absent slot), or `SliceFragment::from_claims(slice,
+  root_fields, owned_types)` for a synthetic one; `SliceFragment::new(..)` is gone.
+  `SchemaSlices::add` now takes `&SliceFragment`.
+- **`SchemaSlices::verify_root_fields` → `verify` (A2).** Rename the call;
+  services on the standard boot path (`Engine::run` / `run_with`) call nothing here
+  and need no change.
+- **Typed consumption (H4).** A mirror that registered a `Consumed for
+  serde_json::Value` must type the consumed value or set
+  `Consumed::RAW_JSON_ESCAPE_HATCH = true`; every typed consumer is unaffected.
+  `Consumed::VERSION` defaults to 1, so existing `Consumed` impls compile
+  unchanged.
+- **Declared post-save subjection (B).** A slice that declares
+  `require_post_save_policy::<A>()` must have some slice register one with
+  `register_post_save_policy::<A>(..)`, or boot fails with
+  `EngineError::UnhonouredSeam`. Purely additive otherwise.
+- **Inferred window shape default (H5).** The window shape now derives from the
+  declared `Visibility::LIVE` (default `true` → a live `Population::Query`). A view
+  that intends a closed `Keys` snapshot must set `LIVE = false`, or return a
+  `Population` directly from `populate` to bypass inference.
+- **Mirror stream identity (H0).** Migration `9113000023_mirror_stream_identity.sql`
+  adds a nullable column; existing watermark rows adopt an identity on their next
+  read — no manual step. Any use of the removed `ALLOW_EMPTY` flag or the required
+  marker is deleted. `Shadows::put`/`remove` keep their 0.1.0 signatures;
+  `put_at`/`remove_at` and `KvBucket::entries_with_revisions` are additive.
+- **Boot kit (H1).** A service `main` that hand-wired `connect_pool` +
+  `Engine::run_with`, re-added `br-util-observability`, a `/sdl` route, a `schema`
+  subcommand and the owner→migrate→grant sequence collapses to a single
+  `run_service(BootPlan { .. })` call (see `crates/example-service/src/bin/service.rs`).
 
 ## 0.1.0 - 2026-09-11
 

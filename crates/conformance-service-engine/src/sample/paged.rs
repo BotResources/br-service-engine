@@ -7,7 +7,7 @@ use service_engine::impact::Impact;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
-use service_engine::view::{Populate, Projector as ViewProjector};
+use service_engine::view::{Populate, Projector as ViewProjector, cohort_window};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -113,8 +113,11 @@ impl ViewProjector for PagedAssignments {
         Ok(Population::Keys(keys))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 }
 
@@ -144,12 +147,53 @@ impl ViewProjector for CohortAssignments {
         ))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 
     fn cohort(principal: &SamplePrincipal) -> CohortKey {
         CohortKey::of(&[principal.tenant()])
+    }
+}
+
+/// A live cohort view whose window is read through the [`CohortIndex`] seam:
+/// one indexed query returns only the caller's cohort rows, and the window
+/// shape is **derived** from `AssignmentVisibility` (LIVE ⇒ a `Population::Query`
+/// on the assignment noun and the membership dep), not hand-picked.
+///
+/// [`CohortIndex`]: service_engine::persistence::CohortIndex
+#[derive(Default)]
+pub struct CohortIndexedAssignments;
+
+impl CohortIndexedAssignments {
+    pub const NAME: ProjectorName = ProjectorName::from_static("cohort_indexed_assignments");
+}
+
+impl ViewProjector for CohortIndexedAssignments {
+    type Principal = SamplePrincipal;
+    type Noun = Assignment;
+    type Store = AssignmentStore;
+    type Query = ();
+    type Out = AssignmentView;
+    type Visibility = AssignmentVisibility;
+
+    const NAME: ProjectorName = Self::NAME;
+
+    async fn populate(
+        cx: &Populate<'_, SamplePrincipal>,
+        _query: &(),
+    ) -> Result<Population<Uuid>, EngineError> {
+        cohort_window::<Self>(cx).await
+    }
+
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 }
 
@@ -181,8 +225,11 @@ impl ViewProjector for ThresholdAssignments {
         ))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 }
 
@@ -212,8 +259,11 @@ impl ViewProjector for PerImpactAssignments {
         ))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 
     fn emission(_impact: &Impact) -> Emission {

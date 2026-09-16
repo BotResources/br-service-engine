@@ -27,8 +27,8 @@ pub const DEP_MEMBERSHIP: u8 = 0;
 pub mod reasons {
     use service_engine::gate::Reason;
 
-    pub const ALREADY_CLOSED: Reason = Reason::new("already_closed");
-    pub const NOT_CLOSED: Reason = Reason::new("not_closed");
+    pub const ALREADY_CLOSED: Reason = Reason::new("ALREADY_CLOSED");
+    pub const NOT_CLOSED: Reason = Reason::new("NOT_CLOSED");
 }
 
 service_engine::gated! {
@@ -68,6 +68,11 @@ pub struct AssignmentVisibility;
 impl Visibility for AssignmentVisibility {
     type Row = AssignmentRow;
     type Principal = SamplePrincipal;
+
+    // `memberships` reads the caller's tenant, which is the DEP_MEMBERSHIP
+    // principal fact; a live cohort window declares it so a membership change
+    // repopulates the window.
+    const DEPS: Deps = Deps::from_bits(1 << DEP_MEMBERSHIP);
 
     fn cohorts(row: &AssignmentRow) -> Cohorts {
         vec![CohortKey::of(&[row.tenant_id])]
@@ -237,17 +242,19 @@ impl Projector for GatedAssignmentProjector {
         facts: &AssignmentFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<GatedAssignmentView> {
-        let row = facts.rows.get(key)?;
+    ) -> Result<Option<GatedAssignmentView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
         if !AssignmentVisibility::visible(row, principal) {
-            return None;
+            return Ok(None);
         }
-        Some(GatedAssignmentView {
+        Ok(Some(GatedAssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             affordances: row.affordances(principal),
-        })
+        }))
     }
 }
 
@@ -276,12 +283,15 @@ impl ViewProjectorTrait for VisibleAssignments {
         Ok(AssignmentVisibility::window(candidates, cx.principal()))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        AssignmentView {
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(AssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             can_close: !row.closed,
-        }
+        })
     }
 }

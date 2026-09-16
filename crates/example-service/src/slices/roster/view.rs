@@ -113,11 +113,11 @@ impl Projector for RosterUsers {
         facts: &BTreeMap<Uuid, (String, String)>,
         key: &Uuid,
         _principal: &AppPrincipal,
-    ) -> Option<RosterView> {
-        facts.get(key).map(|(email, display_name)| RosterView {
+    ) -> Result<Option<RosterView>, EngineError> {
+        Ok(facts.get(key).map(|(email, display_name)| RosterView {
             user_id: *key,
             email: email.clone(),
             display_name: display_name.clone(),
-        })
+        }))
     }
 }

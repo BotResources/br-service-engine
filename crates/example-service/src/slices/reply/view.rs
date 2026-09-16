@@ -48,8 +48,8 @@ impl Projector for RepliesView {
         Ok(Reply::window(candidates, cx.principal()))
     }
 
-    fn project(row: &ReplyRow, principal: &AppPrincipal) -> ReplyView {
-        ReplyView {
+    fn project(row: &ReplyRow, principal: &AppPrincipal) -> Result<ReplyView, EngineError> {
+        Ok(ReplyView {
             id: row.id,
             board_id: row.board_id,
             text: row.text.clone(),
@@ -57,7 +57,7 @@ impl Projector for RepliesView {
             has_attachment: row.blob_ref.is_some(),
             attachment: row.blob_ref,
             affordances: row.affordances(principal),
-        }
+        })
     }
 
     fn emission(_impact: &Impact) -> Emission {

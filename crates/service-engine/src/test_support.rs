@@ -60,6 +60,9 @@ pub struct Title(pub String);
 
 macro_rules! stub_projector {
     ($ty:ident, $name:literal, $key:ty) => {
+        stub_projector!($ty, $name, $key, open_access = None);
+    };
+    ($ty:ident, $name:literal, $key:ty, open_access = $reason:expr) => {
         pub struct $ty;
 
         impl Projector for $ty {
@@ -75,6 +78,10 @@ macro_rules! stub_projector {
             fn nouns(&self) -> &'static [NounName] {
                 const NOUNS: &[NounName] = &[Assignment::NAME];
                 NOUNS
+            }
+
+            fn open_access_reason(&self) -> Option<&'static str> {
+                $reason
             }
 
             fn populate<'a>(
@@ -102,8 +109,8 @@ macro_rules! stub_projector {
                 _facts: &(),
                 _key: &$key,
                 _principal: &TestPrincipal,
-            ) -> Option<Title> {
-                None
+            ) -> Result<Option<Title>, EngineError> {
+                Ok(None)
             }
         }
     };
@@ -112,3 +119,11 @@ macro_rules! stub_projector {
 stub_projector!(AssignmentKeyProjector, "assignments", Uuid);
 stub_projector!(TwinProjector, "assignment_titles", Uuid);
 stub_projector!(MiskeyedProjector, "miskeyed", String);
+// A projector that opts out of the cohort gate but leaves the reason blank
+// (whitespace-only trims to empty): the enforcement path must refuse it.
+stub_projector!(
+    BlankReasonProjector,
+    "blank_reason",
+    Uuid,
+    open_access = Some("   ")
+);

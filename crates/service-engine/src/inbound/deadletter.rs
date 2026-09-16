@@ -21,6 +21,7 @@ pub enum DeadLetterSource {
     Cron,
     Mirror,
     Outbox,
+    Render,
 }
 
 impl DeadLetterSource {
@@ -31,6 +32,7 @@ impl DeadLetterSource {
             Self::Cron => "cron",
             Self::Mirror => "mirror",
             Self::Outbox => "outbox",
+            Self::Render => "render",
         }
     }
 }
@@ -139,6 +141,45 @@ impl DeadLetters {
             source,
             reaction,
             subject,
+            message_id,
+            payload: &[],
+            producer: None,
+            seq_key: None,
+            seq: None,
+            error,
+            delivered: 1,
+        };
+        let mut tx = self.pool.begin().await?;
+        let staged = self.stage(&mut tx, &entry).await?;
+        tx.commit().await?;
+        crate::observe::record_impacts_committed(usize::from(staged));
+        Ok(())
+    }
+
+    /// Record a render-frame projection failure.
+    ///
+    /// A poison document — one a projector could not render — has no NATS
+    /// message behind it, only the projector that faulted and the key it
+    /// choked on. The projector is the source's reaction and the key its
+    /// subject; the message id is derived from both so a key that keeps
+    /// failing across frames folds into one row (its `last_seen` and error
+    /// advance) instead of flooding the table. If a transport is attached the
+    /// staged row also raises the ops-view impact, exactly as the message
+    /// sources do.
+    pub async fn record_render(
+        &self,
+        projector: &str,
+        key: &str,
+        error: &str,
+    ) -> Result<(), sqlx::Error> {
+        let message_id = Uuid::new_v5(
+            &Uuid::NAMESPACE_OID,
+            format!("{projector}\u{0}{key}").as_bytes(),
+        );
+        let entry = StagedDeadLetter {
+            source: DeadLetterSource::Render,
+            reaction: projector,
+            subject: key,
             message_id,
             payload: &[],
             producer: None,

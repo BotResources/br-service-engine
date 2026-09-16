@@ -39,6 +39,7 @@ impl SpyAssignments {
             load_gate: None,
             fail_switch: None,
             panic_switch: None,
+            poison_switch: None,
             broken: false,
             rls: false,
         }
@@ -96,6 +97,13 @@ impl SpyAssignments {
 
     pub fn with_panic_switch(mut self, switch: Arc<AtomicBool>) -> Self {
         self.panic_switch = Some(switch);
+        self
+    }
+
+    /// When flipped on, `project` itself returns an error, standing in for a
+    /// stored document that cannot be rendered (a poison the pod dead-letters).
+    pub fn with_poison_switch(mut self, switch: Arc<AtomicBool>) -> Self {
+        self.poison_switch = Some(switch);
         self
     }
 

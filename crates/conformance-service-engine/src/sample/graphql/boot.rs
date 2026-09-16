@@ -19,35 +19,59 @@ use crate::sample::pipeline::{CloseWidget, MintSecret, close_widget, mint_secret
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 use crate::sample::widget::WidgetProjector;
 
-const WIDGET_SLICE: SliceFragment = SliceFragment {
-    slice: "widget",
-    root_fields: &["widget", "closeWidget", "mintSecret", "widgets"],
-    types: &["WidgetView"],
-};
+fn claims(slice: &'static str, root_fields: &[&str], types: &[&str]) -> SliceFragment {
+    SliceFragment::from_claims(
+        slice,
+        root_fields.iter().map(|f| f.to_string()).collect(),
+        types.iter().map(|t| t.to_string()).collect(),
+    )
+}
 
-const ASSIGNMENT_SLICE: SliceFragment = SliceFragment {
-    slice: "assignment",
-    root_fields: &["assignment", "assignments"],
-    types: &["AssignmentView"],
-};
+fn widget_slice() -> SliceFragment {
+    claims(
+        "widget",
+        &["widget", "closeWidget", "mintSecret", "widgets"],
+        &["WidgetView"],
+    )
+}
 
-const RLS_ASSIGNMENT_SLICE: SliceFragment = SliceFragment {
-    slice: "rls_assignment",
-    root_fields: &["rlsAssignment"],
-    types: &["AssignmentView"],
-};
+fn assignment_slice() -> SliceFragment {
+    claims(
+        "assignment",
+        &["assignment", "assignments"],
+        &["AssignmentView"],
+    )
+}
 
-pub const ROOT_FIELD_COLLISION: SliceFragment = SliceFragment {
-    slice: "shadow",
-    root_fields: &["widget"],
-    types: &["ShadowView"],
-};
+fn rls_assignment_slice() -> SliceFragment {
+    claims("rls_assignment", &["rlsAssignment"], &["AssignmentView"])
+}
 
-pub const TYPE_COLLISION: SliceFragment = SliceFragment {
-    slice: "shadow",
-    root_fields: &["shadow"],
-    types: &["WidgetView"],
-};
+// The reactive delta envelope the `subscription_union!` macro generates
+// (`ResetPayload`/`UpsertPayload`/`RemovePayload`) is shared by every
+// subscription slice and owned by none of them — the subscription analogue of
+// the engine-injected `MutationAck`, but with names the macro invocation
+// chooses, so the static injected set cannot know them. A production slice
+// gives each aggregate its own union and lets `SliceFragment::derive` read
+// those payload types back; this synthetic fixture shares one union across the
+// widget and assignment slices, so it claims the envelope once, here, through
+// the low-level `from_claims` primitive. (`ProjectedView`/`EngineDelta` are
+// GraphQL unions, not object types, so the boot gate never asks for a claim.)
+fn reactive_envelope_slice() -> SliceFragment {
+    claims(
+        "reactive",
+        &[],
+        &["ResetPayload", "UpsertPayload", "RemovePayload"],
+    )
+}
+
+pub fn root_field_collision() -> SliceFragment {
+    claims("shadow", &["widget"], &["ShadowView"])
+}
+
+pub fn type_collision() -> SliceFragment {
+    claims("shadow", &["shadow"], &["WidgetView"])
+}
 
 pub struct GraphqlService {
     pub base_url: String,
@@ -121,11 +145,14 @@ pub async fn boot_graphql_service(
         .register_mutation::<MintSecret, _>(mint_secret)
         .expect("register the mint mutation");
     engine
-        .register_schema_slice(WIDGET_SLICE)
+        .register_schema_slice(widget_slice())
         .expect("the widget slice owns its root fields and types");
     engine
-        .register_schema_slice(ASSIGNMENT_SLICE)
+        .register_schema_slice(assignment_slice())
         .expect("the assignment slice composes without colliding with the widget slice");
+    engine
+        .register_schema_slice(reactive_envelope_slice())
+        .expect("the shared reactive delta envelope is claimed once, by no domain slice");
 
     let readiness = engine.readiness();
     let engine_stop = engine.shutdown_handle();
@@ -184,7 +211,7 @@ pub async fn boot_rls_query_service(
         .register_projector(RlsAssignmentProjector)
         .expect("register the RLS-backed assignment projector");
     engine
-        .register_schema_slice(RLS_ASSIGNMENT_SLICE)
+        .register_schema_slice(rls_assignment_slice())
         .expect("the rls-assignment slice owns its root field and type");
 
     let readiness = engine.readiness();
@@ -235,7 +262,7 @@ pub async fn boot_undeclared_root_field(
     engine.register_principal_resolver(SamplePrincipalResolver)?;
     engine.register_projector(WidgetProjector)?;
     engine.register_projector(AssignmentProjector)?;
-    engine.register_schema_slice(WIDGET_SLICE)?;
+    engine.register_schema_slice(widget_slice())?;
 
     let readiness = engine.readiness();
     let state = Arc::new(engine.graphql_state());
@@ -271,7 +298,7 @@ pub async fn boot_colliding_slices(
     .await?;
     engine.register_principal_resolver(SamplePrincipalResolver)?;
     engine.register_projector(WidgetProjector)?;
-    engine.register_schema_slice(WIDGET_SLICE)?;
+    engine.register_schema_slice(widget_slice())?;
     engine.register_schema_slice(colliding)?;
 
     let readiness = engine.readiness();

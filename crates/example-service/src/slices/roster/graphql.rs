@@ -1,7 +1,6 @@
 use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::Query;
-use service_engine::graphql::SliceFragment;
 use service_engine::session::{WindowParams, WindowSpec};
 use uuid::Uuid;
 
@@ -13,12 +12,6 @@ service_engine::subscription_union! {
     delta = RosterDelta { reset = RosterReset, upsert = RosterUpsert, remove = RosterRemove };
     Person => RosterUsers => RosterView,
 }
-
-pub const FRAGMENT: SliceFragment = SliceFragment {
-    slice: "roster",
-    root_fields: &["person", "rosterDeltas"],
-    types: &["RosterView"],
-};
 
 #[derive(Default)]
 pub struct RosterQuery;

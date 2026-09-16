@@ -2,11 +2,11 @@ use example_contract::PERSON_PREFIX;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Change, Known, KnownScope, Mirror, MirrorReady, Project, Projection};
+use service_engine::mirror::{Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Shadows};
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 pub const DIRECTORY_MIRROR: MirrorName = MirrorName::from_static("directory");
@@ -33,53 +33,27 @@ fn id_of(key: &KvKey) -> Option<Uuid> {
         .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
+/// The declarative `known_*` row: the engine generates the upsert and the delete
+/// from the table, key column and value columns — the projector writes no SQL.
 struct KnownPersonRow {
     id: Uuid,
     email: String,
     display_name: String,
 }
 
-impl Known for KnownPersonRow {
+impl KnownRow for KnownPersonRow {
+    const TABLE: &'static str = "known_persons";
     const NAMESPACE: &'static str = PERSON_NAMESPACE;
 
-    fn foreign_key(&self) -> String {
-        self.id.to_string()
+    fn key(&self) -> Vec<Column> {
+        vec![col("user_id", self.id)]
     }
 
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO known_persons (user_id, email, display_name) \
-                 VALUES ($1, $2, $3) \
-                 ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, \
-                   display_name = EXCLUDED.display_name",
-            )
-            .bind(self.id)
-            .bind(&self.email)
-            .bind(&self.display_name)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
-    }
-}
-
-struct ByPerson(Uuid);
-
-impl KnownScope for ByPerson {
-    const NAMESPACE: &'static str = PERSON_NAMESPACE;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
-        Box::pin(async move {
-            sqlx::query("DELETE FROM known_persons WHERE user_id = $1")
-                .bind(self.0)
-                .execute(conn)
-                .await?;
-            Ok(vec![self.0.to_string()])
-        })
+    fn values(&self) -> Vec<Column> {
+        vec![
+            col("email", self.email.clone()),
+            col("display_name", self.display_name.clone()),
+        ]
     }
 }
 
@@ -97,14 +71,14 @@ impl Project<Uuid> for DirectoryProjection {
             let person = cx.shadow::<ConsumedPerson>().get(&person_key(id)).cloned();
             match person {
                 Some(person) => {
-                    cx.replace_one(KnownPersonRow {
+                    cx.upsert(KnownPersonRow {
                         id,
                         email: person.email,
                         display_name: person.display_name,
                     })
                     .await
                 }
-                None => cx.remove(ByPerson(id)).await,
+                None => cx.retire::<KnownPersonRow>(vec![col("user_id", id)]).await,
             }
         })
     }
