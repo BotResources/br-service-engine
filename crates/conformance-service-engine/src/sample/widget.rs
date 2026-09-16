@@ -256,13 +256,15 @@ impl Projector for WidgetProjector {
         facts: &WidgetFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<WidgetView> {
-        let row = facts.rows.get(key)?;
-        Some(WidgetView {
+    ) -> Result<Option<WidgetView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
+        Ok(Some(WidgetView {
             id: row.id,
             label: row.label.clone(),
             closed: row.closed,
             affordances: row.affordances(principal),
-        })
+        }))
     }
 }

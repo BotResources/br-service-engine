@@ -39,6 +39,7 @@ pub struct SpyAssignments {
     load_gate: Option<Arc<Gate>>,
     fail_switch: Option<Arc<AtomicBool>>,
     panic_switch: Option<Arc<AtomicBool>>,
+    poison_switch: Option<Arc<AtomicBool>>,
     broken: bool,
     rls: bool,
 }
@@ -209,7 +210,7 @@ impl Projector for SpyAssignments {
         facts: &AssignmentFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<AssignmentView> {
+    ) -> Result<Option<AssignmentView>, EngineError> {
         self.spy.projects.fetch_add(1, Ordering::Relaxed);
         if self
             .panic_switch
@@ -218,16 +219,27 @@ impl Projector for SpyAssignments {
         {
             panic!("the sample projector was switched to panic for the duration of the test");
         }
-        let row = facts.rows.get(key)?;
-        if self.window != WindowMode::MembershipOnlyQuery && row.tenant_id != principal.tenant() {
-            return None;
+        if self
+            .poison_switch
+            .as_ref()
+            .is_some_and(|switch| switch.load(Ordering::Relaxed))
+        {
+            return Err(EngineError::Service(
+                "the stored document could not be projected for the duration of the test".into(),
+            ));
         }
-        Some(AssignmentView {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
+        if self.window != WindowMode::MembershipOnlyQuery && row.tenant_id != principal.tenant() {
+            return Ok(None);
+        }
+        Ok(Some(AssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             can_close: !row.closed,
-        })
+        }))
     }
 
     fn cohort(&self, principal: &SamplePrincipal) -> CohortKey {

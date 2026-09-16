@@ -66,6 +66,14 @@ pub enum EngineError {
     #[error("facts loaded for another projector were handed to {projector}")]
     FactsMismatch { projector: ProjectorName },
 
+    #[error("projector {projector} could not project key {key}")]
+    Projection {
+        projector: ProjectorName,
+        key: String,
+        #[source]
+        source: BoxedError,
+    },
+
     #[error(
         "the Query window on {projector} declares an empty Interest, so no impact can reach it"
     )]

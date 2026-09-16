@@ -113,8 +113,11 @@ impl ViewProjector for PagedAssignments {
         Ok(Population::Keys(keys))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 }
 
@@ -144,8 +147,11 @@ impl ViewProjector for CohortAssignments {
         ))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 
     fn cohort(principal: &SamplePrincipal) -> CohortKey {
@@ -181,8 +187,11 @@ impl ViewProjector for ThresholdAssignments {
         ))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 }
 
@@ -212,8 +221,11 @@ impl ViewProjector for PerImpactAssignments {
         ))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 
     fn emission(_impact: &Impact) -> Emission {

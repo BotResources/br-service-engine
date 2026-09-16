@@ -9,6 +9,30 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Added
 
+- **`project` is fallible.** `view::Projector::project` and the low-level
+  `projector::Projector::project` now return `Result<_, EngineError>`
+  (`Result<Out, _>` and `Result<Option<View>, _>` respectively). A projector
+  that hits a stored document it cannot render — a nested blob that will not
+  deserialize, a value the view type cannot represent — returns `Err` instead
+  of panicking. The render pass dead-letters that poison and takes the existing
+  repair-then-end-session path for the faulted sessions, so one malformed row
+  no longer takes the pod down. **Migration:** every `project` implementation
+  wraps its returned view in `Ok(...)` (`Ok(view)` for `view::Projector`,
+  `Ok(Some(view))` / `Ok(None)` for the raw trait); a total projection that
+  cannot fail simply never returns `Err`.
+- `EngineError::Projection { projector, key, source }` reports a projection
+  failure with the projector and key that faulted; the erased projector wraps
+  the implementor's error into it so the render pass can attribute the
+  dead-letter. Additive on the `#[non_exhaustive]` `EngineError`.
+- `DeadLetterSource::Render` (`"render"`) and `DeadLetters::record_render` land a
+  render-frame projection failure in `service_engine.dead_letter` with the
+  projector as the row's reaction and the failing key as its subject, deduped by
+  a name-based (UUIDv5) message id so a key that keeps failing folds into one row
+  rather than flooding the table. **Migration:** exhaustive matches on
+  `DeadLetterSource` gain a `Render` arm.
+- `SessionRuntime::set_dead_letters` installs the store the render pass records
+  poison documents into; the engine wires the transport-backed store at boot so
+  render dead-letters raise the ops-view impact like every other source.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit
@@ -44,6 +68,14 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Fixed
 
+- **`Coalesced` deltas no longer drop their cause.** The coalesced branch of the
+  render plan hard-coded `cause: None`, so a coalesced view's subscribers
+  received `Upsert`/`Remove` deltas with no causal attribution even when the
+  impact carried a fact. A coalesced delta now carries the cause of the last
+  impact it folds (the one latest in the frame that carries one); causeless
+  impacts in the fold contribute none, and a fold with no cause at all is still
+  `None`. This makes coalesced-with-cause — one delta per key carrying the
+  causing fact — expressible, which `PerImpact` could not stand in for.
 - No NATS round-trip inside the mirror's leader transaction, and no `STREAM.INFO`
   per beat while a standby waits: a slow broker no longer pins the advisory lock
   and the `leader_slot` row, nor polls the broker once per beat per bucket.

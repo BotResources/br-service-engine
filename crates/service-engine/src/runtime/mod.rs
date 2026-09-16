@@ -3,8 +3,8 @@ mod counters;
 mod drain;
 mod paging;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -16,6 +16,7 @@ use crate::accumulator::ChunkReader;
 use crate::config::EngineConfig;
 use crate::error::{EngineError, TransportError};
 use crate::impact::{Impact, TransportEvent};
+use crate::inbound::DeadLetters;
 use crate::principal::Principal;
 use crate::registry::RenderRegistry;
 use crate::render::pass::{PassContext, PassReport};
@@ -38,6 +39,7 @@ pub struct SessionRuntime<P: Principal> {
     pub(crate) shutting_down: AtomicBool,
     pub(crate) after_pass: Arc<Notify>,
     pub(crate) lane: crate::lanes::LaneChannel,
+    pub(crate) dead_letters: OnceLock<DeadLetters>,
 }
 
 impl<P: Principal> std::fmt::Debug for SessionRuntime<P> {
@@ -68,7 +70,24 @@ impl<P: Principal> SessionRuntime<P> {
             shutting_down: AtomicBool::new(false),
             after_pass: Arc::new(Notify::new()),
             lane: crate::lanes::LaneChannel::new(lanes),
+            dead_letters: OnceLock::new(),
         })
+    }
+
+    /// Install the dead-letter store the render pass records poison documents
+    /// into. Set once at wiring time with the transport-backed store so render
+    /// dead-letters raise the ops-view impact like every other source; until
+    /// then [`Self::dead_letters`] falls back to a transport-less store built
+    /// from the pool, which still lands the row.
+    pub fn set_dead_letters(&self, dead_letters: DeadLetters) {
+        let _ = self.dead_letters.set(dead_letters);
+    }
+
+    fn dead_letters(&self) -> DeadLetters {
+        self.dead_letters
+            .get()
+            .cloned()
+            .unwrap_or_else(|| DeadLetters::new(self.pg.clone()))
     }
 
     pub(crate) fn lane_channel(&self) -> crate::lanes::LaneChannel {
@@ -135,11 +154,13 @@ impl<P: Principal> SessionRuntime<P> {
         {
             return Ok(0);
         }
+        let dead_letters = self.dead_letters();
         let ctx = PassContext {
             pg: &self.pg,
             registry: &self.registry,
             chunks: &self.chunks,
             config: &self.config,
+            dead_letters: Some(&dead_letters),
         };
         let report = crate::render::pass::run_pass_focused(&ctx, &mut table, &[], None).await?;
         let live = table.live_ids().len();
@@ -170,11 +191,13 @@ impl<P: Principal> SessionRuntime<P> {
         let started = Instant::now();
         let mut table = self.table.lock().await;
         table.reap_dropped(&self.dropped);
+        let dead_letters = self.dead_letters();
         let ctx = PassContext {
             pg: &self.pg,
             registry: &self.registry,
             chunks: &self.chunks,
             config: &self.config,
+            dead_letters: Some(&dead_letters),
         };
         let report =
             crate::render::pass::run_pass_focused(&ctx, &mut table, &impacts, focus).await?;

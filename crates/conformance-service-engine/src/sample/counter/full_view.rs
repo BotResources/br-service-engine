@@ -105,7 +105,7 @@ impl Projector for FullCounterProjector {
         facts: &FullCounterFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<CounterView> {
-        facts.rows.get(key).map(|state| view_of(state, principal))
+    ) -> Result<Option<CounterView>, EngineError> {
+        Ok(facts.rows.get(key).map(|state| view_of(state, principal)))
     }
 }
