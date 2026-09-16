@@ -64,6 +64,8 @@ impl World {
 
         let service = Spawned::service(SpawnEnv {
             database_url: db.app_url.clone(),
+            owner_database_url: db.owner_url.clone(),
+            app_role: db.app_role.clone(),
             nats_url: nats_server.url(),
             pod: pod.to_string(),
             port: free_port(),
@@ -88,6 +90,8 @@ impl World {
     pub async fn spawn_pod(&self, pod: &str) -> Spawned {
         Spawned::service(SpawnEnv {
             database_url: self.db.app_url.clone(),
+            owner_database_url: self.db.owner_url.clone(),
+            app_role: self.db.app_role.clone(),
             nats_url: self.nats_server.url(),
             pod: pod.to_string(),
             port: free_port(),
