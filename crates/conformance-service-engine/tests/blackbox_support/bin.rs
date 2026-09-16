@@ -63,6 +63,8 @@ pub fn free_port() -> u16 {
 
 pub struct SpawnEnv {
     pub database_url: String,
+    pub owner_database_url: String,
+    pub app_role: String,
     pub nats_url: String,
     pub pod: String,
     pub port: u16,
@@ -98,6 +100,8 @@ impl Spawned {
         let mut command = Command::new(example_service_bin());
         command
             .env("DATABASE_URL", &env.database_url)
+            .env("DATABASE_URL_OWNER", &env.owner_database_url)
+            .env("APP_ROLE", &env.app_role)
             .env("NATS_URL", &env.nats_url)
             .env("ENGINE_CHANNEL", "example")
             .env("POD_ID", &env.pod)

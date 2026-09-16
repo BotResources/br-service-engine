@@ -9,6 +9,31 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Added
 
+- **Boot kit** — `run_service(BootPlan { .. })` (re-exported at the crate root), the
+  one call from a service `main`. It installs structured JSON logging
+  (`br-util-observability::init_logging`), short-circuits a `schema` argv subcommand
+  by printing the composed SDL and exiting without touching infra, runs the engine and
+  service migration sets and grants the app role under the **owner** role
+  (`DATABASE_URL_OWNER`) before connecting the RLS-subject **app** pool
+  (`DATABASE_URL`, role `APP_ROLE`) via `br-util-postgres`, installs the process-global
+  Prometheus recorder (`init_metrics`), boots the engine, and serves. `BootPlan` carries
+  `component`, `app_role`, the service `Migrator`, `EngineConfig`, `nats_url`, the three
+  GraphQL roots, `declare_scopes`, and a `register` closure. **Migration for adopters:** a
+  service `main` that hand-wired `connect_pool` + `Engine::run_with` and re-added
+  `br-util-observability`, a `/sdl` route, a `schema` subcommand and the
+  owner→migrate→grant sequence itself should collapse to a single `run_service` call
+  (see `crates/example-service/src/bin/service.rs`); the engine now owns that plumbing.
+  The engine gains `br-util-observability` and `br-util-postgres` dependencies (both at
+  the pinned `br-rust-common` `v1.3.0`).
+- `graphql::with_edge_observability(app, sdl, metrics)` (re-exported at the crate root)
+  mounts `/livez` (always 200 `alive`), `/metrics` (Prometheus text exposition of the
+  engine's existing metric set), and `/sdl` (the composed schema as `text/plain`) beside
+  a service's `app` router, and wraps the whole router in the HTTP metrics layer. This
+  closes engine defect A3: a deployed pod previously mounted only `/graphql`,
+  `/graphql/ws` and `/readyz` and installed no tracing subscriber, so it emitted no logs
+  and exposed no `/livez` or `/metrics`.
+- `example_service::db::migrator()` is now public: the service hands its migration set to
+  the boot kit rather than running it itself.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit

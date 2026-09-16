@@ -28,13 +28,19 @@ fn url_for(admin: &str, role: &str, database: &str) -> String {
     )
 }
 
+/// The black-box database, provisioned the way GitOps provisions production: an owner
+/// role that owns the database, a low-privilege app role with only CONNECT, and nothing
+/// migrated. The spawned binary's boot kit runs the migrations under the owner role and
+/// grants the app role — so every black-box run exercises the real boot path, not a
+/// database the harness quietly migrated first.
 pub struct BlackboxDb {
     pub admin: PgPool,
     pub app: PgPool,
     pub app_url: String,
+    pub owner_url: String,
+    pub app_role: String,
     database: String,
     owner_role: String,
-    app_role: String,
 }
 
 impl BlackboxDb {
@@ -59,28 +65,20 @@ impl BlackboxDb {
             &format!("CREATE DATABASE \"{database}\" OWNER \"{owner_role}\""),
         )
         .await;
-
-        let owner = pool(&url_for(&admin_url, &owner_role, &database)).await;
-        ensure_app_role(&owner, &app_role).await;
+        run(
+            &admin,
+            &format!(
+                "CREATE ROLE \"{app_role}\" LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{ROLE_PASSWORD}'"
+            ),
+        )
+        .await;
         run(
             &admin,
             &format!("GRANT CONNECT ON DATABASE \"{database}\" TO \"{app_role}\""),
         )
         .await;
 
-        service_engine::schema::migrate(&owner)
-            .await
-            .expect("apply the engine migration set as owner, before the binary connects");
-        example_service::db::migrate(&owner)
-            .await
-            .expect("apply the example service migration set as owner");
-
-        grant_app_access(&owner, &app_role).await;
-        service_engine::schema::grant_engine_access(&owner, &app_role)
-            .await
-            .expect("grant the engine schema to the app role");
-        owner.close().await;
-
+        let owner_url = url_for(&admin_url, &owner_role, &database);
         let app_url = url_for(&admin_url, &app_role, &database);
         let app = pool(&app_url).await;
 
@@ -88,9 +86,10 @@ impl BlackboxDb {
             admin,
             app,
             app_url,
+            owner_url,
+            app_role,
             database,
             owner_role,
-            app_role,
         }
     }
 
@@ -109,44 +108,6 @@ impl BlackboxDb {
                 .await;
         }
         admin.close().await;
-    }
-}
-
-async fn ensure_app_role(owner: &PgPool, role: &str) {
-    run(
-        owner,
-        &format!(
-            "DO $$ BEGIN \
-               IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN \
-                 CREATE ROLE \"{role}\" LOGIN; \
-               END IF; \
-             END $$"
-        ),
-    )
-    .await;
-    run(
-        owner,
-        &format!("ALTER ROLE \"{role}\" LOGIN PASSWORD '{ROLE_PASSWORD}'"),
-    )
-    .await;
-}
-
-async fn grant_app_access(owner: &PgPool, role: &str) {
-    for sql in [
-        format!("GRANT USAGE ON SCHEMA public TO \"{role}\""),
-        format!(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"{role}\""
-        ),
-        format!("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"{role}\""),
-        format!(
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA public \
-             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"{role}\""
-        ),
-        format!(
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO \"{role}\""
-        ),
-    ] {
-        run(owner, &sql).await;
     }
 }
 

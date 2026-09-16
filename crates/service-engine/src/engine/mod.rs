@@ -1,3 +1,5 @@
+pub mod boot;
+
 mod blobs;
 mod lane_a;
 mod loops;
