@@ -18,6 +18,7 @@ use crate::pipeline::confirm::{record_confirmations, stored_confirmations};
 use crate::pipeline::context::Reaction;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::OutboundContext;
+use crate::pipeline::policy::PostSavePolicies;
 use crate::pipeline::staged::Staged;
 use crate::pipeline::tx::{begin_scoped, flush_and_commit};
 use crate::principal::{ErasedPrincipal, ReactionPrincipalResolver};
@@ -29,6 +30,7 @@ pub(crate) struct DirectPipeline {
     transport: Arc<dyn ImpactTransport>,
     accumulators: Arc<AccumulatorRuntime>,
     offers: Arc<OfferStagers>,
+    policies: Arc<PostSavePolicies>,
     reactions: Arc<ReactionRegistry>,
     blobs: Option<BlobHandle>,
     lock_timeout: Duration,
@@ -44,6 +46,7 @@ impl DirectPipeline {
         transport: Arc<dyn ImpactTransport>,
         accumulators: Arc<AccumulatorRuntime>,
         offers: Arc<OfferStagers>,
+        policies: Arc<PostSavePolicies>,
         reactions: Arc<ReactionRegistry>,
         blobs: Option<BlobHandle>,
         lock_timeout: Duration,
@@ -56,6 +59,7 @@ impl DirectPipeline {
             transport,
             accumulators,
             offers,
+            policies,
             reactions,
             blobs,
             lock_timeout,
@@ -173,6 +177,7 @@ impl DirectPipeline {
                 &mut staged,
                 self.accumulators.as_ref(),
                 self.offers.clone(),
+                self.policies.clone(),
                 self.blobs.as_ref(),
                 time::now(),
             )
@@ -186,6 +191,13 @@ impl DirectPipeline {
             );
             invoke(invoker.as_ref(), &mut cx, &msg.body).await
         };
+        if let Some(reason) = staged.policy_refusal {
+            let _ = tx.rollback().await;
+            return DispatchOutcome::Failed(DispatchError::terminal(format!(
+                "a post-save policy refused this reaction's write with reason {}",
+                reason.code()
+            )));
+        }
         if let Err(error) = handler {
             let _ = tx.rollback().await;
             let error = match staged.terminal_violation.take() {

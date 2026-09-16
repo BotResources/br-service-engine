@@ -94,7 +94,8 @@ pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
 pub use full_eda::{EventSourced, FullEda};
 pub use gate::{
-    ActionName, Affordances, Gate, GateMismatch, Gated, Reason, check_gates_match_affordances,
+    ActionName, Affordances, Gate, GateMismatch, Gated, Reason, ReasonFormat,
+    check_gates_match_affordances, is_reason_code,
 };
 pub use graphql::{
     AuthReject, CODE_EXTENSION, GraphqlState, JsonScalar, MutationAck, PASSPORT_HEADER,
@@ -135,7 +136,8 @@ pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
 pub use persistence::{Aggregate, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
-    MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, ProducerSequence, Reaction,
+    MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
+    Reaction, Refused,
 };
 pub use population::{Interest, Inverse, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};

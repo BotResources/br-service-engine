@@ -51,7 +51,7 @@ async fn s111_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allo
     );
     assert_eq!(
         body["errors"][0]["extensions"]["code"],
-        serde_json::json!("already_closed"),
+        serde_json::json!("ALREADY_CLOSED"),
         "the same gate that blocks the affordance refuses the mutation with its own reason code: {body}"
     );
     assert!(

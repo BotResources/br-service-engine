@@ -39,7 +39,7 @@ fn advancing_a_done_card_is_refused() {
     card.advance(&holder()).unwrap();
     card.advance(&holder()).unwrap();
     let refused = card.advance(&holder()).expect_err("done is terminal");
-    assert_eq!(refused.code(), "card_already_done");
+    assert_eq!(refused.code(), "CARD_ALREADY_DONE");
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn advancing_without_the_scope_is_refused() {
     let mut card = CardState::open(Uuid::now_v7(), Uuid::now_v7(), "Draft".to_string());
     let bystander = AppPrincipal::new(Uuid::now_v7(), Uuid::now_v7(), Vec::new(), false);
     let refused = card.advance(&bystander).expect_err("advance is gated");
-    assert_eq!(refused.code(), "missing_advance_scope");
+    assert_eq!(refused.code(), "MISSING_ADVANCE_SCOPE");
 }
 
 #[test]

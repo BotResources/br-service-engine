@@ -27,8 +27,8 @@ pub const DEP_MEMBERSHIP: u8 = 0;
 pub mod reasons {
     use service_engine::gate::Reason;
 
-    pub const ALREADY_CLOSED: Reason = Reason::new("already_closed");
-    pub const NOT_CLOSED: Reason = Reason::new("not_closed");
+    pub const ALREADY_CLOSED: Reason = Reason::new("ALREADY_CLOSED");
+    pub const NOT_CLOSED: Reason = Reason::new("NOT_CLOSED");
 }
 
 service_engine::gated! {

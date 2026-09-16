@@ -28,6 +28,7 @@ use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::ReactionRegistry;
 use crate::offers::OfferStagers;
 use crate::pipeline::MutationRegistry;
+use crate::pipeline::{PostSavePolicies, PostSaveSeams};
 use crate::presence::PresenceRegistry;
 use crate::principal::Principal;
 use crate::registry::RenderRegistry;
@@ -64,6 +65,8 @@ pub struct Engine<P: Principal> {
     inbound_reactions: Mutex<ReactionRegistry>,
     mutations: MutationRegistry<P>,
     offers: OfferStagers,
+    post_save: PostSavePolicies,
+    post_save_seams: PostSaveSeams,
     presence: PresenceRegistry<P>,
     blobs: BlobRegistry,
     erasables: Vec<Arc<dyn ErasedErasable>>,
@@ -123,6 +126,8 @@ impl<P: Principal> Engine<P> {
             inbound_reactions: Mutex::new(ReactionRegistry::new()),
             mutations: MutationRegistry::new(),
             offers: OfferStagers::default(),
+            post_save: PostSavePolicies::default(),
+            post_save_seams: PostSaveSeams::default(),
             presence: PresenceRegistry::new(),
             blobs: BlobRegistry::new(),
             erasables: Vec::new(),

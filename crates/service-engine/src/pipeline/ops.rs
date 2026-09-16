@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::{BlobHandle, BlobRef, BlobRowOp};
 use crate::error::EngineError;
+use crate::gate::Reason;
 use crate::impact::{Deps, Dims, Impact};
 use crate::inbound::ReactionMessage;
 use crate::offers::OfferStagers;
@@ -16,6 +17,7 @@ use crate::persistence::{Aggregate, Persistence};
 use crate::pipeline::outbound::{
     OutboundCommand, OutboundContext, OutboundEvent, command_record, event_record,
 };
+use crate::pipeline::policy::{PostSave, PostSavePolicies, Refused};
 use crate::pipeline::staged::{ScheduledMessage, Staged};
 use crate::principal::PrincipalId;
 use crate::relays::outbox::OutboxRecord;
@@ -27,6 +29,7 @@ pub struct Ops<'a> {
     pub(crate) staged: &'a mut Staged,
     pub(crate) accumulators: &'a AccumulatorRuntime,
     pub(crate) offers: Arc<OfferStagers>,
+    pub(crate) policies: Arc<PostSavePolicies>,
     pub(crate) blobs: Option<&'a BlobHandle>,
     pub(crate) now: Timestamp,
     outbound: Option<OutboundContext>,
@@ -39,6 +42,7 @@ impl<'a> Ops<'a> {
         staged: &'a mut Staged,
         accumulators: &'a AccumulatorRuntime,
         offers: Arc<OfferStagers>,
+        policies: Arc<PostSavePolicies>,
         blobs: Option<&'a BlobHandle>,
         now: Timestamp,
     ) -> Self {
@@ -47,6 +51,7 @@ impl<'a> Ops<'a> {
             staged,
             accumulators,
             offers,
+            policies,
             blobs,
             now,
             outbound: None,
@@ -81,8 +86,7 @@ impl<'a> Ops<'a> {
         &mut self,
         key: &<A::Store as Persistence>::Key,
     ) -> Result<Option<A>, EngineError> {
-        aggregate_advisory_lock::<A>(self.conn, key).await?;
-        A::Store::lock(self.conn, key).await?;
+        lock_aggregate::<A>(self.conn, key).await?;
         let loaded = A::Store::load(self.conn, key).await?;
         if let Some(aggregate) = &loaded {
             let reconcile_key = reconcile_key::<A>(aggregate)?;
@@ -91,10 +95,47 @@ impl<'a> Ops<'a> {
         Ok(loaded)
     }
 
+    /// Load several aggregates of one noun in a single pipeline transaction,
+    /// each locked for the transaction, so their invariants can be judged and
+    /// their writes committed together with no partial visibility.
+    ///
+    /// The keys are deduplicated and then locked in ascending order of their
+    /// encoded bytes before any row is read. This ascending order is the
+    /// engine's global aggregate-lock discipline: because every transaction
+    /// that touches an overlapping set acquires the shared locks in the same
+    /// order, two concurrent multi-aggregate writes can never deadlock, and a
+    /// service that needs to mutate several aggregates atomically never has to
+    /// reach for a global advisory lock of its own. To hold aggregates of
+    /// *different* nouns in one transaction, call `load`/`load_many` in
+    /// ascending order of `(store type name, encoded key bytes)` — the same
+    /// order this method imposes within a noun.
+    ///
+    /// Absent keys are omitted from the result, as with a batched read; the
+    /// returned aggregates are in the locked (ascending-key) order.
+    pub async fn load_many<A: Aggregate>(
+        &mut self,
+        keys: &[<A::Store as Persistence>::Key],
+    ) -> Result<Vec<A>, EngineError> {
+        let ordered = lock_order::<A>(keys)?;
+        for (key, _) in &ordered {
+            lock_aggregate::<A>(self.conn, key).await?;
+        }
+        let sorted_keys: Vec<_> = ordered.into_iter().map(|(key, _)| key).collect();
+        let loaded = A::Store::read_many(self.conn, &sorted_keys).await?;
+        let mut aggregates = Vec::with_capacity(loaded.len());
+        for (_, aggregate) in loaded {
+            let reconcile_key = reconcile_key::<A>(&aggregate)?;
+            self.blob_seen.insert(reconcile_key, aggregate.blob_refs());
+            aggregates.push(aggregate);
+        }
+        Ok(aggregates)
+    }
+
     pub async fn save<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
         let outcome = A::Store::save(self.conn, aggregate, aggregate.pending_events()).await;
         self.note_terminal(&outcome);
         outcome?;
+        self.run_post_save::<A>(aggregate)?;
         self.offers
             .stage_for(aggregate, &mut self.staged.offer_dirty)?;
         self.reconcile_blobs::<A>(aggregate)
@@ -104,9 +145,39 @@ impl<'a> Ops<'a> {
         let outcome = A::Store::create(self.conn, aggregate, aggregate.pending_events()).await;
         self.note_terminal(&outcome);
         outcome?;
+        self.run_post_save::<A>(aggregate)?;
         self.offers
             .stage_for(aggregate, &mut self.staged.offer_dirty)?;
         self.reconcile_blobs::<A>(aggregate)
+    }
+
+    /// Run the post-save policy registered for `A`, if any, over the aggregate
+    /// the store just wrote. A refusal is recorded on `staged` and surfaced as
+    /// [`EngineError::PolicyRefused`]; the pipeline maps it to the mutation's
+    /// reason code (or a reaction dead-letter) and rolls the transaction back.
+    fn run_post_save<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let Some(policy) = self.policies.get::<A>() else {
+            return Ok(());
+        };
+        let outcome = {
+            let mut post_save = PostSave::new(self);
+            policy.run(aggregate, &mut post_save)
+        };
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(Refused(reason)) => {
+                self.record_policy_refusal(reason);
+                Err(EngineError::PolicyRefused {
+                    code: reason.code(),
+                })
+            }
+        }
+    }
+
+    pub(crate) fn record_policy_refusal(&mut self, reason: Reason) {
+        if self.staged.policy_refusal.is_none() {
+            self.staged.policy_refusal = Some(reason);
+        }
     }
 
     pub fn delete<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
@@ -244,25 +315,51 @@ impl<'a> Ops<'a> {
     }
 }
 
-async fn aggregate_advisory_lock<A: Aggregate>(
+fn key_bytes<A: Aggregate>(key: &<A::Store as Persistence>::Key) -> Result<Vec<u8>, EngineError> {
+    serde_json::to_vec(key).map_err(|source| EngineError::Encode {
+        what: "aggregate key for the load advisory lock",
+        source,
+    })
+}
+
+/// An aggregate key paired with its canonical encoded bytes, the value the lock
+/// order is taken over.
+type KeyWithBytes<A> = (<<A as Aggregate>::Store as Persistence>::Key, Vec<u8>);
+
+/// Deduplicate `keys` and pair each with its encoded bytes, sorted ascending by
+/// those bytes. This is the deterministic order `load_many` locks in, so any two
+/// transactions locking an overlapping set take the shared locks in one order.
+fn lock_order<A: Aggregate>(
+    keys: &[<A::Store as Persistence>::Key],
+) -> Result<Vec<KeyWithBytes<A>>, EngineError> {
+    let mut ordered: Vec<KeyWithBytes<A>> = Vec::with_capacity(keys.len());
+    for key in keys {
+        let bytes = key_bytes::<A>(key)?;
+        if ordered.iter().any(|(_, seen)| *seen == bytes) {
+            continue;
+        }
+        ordered.push((key.clone(), bytes));
+    }
+    ordered.sort_by(|(_, a), (_, b)| a.cmp(b));
+    Ok(ordered)
+}
+
+/// Take the transaction-scoped advisory lock and the store's row lock for one
+/// aggregate key, in that order. The advisory lock serializes concurrent
+/// commands on the same aggregate even for stores whose `lock` is a no-op.
+async fn lock_aggregate<A: Aggregate>(
     conn: &mut PgConnection,
     key: &<A::Store as Persistence>::Key,
 ) -> Result<(), EngineError> {
     let store = std::any::type_name::<A::Store>();
-    let key_bytes = serde_json::to_vec(key).map_err(|source| EngineError::Encode {
-        what: "aggregate key for the load advisory lock",
-        source,
-    })?;
-    let id = crate::advisory::lock_id(
-        crate::advisory::AGGREGATE_LOAD,
-        &[store.as_bytes(), &key_bytes],
-    );
+    let bytes = key_bytes::<A>(key)?;
+    let id = crate::advisory::lock_id(crate::advisory::AGGREGATE_LOAD, &[store.as_bytes(), &bytes]);
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(id)
-        .execute(conn)
+        .execute(&mut *conn)
         .await
         .map_err(EngineError::Db)?;
-    Ok(())
+    A::Store::lock(conn, key).await
 }
 
 fn reconcile_key<A: Aggregate>(aggregate: &A) -> Result<(TypeId, Vec<u8>), EngineError> {
@@ -271,4 +368,75 @@ fn reconcile_key<A: Aggregate>(aggregate: &A) -> Result<(TypeId, Vec<u8>), Engin
         source,
     })?;
     Ok((TypeId::of::<A>(), key))
+}
+
+#[cfg(test)]
+mod lock_order_tests {
+    use super::*;
+    use crate::persistence::PersistenceStyle;
+    use futures_util::future::BoxFuture;
+
+    struct Widget(String);
+    struct WidgetStore;
+
+    impl Persistence for WidgetStore {
+        type Aggregate = Widget;
+        type Key = String;
+        type Event = ();
+        const STYLE: PersistenceStyle = PersistenceStyle::Crud;
+
+        fn load<'a>(
+            _conn: &'a mut PgConnection,
+            _key: &'a Self::Key,
+        ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>> {
+            Box::pin(async { unimplemented!("lock_order never loads") })
+        }
+        fn save<'a>(
+            _conn: &'a mut PgConnection,
+            _aggregate: &'a Self::Aggregate,
+            _events: &'a [Self::Event],
+        ) -> BoxFuture<'a, Result<(), EngineError>> {
+            Box::pin(async { unimplemented!("lock_order never saves") })
+        }
+        fn create<'a>(
+            _conn: &'a mut PgConnection,
+            _aggregate: &'a Self::Aggregate,
+            _events: &'a [Self::Event],
+        ) -> BoxFuture<'a, Result<(), EngineError>> {
+            Box::pin(async { unimplemented!("lock_order never creates") })
+        }
+    }
+
+    impl Aggregate for Widget {
+        type Store = WidgetStore;
+        fn key(&self) -> String {
+            self.0.clone()
+        }
+    }
+
+    fn order(keys: &[&str]) -> Vec<String> {
+        lock_order::<Widget>(&keys.iter().map(|k| k.to_string()).collect::<Vec<_>>())
+            .expect("string keys always encode")
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect()
+    }
+
+    #[test]
+    fn keys_are_locked_in_ascending_encoded_order_whatever_the_input_order() {
+        // Two transactions handed the same set in opposite orders must lock it
+        // in one order, or they can deadlock.
+        assert_eq!(order(&["c", "a", "b"]), vec!["a", "b", "c"]);
+        assert_eq!(order(&["b", "c", "a"]), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_repeated_key_is_locked_once() {
+        assert_eq!(order(&["a", "b", "a", "b", "a"]), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn the_empty_set_locks_nothing() {
+        assert!(order(&[]).is_empty());
+    }
 }

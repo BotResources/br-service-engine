@@ -37,6 +37,7 @@ impl<P: Principal> Engine<P> {
             self.transport.clone() as Arc<dyn ImpactTransport>,
             self.accumulators.clone(),
             std::sync::Arc::new(self.offers.clone()),
+            std::sync::Arc::new(self.post_save.clone()),
             self.presence.handle(),
             self.blobs.maybe_handle(),
             self.config.lock_timeout,

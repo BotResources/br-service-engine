@@ -26,7 +26,15 @@ pub(crate) fn intern(value: &str) -> &'static str {
 impl<'de> Deserialize<'de> for Reason {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let code = String::deserialize(deserializer)?;
-        Ok(Reason::new(intern(&code)))
+        // A code arriving over the wire is untrusted, so its shape is validated
+        // here rather than through the panicking `Reason::new`. The shape is
+        // checked before `intern`, so a malformed code never leaks a `'static`.
+        if !crate::gate::is_reason_code(code.as_bytes()) {
+            return Err(D::Error::custom(format!(
+                "reason code {code:?} is not SCREAMING_SNAKE_CASE matching ^[A-Z][A-Z0-9_]+$"
+            )));
+        }
+        Reason::parse(intern(&code)).map_err(D::Error::custom)
     }
 }
 
@@ -87,7 +95,7 @@ mod tests {
     use super::*;
 
     const CLOSE: ActionName = ActionName::from_static("close");
-    const ALREADY_CLOSED: Reason = Reason::new("already_closed");
+    const ALREADY_CLOSED: Reason = Reason::new("ALREADY_CLOSED");
 
     #[test]
     fn an_allowed_gate_round_trips_through_json() {
@@ -104,7 +112,7 @@ mod tests {
         let json = serde_json::to_string(&blocked).unwrap();
         let back: Gate = serde_json::from_str(&json).unwrap();
         assert_eq!(back, blocked);
-        assert_eq!(back.reason().map(|r| r.code()), Some("already_closed"));
+        assert_eq!(back.reason().map(|r| r.code()), Some("ALREADY_CLOSED"));
     }
 
     #[test]

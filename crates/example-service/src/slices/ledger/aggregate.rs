@@ -6,7 +6,7 @@ use service_engine::wire::Noun;
 use uuid::Uuid;
 
 pub const EVENT_VERSION: i32 = 2;
-pub const WOULD_GO_NEGATIVE: Reason = Reason::new("ledger_would_go_negative");
+pub const WOULD_GO_NEGATIVE: Reason = Reason::new("LEDGER_WOULD_GO_NEGATIVE");
 
 pub struct Ledger;
 

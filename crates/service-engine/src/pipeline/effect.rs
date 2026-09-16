@@ -14,6 +14,7 @@ use crate::pipeline::context::{Bulk, Mutation};
 use crate::pipeline::mutation::MutationInput;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::OutboundContext;
+use crate::pipeline::policy::PostSavePolicies;
 use crate::pipeline::staged::Staged;
 use crate::pipeline::tx::{begin_scoped, flush_and_commit};
 use crate::pipeline::{MutationError, MutationFault};
@@ -27,6 +28,7 @@ pub(crate) struct MutationServices<P: Principal> {
     pub(crate) transport: Arc<dyn ImpactTransport>,
     pub(crate) accumulators: Arc<AccumulatorRuntime>,
     pub(crate) offers: Arc<OfferStagers>,
+    pub(crate) policies: Arc<PostSavePolicies>,
     pub(crate) presence: PresenceHandle<P>,
     pub(crate) blobs: Option<BlobHandle>,
     pub(crate) lock_timeout: Duration,
@@ -41,6 +43,7 @@ impl<P: Principal> Clone for MutationServices<P> {
             transport: self.transport.clone(),
             accumulators: self.accumulators.clone(),
             offers: self.offers.clone(),
+            policies: self.policies.clone(),
             presence: self.presence.clone(),
             blobs: self.blobs.clone(),
             lock_timeout: self.lock_timeout,
@@ -94,6 +97,7 @@ where
             &mut staged,
             services.accumulators.as_ref(),
             services.offers.clone(),
+            services.policies.clone(),
             services.blobs.as_ref(),
             time::now(),
         )
@@ -101,6 +105,13 @@ where
         let mut cx = Mutation::new(ops, &principal, &services.presence, &mut presence_puts);
         handler(&mut cx, input).await
     };
+    if let Some(reason) = staged.policy_refusal {
+        let _ = tx.rollback().await;
+        return Err(MutationError::refused(
+            Some(reason),
+            "a post-save policy refused the write",
+        ));
+    }
     let output = match result {
         Ok(output) => output,
         Err(error) => {
@@ -158,6 +169,7 @@ where
             &mut staged,
             services.accumulators.as_ref(),
             services.offers.clone(),
+            services.policies.clone(),
             services.blobs.as_ref(),
             time::now(),
         )
@@ -165,6 +177,13 @@ where
         let mut cx = Bulk::new(ops, &principal);
         handler(&mut cx, input).await
     };
+    if let Some(reason) = staged.policy_refusal {
+        let _ = tx.rollback().await;
+        return Err(MutationError::refused(
+            Some(reason),
+            "a post-save policy refused the write",
+        ));
+    }
     let output = match result {
         Ok(output) => output,
         Err(error) => {

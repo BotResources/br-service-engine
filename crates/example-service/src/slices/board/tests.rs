@@ -42,7 +42,7 @@ fn archiving_without_the_scope_is_refused_with_the_missing_scope_reason() {
     let refused = board
         .archive(&bystander(org))
         .expect_err("archive is gated");
-    assert_eq!(refused.code(), "missing_archive_scope");
+    assert_eq!(refused.code(), "MISSING_ARCHIVE_SCOPE");
     assert_eq!(board.state, BoardState::Active);
 }
 
@@ -53,7 +53,7 @@ fn archiving_an_already_archived_board_is_refused_as_not_active() {
     let refused = board
         .archive(&holder(org))
         .expect_err("a second archive is refused");
-    assert_eq!(refused.code(), "board_not_active");
+    assert_eq!(refused.code(), "BOARD_NOT_ACTIVE");
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn the_gate_and_the_command_agree_on_the_same_reason() {
     let board = board(BoardState::Archived);
     let gate = board.archive_gate(&holder(org));
     assert!(!gate.is_allowed());
-    assert_eq!(gate.reason().map(|r| r.code()), Some("board_not_active"));
+    assert_eq!(gate.reason().map(|r| r.code()), Some("BOARD_NOT_ACTIVE"));
 }
 
 #[test]

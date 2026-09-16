@@ -267,6 +267,16 @@ pub enum EngineError {
     )]
     UndeclaredSchemaMember { member: String },
 
+    #[error("a post-save policy refused the write with reason {code}")]
+    PolicyRefused { code: &'static str },
+
+    #[error(
+        "a slice declared aggregate `{aggregate}` subject to a post-save policy, but no slice \
+         registered one; the seam is unhonoured, so the write path it must guard would run \
+         unguarded"
+    )]
+    UnhonouredSeam { aggregate: &'static str },
+
     #[error(
         "no live session {session} on this pod, so its window cannot be paged; a page request \
          must be issued over the session's own connection, which pins it to the pod that holds it"

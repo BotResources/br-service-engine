@@ -7,8 +7,8 @@ use uuid::Uuid;
 use super::CARD_ADVANCE;
 use crate::kernel::AppPrincipal;
 
-pub const DONE: Reason = Reason::new("card_already_done");
-pub const MISSING_SCOPE: Reason = Reason::new("missing_advance_scope");
+pub const DONE: Reason = Reason::new("CARD_ALREADY_DONE");
+pub const MISSING_SCOPE: Reason = Reason::new("MISSING_ADVANCE_SCOPE");
 
 pub struct Card;
 

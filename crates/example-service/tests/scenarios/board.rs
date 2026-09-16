@@ -66,7 +66,7 @@ async fn board_direct_lane_gate_affordance_offer_visibility_oneshot() {
             serde_json::json!({ "id": b1 }),
         )
         .await;
-    assert_eq!(error_code(&refused), "board_not_active");
+    assert_eq!(error_code(&refused), "BOARD_NOT_ACTIVE");
 
     let b2 = Uuid::now_v7();
     ok(&world

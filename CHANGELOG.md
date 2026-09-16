@@ -9,6 +9,35 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Added
 
+- **Post-save policies (declared subjection).** `Engine::register_post_save_policy::<A>(f)`
+  registers a policy the engine runs after every `save`/`create` of aggregate `A`,
+  inside the transaction and before the commit. The policy (`Fn(&A, &mut PostSave)
+  -> Result<(), Refused>`) is pure domain logic over the just-saved aggregate: it
+  stages impacts/commands/events through `PostSave`, or `PostSave::refuse(reason)`
+  to roll the write back and answer the mutation with that `Reason` code (a
+  refusing reaction is dead-lettered with it). It cannot save, so it cannot
+  recurse. This generalises the cross-slice interlocks whose call sites the 0.1
+  rewrite left unwired — the two known uses are the Services breach interlock and
+  the Runners reconcile-journal impact. New public exports: `service_engine::{PostSave,
+  Refused}`; new `EngineError::PolicyRefused { code }` (non-exhaustive enum, no
+  adopter break).
+- **Seam completeness at registration.** `Engine::require_post_save_policy::<A>()`
+  declares aggregate `A` *subject* to a post-save policy; `Engine::run` fails at
+  boot with `EngineError::UnhonouredSeam { aggregate }` unless some slice
+  registered one — the same registration gate the schema type check applies, so a
+  missing interlock is a loud boot error, not a silent absent call. New
+  `EngineError::UnhonouredSeam` variant (non-exhaustive enum, no adopter break).
+- **`Ops::load_many::<A>(&keys)`** loads several aggregates of one noun in one
+  pipeline transaction, each locked for the transaction, so a service mutates
+  several aggregates atomically **without a global advisory lock of its own**. The
+  keys are deduplicated and locked in ascending order of their encoded bytes; that
+  ascending `(store type, encoded key)` order is the engine's documented global
+  aggregate-lock discipline (call `load`/`load_many` in it to hold different nouns
+  in one transaction), and it makes two concurrent multi-aggregate writes
+  deadlock-free. Absent keys are omitted, as for a batched read. Additive — no
+  existing signature changed.
+- `Reason::parse(&'static str) -> Result<Reason, ReasonFormat>` for a reason code
+  decoded from the wire, and `service_engine::{ReasonFormat, is_reason_code}`.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit
@@ -23,6 +52,20 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Changed
 
+- **Reason codes are now `SCREAMING_SNAKE_CASE`.** `Reason::new` validates its
+  argument against `^[A-Z][A-Z0-9_]+$` (a leading capital, then one or more
+  capitals, digits or underscores); a mistyped literal is a compile error at the
+  `const` site, and a code decoded from the wire that fails the shape is rejected
+  at deserialization rather than trusted. This aligns the engine with the frozen
+  `br-test-harness` `verdict::expect_code_shaped`, which already demands this
+  shape, and with a consumer that assumes the casing. All in-tree codes were
+  migrated (e.g. `already_closed` → `ALREADY_CLOSED`).
+  **Migration for adopters:** rename every reason-code literal to
+  `SCREAMING_SNAKE_CASE` — a lower-case literal that compiled under 0.1 is now a
+  compile-time panic in `Reason::new`. Any client, test or fixture that matched a
+  reason code as a string (for example asserting `"already_closed"`) must match
+  the upper-case code. The wire encoding is unchanged; only the accepted alphabet
+  narrowed.
 - **A mirror no longer judges the producer's content.** Converged means the bucket
   is bound and one full read completed with the watch attached at the revision that
   read reached — nothing more. A consumed prefix that reads empty is a converged

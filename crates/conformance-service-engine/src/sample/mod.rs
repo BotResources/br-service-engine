@@ -105,7 +105,7 @@ pub use engine::{
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 pub use engine_pipeline::{
     boot_blob_engine, boot_offer_engine, boot_offer_engine_leased, boot_offer_engine_reconciling,
-    boot_panic_engine, boot_pipeline_engine,
+    boot_panic_engine, boot_pipeline_engine, boot_policy_engine, boot_unhonoured_seam_engine,
 };
 
 pub use assignment::{
