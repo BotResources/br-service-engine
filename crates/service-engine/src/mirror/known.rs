@@ -56,31 +56,36 @@ impl Bind {
         }
     }
 
-    fn push_into(self, sep: &mut sqlx::query_builder::Separated<'_, '_, Postgres, &'static str>) {
+    /// Bind this value as one parameter onto the query (or the literal `NULL`),
+    /// with no surrounding punctuation — the caller places the commas or the
+    /// `AND`. The single match from a variant to its `push_bind` lives here,
+    /// shared by the upsert's `VALUES` list and the delete's `WHERE` predicate so
+    /// the two SQL paths cannot drift.
+    fn push_bind_to(self, qb: &mut QueryBuilder<'_, Postgres>) {
         match self {
             Bind::Uuid(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Text(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Int(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Real(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Bool(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Json(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Timestamptz(v) => {
-                sep.push_bind(v);
+                qb.push_bind(v);
             }
             Bind::Null => {
-                sep.push("NULL");
+                qb.push("NULL");
             }
         }
     }
@@ -184,11 +189,13 @@ pub(super) async fn upsert<R: KnownRow>(
         }
     }
     qb.push(") VALUES (");
-    {
-        let mut binds = qb.separated(", ");
-        for column in key.into_iter().chain(values) {
-            column.value.push_into(&mut binds);
+    let mut first = true;
+    for column in key.into_iter().chain(values) {
+        if !first {
+            qb.push(", ");
         }
+        first = false;
+        column.value.push_bind_to(&mut qb);
     }
     qb.push(") ON CONFLICT (");
     {
@@ -227,32 +234,7 @@ pub(super) async fn delete_by_key<R: KnownRow>(
         first = false;
         qb.push(column.name);
         qb.push(" = ");
-        match column.value {
-            Bind::Uuid(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Text(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Int(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Real(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Bool(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Json(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Timestamptz(v) => {
-                qb.push_bind(v);
-            }
-            Bind::Null => {
-                qb.push("NULL");
-            }
-        }
+        column.value.push_bind_to(&mut qb);
     }
     qb.build().execute(conn).await?;
     Ok(())
