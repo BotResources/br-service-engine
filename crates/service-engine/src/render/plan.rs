@@ -13,7 +13,7 @@ use crate::render::pass::{GroupKey, PassContext, Vanished};
 use crate::render::route::SessionWork;
 use crate::session::SessionId;
 use crate::session::store::SessionTable;
-use crate::wire::{KeyBytes, ViewBytes};
+use crate::wire::{Cause, KeyBytes, ViewBytes};
 
 pub(crate) struct PlannedWindow<P> {
     pub(crate) representative: P,
@@ -122,19 +122,20 @@ pub(crate) fn outgoing_for<P: Principal>(
             })
             .collect();
         if per_impact.is_empty() {
+            let cause = coalesced_cause(touching.get(&(projector.clone(), key.clone())), impacts);
             let step = transition(last, next.as_ref());
             if step.emits_upsert() {
                 outgoing.push(Outgoing::Upsert {
                     projector,
                     key,
                     view: next.expect("an upsert carries the view it rendered"),
-                    cause: None,
+                    cause,
                 });
             } else if step.emits_remove() {
                 outgoing.push(Outgoing::Remove {
                     projector,
                     key,
-                    cause: None,
+                    cause,
                 });
             }
             continue;
@@ -161,3 +162,25 @@ pub(crate) fn outgoing_for<P: Principal>(
     }
     Ok(outgoing)
 }
+
+/// The cause a single coalesced delta carries.
+///
+/// A coalesced projector emits at most one delta per key per frame, folding
+/// every impact that touched the key into it. Only one cause can survive that
+/// fold, and the rule is **last write wins**: the delta carries the cause of the
+/// last impact it folds — the one latest in the frame's arrival order (the
+/// highest index into `impacts`) that carries a cause. Impacts with no cause are
+/// skipped, so a rename that follows a create delivers the rename's cause, never
+/// the stale create's; a fold whose impacts all lack a cause carries `None`.
+fn coalesced_cause(indices: Option<&Vec<usize>>, impacts: &[Impact]) -> Option<Cause> {
+    indices
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|index| impacts[*index].cause().is_some())
+        .max()
+        .and_then(|index| impacts[index].cause().cloned())
+}
+
+#[cfg(test)]
+mod tests;
