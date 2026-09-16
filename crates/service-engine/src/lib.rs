@@ -118,8 +118,9 @@ pub use impact::{Deps, Dims, ForeignKey, Impact, TransportEvent};
 pub use inbound::{Disposition, ReactionError};
 pub use lanes::{Lane, LaneNotice, LanesPaused, LanesResumed};
 pub use mirror::{
-    Change, ChangeOp, Consumed, Known, KnownScope, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader,
-    MirrorReady, Project, Projection, Shadow, Shadows,
+    Bind, Change, ChangeOp, Column, Consumed, ConsumedGuard, ConsumedManifest, Extended, Known,
+    KnownRow, KnownScope, ManifestMismatch, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader,
+    MirrorReady, Project, Projection, Shadow, Shadows, col, is_raw_json,
 };
 pub use name::{
     AccumulatorName, ChannelName, ForeignId, JobName, MirrorName, Namespace, NounName, PodId,

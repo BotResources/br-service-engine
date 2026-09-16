@@ -9,6 +9,7 @@ use crate::impact::{Dims, ForeignKey, Impact};
 use crate::wire::Noun;
 
 use super::consumed::Consumed;
+use super::known::{self, Column, KnownRow};
 use super::shadow::{Shadow, Shadows};
 
 pub struct Projection<'a> {
@@ -60,6 +61,25 @@ impl<'a> Projection<'a> {
     pub async fn replace_one<R: Known>(&mut self, row: R) -> Result<(), EngineError> {
         row.upsert(self.conn).await?;
         self.impact_foreign(R::NAMESPACE, &row.foreign_key())
+    }
+
+    /// Declaratively upsert a [`KnownRow`]: the engine generates the
+    /// `INSERT … ON CONFLICT` from the row's table, key and value columns, and
+    /// stages the impact under the row's foreign key. The documented path — no
+    /// hand-written SQL in the projector.
+    pub async fn upsert<R: KnownRow>(&mut self, row: R) -> Result<(), EngineError> {
+        let foreign_key = row.foreign_key();
+        known::upsert(self.conn, &row).await?;
+        self.impact_foreign(R::NAMESPACE, &foreign_key)
+    }
+
+    /// Declaratively retire one [`KnownRow`] by its key columns: the engine
+    /// generates the `DELETE … WHERE key = …` and stages the impact under the
+    /// same foreign key the matching [`upsert`](Self::upsert) would.
+    pub async fn retire<R: KnownRow>(&mut self, key: Vec<Column>) -> Result<(), EngineError> {
+        let foreign_key = known::foreign_key_of(&key);
+        known::delete_by_key::<R>(self.conn, key).await?;
+        self.impact_foreign(R::NAMESPACE, &foreign_key)
     }
 
     pub async fn remove<S: KnownScope>(&mut self, scope: S) -> Result<(), EngineError> {

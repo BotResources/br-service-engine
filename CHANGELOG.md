@@ -112,6 +112,42 @@ and a single git tag `v{version}` releases the set. Format follows
   engine's own wrappers, so they are allowed unclaimed.
 - `EngineError::SchemaParse` — raised if the composed SDL cannot be parsed during
   the boot gate.
+- **Declarative `known_*` rows.** A mirror row that implements `KnownRow` (its
+  `TABLE`, `NAMESPACE`, key columns and value columns) is written by the engine:
+  `Projection::upsert` generates the `INSERT … ON CONFLICT … DO UPDATE`, and
+  `Projection::retire` the `DELETE … WHERE key = …`, both staging the impact
+  under the same foreign key. A projector using it carries no hand-written SQL.
+  New public API: `KnownRow`, `Column`, `Bind`, `col`, `Projection::{upsert,
+  retire}`. The manual `Known`/`KnownScope` impls (`replace_one`/`replace`/
+  `remove`) stay as the escape hatch for a write that is not a plain single-key
+  upsert (a membership set deleted with `RETURNING`, a column type outside
+  `Bind`). *Migration for adopters:* none — additive; move a mirror to the kit at
+  leisure.
+- **Typed consumption is the law: raw `serde_json::Value` is refused.** A mirror
+  that consumes the bare `serde_json::Value` is rejected at `register_mirror`
+  with the new `EngineError::RawJsonConsumption`, so the whole consumed value is
+  always typed and the join never reads untyped JSON. A value that is
+  deliberately raw JSON (the producer's column is itself JSON) opts in with
+  `Consumed::RAW_JSON_ESCAPE_HATCH = true`; a typed struct holding a
+  `serde_json::Value` *field* needs nothing. `MirrorReady::{validate, guards}`
+  and `ConsumedGuard` expose the check. *Migration for adopters:* a service that
+  registered a `Consumed for serde_json::Value` mirror must type the value or set
+  the escape hatch; every typed consumer is unaffected.
+- **Consumed manifest / version.** `Consumed` gains `const VERSION: u16 = 1` and
+  `manifest() -> ConsumedManifest`; `ConsumedManifest::accepts` is the pure
+  verdict (`ManifestMismatch::{Offer, Version}`) the engine will apply to a
+  producer-owned manifest at scan and watch — a mismatch dead-letters that key
+  and never touches readiness. *Migration for adopters:* none — `VERSION`
+  defaults to 1, existing `Consumed` impls compile unchanged. The scan/watch
+  enforcement that turns a mismatch into a per-key dead letter is not yet wired
+  (it lands in the mirror runtime, reworked in parallel).
+- **Project-specific extension pattern.** `Extended<Core, Ext>` composes a
+  producer's shared `core` with a project-owned `extension` given as the second
+  type parameter; an extension shape this project does not model fails to
+  deserialize — an unknown extension is denied, not mirrored as opaque JSON. A
+  consumer implements `Consumed` on the concrete `Extended<Core, Ext>` (wrap it
+  in a newtype when `Core` is foreign). `example-service` carries the reference
+  (`slices::roster::extension`).
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit

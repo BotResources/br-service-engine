@@ -110,6 +110,16 @@ pub enum EngineError {
     #[error("mirror name {name} is already registered, so its health board would be overwritten")]
     DuplicateMirrorName { name: MirrorName },
 
+    #[error(
+        "mirror {mirror} consumes prefix {prefix} as a raw serde_json::Value; a consumed value \
+         must be typed, or set Consumed::RAW_JSON_ESCAPE_HATCH when the producer's column is \
+         itself JSON"
+    )]
+    RawJsonConsumption {
+        mirror: MirrorName,
+        prefix: &'static str,
+    },
+
     #[error("chunk sequence {seq} is above {max}, the largest a bigint column stores faithfully")]
     ChunkSeqOutOfRange { seq: u64, max: u64 },
 

@@ -273,10 +273,26 @@ scheduled commitment, so an extra reconcile after a takeover is harmless. The
 version
 lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
-`known_*` through the direct lane, joined by a `keyed_by` function and written
-with the `Projection` helpers (`replace_one`, `replace`, `remove`, over the
-`Known` / `KnownScope` traits) so the projector carries no SQL of its own; its
-projection is leader-gated: only the pod holding the mirror lease projects,
+`known_*` through the direct lane, joined by a `keyed_by` function. A consumed
+value is a typed `Consumed`, never raw JSON: a mirror that consumes
+`serde_json::Value` is refused at registration (`EngineError::RawJsonConsumption`)
+unless it sets `Consumed::RAW_JSON_ESCAPE_HATCH`, so the join always reads typed
+rows (a typed value may still hold a `serde_json::Value` field). A `known_*` row
+is written either declaratively — implement `KnownRow` (table, key columns, value
+columns) and the engine generates the upsert and the delete behind
+`Projection::upsert` / `Projection::retire`, the documented path with no SQL in
+the projector — or manually through `replace_one` / `replace` / `remove` over the
+`Known` / `KnownScope` traits, the escape hatch for a write that is not a plain
+single-key upsert. A producer that extends a shared type is consumed with
+`Extended<Core, Ext>`: the project names its own extension as the second type
+parameter and an unknown extension is denied at deserialization, never mirrored
+as opaque JSON. `Consumed::VERSION` and `manifest()` carry the offer's wire
+version, and `ConsumedManifest::accepts` is the pure verdict (`ManifestMismatch`)
+the engine *will* apply at scan and watch so a producer that reused a prefix for
+an incompatible version becomes a nameable dead letter rather than a silent
+mis-decode — the scan/watch enforcement that reads the producer manifest and
+dead-letters the key is not yet wired (it lands in the mirror runtime, reworked
+in parallel). The projection is leader-gated: only the pod holding the mirror lease projects,
 standby pods keep their shadows current and take over on lease loss. The mirror
 persists a per-bucket watermark — the consumed stream's creation identity and
 the last sequence `S` its read reached, committed with the projections in one

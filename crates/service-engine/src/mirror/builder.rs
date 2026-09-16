@@ -12,7 +12,7 @@ use crate::nats::{KvEvent, KvKey, KvPrefix, Nats};
 use crate::transport::ImpactTransport;
 
 use super::change::{Change, ChangeOp};
-use super::consumed::Consumed;
+use super::consumed::{Consumed, ConsumedManifest, is_raw_json};
 use super::handle::MirrorHandle;
 use super::leader::{MirrorGate, MirrorLeader};
 use super::projection::Project;
@@ -58,6 +58,43 @@ pub(super) struct Consumption {
 
 fn service<E: std::error::Error + Send + Sync + 'static>(error: E) -> EngineError {
     EngineError::Service(Box::new(error))
+}
+
+/// What a `.consume::<C>()` records for the engine to check at registration: the
+/// manifest the consumer expects, and whether the value is the raw
+/// `serde_json::Value` escape. It carries no closures, so reading it settles the
+/// typed-consumption law before any watch is opened.
+#[derive(Debug, Clone)]
+pub struct ConsumedGuard {
+    prefix: &'static str,
+    manifest: ConsumedManifest,
+    is_raw_json: bool,
+    escape: bool,
+}
+
+impl ConsumedGuard {
+    fn of<C: Consumed>() -> Self {
+        Self {
+            prefix: C::PREFIX,
+            manifest: C::manifest(),
+            is_raw_json: is_raw_json::<C>(),
+            escape: C::RAW_JSON_ESCAPE_HATCH,
+        }
+    }
+
+    pub fn prefix(&self) -> &'static str {
+        self.prefix
+    }
+
+    pub fn manifest(&self) -> ConsumedManifest {
+        self.manifest
+    }
+
+    /// A consumption of the raw `serde_json::Value` without the explicit escape
+    /// hatch is refused: the whole value must be typed.
+    pub fn refuses_raw_json(&self) -> bool {
+        self.is_raw_json && !self.escape
+    }
 }
 
 impl Consumption {
@@ -162,6 +199,7 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
 pub struct Mirror {
     name: MirrorName,
     consumptions: Vec<Consumption>,
+    guards: Vec<ConsumedGuard>,
 }
 
 impl Mirror {
@@ -169,11 +207,13 @@ impl Mirror {
         Self {
             name,
             consumptions: Vec::new(),
+            guards: Vec::new(),
         }
     }
 
     pub fn consume<C: Consumed>(mut self) -> Self {
         self.consumptions.push(Consumption::of::<C>());
+        self.guards.push(ConsumedGuard::of::<C>());
         self
     }
 
@@ -185,6 +225,7 @@ impl Mirror {
         MirrorKeyed {
             name: self.name,
             consumptions: self.consumptions,
+            guards: self.guards,
             keyed_by: Arc::new(keyed_by),
         }
     }
@@ -195,6 +236,7 @@ type KeyedByFn<K> = Arc<dyn Fn(&Shadows, &Change) -> Vec<K> + Send + Sync>;
 pub struct MirrorKeyed<K> {
     name: MirrorName,
     consumptions: Vec<Consumption>,
+    guards: Vec<ConsumedGuard>,
     keyed_by: KeyedByFn<K>,
 }
 
@@ -206,6 +248,7 @@ where
         MirrorReady {
             name: self.name,
             consumptions: self.consumptions,
+            guards: self.guards,
             keyed_by: self.keyed_by,
             project: Arc::new(project),
             reconcile_keys: None,
@@ -217,6 +260,7 @@ where
 pub struct MirrorReady<K, Pr: Project<K>> {
     name: MirrorName,
     consumptions: Vec<Consumption>,
+    guards: Vec<ConsumedGuard>,
     keyed_by: KeyedByFn<K>,
     project: Arc<Pr>,
     reconcile_keys: Option<ReconcileKeysFn<K>>,
@@ -229,6 +273,27 @@ where
 {
     pub fn name(&self) -> &MirrorName {
         &self.name
+    }
+
+    /// What each `.consume::<C>()` recorded, in declaration order — the typed
+    /// consumption law the engine checks before it opens a watch.
+    pub fn guards(&self) -> &[ConsumedGuard] {
+        &self.guards
+    }
+
+    /// Refuse a mirror that consumes the raw `serde_json::Value` without the
+    /// explicit escape hatch, so the whole value is always typed. Called by
+    /// `register_mirror`; a direct `build*` caller may call it too.
+    pub fn validate(&self) -> Result<(), EngineError> {
+        for guard in &self.guards {
+            if guard.refuses_raw_json() {
+                return Err(EngineError::RawJsonConsumption {
+                    mirror: self.name.clone(),
+                    prefix: guard.prefix(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn reconcile_keys<F>(mut self, reconcile_keys: F) -> Self
@@ -290,5 +355,61 @@ where
         };
         let watch = move || runtime.clone().watch();
         MirrorHandle::new(name, reconcile, watch)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mirror::projection::Projection;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone, Serialize, Deserialize)]
+    struct Typed {
+        #[allow(dead_code)]
+        v: u32,
+    }
+    impl Consumed for Typed {
+        const PREFIX: &'static str = "typed/v1/";
+    }
+
+    struct NoProject;
+    impl Project<()> for NoProject {
+        type Error = EngineError;
+        fn project<'a>(
+            &'a self,
+            _cx: Projection<'a>,
+            _key: (),
+        ) -> BoxFuture<'a, Result<(), EngineError>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn ready<C: Consumed>() -> MirrorReady<(), NoProject> {
+        Mirror::new(MirrorName::from_static("guarded"))
+            .consume::<C>()
+            .keyed_by(|_shadows, _change| Vec::<()>::new())
+            .project(NoProject)
+    }
+
+    #[test]
+    fn a_raw_json_consumption_is_refused_without_the_escape_hatch() {
+        let refusal = ready::<serde_json::Value>().validate().unwrap_err();
+        assert!(matches!(
+            refusal,
+            EngineError::RawJsonConsumption {
+                prefix: "loose/v1/",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_typed_consumption_validates_and_carries_its_manifest() {
+        let ready = ready::<Typed>();
+        assert!(ready.validate().is_ok());
+        let guard = &ready.guards()[0];
+        assert_eq!(guard.prefix(), "typed/v1/");
+        assert_eq!(guard.manifest(), Typed::manifest());
     }
 }
