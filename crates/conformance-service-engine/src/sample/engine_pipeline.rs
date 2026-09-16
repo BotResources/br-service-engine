@@ -97,6 +97,9 @@ pub async fn boot_pipeline_engine(
         .register_mutation::<ScheduleCreate, _>(schedule_create)
         .expect("register the schedule mutation");
     engine
+        .register_mutation::<RelabelBoth, _>(relabel_both)
+        .expect("register the relabel-both mutation (load_many over two widgets)");
+    engine
         .register_bulk::<ImportWidgets, _>(import_widgets)
         .expect("register the import bulk");
     engine

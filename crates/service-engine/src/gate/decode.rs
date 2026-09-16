@@ -29,12 +29,14 @@ impl<'de> Deserialize<'de> for Reason {
         // A code arriving over the wire is untrusted, so its shape is validated
         // here rather than through the panicking `Reason::new`. The shape is
         // checked before `intern`, so a malformed code never leaks a `'static`.
+        // Past this check the shape holds, so the interned code is a valid
+        // `Reason` by construction — no second validation through `parse`.
         if !crate::gate::is_reason_code(code.as_bytes()) {
             return Err(D::Error::custom(format!(
                 "reason code {code:?} is not SCREAMING_SNAKE_CASE matching ^[A-Z][A-Z0-9_]+$"
             )));
         }
-        Reason::parse(intern(&code)).map_err(D::Error::custom)
+        Ok(Reason(intern(&code)))
     }
 }
 
