@@ -66,13 +66,20 @@ impl Consumption {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
                 let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
-                let entries = bucket.entries(&prefix).await.map_err(service)?;
+                let entries = bucket
+                    .entries_with_revisions(&prefix)
+                    .await
+                    .map_err(service)?;
                 let entries = entries
                     .into_iter()
-                    .map(|(key, value)| {
+                    .map(|(key, value, revision)| {
                         let shadow_key = key.clone();
-                        let applier: Applier =
-                            Box::new(move |shadows: &mut Shadows| shadows.put::<C>(key, value));
+                        // The revision rides with the value: the watch resumes
+                        // at the boundary this scan reached, so the two overlap
+                        // and the shadow keeps the newer of the two.
+                        let applier: Applier = Box::new(move |shadows: &mut Shadows| {
+                            shadows.put_at::<C>(key, value, revision.get());
+                        });
                         (shadow_key, applier)
                     })
                     .collect();
@@ -137,15 +144,18 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
         key: key.clone(),
         op,
     };
+    let revision = revision.get();
     let apply: Applier = match value {
-        Some(value) => Box::new(move |shadows: &mut Shadows| shadows.put::<C>(key, value)),
-        None => Box::new(move |shadows: &mut Shadows| shadows.remove::<C>(&key)),
+        Some(value) => {
+            Box::new(move |shadows: &mut Shadows| shadows.put_at::<C>(key, value, revision))
+        }
+        None => Box::new(move |shadows: &mut Shadows| shadows.remove_at::<C>(&key, revision)),
     };
     Update {
         bucket: C::bucket(),
         change,
         apply,
-        revision: revision.get(),
+        revision,
     }
 }
 

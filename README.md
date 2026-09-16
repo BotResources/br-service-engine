@@ -256,7 +256,13 @@ the last sequence `S` its read reached, committed with the projections in one
 transaction — so a standby reports converged only once its shadows are loaded
 **and** the leader has committed the boundary the standby's own boot read
 captured, and the watch resumes at `S + 1` (not from now), so a put or retract
-that lands between the read and the watch is not lost. A periodic reconcile on
+that lands between the read and the watch is not lost. A boundary of zero has no
+history to resume from, so the watch it opens is future-only: the engine re-reads
+the bucket's metadata **after** that subscription exists and reconciles if the
+bucket gained a sequence, which is what closes the window on the boot where every
+consumer's bucket is still empty. A watch that ends under the mirror is named in
+the log and reopens all of them, rather than leaving one bucket unwatched until
+the next scan. A periodic reconcile on
 `EngineConfig::with_mirror_reconcile` repairs drift and reopens the watches from
 the boundary it just read.
 
@@ -272,7 +278,11 @@ fails or does not complete projects nothing: shadows, `known_*` and the
 watermark keep their last converged state until the next successful read. A
 bucket whose identity changed, or whose sequence is below the held watermark, is
 the first-adoption case — a full read, a reconcile, then the new identity and
-boundary are adopted — never a readiness failure and never an operator SQL.
+boundary are adopted — never a readiness failure and never an operator SQL. A
+standby reads the leader's watermark the same way: an identity it never read is a
+wait and then an adoption, never an error the supervisor would count as a restart,
+and a row written before the identity column is read by its sequence alone, so a
+rolling upgrade is never stalled behind a leader that can no longer write one.
 Reconciling the persisted projection keys against the snapshot (`reconcile_keys`)
 is the one behaviour of every scan; on a watch event the engine keys the change
 against the shadows on both sides of it, so a retract whose projection key lived

@@ -49,6 +49,27 @@ and a single git tag `v{version}` releases the set. Format follows
   and the `leader_slot` row, nor polls the broker once per beat per bucket.
 - `/readyz` names the mirror and its own failure after the fixed operator copy,
   read from one sample of the health board rather than two.
+- A mirror resuming a bucket from sequence zero no longer owns a window it cannot
+  see: the watch it opens there is future-only, so the engine re-reads the
+  bucket's metadata after the subscription exists and reconciles when the bucket
+  gained a sequence. Zero is the boundary of every consumer's first boot, so a
+  producer's first key reached `known_*` only at the next periodic reconcile.
+- A standby no longer stalls a rolling upgrade on a leader watermark that carries
+  no identity: a row written before the identity column is compared by its
+  sequence alone — the semantics it was written with — and takes an identity when
+  this pod holds the lease.
+- A leader holding a stream identity the standby never read is an adoption, not an
+  `EngineError::Config`: the standby re-reads once and waits, instead of failing
+  into the supervisor's restart counter, backoff, `Restarting` on `/readyz` and
+  dead letter.
+- A single mirror watch that ends is logged and reopens the watches, instead of
+  being dropped silently by `select_all` and leaving that bucket unwatched until
+  the next periodic reconcile.
+- A shadow keeps the revision it holds and refuses an older one, so the overlap
+  between the scan and the watch can never write a stale value over a newer one.
+  The new `Shadows::put_at`/`remove_at` carry that revision guard (`put`/`remove`
+  keep their 0.1.0 unconditional signatures for compatibility), and
+  `KvBucket::entries_with_revisions` reads the revision per key.
 
 ## 0.1.0 - 2026-09-11
 
