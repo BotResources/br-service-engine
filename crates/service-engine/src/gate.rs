@@ -11,9 +11,10 @@ impl Reason {
     /// shape the frozen `br-test-harness` `verdict::expect_code_shaped` demands
     /// and the casing a downstream consumer assumes; making it a construction
     /// invariant means a mistyped code is a compile error at the `const` site,
-    /// never a value that reaches the wire. Use [`Reason::parse`] for a code
-    /// decoded from an untrusted source, where a bad shape must be an error
-    /// rather than a panic.
+    /// never a value that reaches the wire. Use [`Reason::parse`] for a
+    /// `'static` code you would rather validate than assert (a bad shape must be
+    /// an error, not a panic); a code arriving over the wire is validated and
+    /// interned as the `Reason` is deserialized, without going through either.
     ///
     /// # Panics
     ///
@@ -28,8 +29,11 @@ impl Reason {
         Self(code)
     }
 
-    /// Construct a reason code from a `'static` string decoded at runtime,
-    /// returning [`ReasonFormat`] rather than panicking when the shape is wrong.
+    /// Construct a reason code from a `'static` string whose shape is only known
+    /// at runtime, returning [`ReasonFormat`] rather than panicking when it is
+    /// wrong. This is the fallible sibling of [`Reason::new`] for the same
+    /// `&'static str` input; a code arriving over the wire (an owned, non-static
+    /// string) is validated and interned by `Reason`'s `Deserialize`, not here.
     pub fn parse(code: &'static str) -> Result<Self, ReasonFormat> {
         if is_reason_code(code.as_bytes()) {
             Ok(Self(code))

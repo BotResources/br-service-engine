@@ -36,8 +36,11 @@ and a single git tag `v{version}` releases the set. Format follows
   in one transaction), and it makes two concurrent multi-aggregate writes
   deadlock-free. Absent keys are omitted, as for a batched read. Additive — no
   existing signature changed.
-- `Reason::parse(&'static str) -> Result<Reason, ReasonFormat>` for a reason code
-  decoded from the wire, and `service_engine::{ReasonFormat, is_reason_code}`.
+- `Reason::parse(&'static str) -> Result<Reason, ReasonFormat>` — the fallible
+  sibling of `Reason::new` for a `'static` code whose shape is only known at
+  runtime, and `service_engine::{ReasonFormat, is_reason_code}`. A code arriving
+  over the wire is validated and interned by `Reason`'s `Deserialize`, not through
+  `parse`.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit

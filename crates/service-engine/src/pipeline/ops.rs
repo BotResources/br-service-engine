@@ -122,8 +122,13 @@ impl<'a> Ops<'a> {
         }
         let sorted_keys: Vec<_> = ordered.into_iter().map(|(key, _)| key).collect();
         let loaded = A::Store::read_many(self.conn, &sorted_keys).await?;
-        let mut aggregates = Vec::with_capacity(loaded.len());
-        for (_, aggregate) in loaded {
+        // `read_many` may return rows in any order — a `WHERE id = ANY($1)` set
+        // query yields Postgres physical order, not key order — so re-key the
+        // batch and emit it in the locked ascending-key order the rustdoc
+        // promises. Absent keys are simply not produced.
+        let ordered_aggregates = in_locked_order::<A>(loaded, &sorted_keys);
+        let mut aggregates = Vec::with_capacity(ordered_aggregates.len());
+        for aggregate in ordered_aggregates {
             let reconcile_key = reconcile_key::<A>(&aggregate)?;
             self.blob_seen.insert(reconcile_key, aggregate.blob_refs());
             aggregates.push(aggregate);
@@ -344,6 +349,21 @@ fn lock_order<A: Aggregate>(
     Ok(ordered)
 }
 
+/// Re-key a `read_many` batch and yield its aggregates in `order` — the locked
+/// ascending-key order `load_many` promises. `read_many` may return rows in any
+/// order (an `id = ANY($1)` set query gives Postgres physical order), so the
+/// batch is indexed by key and drained in `order`. A key in `order` that is
+/// absent from the batch (an aggregate that does not exist) is skipped, and a
+/// row whose key is not in `order` cannot occur — the batch was read for exactly
+/// these keys.
+fn in_locked_order<A: Aggregate>(
+    loaded: Vec<(<A::Store as Persistence>::Key, A)>,
+    order: &[<A::Store as Persistence>::Key],
+) -> Vec<A> {
+    let mut by_key: HashMap<<A::Store as Persistence>::Key, A> = loaded.into_iter().collect();
+    order.iter().filter_map(|key| by_key.remove(key)).collect()
+}
+
 /// Take the transaction-scoped advisory lock and the store's row lock for one
 /// aggregate key, in that order. The advisory lock serializes concurrent
 /// commands on the same aggregate even for stores whose `lock` is a no-op.
@@ -438,5 +458,42 @@ mod lock_order_tests {
     #[test]
     fn the_empty_set_locks_nothing() {
         assert!(order(&[]).is_empty());
+    }
+
+    fn widget(key: &str) -> Widget {
+        Widget(key.to_string())
+    }
+
+    #[test]
+    fn a_batch_returned_out_of_order_is_re_emitted_in_the_locked_order() {
+        // `read_many` handed back in c, a, b order (as a set query would); the
+        // locked order is a, b, c. The result must follow the locked order, not
+        // the batch's arrival order.
+        let loaded = vec![
+            ("c".to_string(), widget("c")),
+            ("a".to_string(), widget("a")),
+            ("b".to_string(), widget("b")),
+        ];
+        let order = ["a".to_string(), "b".to_string(), "c".to_string()];
+        let result: Vec<_> = in_locked_order::<Widget>(loaded, &order)
+            .into_iter()
+            .map(|w| w.0)
+            .collect();
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn an_absent_key_is_omitted_and_the_rest_keep_the_locked_order() {
+        // `b` was not found by the read; the result skips it and keeps a, c.
+        let loaded = vec![
+            ("c".to_string(), widget("c")),
+            ("a".to_string(), widget("a")),
+        ];
+        let order = ["a".to_string(), "b".to_string(), "c".to_string()];
+        let result: Vec<_> = in_locked_order::<Widget>(loaded, &order)
+            .into_iter()
+            .map(|w| w.0)
+            .collect();
+        assert_eq!(result, vec!["a", "c"]);
     }
 }
