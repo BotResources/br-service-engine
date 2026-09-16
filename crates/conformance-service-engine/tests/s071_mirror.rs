@@ -197,33 +197,31 @@ async fn s071_a_kv_retract_removes_the_known_row_and_the_session_view() {
 }
 
 #[tokio::test]
-async fn s071_an_empty_consumed_prefix_holds_readiness_down_and_keeps_known_star() {
+async fn s071_an_empty_consumed_prefix_converges_and_known_star_follows_it_to_empty() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    let kept = Uuid::now_v7();
+    let stale = Uuid::now_v7();
     sqlx::query("INSERT INTO known_users (user_id, email) VALUES ($1, $2)")
-        .bind(kept)
-        .bind("kept@example.test")
+        .bind(stale)
+        .bind("stale@example.test")
         .execute(&pool)
         .await
-        .expect("a pre-existing mirrored row from an earlier, non-empty run");
+        .expect("a mirrored row from an earlier, non-empty run");
 
     let mirror = directory_mirror().build(fabric.clone(), pool.clone(), StagingTransport::silent());
-    let outcome = mirror.reconcile().await;
-    let error = outcome.expect_err("an empty consumed prefix must not converge");
-    let chain = error_chain(&error);
-    assert!(
-        chain.contains("identity/users/"),
-        "the failure the supervisor surfaces to readiness names the empty prefix, got {chain}"
+    mirror.reconcile().await.expect(
+        "a producer that has published nothing yet still gives a bound bucket and a completed \
+         read, which is what convergence means",
     );
     assert_eq!(
         known_users(&pool).await,
-        1,
-        "an empty producer bucket is never a reason to erase the mirror; known_users is kept as is"
+        0,
+        "known_* is a pure function of the offer: an empty offer projects to empty rather than \
+         freezing the rows of an earlier run"
     );
 
     drop(nats);
@@ -243,16 +241,6 @@ fn roster_registry()
         .register_projector(RosterUsers)
         .expect("the roster projector registers on its bound noun");
     registry
-}
-
-fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut message = error.to_string();
-    let mut source = error.source();
-    while let Some(next) = source {
-        message = format!("{message}: {next}");
-        source = next.source();
-    }
-    message
 }
 
 async fn current_email(pool: &PgPool, user: Uuid) -> Option<String> {

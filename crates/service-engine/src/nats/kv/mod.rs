@@ -142,13 +142,39 @@ where
     }
 
     pub async fn entries(&self, prefix: &KvPrefix) -> Result<Vec<(KvKey, V)>, NatsError> {
-        Ok(self.entries_with_revision(prefix).await?.0)
+        Ok(self
+            .entries_with_revisions(prefix)
+            .await?
+            .into_iter()
+            .map(|(key, value, _)| (key, value))
+            .collect())
     }
 
     pub async fn entries_with_revision(
         &self,
         prefix: &KvPrefix,
     ) -> Result<(Vec<(KvKey, V)>, u64), NatsError> {
+        let entries = self.entries_with_revisions(prefix).await?;
+        let max = entries
+            .iter()
+            .map(|(_, _, revision)| revision.get())
+            .max()
+            .unwrap_or(0);
+        Ok((
+            entries
+                .into_iter()
+                .map(|(key, value, _)| (key, value))
+                .collect(),
+            max,
+        ))
+    }
+
+    /// Every entry under the prefix with the revision it was read at, so a
+    /// consumer that also watches the bucket can tell which of the two is newer.
+    pub async fn entries_with_revisions(
+        &self,
+        prefix: &KvPrefix,
+    ) -> Result<Vec<(KvKey, V, Revision)>, NatsError> {
         use futures_util::StreamExt;
         let mut keys = self
             .store
@@ -160,7 +186,6 @@ where
             })?
             .boxed();
         let mut out = Vec::new();
-        let mut max_revision = 0;
         while let Some(next) = keys.next().await {
             let raw = next.map_err(|e| NatsError::Kv {
                 key: prefix.as_str().to_string(),
@@ -171,11 +196,10 @@ where
             }
             let Ok(key) = KvKey::new(raw) else { continue };
             if let Some((value, revision)) = self.get_with_revision(&key).await? {
-                max_revision = max_revision.max(revision.get());
-                out.push((key, value));
+                out.push((key, value, revision));
             }
         }
-        Ok((out, max_revision))
+        Ok(out)
     }
 
     pub async fn all(&self) -> Result<Vec<(KvKey, V)>, NatsError> {

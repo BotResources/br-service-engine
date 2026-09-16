@@ -97,10 +97,11 @@ async fn s049_readiness_is_down_until_the_directory_mirror_converges_and_down_ag
         .await,
         "a mirror whose broker died must leave the converged state"
     );
-    assert_eq!(
-        readiness.refresh(),
-        not_ready(REASON_MIRRORS),
-        "a dead mirror takes the service back out of rotation"
+    assert!(
+        matches!(readiness.refresh(), Readiness::NotReady { reason }
+            if reason.starts_with(REASON_MIRRORS) && reason.len() > REASON_MIRRORS.len()),
+        "a dead mirror takes the service out of rotation, and names its own failure after the \
+         fixed operator copy"
     );
     assert!(tasks.restarts() >= 1);
 

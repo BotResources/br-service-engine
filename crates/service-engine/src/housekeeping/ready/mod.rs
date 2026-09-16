@@ -9,7 +9,7 @@ use tokio::sync::watch;
 
 use crate::boot::REASON_MIRRORS;
 use crate::housekeeping::health::RelaysHealthReceiver;
-use crate::housekeeping::mirror::MirrorsHealthReceiver;
+use crate::housekeeping::mirror::{MirrorsHealth, MirrorsHealthReceiver};
 use crate::observe::{
     DEP_INBOUND, DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency,
 };
@@ -99,12 +99,22 @@ impl ReadinessAssembly {
     }
 
     pub fn verdict(&self) -> Option<&'static str> {
+        self.assess().0
+    }
+
+    /// One sample of every board, so the operator copy and the detail that
+    /// follows it describe the same instant. Re-borrowing a board for the detail
+    /// would let the label and the reason come from two different snapshots.
+    fn assess(&self) -> (Option<&'static str>, MirrorsHealth) {
         if self
             .schema_displaced
             .as_ref()
             .is_some_and(|rx| *rx.borrow())
         {
-            return Some(REASON_SCHEMA_VERSION_DISPLACED);
+            return (
+                Some(REASON_SCHEMA_VERSION_DISPLACED),
+                self.mirrors.borrow().clone(),
+            );
         }
         let fabric: Vec<RelayHealth> = self
             .fabric
@@ -124,30 +134,45 @@ impl ReadinessAssembly {
         if let Some(nats) = nats {
             record_dependency(DEP_NATS, nats.is_up());
         }
-        verdict(
+        let verdict = verdict(
             listener_up,
             nats,
             inbound_up,
             &mirrors,
             self.relays.as_ref().map(|r| r.borrow().clone()).as_ref(),
             &fabric,
-        )
+        );
+        (verdict, mirrors)
     }
 
     pub fn refresh(&self) -> Readiness {
-        match self.verdict() {
+        let (verdict, mirrors) = self.assess();
+        match verdict {
             None => {
                 self.handle.set_ready();
                 Readiness::Ready
             }
             Some(reason) => {
-                self.handle.set_not_ready(reason);
-                Readiness::NotReady {
-                    reason: reason.to_string(),
-                }
+                let reason = detailed(reason, &mirrors);
+                self.handle.set_not_ready(reason.clone());
+                Readiness::NotReady { reason }
             }
         }
     }
+}
+
+/// The fixed operator copy, followed by each unconverged mirror's own reason so
+/// `/readyz` names what is holding the pod out of rotation.
+fn detailed(reason: &'static str, mirrors: &MirrorsHealth) -> String {
+    let mut detailed = reason.to_string();
+    if reason == REASON_MIRRORS {
+        for (name, condition) in mirrors.iter() {
+            if let Some(detail) = condition.reason() {
+                detailed.push_str(&format!("; {name}: {detail}"));
+            }
+        }
+    }
+    detailed
 }
 
 impl std::fmt::Debug for ReadinessAssembly {

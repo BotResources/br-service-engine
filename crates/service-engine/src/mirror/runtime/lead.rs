@@ -9,8 +9,17 @@ use crate::impact::Impact;
 use super::super::leader::hold_lease;
 use super::super::projection::{Project, Projection};
 use super::super::shadow::Shadows;
-use super::super::watermark;
+use super::super::watermark::{self, Mark};
 use super::{MirrorRuntime, Revisions};
+
+/// What the watermark the leader holds says about a standby's own boot read.
+enum Caught {
+    Yes,
+    NotYet,
+    /// The held identity is not the one this pod read. A replaced bucket is a
+    /// first adoption, never a failure, so this is a wait — never an error.
+    Replaced,
+}
 
 impl<K, Pr> MirrorRuntime<K, Pr>
 where
@@ -20,30 +29,49 @@ where
     pub(super) async fn converge_as_leader_or_wait(
         &self,
         touched: Vec<K>,
-        read_revision: &Revisions,
     ) -> Result<(), EngineError> {
+        let mut touched = touched;
+        let mut target = self.read_revision.read().await.clone();
         let Some(gate) = &self.leader else {
-            self.project_under_lease(touched, read_revision).await?;
+            self.project_under_lease(touched, &target, Mark::Adopt)
+                .await?;
             return Ok(());
         };
+        let mut reread = false;
         loop {
             if self
-                .project_under_lease(touched.clone(), read_revision)
+                .project_under_lease(touched.clone(), &target, Mark::Adopt)
                 .await?
             {
                 return Ok(());
             }
-            if self.watermark_caught_up(read_revision).await? {
-                return Ok(());
+            match self.caught_up(&target).await? {
+                Caught::Yes => return Ok(()),
+                // The leader holds another stream identity. Either this pod's
+                // read is the stale one — so it re-reads, once — or the leader
+                // has yet to adopt the stream this pod just read, which is the
+                // leader's own next read to do. Neither is a failure:
+                // replacement is adoption, and the standby waits for it exactly
+                // as it waits for a sequence.
+                Caught::Replaced if !reread => {
+                    reread = true;
+                    touched = self.absorb_full_read().await?;
+                    target = self.read_revision.read().await.clone();
+                }
+                Caught::NotYet | Caught::Replaced => tokio::time::sleep(gate.beat).await,
             }
-            tokio::time::sleep(gate.beat).await;
         }
     }
 
+    /// Projects and commits the watermark in one transaction. Nothing here talks
+    /// to NATS: a broker round-trip inside this transaction would pin the
+    /// advisory lock and the `leader_slot` row for its whole timeout and stall
+    /// every other pod's beat.
     pub(super) async fn project_under_lease(
         &self,
         keys: Vec<K>,
         advance: &Revisions,
+        mark: Mark,
     ) -> Result<bool, EngineError> {
         if keys.is_empty() && advance.is_empty() {
             return Ok(true);
@@ -65,8 +93,8 @@ where
             self.project_into(&mut tx, &shadows, keys, &mut impacts)
                 .await?;
         }
-        for (bucket, revision) in advance {
-            watermark::advance(&mut tx, self.name.as_str(), bucket, *revision).await?;
+        for (bucket, snapshot) in advance {
+            watermark::write(&mut tx, self.name.as_str(), bucket, snapshot, mark).await?;
         }
         let committed = impacts.len();
         if !impacts.is_empty() {
@@ -77,14 +105,31 @@ where
         Ok(true)
     }
 
-    async fn watermark_caught_up(&self, read_revision: &Revisions) -> Result<bool, EngineError> {
+    /// A standby is converged once its shadows are loaded and the leader has
+    /// committed at least the sequence the standby's own boot read captured, on
+    /// the identity that read saw. It compares what it holds against what it has
+    /// already read, so waiting costs no `STREAM.INFO` per beat.
+    async fn caught_up(&self, target: &Revisions) -> Result<Caught, EngineError> {
         let mut conn = self.pool.acquire().await?;
-        for (bucket, target) in read_revision {
-            if watermark::read(&mut conn, self.name.as_str(), bucket).await? < *target {
-                return Ok(false);
+        for (bucket, target) in target {
+            let Some(held) = watermark::read(&mut conn, self.name.as_str(), bucket).await? else {
+                return Ok(Caught::NotYet);
+            };
+            // A row written before the identity column carries none, and a
+            // leader still on that release will never write one. It is read
+            // under those semantics — the sequence alone — and takes an identity
+            // the moment this pod holds the lease; holding out for one would
+            // stall every rolling upgrade behind the old leader.
+            if let Some(created) = held.stream_created_at.as_deref()
+                && created != target.created
+            {
+                return Ok(Caught::Replaced);
+            }
+            if held.revision() < target.revision {
+                return Ok(Caught::NotYet);
             }
         }
-        Ok(true)
+        Ok(Caught::Yes)
     }
 
     pub(super) async fn on_beat(&self, was_leader: &mut bool) -> Result<(), EngineError> {
@@ -118,7 +163,8 @@ where
             self.touched_for(&shadows, &changes).await?
         };
         let advance = self.last_seen.read().await.clone();
-        self.project_under_lease(touched, &advance).await?;
+        self.project_under_lease(touched, &advance, Mark::Advance)
+            .await?;
         Ok(())
     }
 
