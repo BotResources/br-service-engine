@@ -23,7 +23,7 @@ impl<P: Principal> Engine<P> {
     pub async fn run(self) -> Result<(), EngineError> {
         let slices = crate::graphql::SchemaSlices::assemble(&self.schema_slices)?;
         if let Some(sdl) = &self.schema_sdl {
-            slices.verify_root_fields(sdl)?;
+            slices.verify(sdl)?;
         }
         let render = self.render_runtime();
         let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =

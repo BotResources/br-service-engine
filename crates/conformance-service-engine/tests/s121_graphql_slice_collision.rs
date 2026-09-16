@@ -1,6 +1,6 @@
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{
-    ROOT_FIELD_COLLISION, TYPE_COLLISION, boot_colliding_slices,
+    boot_colliding_slices, root_field_collision, type_collision,
 };
 use service_engine::EngineError;
 
@@ -15,7 +15,7 @@ async fn s121_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud(
         nats.nats().await,
         "se_s66rf",
         "pod-s66rf",
-        ROOT_FIELD_COLLISION,
+        root_field_collision(),
     )
     .await;
 
@@ -48,7 +48,7 @@ async fn s121_two_slices_claiming_the_same_type_fail_the_engine_boot_loud() {
         nats.nats().await,
         "se_s66ty",
         "pod-s66ty",
-        TYPE_COLLISION,
+        type_collision(),
     )
     .await;
 
