@@ -97,4 +97,12 @@ pub trait Projector: Send + Sync + 'static {
     fn emission(&self, _impact: &Impact) -> Emission {
         Emission::Coalesced
     }
+
+    /// The explicit reason this projector needs no cohort gate, when its
+    /// visibility opts out of one; `None` for a projector that carries no
+    /// open-access declaration. Surfaced so that **every** registration path
+    /// enforces the reason non-empty, not only the `register_view` sugar.
+    fn open_access_reason(&self) -> Option<&'static str> {
+        None
+    }
 }

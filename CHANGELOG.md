@@ -31,9 +31,14 @@ and a single git tag `v{version}` releases the set. Format follows
   bypasses inference entirely.
 - **`visibility::AccessReason` + `open_access!`.** A view that opts out of the
   cohort gate must state why: `Unrestricted`'s reason is surfaced through
-  `Visibility::OPEN_ACCESS_REASON` and refused non-empty at `register_view`
+  `Visibility::OPEN_ACCESS_REASON` and refused non-empty at registration
   (`EngineError::EmptyAccessReason`), so an opt-out is always justified and
-  reviewable.
+  reviewable. The guard lives in `RenderRegistry::register_projector` — the
+  common sink every registration path funnels through — via the new
+  `projector::Projector::open_access_reason` method (default `None`, overridden
+  by `ViewProjector` to surface its view's `OPEN_ACCESS_REASON`), so a view
+  built into a `ViewProjector` and handed to `register_projector` directly is
+  checked exactly like one registered through the `register_view` sugar.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit

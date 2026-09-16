@@ -192,6 +192,10 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
         V::emission(impact)
     }
 
+    fn open_access_reason(&self) -> Option<&'static str> {
+        <V::Visibility as crate::visibility::Visibility>::OPEN_ACCESS_REASON
+    }
+
     fn populate<'a>(
         &'a self,
         pg: &'a PgPool,

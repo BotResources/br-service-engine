@@ -466,8 +466,13 @@ open to every viewer, declares `type Visibility = Unrestricted<Row, Principal,
 Why>` — where `Why` is an `AccessReason` marker (declare it with the
 `open_access!` macro) stating why no cohort gate applies. The reason is surfaced
 through `Visibility::OPEN_ACCESS_REASON` and **refused non-empty at
-`register_view`** (`EngineError::EmptyAccessReason`), so opting out of the cohort
-gate is a deliberate, reviewable statement rather than a silent default. Whether a projector renders under RLS is the **projector's** declaration,
+registration** (`EngineError::EmptyAccessReason`) — the guard sits in
+`register_projector`, the sink every path funnels through (via the
+`projector::Projector::open_access_reason` method that `ViewProjector`
+overrides), so a hand-built `ViewProjector` handed to `register_projector`
+directly is checked exactly like a view registered through `register_view`. So
+opting out of the cohort gate is a deliberate, reviewable statement rather than
+a silent default. Whether a projector renders under RLS is the **projector's** declaration,
 not the call's: `view::Projector` carries `const RLS` (the raw
 `projector::Projector` overrides `renders_under_rls`), and the engine reads it on
 every path — the snapshot, the render pass, the repair and `Query::fetch*`. So a

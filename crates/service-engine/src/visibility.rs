@@ -34,9 +34,10 @@ pub trait Visibility: Send + Sync + 'static {
 
     /// `Some(reason)` when this visibility deliberately applies **no** cohort
     /// gate (see [`Unrestricted`]); `None` for a real cohort declaration.
-    /// `register_view` refuses a view whose visibility opts out with an empty
-    /// reason, so an opt-out is always justified in the source and visible in
-    /// review.
+    /// Registration refuses a view whose visibility opts out with an empty
+    /// reason (the guard lives in `register_projector`, so it holds on every
+    /// registration path), so an opt-out is always justified in the source and
+    /// visible in review.
     const OPEN_ACCESS_REASON: Option<&'static str> = None;
 
     fn cohorts(row: &Self::Row) -> Cohorts;
@@ -104,9 +105,7 @@ pub trait AccessReason: Send + Sync + 'static {
 /// enforced non-empty at registration.
 type UnrestrictedMarker<Row, Principal, Why> = PhantomData<fn() -> (Row, Principal, Why)>;
 
-pub struct Unrestricted<Row, Principal, Why: AccessReason>(
-    UnrestrictedMarker<Row, Principal, Why>,
-);
+pub struct Unrestricted<Row, Principal, Why: AccessReason>(UnrestrictedMarker<Row, Principal, Why>);
 
 impl<Row, Principal, Why> Visibility for Unrestricted<Row, Principal, Why>
 where
