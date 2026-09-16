@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::blobs::{BlobRowOp, insert_reference, orphan_reference};
 use crate::error::EngineError;
+use crate::gate::Reason;
 use crate::impact::Impact;
 use crate::inbound::Source;
 use crate::name::{AccumulatorName, NounName};
@@ -28,6 +29,10 @@ pub(crate) struct Staged {
     pub outbox: Vec<OutboxRecord>,
     pub scheduled_messages: Vec<ScheduledMessage>,
     pub terminal_violation: Option<String>,
+    /// A reason set by a post-save policy that refused the write. The pipeline
+    /// rolls the transaction back and answers this code rather than committing,
+    /// whatever the handler went on to return.
+    pub policy_refusal: Option<Reason>,
     pub offer_dirty: Vec<OfferDirty>,
     pub blob_ops: Vec<BlobRowOp>,
     pub sealed_keys: Vec<(AccumulatorName, KeyBytes)>,

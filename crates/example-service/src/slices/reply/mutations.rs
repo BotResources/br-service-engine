@@ -14,7 +14,7 @@ use crate::kernel::{AppFault, AppPrincipal, BoardMemberships};
 
 const CANCEL_GRACE_SECONDS: i64 = 30;
 
-pub const NOT_A_MEMBER: Reason = Reason::new("not_a_board_member");
+pub const NOT_A_MEMBER: Reason = Reason::new("NOT_A_BOARD_MEMBER");
 
 pub fn board_member_gate(principal: &AppPrincipal, board: Uuid) -> Gate {
     let is_member = principal

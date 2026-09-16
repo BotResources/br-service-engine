@@ -25,6 +25,10 @@ impl<P: Principal> Engine<P> {
         if let Some(sdl) = &self.schema_sdl {
             slices.verify_root_fields(sdl)?;
         }
+        // Every declared subjection must be honoured by a registered policy, or
+        // boot fails loudly here — the same registration gate the schema type
+        // check applies, so a missing cross-slice guard cannot ship silent.
+        self.post_save_seams.verify(&self.post_save)?;
         let render = self.render_runtime();
         let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =
             if self.erasables.is_empty() {
@@ -43,6 +47,7 @@ impl<P: Principal> Engine<P> {
             mut mirrors,
             inbound_reactions,
             offers,
+            post_save,
             presence,
             blobs,
             shutdown,
@@ -51,6 +56,7 @@ impl<P: Principal> Engine<P> {
             ..
         } = self;
         let offers = Arc::new(offers);
+        let post_save = Arc::new(post_save);
         let readiness_guard = readiness.clone();
         let (mut beat, dead_letters, inbound_health) = crate::engine::wiring::wire_beat(
             beat,
@@ -175,6 +181,7 @@ impl<P: Principal> Engine<P> {
                 transport.clone() as Arc<dyn ImpactTransport>,
                 accumulators.clone(),
                 offers.clone(),
+                post_save.clone(),
                 reactions.clone(),
                 blob_handle.clone(),
                 config.lock_timeout,

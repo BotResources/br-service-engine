@@ -44,7 +44,7 @@ battery-backed.
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `SELECT … FOR UPDATE` as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises); log-style events reach `save` via `Aggregate::pending_events` |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
-| `gate`, `visibility` | `Gate`/`Reason`, `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
+| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
@@ -161,6 +161,32 @@ with a single batched read of the same table `load` reads, so the author writes
 no render load SQL; a full-EDA store keeps the default `read_many` (a `load` per
 key) because the current state is the snapshot replayed forward, not a column
 read.
+
+`cx.load_many::<A>(&keys)` loads several aggregates of one noun in the one
+pipeline transaction, each locked for the transaction, so a handler can judge
+their invariants and commit their writes together with no partial visibility and
+**without a global advisory lock of its own**. The keys are deduplicated and then
+locked in ascending order of their encoded bytes before any row is read; because
+every transaction that touches an overlapping set takes the shared locks in that
+one order, two concurrent multi-aggregate writes cannot deadlock. That ascending
+`(store type, encoded key)` order is the engine's global aggregate-lock
+discipline: to hold aggregates of *different* nouns in one transaction, call
+`load`/`load_many` in that same order. Absent keys are omitted from the result,
+as for a batched read.
+
+After every `save`/`create`, inside the transaction and before the commit, the
+engine runs the **post-save policy** registered for that aggregate, if any
+(`register_post_save_policy::<A>`). The policy is pure domain logic over the
+aggregate the pipeline just saved (principle 18): it can stage impacts, commands
+and events, or `PostSave::refuse(reason)` the write — a refusal rolls the
+transaction back and answers the mutation with that `Reason` code (a refusing
+reaction is dead-lettered with it). It cannot save, so it cannot recurse. This is
+the engine's answer to cross-slice wiring that a slice was meant to call and
+never did: a slice declares its aggregate *subject* to a policy with
+`require_post_save_policy::<A>`, and boot fails with `EngineError::UnhonouredSeam`
+unless some slice registered one — the same registration gate the schema type
+check applies, so a missing interlock is a loud boot error instead of a silent
+absent call.
 
 Full EDA does not hand-roll that log. The `full_eda` kit owns it: a slice
 declares an `EventSourced` aggregate (its `NOUN`, `EVENT_VERSION`, the

@@ -158,6 +158,37 @@ impl<P: Principal> Engine<P> {
             .subscriptions()
     }
 
+    /// Register the post-save policy for aggregate `A`: the engine runs it after
+    /// every `save`/`create` of `A`, inside the transaction, before the commit.
+    /// The policy observes the saved aggregate and either refuses the write
+    /// through [`crate::pipeline::PostSave::refuse`] or stages impacts, commands
+    /// and events. This honours a subjection a slice declared with
+    /// [`Engine::require_post_save_policy`]; there is no per-handler call site to
+    /// add, so none to forget.
+    pub fn register_post_save_policy<A, F>(&mut self, policy: F) -> Result<(), EngineError>
+    where
+        A: crate::persistence::Aggregate,
+        F: Fn(&A, &mut crate::pipeline::PostSave<'_, '_>) -> Result<(), crate::pipeline::Refused>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.post_save.register::<A, F>(policy)
+    }
+
+    /// Declare that aggregate `A` is subject to a post-save policy. Boot fails
+    /// with [`EngineError::UnhonouredSeam`] unless some slice registered one with
+    /// [`Engine::register_post_save_policy`]. A slice that owns an aggregate a
+    /// later slice must guard uses this to make the missing guard a boot error
+    /// rather than a silent gap.
+    pub fn require_post_save_policy<A>(&mut self) -> Result<(), EngineError>
+    where
+        A: crate::persistence::Aggregate,
+    {
+        self.post_save_seams.require::<A>();
+        Ok(())
+    }
+
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
         let leader = crate::offers::OfferLeader::new(self.config.pod_id.clone(), self.config.lease);
         let relay = crate::offers::OfferRelay::<O>::new(

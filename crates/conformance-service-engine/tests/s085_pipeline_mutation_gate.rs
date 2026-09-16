@@ -85,7 +85,7 @@ async fn s085_a_mutation_gates_deny_and_allow_through_one_pipeline_and_the_impac
     assert!(!flipped.affordances["close"].allowed);
     assert_eq!(
         flipped.affordances["close"].reason.as_deref(),
-        Some("already_closed"),
+        Some("ALREADY_CLOSED"),
     );
 
     let refused = executor
@@ -94,7 +94,7 @@ async fn s085_a_mutation_gates_deny_and_allow_through_one_pipeline_and_the_impac
         .expect_err("the same gate that blocks the affordance refuses the mutation");
     assert_eq!(
         refused.code(),
-        Some("already_closed"),
+        Some("ALREADY_CLOSED"),
         "the mutation refuses with the affordance's own reason code, from one gate function",
     );
 

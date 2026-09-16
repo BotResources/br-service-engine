@@ -80,12 +80,17 @@ impl<P: Principal> Eraser<P> {
         let fresh = record_erasure(&mut tx, person, now).await?;
         let mut staged = Staged::default();
         let mut manifest = Erased::new();
+        let erase_policies = Arc::new(crate::pipeline::PostSavePolicies::default());
         for erasable in self.erasables.iter() {
             let ops = Ops::new(
                 &mut tx,
                 &mut staged,
                 self.accumulators.as_ref(),
                 self.offers.clone(),
+                // Erasure anonymizes rows as a system gesture; no domain
+                // post-save policy runs, so an interlock can never block a
+                // person's right to erasure.
+                erase_policies.clone(),
                 None,
                 now,
             );

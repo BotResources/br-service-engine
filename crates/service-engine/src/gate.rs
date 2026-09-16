@@ -4,8 +4,44 @@ use serde::ser::{Serialize, SerializeMap, SerializeStruct, Serializer};
 pub struct Reason(&'static str);
 
 impl Reason {
+    /// Construct a reason code from a `'static` literal.
+    ///
+    /// A code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`: one
+    /// capital, then one or more capitals, digits or underscores. This is the
+    /// shape the frozen `br-test-harness` `verdict::expect_code_shaped` demands
+    /// and the casing a downstream consumer assumes; making it a construction
+    /// invariant means a mistyped code is a compile error at the `const` site,
+    /// never a value that reaches the wire. Use [`Reason::parse`] for a
+    /// `'static` code you would rather validate than assert (a bad shape must be
+    /// an error, not a panic); a code arriving over the wire is validated and
+    /// interned as the `Reason` is deserialized, without going through either.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `code` is not `SCREAMING_SNAKE_CASE`. In the intended `const`
+    /// context (`const R: Reason = Reason::new("...")`) the panic is a
+    /// compile-time error.
     pub const fn new(code: &'static str) -> Self {
+        assert!(
+            is_reason_code(code.as_bytes()),
+            "a reason code must be SCREAMING_SNAKE_CASE matching ^[A-Z][A-Z0-9_]+$"
+        );
         Self(code)
+    }
+
+    /// Construct a reason code from a `'static` string whose shape is only known
+    /// at runtime, returning [`ReasonFormat`] rather than panicking when it is
+    /// wrong. This is the fallible sibling of [`Reason::new`] for the same
+    /// `&'static str` input; a code arriving over the wire (an owned, non-static
+    /// string) is validated and interned by `Reason`'s `Deserialize`, not here.
+    pub fn parse(code: &'static str) -> Result<Self, ReasonFormat> {
+        if is_reason_code(code.as_bytes()) {
+            Ok(Self(code))
+        } else {
+            Err(ReasonFormat {
+                code: code.to_owned(),
+            })
+        }
     }
 
     pub const fn code(&self) -> &'static str {
@@ -16,6 +52,43 @@ impl Reason {
         self.0
     }
 }
+
+/// True when `bytes` is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`.
+pub const fn is_reason_code(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 {
+        return false;
+    }
+    if !bytes[0].is_ascii_uppercase() {
+        return false;
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if !(b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_') {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// A string offered as a reason code did not match `^[A-Z][A-Z0-9_]+$`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasonFormat {
+    pub code: String,
+}
+
+impl std::fmt::Display for ReasonFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "reason code {:?} is not SCREAMING_SNAKE_CASE matching ^[A-Z][A-Z0-9_]+$",
+            self.code
+        )
+    }
+}
+
+impl std::error::Error for ReasonFormat {}
 
 impl Serialize for Reason {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -150,7 +223,7 @@ impl Affordances {
     pub fn require(&self, action: ActionName) -> Result<(), Reason> {
         match self.get(action) {
             Some(gate) => gate.require(),
-            None => Err(Reason::new("unknown_action")),
+            None => Err(Reason::new("UNKNOWN_ACTION")),
         }
     }
 }

@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::kernel::AppPrincipal;
 
-pub const NOT_STREAMING: Reason = Reason::new("reply_not_streaming");
+pub const NOT_STREAMING: Reason = Reason::new("REPLY_NOT_STREAMING");
 
 pub struct Reply;
 

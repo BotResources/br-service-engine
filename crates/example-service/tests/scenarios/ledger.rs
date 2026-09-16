@@ -35,7 +35,7 @@ async fn full_eda_ledger_gate_and_totals() {
             serde_json::json!({ "id": l, "a": -100 }),
         )
         .await;
-    assert_eq!(error_code(&refused), "ledger_would_go_negative");
+    assert_eq!(error_code(&refused), "LEDGER_WOULD_GO_NEGATIVE");
 
     world.cleanup().await;
 }

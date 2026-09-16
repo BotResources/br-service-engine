@@ -8,6 +8,7 @@ mod ops;
 mod ops_blob;
 mod ops_seal;
 mod outbound;
+mod policy;
 mod staged;
 mod tx;
 
@@ -17,6 +18,8 @@ pub use mutation::{MutationExecutor, MutationInput, MutationRegistry};
 pub use ops::Ops;
 pub use outbound::{OutboundCommand, OutboundEvent, ProducerSequence};
 pub(crate) use outbound::{OutboundContext, event_record};
+pub use policy::{PostSave, Refused};
+pub(crate) use policy::{PostSavePolicies, PostSaveSeams};
 pub(crate) use staged::Staged;
 pub(crate) use tx::{begin_scoped, flush_and_commit};
 

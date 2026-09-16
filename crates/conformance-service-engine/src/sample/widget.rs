@@ -19,7 +19,7 @@ use crate::sample::principal::SamplePrincipal;
 pub mod reasons {
     use service_engine::gate::Reason;
 
-    pub const ALREADY_CLOSED: Reason = Reason::new("already_closed");
+    pub const ALREADY_CLOSED: Reason = Reason::new("ALREADY_CLOSED");
 }
 
 pub struct Widget;
