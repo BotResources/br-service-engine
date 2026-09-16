@@ -124,7 +124,8 @@ pub use offer::{
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use paged::{
-    AssignmentPage, CohortAssignments, PagedAssignments, PerImpactAssignments, ThresholdAssignments,
+    AssignmentPage, CohortAssignments, CohortIndexedAssignments, PagedAssignments,
+    PerImpactAssignments, ThresholdAssignments,
 };
 pub use pipeline::{
     CloseWidget, CreateWidget, DeleteWidget, DetonateWidget, ImportWidgets, LockWidget, MintSecret,

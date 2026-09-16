@@ -10,6 +10,13 @@ use super::aggregate::Card;
 use super::store::{self, CardAggregate, CardStore};
 use crate::kernel::AppPrincipal;
 
+service_engine::open_access!(
+    /// Cards are scoped to a board through the `BoardWindow` query; access to
+    /// the board is gated by the board surface, so the card list carries no
+    /// cohort gate of its own.
+    pub CardsOpenAccess = "cards are scoped by their parent board's window, not by a cohort"
+);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct CardView {
     pub id: Uuid,
@@ -64,7 +71,7 @@ impl Projector for CardsView {
     type Store = CardStore;
     type Query = BoardWindow;
     type Out = CardView;
-    type Visibility = Unrestricted<CardAggregate, AppPrincipal>;
+    type Visibility = Unrestricted<CardAggregate, AppPrincipal, CardsOpenAccess>;
 
     const NAME: ProjectorName = Self::NAME;
 

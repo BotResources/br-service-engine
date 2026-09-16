@@ -10,6 +10,12 @@ use super::aggregate::Ledger;
 use super::store::{self, LedgerAggregate, LedgerStore};
 use crate::kernel::AppPrincipal;
 
+service_engine::open_access!(
+    /// The ledger is a per-service running total with no per-viewer scoping:
+    /// every authenticated viewer sees the same aggregate.
+    pub LedgersOpenAccess = "the ledger total is a service-wide aggregate open to every viewer"
+);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct LedgerView {
     pub id: Uuid,
@@ -30,7 +36,7 @@ impl Projector for LedgersView {
     type Store = LedgerStore;
     type Query = ();
     type Out = LedgerView;
-    type Visibility = Unrestricted<LedgerAggregate, AppPrincipal>;
+    type Visibility = Unrestricted<LedgerAggregate, AppPrincipal, LedgersOpenAccess>;
 
     const NAME: ProjectorName = Self::NAME;
 

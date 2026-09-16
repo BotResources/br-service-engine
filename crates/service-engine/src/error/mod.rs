@@ -60,6 +60,12 @@ pub enum EngineError {
     #[error("no projector is registered under {0}")]
     UnboundProjector(ProjectorName),
 
+    #[error(
+        "view {view} declares Unrestricted visibility with an empty reason; \
+         state why no cohort gate applies (open_access!)"
+    )]
+    EmptyAccessReason { view: ProjectorName },
+
     #[error("no principal resolver is registered, so a principal cannot be refreshed")]
     MissingPrincipalResolver,
 

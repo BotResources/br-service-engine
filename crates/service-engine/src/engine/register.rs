@@ -77,6 +77,11 @@ impl<P: Principal> Engine<P> {
         &mut self,
         view: V,
     ) -> Result<(), EngineError> {
+        if let Some(reason) = <V::Visibility as crate::visibility::Visibility>::OPEN_ACCESS_REASON
+            && reason.trim().is_empty()
+        {
+            return Err(EngineError::EmptyAccessReason { view: V::NAME });
+        }
         self.register_projector(crate::view::ViewProjector::new(view))
     }
 

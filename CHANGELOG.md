@@ -9,6 +9,31 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Added
 
+- **Read-side cohort seam (`persistence::CohortIndex`).** A store may implement
+  `keys_in_cohorts(conn, &[CohortKey]) -> Vec<Key>` so a cohort view's window is
+  read with **one indexed query on the cohort column**, only the caller's rows,
+  instead of scanning the table and filtering in memory. The rule the seam
+  enforces: a cohort key MUST be a stored column on the row (an `org_id`, an
+  `is_public`, or a `(row, cohort_key)` index row written on save) — a cohort
+  needing a per-row lookup is not a cohort. `CohortKey::as_bytes` exposes the
+  lossless key image for binding.
+- **`view::cohort_window` / `view::windowed`.** `cohort_window::<V>(cx)` populates
+  a view through the `CohortIndex` seam from the caller's `Visibility::memberships`
+  (rebuilt from freshly loaded principal facts) and derives the window shape from
+  the declaration. `windowed::<V>(keys)` turns a key set into that inferred shape.
+- **Inferred window shape (`Visibility::LIVE` + `Visibility::DEPS`).** The
+  `Keys`-vs-`Query` choice is now derived from the declared visibility, not
+  hand-picked per `populate`: a `LIVE` visibility (the default) yields a
+  `Population::Query` carrying an `Interest` on the view's noun and `DEPS`, so a
+  newly created in-cohort row reaches an open session and a membership change
+  repopulates the window; `LIVE = false` is the explicit override for a closed
+  `Keys` snapshot. Returning a `Population` directly from `populate` still
+  bypasses inference entirely.
+- **`visibility::AccessReason` + `open_access!`.** A view that opts out of the
+  cohort gate must state why: `Unrestricted`'s reason is surfaced through
+  `Visibility::OPEN_ACCESS_REASON` and refused non-empty at `register_view`
+  (`EngineError::EmptyAccessReason`), so an opt-out is always justified and
+  reviewable.
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
 - Mirrors persist a per-bucket **stream identity** beside the watermark and commit
@@ -23,6 +48,13 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### Changed
 
+- **`visibility::Unrestricted` now takes a third type parameter,
+  `Why: AccessReason`.** A view that renders every row must name the reason it
+  needs no cohort gate. Migration for adopters: declare a marker with
+  `service_engine::open_access!(pub MyReason = "why no cohort gate applies");`
+  and change `type Visibility = Unrestricted<Row, Principal>` to
+  `Unrestricted<Row, Principal, MyReason>`. The marker's visibility must be at
+  least that of the view. An empty reason is refused at `register_view`.
 - **A mirror no longer judges the producer's content.** Converged means the bucket
   is bound and one full read completed with the watch attached at the revision that
   read reached — nothing more. A consumed prefix that reads empty is a converged

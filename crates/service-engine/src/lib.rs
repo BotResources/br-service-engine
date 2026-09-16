@@ -132,7 +132,7 @@ pub use nats::{
 pub use offer::Offer;
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
-pub use persistence::{Aggregate, Persistence, PersistenceStyle};
+pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, ProducerSequence, Reaction,
@@ -160,6 +160,9 @@ pub use time::Timestamp;
 pub use transport::{
     ImpactTransport, ListenerProbe, NOTIFY_PAYLOAD_LIMIT, PendingImpacts, PgListenNotify,
 };
-pub use view::{Populate, Projector, ViewKey, ViewProjector};
-pub use visibility::{Cohorts, Visibility, WindowMismatch, check_window_matches_visibility};
+pub use view::{Populate, Projector, ViewKey, ViewProjector, cohort_window, windowed};
+pub use visibility::{
+    AccessReason, Cohorts, Unrestricted, Visibility, WindowMismatch,
+    check_window_matches_visibility,
+};
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};

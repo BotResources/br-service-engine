@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::CohortKey;
 use service_engine::error::EngineError;
 use service_engine::impact::{Dims, ForeignKey};
 use service_engine::name::{NounName, ProjectorName};
-use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
+use service_engine::persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 use service_engine::population::{Inverse, Population};
 use service_engine::projector::{LoadScope, Projector};
 use service_engine::session::WindowParams;
@@ -148,6 +149,26 @@ impl Aggregate for AssignmentRow {
 
     fn key(&self) -> Uuid {
         self.id
+    }
+}
+
+impl CohortIndex for AssignmentStore {
+    fn keys_in_cohorts<'a>(
+        conn: &'a mut PgConnection,
+        cohorts: &'a [CohortKey],
+    ) -> BoxFuture<'a, Result<Vec<Uuid>, EngineError>> {
+        Box::pin(async move {
+            // The cohort key is a stored column: one indexed read, only the
+            // caller's rows. `cohort_key` is written by the `cohort_assignment`
+            // seed helper as `CohortKey::of(&[tenant])`, exactly the key
+            // `AssignmentVisibility::memberships` derives from the principal.
+            let images: Vec<Vec<u8>> = cohorts.iter().map(|c| c.as_bytes().to_vec()).collect();
+            let rows = sqlx::query("SELECT id FROM sample_assignment WHERE cohort_key = ANY($1)")
+                .bind(&images)
+                .fetch_all(conn)
+                .await?;
+            Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+        })
     }
 }
 
