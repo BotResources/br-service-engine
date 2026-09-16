@@ -100,6 +100,7 @@ impl<P: Principal> Engine<P> {
         K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
         Pr: Project<K>,
     {
+        mirror.validate()?;
         let handle = mirror
             .with_reconcile_deadline(self.config.mirror_reconcile)
             .build_led(
