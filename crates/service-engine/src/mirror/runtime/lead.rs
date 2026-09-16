@@ -9,7 +9,7 @@ use crate::impact::Impact;
 use super::super::leader::hold_lease;
 use super::super::projection::{Project, Projection};
 use super::super::shadow::Shadows;
-use super::super::watermark;
+use super::super::watermark::{self, Mark};
 use super::{MirrorRuntime, Revisions};
 
 impl<K, Pr> MirrorRuntime<K, Pr>
@@ -23,12 +23,13 @@ where
         read_revision: &Revisions,
     ) -> Result<(), EngineError> {
         let Some(gate) = &self.leader else {
-            self.project_under_lease(touched, read_revision).await?;
+            self.project_under_lease(touched, read_revision, Mark::Adopt)
+                .await?;
             return Ok(());
         };
         loop {
             if self
-                .project_under_lease(touched.clone(), read_revision)
+                .project_under_lease(touched.clone(), read_revision, Mark::Adopt)
                 .await?
             {
                 return Ok(());
@@ -40,10 +41,15 @@ where
         }
     }
 
+    /// Projects and commits the watermark in one transaction. Nothing here talks
+    /// to NATS: a broker round-trip inside this transaction would pin the
+    /// advisory lock and the `leader_slot` row for its whole timeout and stall
+    /// every other pod's beat.
     pub(super) async fn project_under_lease(
         &self,
         keys: Vec<K>,
         advance: &Revisions,
+        mark: Mark,
     ) -> Result<bool, EngineError> {
         if keys.is_empty() && advance.is_empty() {
             return Ok(true);
@@ -65,8 +71,8 @@ where
             self.project_into(&mut tx, &shadows, keys, &mut impacts)
                 .await?;
         }
-        for (bucket, revision) in advance {
-            watermark::advance(&mut tx, self.name.as_str(), bucket, *revision).await?;
+        for (bucket, snapshot) in advance {
+            watermark::write(&mut tx, self.name.as_str(), bucket, snapshot, mark).await?;
         }
         let committed = impacts.len();
         if !impacts.is_empty() {
@@ -77,10 +83,33 @@ where
         Ok(true)
     }
 
+    /// A standby is converged once its shadows are loaded and the leader has
+    /// committed at least the sequence the standby's own boot read captured, on
+    /// the identity that read saw. It compares what it holds against what it has
+    /// already read, so waiting costs no `STREAM.INFO` per beat.
     async fn watermark_caught_up(&self, read_revision: &Revisions) -> Result<bool, EngineError> {
         let mut conn = self.pool.acquire().await?;
         for (bucket, target) in read_revision {
-            if watermark::read(&mut conn, self.name.as_str(), bucket).await? < *target {
+            let Some(held) = watermark::read(&mut conn, self.name.as_str(), bucket).await? else {
+                return Ok(false);
+            };
+            match held.stream_created_at.as_deref() {
+                // No identity yet: a leader upgraded from a release before the
+                // identity column, still to adopt one. Keep waiting.
+                None => return Ok(false),
+                Some(created) if created != target.created => {
+                    // The leader converged on another stream. This standby's
+                    // boot read is stale, so it re-reads rather than wait for a
+                    // sequence that belongs to a bucket that no longer exists.
+                    return Err(EngineError::Config(format!(
+                        "mirror {}, bucket {bucket}: the leader adopted another stream identity; \
+                         re-reading the bucket",
+                        self.name
+                    )));
+                }
+                Some(_) => {}
+            }
+            if held.revision() < target.revision {
                 return Ok(false);
             }
         }
@@ -118,7 +147,8 @@ where
             self.touched_for(&shadows, &changes).await?
         };
         let advance = self.last_seen.read().await.clone();
-        self.project_under_lease(touched, &advance).await?;
+        self.project_under_lease(touched, &advance, Mark::Advance)
+            .await?;
         Ok(())
     }
 

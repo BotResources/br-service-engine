@@ -104,13 +104,18 @@ async fn s144_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revi
         "a standby projects nothing; only the leader writes known_users"
     );
 
-    sqlx::query(
-        "INSERT INTO service_engine.mirror_watermark (mirror, bucket, revision) \
-         VALUES ('directory', 'PUBLISHED_LANGUAGE', 9223372036854775807)",
-    )
-    .execute(&pool)
-    .await
-    .expect("the leader advances the watermark past the bucket revision");
+    // A real leader, not a hand-written row: the standby waits for the identity
+    // and the sequence its own boot read captured, which only a leader commits.
+    directory_mirror()
+        .build_led(
+            fabric.clone(),
+            pool.clone(),
+            StagingTransport::silent() as Arc<dyn ImpactTransport>,
+            MirrorLeader::new(PodId::new("pod-a").unwrap(), LEASE, BEAT),
+        )
+        .reconcile()
+        .await
+        .expect("the leader projects and commits the bucket identity and its boundary");
 
     let outcome = tokio::time::timeout(OBSERVED_WITHIN, converge)
         .await
@@ -123,7 +128,7 @@ async fn s144_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revi
 }
 
 #[tokio::test]
-async fn s144_emptying_a_consumed_prefix_at_run_time_takes_readiness_down_and_keeps_known_star() {
+async fn s144_an_empty_consumed_prefix_converges_and_known_star_follows_it_to_empty() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -133,10 +138,12 @@ async fn s144_emptying_a_consumed_prefix_at_run_time_takes_readiness_down_and_ke
     let user = Uuid::now_v7();
     let mirror =
         directory_mirror().build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport));
-    mirror
-        .reconcile()
-        .await
-        .expect_err("a bucket that starts empty holds readiness down at boot");
+    mirror.reconcile().await.expect(
+        "a bucket that has nothing in it yet is a converged bucket: every producer's first \
+         deploy publishes nothing, and the consumer never judges that",
+    );
+    assert_eq!(known_users(&pool).await, 0);
+
     publish_roster(
         &fabric,
         &SampleDirectory::with_users(&[(user, "only@example.test")]),
@@ -149,38 +156,40 @@ async fn s144_emptying_a_consumed_prefix_at_run_time_takes_readiness_down_and_ke
     assert_eq!(known_users(&pool).await, 1);
 
     let watched = tokio::spawn(mirror.watch());
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    await_known(
+        &pool,
+        1,
+        "the watch resumed on the roster the boot read saw",
+    )
+    .await;
     retract_user(&fabric, user).await;
 
-    let error = tokio::time::timeout(OBSERVED_WITHIN, watched)
-        .await
-        .expect("the watch stops when the last key of a consumed prefix is retracted")
-        .expect("the watch task did not panic")
-        .expect_err("emptying a consumed prefix during a run must take readiness down");
-    let chain = error_chain(&error);
+    await_known(
+        &pool,
+        0,
+        "retracting the last key of a consumed prefix empties known_*: the projection follows \
+         the source, and an empty source is a value like any other",
+    )
+    .await;
     assert!(
-        chain.contains("identity/users/"),
-        "the failure names the prefix that went empty, got {chain}"
-    );
-    assert_eq!(
-        known_users(&pool).await,
-        1,
-        "a change that would empty a consumed prefix never erases known_*; the row is kept as is"
+        !watched.is_finished(),
+        "the mirror keeps watching an empty prefix; empty is not a failure"
     );
 
     let back = Uuid::now_v7();
     publish_roster(
         &fabric,
-        &SampleDirectory::with_users(&[(user, "only@example.test"), (back, "back@example.test")]),
+        &SampleDirectory::with_users(&[(back, "back@example.test")]),
     )
     .await;
-    directory_mirror()
-        .build(fabric.clone(), pool.clone(), Arc::new(RecordingTransport))
-        .reconcile()
-        .await
-        .expect("a refilled bucket converges again, so the pod goes back up");
-    assert_eq!(known_users(&pool).await, 2);
+    await_known(
+        &pool,
+        1,
+        "a refilled bucket flows straight back into known_*",
+    )
+    .await;
 
+    watched.abort();
     drop(nats);
     db.cleanup().await;
 }
@@ -245,14 +254,4 @@ async fn await_known(pool: &PgPool, want: i64, note: &str) {
         assert!(tokio::time::Instant::now() < deadline, "{note}");
         tokio::time::sleep(POLL).await;
     }
-}
-
-fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut message = error.to_string();
-    let mut source = error.source();
-    while let Some(next) = source {
-        message = format!("{message}: {next}");
-        source = next.source();
-    }
-    message
 }

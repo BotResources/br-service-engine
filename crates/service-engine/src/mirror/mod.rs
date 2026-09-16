@@ -1,7 +1,6 @@
 mod builder;
 mod change;
 mod consumed;
-mod empty;
 mod handle;
 mod leader;
 mod projection;

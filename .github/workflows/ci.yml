@@ -229,6 +229,15 @@ jobs:
           tar -xzf /tmp/nats-server.tar.gz -C /tmp
           sudo install "/tmp/nats-server-${NATS_SERVER_VERSION}-linux-amd64/nats-server" /usr/local/bin/nats-server
           nats-server --version
+      # The fixture is pinned to one commit, so its module and build caches are
+      # valid until that pin moves: without this every push recompiles MinIO.
+      - name: cache the MinIO fixture build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: minio-${{ runner.os }}-01ce918d8279a20e4706b96a64396146894adee4
       - name: build pinned MinIO fixture
         env:
           # Official RELEASE.2025-09-07T16-13-09Z. Binary archive returns HTTP 410.

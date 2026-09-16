@@ -58,7 +58,7 @@ impl World {
             },
         )
         .await
-        .expect("seed the roster so the directory mirror converges to a non-empty prefix at boot");
+        .expect("seed the roster so the black-box service has users to serve at boot");
 
         let scopes = accept_scopes(&nats).await;
 

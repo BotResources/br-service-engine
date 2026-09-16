@@ -48,7 +48,7 @@ battery-backed.
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `replace`/`replace_one`/`remove`, leader-gated projection, per-bucket watermark + watch-from-revision, periodic reconcile, run-time empty-prefix guard |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `replace`/`replace_one`/`remove`, leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
@@ -251,15 +251,34 @@ with the `Projection` helpers (`replace_one`, `replace`, `remove`, over the
 `Known` / `KnownScope` traits) so the projector carries no SQL of its own; its
 projection is leader-gated: only the pod holding the mirror lease projects,
 standby pods keep their shadows current and take over on lease loss. The mirror
-persists a per-bucket watermark — the bucket revision it has projected up to,
-which the leader advances as it projects — so a standby reports converged only
-once its shadows are loaded **and** the watermark has reached the revision its
-boot read reached, and the watch resumes from that revision (not from now), so a
-put or retract that lands between the boot read and the watch is not lost. A
-periodic reconcile on `EngineConfig::with_mirror_reconcile` repairs drift, and a
-consumed prefix that reads empty — at boot or during a run, including a change
-that would empty it — holds readiness DOWN with the prefix's name and never
-erases `known_*`. Scopes are assembled from the slices: each
+persists a per-bucket watermark — the consumed stream's creation identity and
+the last sequence `S` its read reached, committed with the projections in one
+transaction — so a standby reports converged only once its shadows are loaded
+**and** the leader has committed the boundary the standby's own boot read
+captured, and the watch resumes at `S + 1` (not from now), so a put or retract
+that lands between the read and the watch is not lost. A periodic reconcile on
+`EngineConfig::with_mirror_reconcile` repairs drift and reopens the watches from
+the boundary it just read.
+
+**Converged means bound, fully read once, and watched from the revision that read
+reached — nothing about content.** A consumed prefix that reads empty is a
+converged prefix with nothing in it: `known_*` follows the source and is
+projected to empty, at boot or during a run, exactly as it follows any other
+value. Empty is the normal state of every producer's first deploy, and a
+producer in trouble is already visible on its own readiness, so the consumer
+never judges the producer's content, never validates the producer's bucket
+configuration, and never adds a second 503 to the producer's. Only a read that
+fails or does not complete projects nothing: shadows, `known_*` and the
+watermark keep their last converged state until the next successful read. A
+bucket whose identity changed, or whose sequence is below the held watermark, is
+the first-adoption case — a full read, a reconcile, then the new identity and
+boundary are adopted — never a readiness failure and never an operator SQL.
+Reconciling the persisted projection keys against the snapshot (`reconcile_keys`)
+is the one behaviour of every scan; on a watch event the engine keys the change
+against the shadows on both sides of it, so a retract whose projection key lived
+only in the retracted payload still reaches `known_*`.
+
+Scopes are assembled from the slices: each
 slice contributes its keys with `engine.contribute_scopes(&[..])`, and
 `declare_contributed_scopes` unions them into one `ScopeManifest` and runs
 the boot scope-declaration handshake that gates readiness until Identity confirms

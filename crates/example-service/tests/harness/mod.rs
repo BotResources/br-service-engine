@@ -92,7 +92,7 @@ impl World {
             },
         )
         .await
-        .expect("seed the roster so the directory mirror has a non-empty prefix at boot");
+        .expect("seed the roster so the example service has users to serve at boot");
 
         let (minio, blob_bucket, blob_config) = if options.blobs {
             let minio = TestMinio::spawn().await;

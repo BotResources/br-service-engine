@@ -11,6 +11,44 @@ and a single git tag `v{version}` releases the set. Format follows
 
 - `Reaction::message_id()` exposes the stable inbound message identity to handlers,
   enabling domain deduplication that outlives the engine's delivery-claim retention.
+- Mirrors persist a per-bucket **stream identity** beside the watermark and commit
+  both with the projections in one transaction. The boundary is the last sequence
+  the read captured, taken from fresh `get_info()` metadata before the first scan;
+  every scanned entry is applied, the watch resumes at `S + 1`, and a genuinely
+  zero boundary rescans before it opens a future-only `watch_all()`. A standby
+  reports converged once the leader has committed the boundary the standby's own
+  boot read captured, with no broker round-trip per beat. Migration
+  `9113000023_mirror_stream_identity.sql` adds the nullable column; existing
+  watermark rows keep their revision and adopt an identity on their next read.
+
+### Changed
+
+- **A mirror no longer judges the producer's content.** Converged means the bucket
+  is bound and one full read completed with the watch attached at the revision that
+  read reached — nothing more. A consumed prefix that reads empty is a converged
+  prefix with nothing in it: `known_*` follows the source and is projected to
+  empty, at boot or during a run. Only a read that fails or does not complete
+  projects nothing. This withdraws the 0.1.0 rule that an empty consumed prefix
+  holds readiness DOWN, which made the first deploy of every consumer fail, since
+  every producer's bucket is empty until it publishes.
+- A consumed bucket whose stream identity changed, or whose sequence is below the
+  held watermark, is the **first-adoption** case: full read, reconcile, adopt the
+  new identity and boundary. It never holds readiness DOWN and never asks an
+  operator to run SQL. The engine also no longer validates the producer's bucket
+  history (`max_messages_per_subject`); it keeps the latest value per key whatever
+  the bucket retains.
+- Reconciling the persisted projection keys against the snapshot is now the one
+  behaviour of every scan, with no opt-in. On a watch event the engine keys the
+  change against the shadows both before and after it is applied, so a retract
+  whose projection key lived only in the retracted payload still reaches `known_*`.
+
+### Fixed
+
+- No NATS round-trip inside the mirror's leader transaction, and no `STREAM.INFO`
+  per beat while a standby waits: a slow broker no longer pins the advisory lock
+  and the `leader_slot` row, nor polls the broker once per beat per bucket.
+- `/readyz` names the mirror and its own failure after the fixed operator copy,
+  read from one sample of the health board rather than two.
 
 ## 0.1.0 - 2026-09-11
 
