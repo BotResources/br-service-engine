@@ -90,20 +90,22 @@ where
     }
 
     pub(super) async fn boot_reconcile(&self) -> Result<(), EngineError> {
-        let Read {
-            shadows,
-            changes,
-            read_revision,
-        } = self.full_read().await?;
-        let touched = self.touched_for(&shadows, &changes).await?;
-        *self.shadows.write().await = shadows;
-        *self.read_revision.write().await = read_revision.clone();
-        *self.last_seen.write().await = read_revision.clone();
-        self.converge_as_leader_or_wait(touched, &read_revision)
-            .await
+        let touched = self.absorb_full_read().await?;
+        self.converge_as_leader_or_wait(touched).await
     }
 
     pub(super) async fn periodic_reconcile(&self) -> Result<(), EngineError> {
+        let touched = self.absorb_full_read().await?;
+        let adopt = self.read_revision.read().await.clone();
+        self.project_under_lease(touched, &adopt, Mark::Adopt)
+            .await?;
+        Ok(())
+    }
+
+    /// One full read folded into the runtime's own state: the shadows it read,
+    /// and both cursors carried onto whatever identity that read saw. Returns
+    /// the keys the read touches, for the caller to project under the lease.
+    pub(super) async fn absorb_full_read(&self) -> Result<Vec<K>, EngineError> {
         let Read {
             shadows,
             changes,
@@ -113,9 +115,7 @@ where
         *self.shadows.write().await = shadows;
         merge_forward(&mut *self.read_revision.write().await, &read_revision);
         merge_forward(&mut *self.last_seen.write().await, &read_revision);
-        self.project_under_lease(touched, &read_revision, Mark::Adopt)
-            .await?;
-        Ok(())
+        Ok(touched)
     }
 
     /// One full read of every consumed prefix, against a boundary captured

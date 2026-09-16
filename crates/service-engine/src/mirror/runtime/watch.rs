@@ -16,7 +16,16 @@ use super::{MirrorRuntime, Revisions, dedup, merge_forward};
 /// the bound is there so a broker answering oddly cannot spin this loop.
 const ZERO_BOUNDARY_RESCANS: u32 = 3;
 
-type Watches = Vec<BoxStream<'static, Result<Update, EngineError>>>;
+/// One watch's items, followed by the marker that names it when it ends.
+/// `select_all` drops an exhausted stream silently, so a bucket could stop being
+/// watched with nothing said until the next periodic reconcile; the marker turns
+/// that silence into a reopen.
+enum Served {
+    Update(Result<Update, EngineError>),
+    Ended(&'static str),
+}
+
+type Watches = Vec<BoxStream<'static, Served>>;
 
 impl<K, Pr> MirrorRuntime<K, Pr>
 where
@@ -29,18 +38,44 @@ where
         }
         loop {
             let resume = self.settled_boundary().await?;
-            let mut watches = Watches::new();
-            for consumption in self.consumptions.iter() {
-                let from = match resume.get(consumption.bucket) {
-                    Some(snapshot) if snapshot.revision > 0 => snapshot.revision.saturating_add(1),
-                    _ => 0,
-                };
-                watches.push((consumption.open_watch)(self.nats.clone(), from).await?);
+            let watches = self.open_watches(&resume).await?;
+            // The watches exist now. A bucket that resumed from zero opened a
+            // future-only `watch_all()`, so a put that landed between the
+            // boundary and this subscription reached nobody. Fresh metadata read
+            // *after* the subscription closes that window: whatever the bucket
+            // gained is either already on the open watch or is read here, and a
+            // reconcile settles both. Zero is every consumer's first boot, so
+            // this window is the common case, not the rare one.
+            if self.zero_boundary_gained(&resume).await? {
+                drop(watches);
+                self.periodic_reconcile().await?;
+                continue;
             }
             if self.serve(watches).await? {
                 return Ok(());
             }
         }
+    }
+
+    async fn open_watches(&self, resume: &Revisions) -> Result<Watches, EngineError> {
+        let mut watches = Watches::new();
+        for consumption in self.consumptions.iter() {
+            let from = match resume.get(consumption.bucket) {
+                Some(snapshot) if snapshot.revision > 0 => snapshot.revision.saturating_add(1),
+                _ => 0,
+            };
+            let bucket = consumption.bucket;
+            let opened = (consumption.open_watch)(self.nats.clone(), from).await?;
+            watches.push(
+                opened
+                    .map(Served::Update)
+                    .chain(futures_util::stream::once(
+                        async move { Served::Ended(bucket) },
+                    ))
+                    .boxed(),
+            );
+        }
+        Ok(watches)
     }
 
     /// `watch_all_from(0)` is future-only in the pinned client, so a bucket
@@ -51,15 +86,7 @@ where
     async fn settled_boundary(&self) -> Result<Revisions, EngineError> {
         for _ in 0..ZERO_BOUNDARY_RESCANS {
             let resume = self.read_revision.read().await.clone();
-            let mut gained = false;
-            for (bucket, snapshot) in &resume {
-                if snapshot.revision == 0 {
-                    let current =
-                        watermark::snapshot(&self.nats, self.name.as_str(), bucket).await?;
-                    gained |= current.revision > 0;
-                }
-            }
-            if !gained {
+            if !self.zero_boundary_gained(&resume).await? {
                 return Ok(resume);
             }
             self.periodic_reconcile().await?;
@@ -67,8 +94,26 @@ where
         Ok(self.read_revision.read().await.clone())
     }
 
-    /// Runs the open watches until they end (`true`) or until the periodic scan
-    /// replaces the boundary they resume from (`false`, reopen).
+    /// Whether a bucket this mirror is resuming from zero has gained a sequence
+    /// since. A JetStream sequence never returns to zero, so an answer of `true`
+    /// is final: the bucket leaves the zero case for the life of the stream.
+    async fn zero_boundary_gained(&self, resume: &Revisions) -> Result<bool, EngineError> {
+        for (bucket, snapshot) in resume {
+            if snapshot.revision == 0
+                && watermark::snapshot(&self.nats, self.name.as_str(), bucket)
+                    .await?
+                    .revision
+                    > 0
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Runs the open watches until every one of them is gone (`true`), or until
+    /// one bucket needs its watch reopened (`false`): the periodic scan replaced
+    /// the boundary they resume from, or a single watch ended under them.
     async fn serve(&self, watches: Watches) -> Result<bool, EngineError> {
         let mut merged = futures_util::stream::select_all(watches);
         let mut beat = tokio::time::interval(self.renew_period());
@@ -90,22 +135,36 @@ where
                     // these watches predates the scan that just replaced it.
                     return Ok(false);
                 }
-                item = merged.next() => {
-                    let Some(item) = item else { return Ok(true) };
-                    self.on_watch_event(item?).await?;
+                item = merged.next() => match item {
+                    None => return Ok(true),
+                    Some(Served::Ended(bucket)) => {
+                        tracing::warn!(
+                            mirror = %self.name,
+                            bucket,
+                            "a mirror watch ended; reopening the watches from the boundary the \
+                             mirror holds",
+                        );
+                        return Ok(false);
+                    }
+                    Some(Served::Update(item)) => self.on_watch_event(item?).await?,
                 }
             }
         }
     }
 
     async fn on_watch_event(&self, update: Update) -> Result<(), EngineError> {
-        let created = self
+        let snapshotted = self
             .read_revision
             .read()
             .await
             .get(update.bucket)
-            .map(|snapshot| snapshot.created.clone())
-            .expect("a watch opens only on a bucket a full read has snapshotted");
+            .map(|snapshot| snapshot.created.clone());
+        // A watch opens only on a bucket a full read has snapshotted. If that
+        // ever stops holding, the event is skipped rather than panicked on: the
+        // next read is what would give it an identity to advance against.
+        let Some(created) = snapshotted else {
+            return Ok(());
+        };
         let touched = {
             let mut shadows = self.shadows.write().await;
             // Key the change on both sides of it. A retract whose projection key

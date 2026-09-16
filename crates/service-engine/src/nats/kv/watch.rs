@@ -89,6 +89,10 @@ impl<V> KvBucket<V> {
         Ok(KvWatch { inner })
     }
 
+    /// Resumes at `revision`. Revision zero has no history to resume from, so it
+    /// degrades to a future-only `watch_all()`: a caller that resumes from zero
+    /// owns the window between its boundary read and this subscription, and must
+    /// re-read the bucket's metadata once the watch exists (the mirror does).
     pub async fn watch_all_from(&self, revision: u64) -> Result<KvWatch, NatsError> {
         if revision == 0 {
             return self.watch_all().await;
