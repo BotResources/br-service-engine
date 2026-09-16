@@ -44,7 +44,7 @@ battery-backed.
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
 | `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `SELECT … FOR UPDATE` as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises); log-style events reach `save` via `Aggregate::pending_events` |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
-| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility` |
+| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
@@ -479,11 +479,36 @@ that leaves the principal's cohorts is delivered as a `Remove` and one that ente
 as an `Upsert`. When a principal's own facts change (a membership granted or
 revoked, staged with `Ops::impact_principal_facts`), the engine re-resolves the
 principal and repopulates every window shape — a `Population::Keys` window
-included — so both directions reach a live session then and there. A projector
-that filters through Postgres RLS instead of cohorts, or one that is open to every
-viewer, declares `type Visibility = Unrestricted<Row, Principal>`, a conscious
-"no cohort gate here" that keeps the render-time gate off rather than defaulting
-it open. Whether a projector renders under RLS is the **projector's** declaration,
+included — so both directions reach a live session then and there.
+
+The **window shape is derived from the declaration**, not hand-picked per
+`populate`: `Visibility::LIVE` (the read-side default) makes a cohort view a
+live surface, so `view::windowed` and `view::cohort_window` return a
+`Population::Query` carrying an `Interest` on the view's noun and
+`Visibility::DEPS` — a newly created in-cohort row then reaches an open session
+(a `Keys`/`Fixed` window would never deliver it, since a fresh key is not yet a
+member) and a membership change repopulates the window. `LIVE = false` is the
+explicit override for a closed `Keys` snapshot; returning a `Population` from
+`populate` directly bypasses inference. A cohort view reads **only the caller's
+rows** through the store's `CohortIndex` seam
+(`keys_in_cohorts(conn, &memberships)`) — one indexed query on the cohort
+column, never a table scan filtered in memory. The rule the seam enforces: a
+**cohort key must be a stored column on the row** (an `org_id`, an `is_public`,
+or a `(row, cohort_key)` index row written on save); a cohort that would need a
+per-row lookup is not a cohort.
+
+A projector that filters through Postgres RLS instead of cohorts, or one that is
+open to every viewer, declares `type Visibility = Unrestricted<Row, Principal,
+Why>` — where `Why` is an `AccessReason` marker (declare it with the
+`open_access!` macro) stating why no cohort gate applies. The reason is surfaced
+through `Visibility::OPEN_ACCESS_REASON` and **refused non-empty at
+registration** (`EngineError::EmptyAccessReason`) — the guard sits in
+`register_projector`, the sink every path funnels through (via the
+`projector::Projector::open_access_reason` method that `ViewProjector`
+overrides), so a hand-built `ViewProjector` handed to `register_projector`
+directly is checked exactly like a view registered through `register_view`. So
+opting out of the cohort gate is a deliberate, reviewable statement rather than
+a silent default. Whether a projector renders under RLS is the **projector's** declaration,
 not the call's: `view::Projector` carries `const RLS` (the raw
 `projector::Projector` overrides `renders_under_rls`), and the engine reads it on
 every path — the snapshot, the render pass, the repair and `Query::fetch*`. So a

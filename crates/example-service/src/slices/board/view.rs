@@ -12,6 +12,13 @@ use super::aggregate::{Board, BoardRow, BoardState};
 use super::store::{self, BoardStore, OrgBoardStore};
 use crate::kernel::{AppPrincipal, AppRls};
 
+service_engine::open_access!(
+    /// This projector renders under Postgres row-level security: the visible
+    /// set is filtered by the RLS policy on the session role, not by an
+    /// in-engine cohort gate.
+    pub OrgBoardsRlsAccess = "org boards are filtered by Postgres RLS, not by an engine cohort"
+);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
 pub struct BoardView {
     pub id: Uuid,
@@ -82,7 +89,7 @@ impl Projector for OrgBoardsRls {
     type Store = OrgBoardStore;
     type Query = ();
     type Out = BoardView;
-    type Visibility = Unrestricted<BoardRow, AppPrincipal>;
+    type Visibility = Unrestricted<BoardRow, AppPrincipal, OrgBoardsRlsAccess>;
 
     const NAME: ProjectorName = Self::NAME;
 

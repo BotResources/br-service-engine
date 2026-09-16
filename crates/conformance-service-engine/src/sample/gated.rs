@@ -69,6 +69,11 @@ impl Visibility for AssignmentVisibility {
     type Row = AssignmentRow;
     type Principal = SamplePrincipal;
 
+    // `memberships` reads the caller's tenant, which is the DEP_MEMBERSHIP
+    // principal fact; a live cohort window declares it so a membership change
+    // repopulates the window.
+    const DEPS: Deps = Deps::from_bits(1 << DEP_MEMBERSHIP);
+
     fn cohorts(row: &AssignmentRow) -> Cohorts {
         vec![CohortKey::of(&[row.tenant_id])]
     }

@@ -77,6 +77,9 @@ impl<P: Principal> Engine<P> {
         &mut self,
         view: V,
     ) -> Result<(), EngineError> {
+        // The empty-reason guard lives in `register_projector` (the common
+        // sink), so it fires whether a view arrives here or through a
+        // hand-built `ViewProjector` passed to `register_projector` directly.
         self.register_projector(crate::view::ViewProjector::new(view))
     }
 

@@ -65,6 +65,11 @@ impl<P: Principal> RenderRegistry<P> {
         if self.projectors.contains_key(&name) {
             return Err(EngineError::DuplicateProjectorName { name });
         }
+        if let Some(reason) = projector.open_access_reason()
+            && reason.trim().is_empty()
+        {
+            return Err(EngineError::EmptyAccessReason { view: name });
+        }
         let nouns = projector.nouns();
         for noun in nouns {
             let bound = self
@@ -162,7 +167,7 @@ impl<P: Principal> RenderRegistry<P> {
 mod tests {
     use super::*;
     use crate::test_support::{
-        Assignment, AssignmentKeyProjector, MiskeyedProjector, TwinProjector,
+        Assignment, AssignmentKeyProjector, BlankReasonProjector, MiskeyedProjector, TwinProjector,
     };
     fn bound() -> RenderRegistry<crate::test_support::TestPrincipal> {
         let mut registry = RenderRegistry::new();
@@ -217,6 +222,23 @@ mod tests {
             ),
             "a projector whose key does not decode the already-bound noun key is still refused"
         );
+    }
+
+    #[test]
+    fn an_open_access_projector_with_a_blank_reason_is_refused_on_the_common_sink_not_only_register_view()
+     {
+        let mut registry = bound();
+        let refusal = registry.register_projector(BlankReasonProjector);
+        assert!(
+            matches!(
+                &refusal,
+                Err(EngineError::EmptyAccessReason { view }) if *view == BlankReasonProjector.name()
+            ),
+            "a projector opting out of the cohort gate with an empty reason is refused at \
+             register_projector — the sink every path (register_view included) funnels through, \
+             so a hand-built ViewProjector cannot slip past the guard, got {refusal:?}"
+        );
+        assert_eq!(registry.on_noun(&Assignment::NAME).len(), 0);
     }
 
     #[test]

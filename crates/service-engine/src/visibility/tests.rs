@@ -187,3 +187,42 @@ fn the_check_flags_a_window_that_drops_a_visible_key() {
     assert_eq!(mismatch.only_in_declaration, vec![mine.id]);
     assert!(mismatch.only_in_window.is_empty());
 }
+
+#[test]
+fn a_real_cohort_visibility_declares_no_open_access_reason_and_is_live_by_default() {
+    assert_eq!(ProjectVisibility::OPEN_ACCESS_REASON, None);
+    // Bound through locals so these read as observed values, not const asserts.
+    let live = ProjectVisibility::LIVE;
+    let deps_empty = ProjectVisibility::DEPS.is_empty();
+    assert!(live, "a cohort view is a live surface unless it opts out");
+    assert!(
+        deps_empty,
+        "a visibility that reads no principal facts declares no deps"
+    );
+}
+
+crate::open_access!(TestOpen = "filtered by an external mechanism, not a cohort");
+
+#[test]
+fn unrestricted_surfaces_its_access_reason_and_admits_every_row() {
+    type Open = Unrestricted<Project, Viewer, TestOpen>;
+    assert_eq!(
+        <Open as Visibility>::OPEN_ACCESS_REASON,
+        Some("filtered by an external mechanism, not a cohort"),
+        "the reason is carried through to registration so the opt-out is reviewable"
+    );
+    assert_eq!(
+        TestOpen::REASON,
+        "filtered by an external mechanism, not a cohort"
+    );
+    let stranger = Viewer {
+        orgs: vec![],
+        projects: vec![],
+    };
+    let project = Project {
+        org: Uuid::now_v7(),
+        id: Uuid::now_v7(),
+        public: false,
+    };
+    assert!(<Open as Visibility>::visible(&project, &stranger));
+}
