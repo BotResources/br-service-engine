@@ -47,6 +47,24 @@ fn rls_assignment_slice() -> SliceFragment {
     claims("rls_assignment", &["rlsAssignment"], &["AssignmentView"])
 }
 
+// The reactive delta envelope the `subscription_union!` macro generates
+// (`ResetPayload`/`UpsertPayload`/`RemovePayload`) is shared by every
+// subscription slice and owned by none of them — the subscription analogue of
+// the engine-injected `MutationAck`, but with names the macro invocation
+// chooses, so the static injected set cannot know them. A production slice
+// gives each aggregate its own union and lets `SliceFragment::derive` read
+// those payload types back; this synthetic fixture shares one union across the
+// widget and assignment slices, so it claims the envelope once, here, through
+// the low-level `from_claims` primitive. (`ProjectedView`/`EngineDelta` are
+// GraphQL unions, not object types, so the boot gate never asks for a claim.)
+fn reactive_envelope_slice() -> SliceFragment {
+    claims(
+        "reactive",
+        &[],
+        &["ResetPayload", "UpsertPayload", "RemovePayload"],
+    )
+}
+
 pub fn root_field_collision() -> SliceFragment {
     claims("shadow", &["widget"], &["ShadowView"])
 }
@@ -132,6 +150,9 @@ pub async fn boot_graphql_service(
     engine
         .register_schema_slice(assignment_slice())
         .expect("the assignment slice composes without colliding with the widget slice");
+    engine
+        .register_schema_slice(reactive_envelope_slice())
+        .expect("the shared reactive delta envelope is claimed once, by no domain slice");
 
     let readiness = engine.readiness();
     let engine_stop = engine.shutdown_handle();
