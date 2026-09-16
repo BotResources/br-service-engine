@@ -67,8 +67,9 @@ and a single git tag `v{version}` releases the set. Format follows
   the next periodic reconcile.
 - A shadow keeps the revision it holds and refuses an older one, so the overlap
   between the scan and the watch can never write a stale value over a newer one.
-  `Shadows::put`/`remove` take that revision, and `KvBucket::entries_with_revisions`
-  reads it per key.
+  The new `Shadows::put_at`/`remove_at` carry that revision guard (`put`/`remove`
+  keep their 0.1.0 unconditional signatures for compatibility), and
+  `KvBucket::entries_with_revisions` reads the revision per key.
 
 ## 0.1.0 - 2026-09-11
 

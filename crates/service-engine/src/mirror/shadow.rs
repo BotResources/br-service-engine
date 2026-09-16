@@ -15,11 +15,18 @@ impl Shadows {
         Self::default()
     }
 
+    /// Unconditionally stores a key at revision 0, bypassing the per-key
+    /// revision guard. Kept for 0.1.0 API compatibility; prefer [`Self::put_at`]
+    /// wherever the caller knows the revision a value came from.
+    pub fn put<C: Consumed>(&mut self, key: KvKey, value: C) {
+        self.map_mut::<C>().insert(key, Held { value, revision: 0 });
+    }
+
     /// Applies one revision of a key. The scan and the watch overlap by design —
     /// the watch resumes at the boundary the scan reached — so a shadow carries
     /// the revision it holds and refuses anything older: whichever of the two
     /// arrives last, the newer revision is the one that stays.
-    pub fn put<C: Consumed>(&mut self, key: KvKey, value: C, revision: u64) {
+    pub fn put_at<C: Consumed>(&mut self, key: KvKey, value: C, revision: u64) {
         let map = self.map_mut::<C>();
         if map.get(&key).is_some_and(|held| held.revision > revision) {
             return;
@@ -27,9 +34,16 @@ impl Shadows {
         map.insert(key, Held { value, revision });
     }
 
+    /// Unconditionally removes a key, bypassing the per-key revision guard.
+    /// Kept for 0.1.0 API compatibility; prefer [`Self::remove_at`] wherever
+    /// the caller knows the revision the retract came from.
+    pub fn remove<C: Consumed>(&mut self, key: &KvKey) {
+        self.map_mut::<C>().remove(key);
+    }
+
     /// A retract is a revision like any other, and is refused the same way when
     /// the shadow already holds a newer one.
-    pub fn remove<C: Consumed>(&mut self, key: &KvKey, revision: u64) {
+    pub fn remove_at<C: Consumed>(&mut self, key: &KvKey, revision: u64) {
         let map = self.map_mut::<C>();
         if map.get(key).is_some_and(|held| held.revision > revision) {
             return;
@@ -130,8 +144,8 @@ mod tests {
     #[test]
     fn two_consumed_types_keep_separate_typed_shadows() {
         let mut shadows = Shadows::new();
-        shadows.put::<A>(key("a/1"), A(1), 1);
-        shadows.put::<B>(key("b/1"), B(9), 1);
+        shadows.put_at::<A>(key("a/1"), A(1), 1);
+        shadows.put_at::<B>(key("b/1"), B(9), 1);
         assert_eq!(shadows.shadow::<A>().get(&key("a/1")), Some(&A(1)));
         assert_eq!(shadows.shadow::<B>().get(&key("b/1")), Some(&B(9)));
         assert_eq!(shadows.shadow::<A>().get(&key("b/1")), None);
@@ -140,8 +154,8 @@ mod tests {
     #[test]
     fn a_removed_key_leaves_the_shadow_and_an_absent_type_reads_empty() {
         let mut shadows = Shadows::new();
-        shadows.put::<A>(key("a/1"), A(1), 1);
-        shadows.remove::<A>(&key("a/1"), 2);
+        shadows.put_at::<A>(key("a/1"), A(1), 1);
+        shadows.remove_at::<A>(&key("a/1"), 2);
         assert!(shadows.shadow::<A>().is_empty());
         assert_eq!(shadows.shadow::<B>().len(), 0);
     }
@@ -149,20 +163,20 @@ mod tests {
     #[test]
     fn an_older_revision_never_lands_on_top_of_a_newer_one() {
         let mut shadows = Shadows::new();
-        shadows.put::<A>(key("a/1"), A(7), 7);
-        shadows.put::<A>(key("a/1"), A(3), 3);
+        shadows.put_at::<A>(key("a/1"), A(7), 7);
+        shadows.put_at::<A>(key("a/1"), A(3), 3);
         assert_eq!(
             shadows.shadow::<A>().get(&key("a/1")),
             Some(&A(7)),
             "the scan and the watch overlap, and the newer revision stays"
         );
-        shadows.remove::<A>(&key("a/1"), 3);
+        shadows.remove_at::<A>(&key("a/1"), 3);
         assert_eq!(
             shadows.shadow::<A>().get(&key("a/1")),
             Some(&A(7)),
             "a retract older than the value held is refused the same way"
         );
-        shadows.put::<A>(key("a/1"), A(8), 8);
+        shadows.put_at::<A>(key("a/1"), A(8), 8);
         assert_eq!(shadows.shadow::<A>().get(&key("a/1")), Some(&A(8)));
     }
 }

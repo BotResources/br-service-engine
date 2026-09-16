@@ -78,7 +78,7 @@ impl Consumption {
                         // at the boundary this scan reached, so the two overlap
                         // and the shadow keeps the newer of the two.
                         let applier: Applier = Box::new(move |shadows: &mut Shadows| {
-                            shadows.put::<C>(key, value, revision.get());
+                            shadows.put_at::<C>(key, value, revision.get());
                         });
                         (shadow_key, applier)
                     })
@@ -147,9 +147,9 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
     let revision = revision.get();
     let apply: Applier = match value {
         Some(value) => {
-            Box::new(move |shadows: &mut Shadows| shadows.put::<C>(key, value, revision))
+            Box::new(move |shadows: &mut Shadows| shadows.put_at::<C>(key, value, revision))
         }
-        None => Box::new(move |shadows: &mut Shadows| shadows.remove::<C>(&key, revision)),
+        None => Box::new(move |shadows: &mut Shadows| shadows.remove_at::<C>(&key, revision)),
     };
     Update {
         bucket: C::bucket(),
