@@ -184,6 +184,19 @@ and a single git tag `v{version}` releases the set. Format follows
   boot read captured, with no broker round-trip per beat. Migration
   `9113000023_mirror_stream_identity.sql` adds the nullable column; existing
   watermark rows keep their revision and adopt an identity on their next read.
+- **Multi-pod black-box conformance (`bb08`–`bb11`).** Four scenarios boot two
+  instances of the `example-service` binary against one Postgres and one NATS and
+  prove the fleet behaviour issue #126 §F flagged as untested: cross-pod reconcile
+  relay (a mutation on pod A produces the delta on a session attached to pod B), the
+  rolling roll (a client mid-session reconnects to another pod for a fresh `Reset`
+  from committed state), outbox exactly-once across pods (a row staged on one pod is
+  published once though both relay, guaranteed by the outbox relay's `FOR UPDATE SKIP
+  LOCKED` row claim), and mirror leader/standby failover (the leader projects, the
+  standby converges to readiness from the KV bucket with no RPC, and on lease loss
+  takes over and resumes its watch without a reload). Test-only; no library API
+  change. The reference binary now reads `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` to run
+  leader elections under a short lease, so a failover is observable inside a bounded
+  wait; unset, both keep the engine defaults (30 s lease, 1 s beat).
 
 ### Changed
 

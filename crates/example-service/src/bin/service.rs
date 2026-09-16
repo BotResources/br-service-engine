@@ -32,6 +32,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(ms) = std::env::var("SESSION_MAX_AGE_MS") {
         config = config.with_session_max_age(Duration::from_millis(ms.parse()?));
     }
+    if let Ok(ms) = std::env::var("ENGINE_LEASE_MS") {
+        config = config.with_lease(Duration::from_millis(ms.parse()?));
+    }
+    if let Ok(ms) = std::env::var("ENGINE_BEAT_MS") {
+        config = config.with_beat(Duration::from_millis(ms.parse()?));
+    }
 
     if let (Ok(endpoint), Ok(bucket), Ok(access), Ok(secret)) = (
         std::env::var("S3_ENDPOINT"),

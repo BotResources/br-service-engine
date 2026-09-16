@@ -802,7 +802,18 @@ whichever mode it lives:
   replay the chunks, verify the hash, commit the record and deliver it, read back
   over GraphQL (`bb05`); and the `graphql-transport-ws` socket is closed by the
   binary at `session_max_age` measured from the handshake, so a client that holds
-  it open must reconnect with a fresh passport (`bb06`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  it open must reconnect with a fresh passport (`bb06`); and `main`'s one call to
+  the boot kit installs logging, the owner→migrate→grant→app-pool sequence, and the
+  `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`). A **multi-pod set**
+  boots two instances of the binary against one Postgres and one NATS and proves the
+  fleet behaviour §F called untested: a mutation committed on pod A produces the
+  delta on a session attached to pod B (`bb08`), a client mid-session survives its
+  pod being rolled and reconnects to another for a fresh `Reset` from committed state
+  (`bb09`), an outbox row staged on one pod is published exactly once though both pods
+  run the relay (`bb10`), and the mirror leader projects while a standby converges to
+  readiness from the KV bucket and then takes over the expired lease to project a
+  change published after the leader died (`bb11`, which shortens the lease and beat
+  through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
   and built on demand otherwise, so the mode is self-sufficient locally. `bb05`
   drives the real lane-A ingress: the `example-twin` binary streams the reply's
@@ -829,7 +840,12 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb03_subscription_reset_and_reconnect \
     --test bb04_cross_service_cycle_twin_binary \
     --test bb05_seal_streamed_reply \
-    --test bb06_session_max_age_closes_the_socket
+    --test bb06_session_max_age_closes_the_socket \
+    --test bb07_boot_kit \
+    --test bb08_reconcile_relay_cross_pod \
+    --test bb09_rolling_roll_reconnect \
+    --test bb10_outbox_published_once_across_pods \
+    --test bb11_mirror_leader_standby_failover
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \

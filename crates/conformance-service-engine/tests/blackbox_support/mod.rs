@@ -21,7 +21,7 @@ use bin::{SpawnEnv, Spawned, free_port};
 use pg::BlackboxDb;
 use scopes::{ScopeIdentity, accept_scopes};
 
-pub use bin::SessionBounds;
+pub use bin::{MirrorBounds, SessionBounds};
 pub use graphql_support::{GraphqlWs, post_json};
 
 pub struct World {
@@ -34,10 +34,25 @@ pub struct World {
 
 impl World {
     pub async fn start(pod: &str) -> World {
-        World::start_with_bounds(pod, None).await
+        World::start_inner(pod, None, None).await
     }
 
     pub async fn start_with_bounds(pod: &str, session_bounds: Option<SessionBounds>) -> World {
+        World::start_inner(pod, session_bounds, None).await
+    }
+
+    /// Boot the first pod under a short lease/beat so a later failover is observable
+    /// inside a bounded wait. This pod boots alone, so it is the pod that takes every
+    /// leader lease — deterministically the leader a failover scenario then kills.
+    pub async fn start_with_mirror(pod: &str, mirror: MirrorBounds) -> World {
+        World::start_inner(pod, None, Some(mirror)).await
+    }
+
+    async fn start_inner(
+        pod: &str,
+        session_bounds: Option<SessionBounds>,
+        mirror: Option<MirrorBounds>,
+    ) -> World {
         let db = BlackboxDb::fresh().await;
         let nats_server = TestNats::spawn().await;
         nats_server.provision().await;
@@ -71,6 +86,7 @@ impl World {
             port: free_port(),
             blobs: None,
             session_bounds,
+            mirror,
         })
         .await;
 
@@ -88,6 +104,16 @@ impl World {
     }
 
     pub async fn spawn_pod(&self, pod: &str) -> Spawned {
+        self.spawn_pod_inner(pod, None).await
+    }
+
+    /// Spawn a second pod against the same Postgres and NATS under a short lease/beat,
+    /// so it converges as a standby and can take over inside a bounded wait.
+    pub async fn spawn_pod_with_mirror(&self, pod: &str, mirror: MirrorBounds) -> Spawned {
+        self.spawn_pod_inner(pod, Some(mirror)).await
+    }
+
+    async fn spawn_pod_inner(&self, pod: &str, mirror: Option<MirrorBounds>) -> Spawned {
         Spawned::service(SpawnEnv {
             database_url: self.db.app_url.clone(),
             owner_database_url: self.db.owner_url.clone(),
@@ -97,8 +123,16 @@ impl World {
             port: free_port(),
             blobs: None,
             session_bounds: None,
+            mirror,
         })
         .await
+    }
+
+    /// Take the first pod down under the running test, the way Kubernetes evicts it
+    /// during a rolling roll. The handle stays valid; `cleanup` reaps it a second time
+    /// harmlessly.
+    pub fn shutdown_service(&mut self) {
+        self.service.kill_now();
     }
 
     pub async fn gql(
