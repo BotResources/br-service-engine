@@ -109,8 +109,8 @@ macro_rules! stub_projector {
                 _facts: &(),
                 _key: &$key,
                 _principal: &TestPrincipal,
-            ) -> Option<Title> {
-                None
+            ) -> Result<Option<Title>, EngineError> {
+                Ok(None)
             }
         }
     };

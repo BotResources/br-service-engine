@@ -63,7 +63,15 @@ pub trait Projector: Send + Sync + 'static {
         query: &Self::Query,
     ) -> impl Future<Output = Result<Population<ViewKey<Self>>, EngineError>> + Send;
 
-    fn project(row: &ViewRow<Self>, principal: &Self::Principal) -> Self::Out;
+    /// Render this row into its view for the principal.
+    ///
+    /// Return `Err` when the stored row cannot be projected — a nested blob that
+    /// will not deserialize, a value the view type cannot represent. The engine
+    /// treats that as a poison document: it dead-letters the failure with this
+    /// projector as the source and repairs, then ends, the faulted sessions,
+    /// rather than letting a panic take the pod down. A total projection that
+    /// never fails returns `Ok(view)`.
+    fn project(row: &ViewRow<Self>, principal: &Self::Principal) -> Result<Self::Out, EngineError>;
 
     fn visible(row: &ViewRow<Self>, principal: &Self::Principal) -> bool {
         <Self::Visibility as Visibility>::visible(row, principal)
@@ -241,11 +249,12 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
         facts: &ViewFacts<V>,
         key: &ViewKey<V>,
         principal: &V::Principal,
-    ) -> Option<V::Out> {
+    ) -> Result<Option<V::Out>, EngineError> {
         facts
             .rows
             .get(key)
             .filter(|row| V::visible(row, principal))
             .map(|row| V::project(row, principal))
+            .transpose()
     }
 }

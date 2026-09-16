@@ -71,8 +71,8 @@ impl Projector for BoardsView {
         Ok(Board::window(candidates, cx.principal()))
     }
 
-    fn project(row: &BoardRow, principal: &AppPrincipal) -> BoardView {
-        view_of(row, principal)
+    fn project(row: &BoardRow, principal: &AppPrincipal) -> Result<BoardView, EngineError> {
+        Ok(view_of(row, principal))
     }
 }
 
@@ -106,7 +106,7 @@ impl Projector for OrgBoardsRls {
         Ok(Population::Keys(ids.into_iter().collect()))
     }
 
-    fn project(row: &BoardRow, principal: &AppPrincipal) -> BoardView {
-        view_of(row, principal)
+    fn project(row: &BoardRow, principal: &AppPrincipal) -> Result<BoardView, EngineError> {
+        Ok(view_of(row, principal))
     }
 }

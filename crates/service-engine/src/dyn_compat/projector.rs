@@ -277,10 +277,18 @@ impl<Pr: Projector> ErasedProjector<Pr::Principal> for ProjectorAdapter<Pr> {
                 .ok_or_else(|| EngineError::FactsMismatch {
                     projector: self.0.name(),
                 })?;
-        let key = key.decode::<Pr::Key>()?;
-        match self.0.project(facts, &key, principal) {
-            Some(view) => Ok(Some(ViewBytes::encode(&view)?)),
-            None => Ok(None),
+        let decoded = key.decode::<Pr::Key>()?;
+        // A projection failure names its projector and key so the render pass
+        // can dead-letter it as poison; a key that will not even decode is an
+        // engine fault, not a projection one, and keeps its own error above.
+        match self.0.project(facts, &decoded, principal) {
+            Ok(Some(view)) => Ok(Some(ViewBytes::encode(&view)?)),
+            Ok(None) => Ok(None),
+            Err(source) => Err(EngineError::Projection {
+                projector: self.0.name(),
+                key: String::from_utf8_lossy(key.as_slice()).into_owned(),
+                source: Box::new(source),
+            }),
         }
     }
 }

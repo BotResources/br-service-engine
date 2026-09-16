@@ -265,16 +265,18 @@ impl Projector for AssignmentProjector {
         facts: &AssignmentFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<AssignmentView> {
-        let row = facts.rows.get(key)?;
+    ) -> Result<Option<AssignmentView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
         if row.tenant_id != principal.tenant() {
-            return None;
+            return Ok(None);
         }
-        Some(AssignmentView {
+        Ok(Some(AssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             can_close: !row.closed,
-        })
+        }))
     }
 }

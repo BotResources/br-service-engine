@@ -36,6 +36,7 @@ async fn a_focused_replay_does_not_re_hold_its_impacts_for_other_pending_session
         registry: &registry,
         chunks: &chunks,
         config: &config,
+        dead_letters: None,
     };
 
     let mut going_live = Session::pending(

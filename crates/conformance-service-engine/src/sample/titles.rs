@@ -103,12 +103,12 @@ impl Projector for TitleProjector {
         facts: &TitleFacts,
         key: &Uuid,
         _principal: &SamplePrincipal,
-    ) -> Option<TitleView> {
+    ) -> Result<Option<TitleView>, EngineError> {
         self.renders.fetch_add(1, Ordering::Relaxed);
-        facts.titles.get(key).map(|title| TitleView {
+        Ok(facts.titles.get(key).map(|title| TitleView {
             id: *key,
             title: title.clone(),
-        })
+        }))
     }
 }
 
@@ -158,7 +158,7 @@ impl Projector for MiskeyedProjector {
         _facts: &(),
         _key: &String,
         _principal: &SamplePrincipal,
-    ) -> Option<TitleView> {
-        None
+    ) -> Result<Option<TitleView>, EngineError> {
+        Ok(None)
     }
 }

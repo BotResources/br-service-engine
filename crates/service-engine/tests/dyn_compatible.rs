@@ -131,8 +131,13 @@ impl Projector for Tickets {
         Box::pin(async move { Ok(keys) })
     }
 
-    fn project(&self, facts: &Vec<Uuid>, key: &Uuid, _principal: &Viewer) -> Option<TicketView> {
-        facts.contains(key).then_some(TicketView { id: *key })
+    fn project(
+        &self,
+        facts: &Vec<Uuid>,
+        key: &Uuid,
+        _principal: &Viewer,
+    ) -> Result<Option<TicketView>, EngineError> {
+        Ok(facts.contains(key).then_some(TicketView { id: *key }))
     }
 }
 

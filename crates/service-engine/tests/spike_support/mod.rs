@@ -120,12 +120,12 @@ impl Projector for Assignments {
         facts: &BTreeSet<Uuid>,
         key: &Uuid,
         principal: &Viewer,
-    ) -> Option<AssignmentView> {
-        facts.contains(key).then(|| AssignmentView {
+    ) -> Result<Option<AssignmentView>, EngineError> {
+        Ok(facts.contains(key).then(|| AssignmentView {
             id: *key,
             tenant: principal.tenant,
             can_close: self.open.contains(key),
-        })
+        }))
     }
 
     fn cohort(&self, principal: &Viewer) -> CohortKey {
@@ -206,8 +206,8 @@ impl Projector for Notes {
         facts: &BTreeMap<NoteKey, String>,
         key: &NoteKey,
         _principal: &Viewer,
-    ) -> Option<NoteView> {
-        facts.get(key).map(|body| NoteView { body: body.clone() })
+    ) -> Result<Option<NoteView>, EngineError> {
+        Ok(facts.get(key).map(|body| NoteView { body: body.clone() }))
     }
 }
 

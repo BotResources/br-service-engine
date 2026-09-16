@@ -92,13 +92,13 @@ impl Projector for CardsView {
         Ok(Population::Keys(keys.into_iter().collect()))
     }
 
-    fn project(card: &CardAggregate, _principal: &AppPrincipal) -> CardView {
+    fn project(card: &CardAggregate, _principal: &AppPrincipal) -> Result<CardView, EngineError> {
         let state = &card.0;
-        CardView {
+        Ok(CardView {
             id: state.id,
             board_id: state.board_id,
             title: state.title.clone(),
             status: state.status.as_str().to_string(),
-        }
+        })
     }
 }

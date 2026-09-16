@@ -158,6 +158,7 @@ impl<P: Principal> SessionRuntime<P> {
             registry: &self.registry,
             chunks: &self.chunks,
             config: &self.config,
+            dead_letters: None,
         };
         let cost = resnapshot(&ctx, &mut table, id).await?;
         drop(table);
@@ -176,6 +177,7 @@ impl<P: Principal> SessionRuntime<P> {
             registry: &self.registry,
             chunks: &self.chunks,
             config: &self.config,
+            dead_letters: None,
         };
         let mut reset = 0;
         for id in ids {

@@ -86,9 +86,10 @@ frontier itself refuses a frame with no `br-core-integration` envelope at
 `Incoming::identify` (terminal — one dead-letter row and a `Term`), so a reaction
 never runs on a frame that carries no sender at all. The `service_engine.dead_letter`
 table is the one table for every source of work: inbound reactions, scheduled
-messages, cron ticks, a persistently stuck mirror and an outbox row that keeps
-failing to publish against a reachable broker all record there
-(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox}`), each staging an
+messages, cron ticks, a persistently stuck mirror, an outbox row that keeps
+failing to publish against a reachable broker, and a render frame that hit a
+stored document a projector could not render all record there
+(`DeadLetterSource::{Reaction, Scheduled, Cron, Mirror, Outbox, Render}`), each staging an
 ops-view impact and incrementing `service_engine_dead_letters_total` by source. A
 frame is terminated only once its dead-letter row is durably written: if that
 write fails (Postgres unreachable) the frame is nak'ed, not terminated, and the
@@ -463,7 +464,10 @@ The authoring ergonomics follow the intent. A projector is
 written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
 names its `type Noun` and `type Store`, a typed `Query`, its `type Visibility`, and
 writes only a native `async fn populate(cx, q)` over a `Populate` context and
-`project(row, principal)`.
+`project(row, principal) -> Result<Out, EngineError>`. `project` is fallible: a
+stored row it cannot render (a nested blob that will not deserialize) returns
+`Err`, and the engine dead-letters that poison with the projector as source and
+repairs, then ends, the faulted sessions rather than panicking the pod.
 No hand-written future plumbing and no render load SQL live in the view: the engine
 loads the noun's rows through the store's `Persistence::read_many` and owns the
 `Facts` type, the `LoadScope::{Bulk, PerPrincipal}` match and the derived
@@ -550,7 +554,11 @@ global default. `fn emission(&Impact) -> Emission` lets a projector ask for
 default `Coalesced`; a `PerImpact` projector never faults on a **causeless**
 impact (a principal-facts change, a foreign change, a scheduled impact) — those
 fold coalesced, because only an impact that carries a cause can be delivered per
-impact. A `Cause` that does not fit one 8000-byte notification fails the **write**
+impact. A `Coalesced` delta also carries a `cause`: the fold keeps the cause of
+the **last** impact it folds (the one latest in the frame that carries one),
+so a coalesced view attributes its delta to the most recent causing fact —
+causeless impacts in the fold contribute none, and a fold with no cause at all
+carries `None`. A `Cause` that does not fit one 8000-byte notification fails the **write**
 transaction fail-closed (`TransportError`): the write is refused rather than the
 cause silently dropped, so a service that attaches a large payload as a cause
 learns at the mutation, not by a viewer missing it — keep a cause to a small fact

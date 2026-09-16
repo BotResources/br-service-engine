@@ -242,17 +242,19 @@ impl Projector for GatedAssignmentProjector {
         facts: &AssignmentFacts,
         key: &Uuid,
         principal: &SamplePrincipal,
-    ) -> Option<GatedAssignmentView> {
-        let row = facts.rows.get(key)?;
+    ) -> Result<Option<GatedAssignmentView>, EngineError> {
+        let Some(row) = facts.rows.get(key) else {
+            return Ok(None);
+        };
         if !AssignmentVisibility::visible(row, principal) {
-            return None;
+            return Ok(None);
         }
-        Some(GatedAssignmentView {
+        Ok(Some(GatedAssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             affordances: row.affordances(principal),
-        })
+        }))
     }
 }
 
@@ -281,12 +283,15 @@ impl ViewProjectorTrait for VisibleAssignments {
         Ok(AssignmentVisibility::window(candidates, cx.principal()))
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        AssignmentView {
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(AssignmentView {
             id: row.id,
             title: row.title.clone(),
             closed: row.closed,
             can_close: !row.closed,
-        }
+        })
     }
 }
