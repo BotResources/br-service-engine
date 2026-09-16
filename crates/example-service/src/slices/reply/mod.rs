@@ -46,6 +46,12 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
             orphan_after: Duration::from_secs(24 * 60 * 60),
         })?;
     }
-    engine.register_schema_slice(graphql::FRAGMENT)?;
+    engine.register_schema_slice(
+        service_engine::graphql::SliceFragment::derive::<
+            graphql::ReplyQuery,
+            graphql::ReplyMutation,
+            graphql::ReplySubscription,
+        >("reply"),
+    )?;
     Ok(())
 }

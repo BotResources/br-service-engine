@@ -10,6 +10,12 @@ use crate::kernel::AppPrincipal;
 pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine.register_projector(view::RosterUsers)?;
     engine.register_mirror(mirror::directory_mirror())?;
-    engine.register_schema_slice(graphql::FRAGMENT)?;
+    engine.register_schema_slice(
+        service_engine::graphql::SliceFragment::derive::<
+            graphql::RosterQuery,
+            async_graphql::EmptyMutation,
+            graphql::RosterSubscription,
+        >("roster"),
+    )?;
     Ok(())
 }

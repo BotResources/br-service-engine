@@ -1,6 +1,5 @@
 use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
-use service_engine::graphql::SliceFragment;
 use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
@@ -20,22 +19,6 @@ service_engine::subscription_union! {
     delta = OrgBoardDelta { reset = OrgBoardReset, upsert = OrgBoardUpsert, remove = OrgBoardRemove };
     OrgBoard => service_engine::view::ViewProjector<OrgBoardsRls> => BoardView,
 }
-
-pub const FRAGMENT: SliceFragment = SliceFragment {
-    slice: "board",
-    root_fields: &[
-        "board",
-        "boards",
-        "orgBoards",
-        "boardDeltas",
-        "orgBoardDeltas",
-        "createBoard",
-        "archiveBoard",
-        "mintBoardInvite",
-        "setBoardMembership",
-    ],
-    types: &["BoardView"],
-};
 
 #[derive(Default)]
 pub struct BoardQuery;

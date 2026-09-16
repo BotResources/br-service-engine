@@ -1,7 +1,6 @@
 use async_graphql::{Context, Json, Object, Result, Subscription};
 use futures_util::Stream;
 use serde::Serialize;
-use service_engine::graphql::SliceFragment;
 use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{JsonScalar, MutationAck, Query};
 use uuid::Uuid;
@@ -22,21 +21,6 @@ service_engine::presence_subscription_union! {
     delta = TypingDelta { reset = TypingReset, upsert = TypingUpsert, remove = TypingRemove };
     Typing => Typing => TypingView,
 }
-
-pub const FRAGMENT: SliceFragment = SliceFragment {
-    slice: "reply",
-    root_fields: &[
-        "reply",
-        "replyDownload",
-        "replyDeltas",
-        "typingDeltas",
-        "startReply",
-        "setTyping",
-        "cancelReply",
-        "attachReply",
-    ],
-    types: &["ReplyView"],
-};
 
 #[derive(Serialize)]
 struct TypingWindow {
