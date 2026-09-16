@@ -189,8 +189,11 @@ impl ViewProjector for CohortIndexedAssignments {
         cohort_window::<Self>(cx).await
     }
 
-    fn project(row: &AssignmentRow, _principal: &SamplePrincipal) -> AssignmentView {
-        view(row)
+    fn project(
+        row: &AssignmentRow,
+        _principal: &SamplePrincipal,
+    ) -> Result<AssignmentView, EngineError> {
+        Ok(view(row))
     }
 }
 
