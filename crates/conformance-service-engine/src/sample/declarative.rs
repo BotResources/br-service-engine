@@ -1,9 +1,3 @@
-//! A mirror written entirely with the declarative `KnownRow` kit: it consumes
-//! two offers and projects two single-key `known_*` tables (`known_users`,
-//! `known_groups`) with no hand-written SQL in the projector. It proves the
-//! documented path of the mirror kit end to end — a typed multi-offer join into
-//! two tables from an empty start.
-
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
 use service_engine::mirror::{

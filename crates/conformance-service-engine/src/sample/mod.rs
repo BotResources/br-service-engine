@@ -72,8 +72,10 @@ pub const TABLES: &[&str] = &[
 ];
 
 pub use mirror::{
-    DIRECTORY_MIRROR, SampleDirectory, SamplePublishedUser, backfills, directory_mirror,
-    directory_mirror_handle, known_users, publish_roster, retract_user,
+    DIRECTORY_MIRROR, REQUIRED_USER_KEY, SampleDirectory, SamplePublishedUser, backfills,
+    directory_mirror, directory_mirror_handle, known_users, mirror_dead_letters,
+    publish_offer_manifest, publish_required_user, publish_roster, publish_versioned_user,
+    read_offer_manifest, required_key_mirror, retract_required_user, retract_user, user_prefix,
 };
 
 pub use counter::{
@@ -124,8 +126,8 @@ pub use gated::{
 };
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use offer::{
-    MintThenReject, PublishedWidget, WidgetOffer, mint_then_reject, offer_dirty_keys,
-    published_widget, seed_bucket, widget_key,
+    MintThenReject, PublishedWidget, WIDGET_OFFER_PREFIX, WidgetOffer, mint_then_reject,
+    offer_dirty_keys, published_widget, seed_bucket, widget_key,
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use paged::{

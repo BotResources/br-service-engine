@@ -10,6 +10,7 @@ pub const REASON_INBOUND_STOPPED: &str = "an inbound or streaming consumer stopp
 pub const REASON_SHUTTING_DOWN: &str = "the pod is shutting down";
 pub const REASON_SCHEMA_VERSION_DISPLACED: &str =
     "another engine or service version owns the store";
+pub const REASON_REQUIRED_KEYS: &str = "a required configuration key is absent";
 
 pub(crate) fn verdict(
     listener_up: Option<bool>,
