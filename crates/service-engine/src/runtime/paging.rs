@@ -95,10 +95,12 @@ impl<P: Principal> SessionRuntime<P> {
         } else {
             erased.cohort(&principal)
         };
+        let dead_letters = self.dead_letters();
         let renderer = Renderer {
             pg: &self.pg,
             chunks: &self.chunks,
             rls: self.registry.rls(),
+            dead_letters: Some(&dead_letters),
         };
         let (rendered, _cost) = renderer
             .render(&erased, under_rls, cohort, &principal, &keys)
