@@ -2,19 +2,44 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use metrics::{
-    Counter, CounterFn, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+    Counter, CounterFn, Gauge, GaugeFn, Histogram, Key, KeyName, Metadata, Recorder, SharedString,
+    Unit,
 };
 
 type Totals = Arc<Mutex<HashMap<String, u64>>>;
+type Levels = Arc<Mutex<HashMap<String, f64>>>;
 
 #[derive(Clone, Default)]
 pub struct MetricProbe {
     totals: Totals,
+    levels: Levels,
 }
 
 struct ProbeCounter {
     slot: String,
     totals: Totals,
+}
+
+struct ProbeGauge {
+    slot: String,
+    levels: Levels,
+}
+
+impl GaugeFn for ProbeGauge {
+    fn increment(&self, value: f64) {
+        let mut levels = self.levels.lock().unwrap_or_else(|p| p.into_inner());
+        *levels.entry(self.slot.clone()).or_default() += value;
+    }
+
+    fn decrement(&self, value: f64) {
+        let mut levels = self.levels.lock().unwrap_or_else(|p| p.into_inner());
+        *levels.entry(self.slot.clone()).or_default() -= value;
+    }
+
+    fn set(&self, value: f64) {
+        let mut levels = self.levels.lock().unwrap_or_else(|p| p.into_inner());
+        levels.insert(self.slot.clone(), value);
+    }
 }
 
 impl CounterFn for ProbeCounter {
@@ -73,6 +98,31 @@ impl MetricProbe {
             .map(|(_, value)| *value)
             .sum()
     }
+
+    pub fn max_gauge(&self, name: &str) -> Option<f64> {
+        self.levels
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|(slot, _)| slot_name(slot) == name)
+            .map(|(_, value)| *value)
+            .fold(None, |acc, value| {
+                Some(acc.map_or(value, |m: f64| m.max(value)))
+            })
+    }
+
+    pub fn labelled_gauge(&self, name: &str, label_key: &str, label_value: &str) -> Option<f64> {
+        let pair = format!("{label_key}={label_value}");
+        self.levels
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .filter(|(slot, _)| slot_name(slot) == name && slot_has_label(slot, &pair))
+            .map(|(_, value)| *value)
+            .fold(None, |acc, value| {
+                Some(acc.map_or(value, |m: f64| m.max(value)))
+            })
+    }
 }
 
 fn slot_name(slot: &str) -> &str {
@@ -101,8 +151,11 @@ impl Recorder for MetricProbe {
         }))
     }
 
-    fn register_gauge(&self, _key: &Key, _metadata: &Metadata<'_>) -> Gauge {
-        Gauge::noop()
+    fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
+        Gauge::from_arc(Arc::new(ProbeGauge {
+            slot: slot(key),
+            levels: self.levels.clone(),
+        }))
     }
 
     fn register_histogram(&self, _key: &Key, _metadata: &Metadata<'_>) -> Histogram {

@@ -1116,7 +1116,12 @@ and a non-zero exit — while either set is unapplied, and derives `message_rete
 from the bound streams' `max_age`. Role and database provisioning stay in GitOps. Every engine metric is exported labelled
 by `service` and `pod` (with the boot kit's `component` global label); each
 dependency of the degrade table is a `service_engine_dependency_up` gauge, so a
-not-UP state is visible before readiness moves. `service_engine_impacts_committed_total` is the notify-budget
+not-UP state is visible before readiness moves. Every leased loop reports whether
+this pod holds its lease through one `service_engine_leader{kind,name}` gauge —
+`kind` is `relay`, `cron`, `offer` or `mirror`, `name` the slot — set to `1` on
+the holder and `0` on a standby, so `sum by (kind, name)` is `1` where a loop is
+led and a failover shows as the gauge moving from the old pod to the new one.
+`service_engine_impacts_committed_total` is the notify-budget
 counter watched at the Postgres-cluster level; it counts impacts of committed
 transactions only, recorded after the commit, never a rolled-back mutation. The
 five shipped alerts are in

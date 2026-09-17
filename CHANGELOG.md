@@ -202,6 +202,8 @@ the black-box battery greps — is the wording the engine now emits.
 
 ### lane: metrics
 
+- **13. Leader gauge per leased loop.** One `service_engine_leader{kind,name}` gauge (`metrics::LEADER`) reports whether this pod holds a leased loop's lease: `kind` is `relay`, `cron`, `offer` or `mirror` and `name` is the slot, `1` on the holder and `0` on a standby, carrying the usual `service`/`pod` identity labels. `observe::record_leader(kind, name, holder)` sets it. It replaces the three unprefixed per-loop names proposed in #128 with one fact keyed by `kind`. The relay and cron loops record it from the shared slot claim (`housekeeping/leader/mod.rs`: a won claim is `1`, a lost claim `0`, so a standby that competes reads `0` and a leader that stops winning a slot reads `0` on its next claim); the offer records it at its singleton claim and every renewal (`offers/leader.rs`); the mirror records it every beat from `on_beat` (`mirror/runtime/lead.rs`), so a standby holds `0` and a failover moves the `1` to the pod that takes the expired lease. The gauge is a level, so a stale value self-corrects on the next claim or beat and a gracefully finished process stops emitting when its scrape stops.
+
 ### Adopter migration
 
 - write: `Aggregate: Clone` — derive `Clone` on every aggregate.
@@ -228,6 +230,7 @@ the black-box battery greps — is the wording the engine now emits.
 - cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
 - cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
 
+- metrics (13, additive): a new `service_engine_leader{kind,name}` gauge; no adopter code change — dashboards and alerts gain the per-loop leader series.
 - mirror (N3, break): `Projection::upsert` / `replace` return `Written` instead of `()`; delete the hand-written roster comparison that avoided a spurious impact set.
 - mirror (7, additive): delete per-projector version guards on engine-produced offers; the engine now reads the offer manifest and dead-letters a prefix mismatch.
 - mirror (N9, additive): delete the hand-written per-value guards on a non-engine producer and implement `Consumed::wire_version` instead.

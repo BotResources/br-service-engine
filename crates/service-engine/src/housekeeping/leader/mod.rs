@@ -43,6 +43,7 @@ pub async fn claim_current_slot(
         .bind(lease.as_secs_f64())
         .fetch_optional(conn)
         .await?;
+    record_slot_leader(&name, row.is_some());
     Ok(row.map(|row| held(name, pod, &row)))
 }
 
@@ -62,6 +63,7 @@ pub async fn claim_slot_at(
         .bind(lease.as_secs_f64())
         .fetch_optional(conn)
         .await?;
+    record_slot_leader(&name, row.is_some());
     Ok(row.map(|row| held(name, pod, &row)))
 }
 
@@ -175,6 +177,10 @@ fn claim_sql(slot: &str) -> String {
           WHERE held.completed_at IS NULL AND held.lease_until <= now() \
          RETURNING slot, lease_until"
     )
+}
+
+fn record_slot_leader(name: &SlotName, holder: bool) {
+    crate::observe::record_leader(name.kind().prefix(), name.as_str(), holder);
 }
 
 fn held(name: SlotName, pod: &PodId, row: &sqlx::postgres::PgRow) -> Lease {
