@@ -13,6 +13,41 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### lane: boot
 
+**4.** The boot kit splits into three argv entry points behind one `run_service` /
+`BootPlan`. `engine/boot.rs` becomes `engine/boot/{mod,migrate,serve,env}.rs`.
+`migrate` runs under the owner role, from `DATABASE_URL_OWNER` **only** (no fallback
+to `DATABASE_URL`), retries the owner connection with backoff up to
+`EngineConfig::migrate_connect_timeout` (default five minutes), applies the engine
+set then the service set on one shared `_sqlx_migrations` ledger — the kit sets
+`ignore_missing` on both migrators — waits for the app role to exist, then
+`grant_engine_access` + `grant_app_access`, and exits. `serve` runs under the app
+role: it refuses to run — `EngineError::MigrationsPending { engine, service }`,
+`REASON_MIGRATIONS_PENDING`, readiness DOWN and a non-zero exit — while either set
+is unapplied (checked through the app role against the shared ledger), then boots
+the engine and serves. `schema` prints the SDL and touches no infra. `run_service`
+dispatches on argv (`migrate` / `serve` / `schema`; no argv serves).
+`EngineConfig::from_env()` reads the whole app-env group in one place —
+`ENGINE_CHANNEL`, `HOSTNAME` (replaces `POD_ID`), `PORT`/`HOST` (replace `HTTP_ADDR`),
+`NATS_URL`, `APP_ROLE`, and the optional session/lease/beat timings — so a service
+`main` reads no engine env var by hand; `BootPlan.config` is `from_env()?` plus the
+service's own `with_service` / `with_blob_storage` / `with_session_ttl`. `BootPlan`
+loses `nats_url` and `app_role` (both now read by `from_env` into `EngineConfig`).
+`with_edge_observability` is crate-private: `serve` is the one boot door, and no
+observability helper is re-exported at the crate root.
+
+**N1.** `serve` derives `message_retention` from the bound streams' `max_age`
+(`inbound::derive_message_retention`, `Nats::stream_max_age`) after the reactions
+are registered, taking the max over the subscription streams and refusing an
+unlimited stream. A service no longer sets `with_message_retention` by hand, and the
+pre-boot second NATS connection every adopter opened to read the stream `max_age` is
+gone. An explicit `with_message_retention` still wins when larger. The existing
+retention-mismatch boot check (`s174`) is unchanged.
+
+**14.** `readiness` re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
+from `br-util-axum-readiness = "v1.3.0"`; the engine holds no copy. Paths are kept,
+and the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording — the one
+the black-box battery greps — is the wording the engine now emits.
+
 ### lane: chart
 
 ### lane: cohort
@@ -24,6 +59,23 @@ and a single git tag `v{version}` releases the set. Format follows
 ### lane: metrics
 
 ### Adopter migration
+
+- boot: `BootPlan` loses `nats_url` and `app_role`; build `config` as
+  `EngineConfig::from_env()?.with_service(..)` (which now reads `NATS_URL` and
+  `APP_ROLE`) and drop those two fields from the `BootPlan` literal.
+- boot: `run_service` dispatches on argv — the pod runs `migrate` as the library
+  chart's init container and `serve` as the main container; e2e harnesses spawn
+  `migrate` then `serve` instead of one no-argv process.
+- boot: delete every hand-read engine env var from `main`; `EngineConfig::from_env()`
+  reads them. Rename `POD_ID` → `HOSTNAME` and `HTTP_ADDR` → `PORT`/`HOST` in the
+  deployment; `serve` reads `DATABASE_URL`, `migrate` reads `DATABASE_URL_OWNER`
+  (strict, no fallback).
+- boot: delete the pre-boot NATS connection that read the stream `max_age` and the
+  hand-set `with_message_retention`; `serve` derives it.
+- boot: delete `set_ignore_missing(true)` from the service migrator handed to the
+  kit; the kit sets it on both sets.
+- boot: `with_edge_observability` is no longer public; a hand-wired `main` uses
+  `serve` instead.
 
 ### Replaced or dropped
 

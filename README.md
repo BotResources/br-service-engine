@@ -39,7 +39,7 @@ battery-backed.
 
 | Module | Responsibility |
 |---|---|
-| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that does logging, the owner→migrate→grant→app-pool split, `/livez` + `/metrics` + `/sdl`, the `schema` subcommand, and serving |
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies both migration sets, waits for the app role, grants it), `serve` (app role, refuses an unmigrated store by name, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
@@ -55,7 +55,7 @@ battery-backed.
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
-| `readiness` | the engine's own `Readiness`/`ReadinessHandle` and `/readyz` route (no `br-util-axum-readiness`) |
+| `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
 | `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, `with_edge_observability` (mounts `/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud); each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
@@ -705,13 +705,13 @@ reaches the reaction, which decides: the example's `create_card` finds the card
 already exists and re-emits `CardReady` rather than colliding on the unique
 constraint and dead-lettering a legitimate replay.
 
-A service depends on `br-rust-common` only for frontier types (the Passport, the
+A service depends on `br-rust-common` for frontier types (the Passport, the
 integration envelope and coordinates, the scope declaration and its handshake, the
-shared value types): the
-engine provides its own `connect_pool` / `validate_database_tls` (the
-secure-by-default Postgres connect) and its own `Readiness` / `ReadinessHandle` /
-`readiness_route`, so `br-util-postgres` and `br-util-axum-readiness` are gone from
-the engine, the example and the battery.
+shared value types) and for the boot-time primitives it does not re-invent: the
+engine keeps its own `connect_pool` / `validate_database_tls` (the secure-by-default
+Postgres connect) but re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
+from `br-util-axum-readiness` rather than carrying a copy, and `serve` reads the
+migration ledger through `br-util-postgres`.
 
 ## Writing a service
 
@@ -727,12 +727,14 @@ splits into `graphql/item.rs` and `graphql/board.rs`, each a fragment), a
 `slices/mod.rs` that lists the
 slices once through the `compose_service!` macro, a `register.rs` and a
 `graphql.rs` that are slice-agnostic, and a `src/bin/service.rs` whose `main`
-builds `EngineConfig` from the environment and hands it, the composed roots, the
-service migrator and `register::all` to the engine boot kit `run_service(BootPlan { .. })`
-— the one call that installs JSON logging, runs the owner→migrate→grant→app-pool
-sequence, mounts `/livez` + `/metrics` + `/sdl`, answers the `schema` subcommand,
-and serves. `main` holds no infra wiring of its own; it is the reference for how a
-service boots.
+builds `EngineConfig::from_env()?` (adding only its own `with_service` /
+`with_blob_storage` on top) and hands it, the composed roots, the service migrator
+and `register::all` to the engine boot kit `run_service(BootPlan { .. })` — the one
+call that dispatches on argv: `migrate` runs the owner→migrate→grant sequence under
+`DATABASE_URL_OWNER`, `serve` refuses an unmigrated store by name then installs JSON
+logging + `/livez` + `/metrics` + `/sdl` and serves under `DATABASE_URL`, and
+`schema` prints the SDL. `main` reads no engine env var by hand and holds no infra
+wiring of its own; it is the reference for how a service boots.
 `compose_service!` takes each slice's module, cargo feature and root objects on
 **one line** and generates, for the whole set, the `pub mod` declarations, the
 `QueryRoot`/`MutationRoot`/`SubscriptionRoot` merged objects and the `register`
@@ -804,8 +806,10 @@ whichever mode it lives:
   over GraphQL (`bb05`); and the `graphql-transport-ws` socket is closed by the
   binary at `session_max_age` measured from the handshake, so a client that holds
   it open must reconnect with a fresh passport (`bb06`); and `main`'s one call to
-  the boot kit installs logging, the owner→migrate→grant→app-pool sequence, and the
-  `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`). A **multi-pod set**
+  the boot kit runs `migrate` then `serve`, installs logging, and answers the
+  `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`); `serve` refuses an
+  unmigrated store by name (`bb12`) and `migrate` waits for the app role before it
+  grants it (`bb13`). A **multi-pod set**
   boots two instances of the binary against one Postgres and one NATS and proves the
   fleet behaviour §F called untested: a mutation committed on pod A produces the
   delta on a session attached to pod B (`bb08`), a client mid-session survives its
@@ -963,25 +967,27 @@ exposes the raw signal to a service or a test; `graphql::lane_notice_stream` and
 the union's generated `subscribe(deltas, notices)` merge it into a subscription
 (the reference `replyDeltas` / `typingDeltas` do this).
 
-The boot kit (`run_service` / `BootPlan`) installs the observability the whole
-platform shares, so a service `main` never re-adds it by hand. It reuses the
-`br-rust-common` crates the engine pins (`br-util-observability`,
-`br-util-postgres`): `init_logging` for a structured JSON tracing subscriber
-(level from `RUST_LOG`), `init_metrics` for the process-global Prometheus
-recorder, and `br-util-postgres` for the owner/app pool split. Beside the
-engine's own `/readyz` (from `crate::readiness`, not `br-util-axum-readiness`),
-`with_edge_observability` mounts `/livez` (always 200, never gated on a
-dependency), `/metrics` (Prometheus text — every engine metric already emits
-against the global recorder, so it is exported here without extra wiring), and
-`/sdl` (the composed schema as `text/plain`); the whole router carries the HTTP
-metrics layer. The `schema` argv subcommand prints that same SDL and exits
-without touching Postgres or NATS, so a build step can extract the schema from
-the binary alone. The database follows the engine's posture rule (the runtime
-role must not own its schema): the kit runs the engine and service migration
-sets, then grants the app role, under the **owner** role named by
-`DATABASE_URL_OWNER` before it ever connects the RLS-subject **app** pool named
-by `DATABASE_URL` (the app role is named by `APP_ROLE`); role and database
-provisioning stay in GitOps. Every engine metric is exported labelled
+The `serve` entry point installs the observability the whole platform shares, so
+a service `main` never re-adds it by hand (`with_edge_observability` is crate-private
+— `serve` is the one door). It reuses the `br-rust-common` crates the engine pins
+(`br-util-observability`, `br-util-postgres`): `init_logging` for a structured JSON
+tracing subscriber (level from `RUST_LOG`), `init_metrics` for the process-global
+Prometheus recorder, and `br-util-postgres` for the app pool and the migration
+ledger read. Beside `/readyz` (re-exported from `br-util-axum-readiness`), the kit
+mounts `/livez` (always 200, never gated on a dependency), `/metrics` (Prometheus
+text — every engine metric already emits against the global recorder, so it is
+exported here without extra wiring), and `/sdl` (the composed schema as
+`text/plain`); the whole router carries the HTTP metrics layer. The `schema` argv
+subcommand prints that same SDL and exits without touching Postgres or NATS, so a
+build step can extract the schema from the binary alone. The database follows the
+engine's posture rule (the runtime role must not own its schema), and the two
+entry points split along it: `migrate` runs the engine and service migration sets
+on one shared ledger, waits for the app role to exist, and grants it, all under the
+**owner** role named by `DATABASE_URL_OWNER` (strict — no fallback to `DATABASE_URL`);
+`serve` connects only the RLS-subject **app** pool named by `DATABASE_URL` (the app
+role is named by `APP_ROLE`), refuses to run — `503` with `REASON_MIGRATIONS_PENDING`
+and a non-zero exit — while either set is unapplied, and derives `message_retention`
+from the bound streams' `max_age`. Role and database provisioning stay in GitOps. Every engine metric is exported labelled
 by `service` and `pod` (with the boot kit's `component` global label); each
 dependency of the degrade table is a `service_engine_dependency_up` gauge, so a
 not-UP state is visible before readiness moves. `service_engine_impacts_committed_total` is the notify-budget
