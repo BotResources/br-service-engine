@@ -4,6 +4,7 @@ use sqlx::PgPool;
 
 use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
+use crate::mirror::{OfferManifest, manifest_key};
 use crate::name::RelayName;
 use crate::nats::{KvBucket, KvKey, KvPrefix, NatsError};
 use crate::offer::Offer;
@@ -16,10 +17,12 @@ pub(crate) async fn reconcile<O: Offer>(
     pg: &PgPool,
     name: &RelayName,
     bucket: &KvBucket<O::Published>,
+    manifest: &KvBucket<OfferManifest>,
     leader: &OfferLeader,
     lease: &mut Lease,
     chunk: usize,
 ) -> Result<(), RelayError> {
+    publish_manifest::<O>(manifest).await?;
     let mut conn = pg.acquire().await?;
     let rows = O::all(&mut conn).await.map_err(relay)?;
     drop(conn);
@@ -66,6 +69,27 @@ pub(crate) async fn reconcile<O: Offer>(
         tx.commit().await?;
     }
     Ok(())
+}
+
+async fn publish_manifest<O: Offer>(manifest: &KvBucket<OfferManifest>) -> Result<(), RelayError> {
+    let key = manifest_key(O::PREFIX).map_err(relay)?;
+    let want = OfferManifest {
+        prefix: O::PREFIX.to_string(),
+        version: O::VERSION,
+    };
+    match manifest
+        .get_with_revision(&key)
+        .await
+        .map_err(published_language)?
+    {
+        Some((found, _)) if found == want => Ok(()),
+        Some((_, revision)) => manifest
+            .update_if(&key, &want, revision)
+            .await
+            .map(|_| ())
+            .map_err(published_language),
+        None => manifest.put(&key, &want).await.map_err(published_language),
+    }
 }
 
 fn published_language(error: NatsError) -> RelayError {

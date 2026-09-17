@@ -13,6 +13,7 @@ pub trait Offer: Send + Sync + 'static {
 
     const NAME: &'static str;
     const PREFIX: &'static str;
+    const VERSION: u16 = 1;
 
     fn key(row: &Self::Row) -> Result<KvKey, EngineError>;
 
