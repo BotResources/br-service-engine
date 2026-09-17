@@ -66,11 +66,12 @@ async fn s177_a_pending_backlog_does_not_delay_the_nats_down_verdict() {
          on the {BACKLOG}-row outbox would have held it UP for minutes"
     );
 
-    let pending: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'PENDING'")
-            .fetch_one(&pool)
-            .await
-            .expect("count the pending outbox rows");
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'PENDING'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count the pending outbox rows");
     assert_eq!(
         pending, BACKLOG as i64,
         "the whole backlog is still pending under the outage; the DOWN verdict is not the relay \

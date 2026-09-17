@@ -51,7 +51,7 @@ async fn chunk_count(pool: &PgPool, note: Uuid) -> i64 {
 
 async fn person_erased_rows(pool: &PgPool) -> i64 {
     sqlx::query_scalar(&format!(
-        "SELECT count(*) FROM integration_outbox WHERE subject = 'integration.evt.{SERVICE}.person.erased.v1'"
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE subject = 'integration.evt.{SERVICE}.person.erased.v1'"
     ))
     .fetch_one(pool)
     .await

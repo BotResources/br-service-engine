@@ -112,7 +112,7 @@ async fn s189_a_connected_broker_whose_jetstream_cannot_answer_spends_no_budget(
 }
 
 async fn attempts(pool: &PgPool, id: Uuid) -> i64 {
-    sqlx::query_scalar("SELECT attempts FROM integration_outbox WHERE id = $1")
+    sqlx::query_scalar("SELECT attempts FROM service_engine.integration_outbox WHERE id = $1")
         .bind(id)
         .fetch_one(pool)
         .await
