@@ -203,7 +203,9 @@ impl Project<Uuid> for StaffingProjection {
                     })
                     .collect()
             };
-            cx.replace(GroupMembers(group_id), members).await
+            cx.replace(GroupMembers(group_id), members)
+                .await
+                .map(|_| ())
         })
     }
 }

@@ -79,6 +79,13 @@ impl MirrorSupervisor {
         self.subscription.clone()
     }
 
+    pub fn required_keys(&self) -> Vec<watch::Receiver<Vec<String>>> {
+        self.mirrors
+            .iter()
+            .filter_map(MirrorHandle::required_keys)
+            .collect()
+    }
+
     pub fn restarts(&self) -> u64 {
         self.restarts.load(Ordering::Relaxed)
     }

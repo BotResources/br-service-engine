@@ -190,6 +190,11 @@ the black-box battery greps — is the wording the engine now emits.
 
 ### lane: mirror
 
+- **7. Engine offers publish a manifest; consumer verdict at scan.** An offer leader now writes `OfferManifest { prefix, version }` under `manifest_key(prefix)` — a sibling key outside the data prefix — at every reconcile (CAS, idempotent), carrying the new defaulted `Offer::VERSION`. A consuming mirror reads that manifest at scan (boot and every periodic reconcile) against `Consumed::manifest()`: a version or prefix mismatch dead-letters the whole prefix once (`DeadLetterSource::Mirror`, keyed `(mirror, prefix)`) and leaves that prefix's shadow empty (`known_*` follows to empty); an absent manifest is the pre-0.3 producer case and is applied silently; readiness is untouched. This closes the 0.2 disclosure that the manifest verdict was declared but unwired. It removes no guard on a non-engine producer, which has no engine manifest — those are covered by `wire_version` (N9).
+- **N9. Per-value `wire_version` on `Consumed`.** `Consumed::wire_version(&value) -> Option<u16>` (defaulted `None`) lets a consumer of a non-engine producer declare the producer's per-value version field. The engine compares it to `Consumed::VERSION` at scan and at watch when it returns `Some`; a mismatch dead-letters that one value (keyed `(mirror, key)`), leaves its shadow row absent, and projects the rest of the prefix; `None` is never judged. Readiness is untouched. Not a manifest — the producer's shape is the consumer's declaration, so nothing producer-specific enters the engine.
+- **8. `require_key` on a mirror.** `Mirror::require_key::<C>(key)` names one key under `C::PREFIX` as configuration; `validate` refuses a key outside the prefix (`EngineError::RequiredKeyOutsidePrefix`). The mirror is not ready (`REASON_REQUIRED_KEYS`, `/readyz` naming `mirror: key`, `service_engine_dependency_up{dependency="required_keys"}`) until the key is present in the shadow, evaluated after every scan and watch event through a `watch::Receiver` beside the mirror-health board. Nothing is dead-lettered, no restart budget burns, the mirror stays converged and keeps projecting. A mirror that declares no required key is never affected.
+- **N3. Change-detecting `upsert` / `replace` in the mirror kit.** `Projection::upsert` compares the stored row (`INSERT … ON CONFLICT DO UPDATE … WHERE row IS DISTINCT FROM excluded RETURNING (xmax = 0)`) and returns `Written::{Inserted, Changed, Unchanged}`; `Unchanged` stages no impact. `replace` diffs the incoming key set against the scope's previous keys and stages an impact only for a key that entered or left the set: its granularity is the key set, so a `replace` scope carries keys-only link rows and per-value diffing is `upsert`'s job. This retires the hand-written roster comparison every adopter carried and is the replacement for the dropped write-set check of item 2.
+
 ### lane: graphql
 
 ### lane: metrics
@@ -220,11 +225,16 @@ the black-box battery greps — is the wording the engine now emits.
 - cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
 - cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
 
+- mirror (N3, break): `Projection::upsert` / `replace` return `Written` instead of `()`; delete the hand-written roster comparison that avoided a spurious impact set.
+- mirror (7, additive): delete per-projector version guards on engine-produced offers; the engine now reads the offer manifest and dead-letters a prefix mismatch.
+- mirror (N9, additive): delete the hand-written per-value guards on a non-engine producer and implement `Consumed::wire_version` instead.
+- mirror (8, additive): a mirror that needs a configuration key declares `Mirror::require_key::<C>(key)` (the key must live under `C::PREFIX`); a `project`-time `Err(EngineError::Config)` guard on that key is now the mirror's readiness declaration.
+
 ### Replaced or dropped
 
 - `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper; the one-lock-domain rule is in `intent.md`.
 - `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields (see `intent.md`).
-- No write-set check: the mirror kit's `upsert`/`replace` are change-detecting instead, so an unchanged row stages nothing.
+- No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
 - `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
 
 ## 0.2.0 - 2026-09-16

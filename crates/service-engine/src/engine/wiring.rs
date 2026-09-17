@@ -32,9 +32,6 @@ pub(super) fn wire_beat<P: Principal>(
     let dead_letters =
         DeadLetters::new(pg.clone()).with_transport(transport.clone() as Arc<dyn ImpactTransport>);
     mirrors.set_dead_letters(dead_letters.clone());
-    // The render pass records poison documents (a projection that returned Err)
-    // through the same transport-backed store, so a render dead-letter raises
-    // the ops-view impact exactly as the message sources do.
     render.set_dead_letters(dead_letters.clone());
     let (inbound_health, inbound_health_rx) = InboundHealth::new();
 
@@ -53,7 +50,8 @@ pub(super) fn wire_beat<P: Principal>(
         .with_listener(transport.listener_health())
         .with_inbound_health(inbound_health_rx)
         .with_nats(nats.clone(), config.nats_grace)
-        .with_schema_version(schema_displaced_rx);
+        .with_schema_version(schema_displaced_rx)
+        .with_required_keys(mirrors.required_keys());
     beat = beat
         .with_transport(transport.clone())
         .with_accumulators(accumulators.clone())

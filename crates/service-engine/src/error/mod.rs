@@ -120,6 +120,16 @@ pub enum EngineError {
         prefix: &'static str,
     },
 
+    #[error(
+        "mirror {mirror} requires key {key}, which is outside its consumed prefix {prefix}; a \
+         required key must live under a prefix the mirror consumes"
+    )]
+    RequiredKeyOutsidePrefix {
+        mirror: MirrorName,
+        prefix: &'static str,
+        key: &'static str,
+    },
+
     #[error("chunk sequence {seq} is above {max}, the largest a bigint column stores faithfully")]
     ChunkSeqOutOfRange { seq: u64, max: u64 },
 

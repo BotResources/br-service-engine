@@ -170,3 +170,5 @@ pub use visibility::{
     check_window_matches_visibility,
 };
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};
+
+pub use mirror::{OfferManifest, manifest_key};

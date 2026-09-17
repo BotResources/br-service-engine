@@ -11,23 +11,24 @@ use tokio::sync::RwLock;
 
 use crate::config::DEFAULT_BEAT;
 use crate::error::EngineError;
+use crate::inbound::DeadLetters;
 use crate::name::MirrorName;
-use crate::nats::{Nats, NatsError};
+use crate::nats::{KvBucket, Nats, NatsError};
 use crate::transport::ImpactTransport;
 
 const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
-use super::builder::{Consumption, ReconcileKeysFn};
 use super::change::{Change, ChangeOp};
+use super::consumed::OfferManifest;
+use super::consumption::{Consumption, Effect, ReconcileKeysFn};
 use super::handle::MirrorRun;
 use super::leader::MirrorGate;
 use super::projection::Project;
+use super::required::RequiredKey;
 use super::shadow::Shadows;
 use super::watermark::{self, Mark, Snapshot};
 
 type KeyedByFn<K> = Arc<dyn Fn(&Shadows, &Change) -> Vec<K> + Send + Sync>;
-/// The snapshot a mirror is at, one entry per distinct consumed bucket. Two
-/// consumptions of the same prefix in different buckets keep distinct entries.
 type Revisions = BTreeMap<String, Snapshot>;
 
 pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
@@ -41,6 +42,8 @@ pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
     reconcile_keys: Option<ReconcileKeysFn<K>>,
     leader: Option<MirrorGate>,
     reconcile_deadline: Duration,
+    required_keys: Vec<RequiredKey>,
+    required_tx: Option<Arc<tokio::sync::watch::Sender<Vec<String>>>>,
     shadows: Arc<RwLock<Shadows>>,
     read_revision: Arc<RwLock<Revisions>>,
     last_seen: Arc<RwLock<Revisions>>,
@@ -63,6 +66,8 @@ where
         reconcile_keys: Option<ReconcileKeysFn<K>>,
         leader: Option<MirrorGate>,
         reconcile_deadline: Duration,
+        required_keys: Vec<RequiredKey>,
+        required_tx: Option<Arc<tokio::sync::watch::Sender<Vec<String>>>>,
     ) -> Self {
         Self {
             name,
@@ -75,6 +80,8 @@ where
             reconcile_keys,
             leader,
             reconcile_deadline,
+            required_keys,
+            required_tx,
             shadows: Arc::new(RwLock::new(Shadows::new())),
             read_revision: Arc::new(RwLock::new(Revisions::new())),
             last_seen: Arc::new(RwLock::new(Revisions::new())),
@@ -102,9 +109,6 @@ where
         Ok(())
     }
 
-    /// One full read folded into the runtime's own state: the shadows it read,
-    /// and both cursors carried onto whatever identity that read saw. Returns
-    /// the keys the read touches, for the caller to project under the lease.
     pub(super) async fn absorb_full_read(&self) -> Result<Vec<K>, EngineError> {
         let Read {
             shadows,
@@ -115,14 +119,32 @@ where
         *self.shadows.write().await = shadows;
         merge_forward(&mut *self.read_revision.write().await, &read_revision);
         merge_forward(&mut *self.last_seen.write().await, &read_revision);
+        self.publish_required_keys().await;
         Ok(touched)
     }
 
-    /// One full read of every consumed prefix, against a boundary captured
-    /// before the first scan. What the read finds is never judged: a prefix that
-    /// reads empty is a converged prefix with nothing in it, and the reconcile
-    /// below projects `known_*` to empty as it would to any other value. Only a
-    /// read that fails leaves the projections and the watermark untouched.
+    pub(super) async fn publish_required_keys(&self) {
+        let Some(tx) = &self.required_tx else {
+            return;
+        };
+        let missing = {
+            let shadows = self.shadows.read().await;
+            self.required_keys
+                .iter()
+                .filter(|required| !required.is_present(&shadows))
+                .map(|required| format!("{}: {}", self.name, required.key()))
+                .collect::<Vec<_>>()
+        };
+        tx.send_if_modified(|held| {
+            if *held == missing {
+                false
+            } else {
+                *held = missing;
+                true
+            }
+        });
+    }
+
     async fn full_read(&self) -> Result<Read, EngineError> {
         let mut read_revision = Revisions::new();
         for consumption in self.consumptions.iter() {
@@ -132,20 +154,34 @@ where
                 read_revision.insert(consumption.bucket.to_string(), snapshot);
             }
         }
+        let manifests = self
+            .nats
+            .published_language::<OfferManifest>()
+            .await
+            .map_err(EngineError::Nats)?;
         let mut shadows = Shadows::new();
         let mut changes = Vec::new();
         for consumption in self.consumptions.iter() {
+            if let Some(reason) = self.manifest_rejection(consumption, &manifests).await? {
+                self.dead_letter(consumption.prefix, &reason).await;
+                continue;
+            }
             let loaded = (consumption.load)(self.nats.clone()).await?;
-            // Every scanned entry is applied, including one whose revision is
-            // above the captured S: the watch resumes at S + 1, so the overlap
-            // replays a current value the projection absorbs idempotently.
-            for (key, apply) in loaded.entries {
-                changes.push(Change {
-                    prefix: consumption.prefix,
-                    key,
-                    op: ChangeOp::Put,
-                });
-                apply(&mut shadows);
+            for (key, effect) in loaded.entries {
+                match effect {
+                    Effect::Apply(apply) => {
+                        changes.push(Change {
+                            prefix: consumption.prefix,
+                            key,
+                            op: ChangeOp::Put,
+                        });
+                        apply(&mut shadows);
+                    }
+                    Effect::WireVersionRejected { expected, found } => {
+                        self.dead_letter(key.as_str(), &wire_version_reason(expected, found))
+                            .await;
+                    }
+                }
             }
         }
         Ok(Read {
@@ -155,10 +191,43 @@ where
         })
     }
 
-    /// The keys a full read touches: the ones the snapshot joins to, plus every
-    /// key the service has already persisted. Reconciling the persisted keys
-    /// against the snapshot is the one behaviour of every scan — it is how a
-    /// removal reaches `known_*`, an empty snapshot included.
+    async fn manifest_rejection(
+        &self,
+        consumption: &Consumption,
+        manifests: &KvBucket<OfferManifest>,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(found) = manifests
+            .get(&consumption.manifest_key)
+            .await
+            .map_err(EngineError::Nats)?
+        else {
+            return Ok(None);
+        };
+        match consumption
+            .expected_manifest
+            .accepts(&found.prefix, found.version)
+        {
+            Ok(()) => Ok(None),
+            Err(mismatch) => Ok(Some(mismatch.to_string())),
+        }
+    }
+
+    async fn dead_letter(&self, subject: &str, error: &str) {
+        let dead_letters =
+            DeadLetters::new(self.pool.clone()).with_transport(self.transport.clone());
+        if let Err(error) = dead_letters
+            .record_mirror(self.name.as_str(), subject, error)
+            .await
+        {
+            tracing::warn!(
+                mirror = %self.name,
+                subject,
+                %error,
+                "recording a mirror dead letter failed",
+            );
+        }
+    }
+
     async fn touched_for(
         &self,
         shadows: &Shadows,
@@ -203,9 +272,13 @@ struct Read {
     read_revision: Revisions,
 }
 
-/// Carry each bucket forward: monotonic inside one stream identity, replaced
-/// outright when the identity under it changed, since a new stream's sequence
-/// means nothing to the old one.
+fn wire_version_reason(expected: u16, found: u16) -> String {
+    format!(
+        "mirror value carries wire version {found}, but this consumer is coded against version \
+         {expected}; a breaking change moves the version into a new prefix"
+    )
+}
+
 fn merge_forward(into: &mut Revisions, from: &Revisions) {
     for (bucket, snapshot) in from {
         match into.get_mut(bucket) {
