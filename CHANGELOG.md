@@ -11,6 +11,63 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### lane: write
 
+#### 3. Transition-aware policies, delete policies
+
+`Aggregate` now requires `Clone`, and the pipeline retains the loaded image of
+every aggregate it loads. A post-save policy takes `Saved<'_, A> { prior, next,
+events }` instead of the bare saved aggregate: `next` is what was just saved,
+`prior` is the stored image (`None` on a create), `events` its pending events, and
+`Saved::transitioned(|a| …)` reports whether a projection of the two differs. The
+same shape drives a new **post-delete** policy: `register_post_delete_policy::<A>`
+/ `require_post_delete_policy::<A>`, run before a hard delete, refusing or allowing
+it exactly like a save policy. One `PostSave` context serves both hooks; the seams
+are declared and boot-checked together (`EngineError::UnhonouredSeam`).
+
+#### N5. `Persistence::delete` and `cx.delete`
+
+`Persistence` gains `delete(conn, key)`, defaulting to a refusal
+(`EngineError::DeleteUnsupported`) so a store that never deletes writes nothing.
+`cx.delete(&aggregate)` runs the delete policy, issues `Persistence::delete`, then
+stages the aggregate's offer and blob reconciliation; a refusal or a delete failure
+rolls the transaction back like a save. A raw `DELETE` outside `cx.delete` is a
+lock-domain violation (see N6), never an engine path.
+
+#### 6. Offer trigger types
+
+`OfferTrigger<O>: Aggregate` with `key_from(&self) -> Result<KvKey, EngineError>`,
+registered by `Engine::register_offer_trigger::<O, T>()` (refused when `T` is the
+offer's own row). A change to a trigger aggregate stages the offer's dirty key, so
+the offer re-publishes when a fact it derives from — not its own row — changes; the
+trigger keys onto the offer row and must live in the offer's slice, a coupling the
+engine cannot check and the README states. `Offer` gains `const VERSION: u16 = 1`.
+Retires the hand-written `dirty_service` class. Additive.
+
+#### 15. Engine-owned integration outbox
+
+`OUTBOX_TABLE` is now `service_engine.integration_outbox`, created by the engine
+migration `9113000024` and owned like every `service_engine.*` table; the six SQL
+sites read the constant. A migrating pod adopts any legacy `public.integration_outbox`
+rows through `adopt_legacy_outbox`, an idempotent post-migration step (not folded
+into the migration: the fresh-database order would leave an orphan `public` table),
+which drains the rows and drops the legacy table. The sample and example outbox DDL
+is gone.
+
+#### N2. `cx.create` refuses an existing key
+
+`cx.create` now loads under the aggregate advisory lock and refuses an already-held
+key with `EngineError::KeyReused`, surfaced as the stable code `KEY_REUSED`, instead
+of overwriting or hitting a raw unique violation. Two concurrent creates leave exactly
+one winner. Removes the principle-5 guard every service hand-wrote.
+
+#### N6. One lock domain; `Persistence::row_lock`
+
+`Persistence::row_lock(conn, table, key)` is a defaulted helper issuing the common
+`SELECT … FOR UPDATE` on the aggregate row — the one-line `lock` implementation for a
+store that wants a row lock beside the engine's advisory lock. `Persistence::lock`
+keeps its no-op default (the advisory lock already serializes every pipeline load).
+The one-lock-domain rule — every write to an aggregate's rows goes through
+`cx.load`/`cx.save`/`cx.delete` — is doctrine in `intent.md`.
+
 ### lane: boot
 
 ### lane: chart
@@ -24,6 +81,10 @@ and a single git tag `v{version}` releases the set. Format follows
 ### lane: metrics
 
 ### Adopter migration
+
+- write: `Aggregate: Clone` — derive `Clone` on every aggregate.
+- write: a post-save policy takes `Saved<'_, A>` — `saved.next` is the former saved-aggregate argument and `saved.prior` the stored image (`None` on a create); read the transition with `saved.transitioned(…)`. Add `register_post_delete_policy` where you hard-delete, implement `Persistence::delete` on stores that delete and route hard deletes through `cx.delete`, and drop the hand-written `cx.create` key guard (the engine now refuses reuse with `KEY_REUSED`).
+- write: `OUTBOX_TABLE` is now `service_engine.integration_outbox`; never create `integration_outbox` yourself again — keep an existing `*_outbox.sql` only where a database has already applied it (its rows are adopted at migrate time, then the legacy table is dropped).
 
 ### Replaced or dropped
 

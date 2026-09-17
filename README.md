@@ -43,12 +43,12 @@ battery-backed.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
-| `persistence` | `Persistence` trait + `Aggregate`; CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), and a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `SELECT … FOR UPDATE` as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises); log-style events reach `save` via `Aggregate::pending_events` |
+| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper, as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
 | `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
-| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
+| `offer` | `Offer` trait (`VERSION`), `register_offer`, `register_offer_trigger::<O, T>` (a `T: OfferTrigger<O>` in the offer's own slice re-publishes the offer when it changes; its `key()` is the offer row's key, its `key_from()` the offer's KvKey), leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
 | `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `replace`/`replace_one`/`remove`, leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
@@ -154,11 +154,16 @@ JSON-encoded key — `pg_advisory_xact_lock` over an FNV-1a hash of
 two keys or two store types never collide onto one lock — held until the
 pipeline transaction commits or rolls back. So concurrent commands on one
 aggregate serialize in **every** style even when the store's `Persistence::lock`
-is the default no-op; the reference stores' `SELECT … FOR UPDATE` on the row (or
-snapshot) key stays as an optimisation that also pins the row image. The advisory
-lock, like `lock`, runs inside the pipeline transaction under `lock_timeout`, so
-a contended write that waits past the timeout is retryable, not stuck; a render
-frame never waits on it. A CRUD or soft-EDA store overrides `read_many`
+is the default no-op. A store that also wants the row itself locked implements
+`lock`, in the common case as `Self::row_lock(conn, table, key)` — the defaulted
+`SELECT … FOR UPDATE` helper the engine ships — which pins the row image on top of
+the advisory lock. That is the one lock domain: every write to an aggregate's rows
+goes through the pipeline's `load`/`save`/`delete`, so a raw `SELECT … FOR UPDATE`
+or `DELETE` issued outside that path locks rows the pipeline does not know about
+and bypasses every policy — a CAS column is a symptom of a second domain, not a
+remedy. The advisory lock, like `lock`, runs inside the pipeline transaction under
+`lock_timeout`, so a contended write that waits past the timeout is retryable, not
+stuck; a render frame never waits on it. A CRUD or soft-EDA store overrides `read_many`
 with a single batched read of the same table `load` reads, so the author writes
 no render load SQL; a full-EDA store keeps the default `read_many` (a `load` per
 key) because the current state is the snapshot replayed forward, not a column
@@ -178,17 +183,31 @@ as for a batched read.
 
 After every `save`/`create`, inside the transaction and before the commit, the
 engine runs the **post-save policy** registered for that aggregate, if any
-(`register_post_save_policy::<A>`). The policy is pure domain logic over the
-aggregate the pipeline just saved (principle 18): it can stage impacts, commands
-and events, or `PostSave::refuse(reason)` the write — a refusal rolls the
-transaction back and answers the mutation with that `Reason` code (a refusing
-reaction is dead-lettered with it). It cannot save, so it cannot recurse. This is
-the engine's answer to cross-slice wiring that a slice was meant to call and
-never did: a slice declares its aggregate *subject* to a policy with
-`require_post_save_policy::<A>`, and boot fails with `EngineError::UnhonouredSeam`
-unless some slice registered one — the same registration gate the schema type
-check applies, so a missing interlock is a loud boot error instead of a silent
-absent call.
+(`register_post_save_policy::<A>`). The policy is pure domain logic over a
+`Saved<'_, A>` — `next` is the aggregate the pipeline just saved, `prior` is the
+stored image the pipeline loaded (`None` on a create), and `events` are its
+pending events (principle 18). It reads the transition (`saved.transitioned(|a|
+…)` compares a projection of `prior` and `next`), can stage impacts, commands and
+events, or `PostSave::refuse(reason)` the write — a refusal rolls the transaction
+back and answers the mutation with that `Reason` code (a refusing reaction is
+dead-lettered with it). It cannot save, so it cannot recurse. This is the engine's
+answer to cross-slice wiring that a slice was meant to call and never did: a slice
+declares its aggregate *subject* to a policy with `require_post_save_policy::<A>`,
+and boot fails with `EngineError::UnhonouredSeam` unless some slice registered one
+— the same registration gate the schema type check applies, so a missing interlock
+is a loud boot error instead of a silent absent call.
+
+A hard delete goes through `cx.delete(&aggregate)`. The engine runs the
+aggregate's **post-delete policy** (`register_post_delete_policy::<A>`, declared
+with `require_post_delete_policy::<A>`, over the same `Saved` and `PostSave`), then
+issues `Persistence::delete(conn, key)`, then stages the aggregate's offer and blob
+reconciliation — a refusal or a delete failure rolls the transaction back like a
+save. A store's `delete` defaults to refusing with `EngineError::DeleteUnsupported`,
+so a store that never deletes writes nothing; a raw `DELETE` outside `cx.delete`
+is the second-lock-domain violation above, not an engine path. `cx.create` refuses
+an already-held key under the same advisory lock with `EngineError::KeyReused`
+(`KEY_REUSED`), so a creator-generated id is used once and the engine never
+overwrites through create.
 
 Full EDA does not hand-roll that log. The `full_eda` kit owns it: a slice
 declares an `EventSourced` aggregate (its `NOUN`, `EVENT_VERSION`, the
@@ -262,7 +281,12 @@ or a compare-and-set on that observed revision, a failed set left dirty for the
 next drain), and finally raising the per-key watermark and deleting the marker in
 a small fenced transaction that asserts the lease — so a concurrent write to an offered noun never waits on the
 drain and a leader frozen past its lease fails its writes rather than regressing
-the bucket. It reconciles the
+the bucket. A `register_offer_trigger::<O, T>` stages the same dirty key from a
+*second* aggregate `T` in the offer's slice, so the offer re-publishes when a fact
+it derives from changes and not only when its own row does; `T` keys onto the offer
+row (its `key()` decodes as the row's key, its `key_from()` yields the offer's
+KvKey), a coupling the engine cannot check, so the trigger must live in the offer's
+own slice. It reconciles the
 bucket against the store on its first drain after boot and then every
 `EngineConfig::with_offer_reconcile` period (re-putting stale keys, retracting
 orphans), so a stable leader that never restarts still repairs out-of-band
@@ -663,6 +687,11 @@ ordered and the per-`(producer, reaction, seq_key)` sequence guard on the receiv
 drops a stale message as an acked no-op — a view never walks backwards. The guard
 is scoped per reaction, so two reactions consuming different facts of one producer
 under one key keep independent watermarks and never drop each other's messages.
+The integration outbox is an engine-owned table (`service_engine.integration_outbox`,
+in the engine schema like every `service_engine.*` table); a migrating pod adopts any
+legacy `public.integration_outbox` rows once (`adopt_legacy_outbox`, an idempotent
+post-migration step, not a migration — the fresh-database order would otherwise leave
+an orphan) and drops the legacy table.
 The hosted outbox relay drains a backlog within one beat (its batch cap equals its
 drain bound, so
 a full batch signals the beat to come back), and a periodic hygiene pass
