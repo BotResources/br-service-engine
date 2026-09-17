@@ -144,20 +144,29 @@ where
             },
         );
         match update.effect {
-            Effect::WireVersionRejected { expected, found } => {
-                self.dead_letter(
-                    update.change.key.as_str(),
-                    &wire_version_reason(expected, found),
-                )
-                .await;
+            Effect::Boundary => {
                 merge_forward(&mut *self.last_seen.write().await, &advance);
+                self.project_under_lease(Vec::new(), &advance, Mark::Advance)
+                    .await?;
+            }
+            Effect::WireVersionRejected { expected, found } => {
+                if let Some(change) = &update.change {
+                    self.dead_letter(change.key.as_str(), &wire_version_reason(expected, found))
+                        .await;
+                }
+                merge_forward(&mut *self.last_seen.write().await, &advance);
+                self.project_under_lease(Vec::new(), &advance, Mark::Advance)
+                    .await?;
             }
             Effect::Apply(apply) => {
+                let Some(change) = update.change else {
+                    return Ok(());
+                };
                 let touched = {
                     let mut shadows = self.shadows.write().await;
-                    let mut touched = (self.keyed_by)(&shadows, &update.change);
+                    let mut touched = (self.keyed_by)(&shadows, &change);
                     apply(&mut shadows);
-                    touched.extend((self.keyed_by)(&shadows, &update.change));
+                    touched.extend((self.keyed_by)(&shadows, &change));
                     dedup(touched)
                 };
                 merge_forward(&mut *self.last_seen.write().await, &advance);

@@ -181,6 +181,7 @@ where
                         self.dead_letter(key.as_str(), &wire_version_reason(expected, found))
                             .await;
                     }
+                    Effect::Boundary => {}
                 }
             }
         }

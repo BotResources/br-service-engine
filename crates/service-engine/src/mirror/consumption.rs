@@ -6,7 +6,7 @@ use futures_util::stream::BoxStream;
 use sqlx::PgPool;
 
 use crate::error::EngineError;
-use crate::nats::{KvEvent, KvKey, KvPrefix, Nats};
+use crate::nats::{KvEvent, KvKey, KvPrefix, Nats, Watched};
 
 use super::change::{Change, ChangeOp};
 use super::consumed::{Consumed, ConsumedManifest, manifest_key};
@@ -20,11 +20,12 @@ pub(super) type ReconcileKeysFn<K> =
 pub(super) enum Effect {
     Apply(Applier),
     WireVersionRejected { expected: u16, found: u16 },
+    Boundary,
 }
 
 pub(super) struct Update {
     pub(super) bucket: &'static str,
-    pub(super) change: Change,
+    pub(super) change: Option<Change>,
     pub(super) effect: Effect,
     pub(super) revision: u64,
 }
@@ -102,7 +103,9 @@ impl Consumption {
                         match watch.next_under::<C>(&prefix).await {
                             None => None,
                             Some(Err(error)) => Some((Err(service(error)), (watch, prefix))),
-                            Some(Ok(event)) => Some((Ok(into_update::<C>(event)), (watch, prefix))),
+                            Some(Ok(watched)) => {
+                                Some((Ok(into_update::<C>(watched)), (watch, prefix)))
+                            }
                         }
                     },
                 )
@@ -137,13 +140,19 @@ impl Consumption {
     }
 }
 
-fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
-    match event {
-        KvEvent::Put {
+fn into_update<C: Consumed>(watched: Watched<C>) -> Update {
+    match watched {
+        Watched::Boundary(revision) => Update {
+            bucket: C::bucket(),
+            change: None,
+            effect: Effect::Boundary,
+            revision,
+        },
+        Watched::Event(KvEvent::Put {
             key,
             value,
             revision,
-        } => {
+        }) => {
             let change = Change {
                 prefix: C::PREFIX,
                 key: key.clone(),
@@ -153,12 +162,12 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
             let effect = wire_effect::<C>(key, value, revision);
             Update {
                 bucket: C::bucket(),
-                change,
+                change: Some(change),
                 effect,
                 revision,
             }
         }
-        KvEvent::Delete { key, revision } => {
+        Watched::Event(KvEvent::Delete { key, revision }) => {
             let change = Change {
                 prefix: C::PREFIX,
                 key: key.clone(),
@@ -170,7 +179,7 @@ fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
             }));
             Update {
                 bucket: C::bucket(),
-                change,
+                change: Some(change),
                 effect,
                 revision,
             }
