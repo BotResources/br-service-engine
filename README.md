@@ -295,7 +295,11 @@ it at scan against `Consumed::manifest()` (`ConsumedManifest::accepts`,
 `ManifestMismatch`) and, on a mismatch, dead-letters the whole prefix once
 (`DeadLetterSource::Mirror`, keyed `(mirror, prefix)`) and leaves that prefix's
 shadow empty; an absent manifest is the pre-0.3 producer case and is applied
-silently. For a **non-engine producer** that carries a per-value version field,
+silently. Because `manifest_key(prefix)` is a sibling outside the watched data
+prefix, no watch event ever carries it, so the manifest verdict is re-evaluated
+only at scan — boot and every periodic reconcile — and a producer version bump is
+caught within one reconcile deadline, not instantly. For a **non-engine
+producer** that carries a per-value version field,
 the consumer declares `Consumed::wire_version(&value)`; the engine compares it to
 `Consumed::VERSION` at scan and at watch and dead-letters a single mismatched
 value (keyed `(mirror, key)`), leaving its shadow row absent while the rest of

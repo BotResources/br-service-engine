@@ -33,8 +33,6 @@ fn id_of(key: &KvKey) -> Option<Uuid> {
         .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
-/// The declarative `known_*` row: the engine generates the upsert and the delete
-/// from the table, key column and value columns — the projector writes no SQL.
 struct KnownPersonRow {
     id: Uuid,
     email: String,
