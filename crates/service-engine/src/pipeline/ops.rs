@@ -18,7 +18,7 @@ use crate::pipeline::outbound::{
     OutboundCommand, OutboundContext, OutboundEvent, command_record, event_record,
 };
 use crate::pipeline::policy::{AggregatePolicy, Policies, PostSave, Refused, Saved};
-use crate::pipeline::staged::{ScheduledMessage, Staged};
+use crate::pipeline::staged::{RefusalOrigin, ScheduledMessage, Staged, StagedRefusal};
 use crate::principal::PrincipalId;
 use crate::relays::outbox::OutboxRecord;
 use crate::time::Timestamp;
@@ -132,7 +132,7 @@ impl<'a> Ops<'a> {
         let key = aggregate.key();
         lock_aggregate::<A>(self.conn, &key).await?;
         if A::Store::load(self.conn, &key).await?.is_some() {
-            self.record_policy_refusal(KEY_REUSED);
+            self.record_policy_refusal(KEY_REUSED, RefusalOrigin::CreatePrecondition);
             return Err(EngineError::KeyReused {
                 store: std::any::type_name::<A::Store>(),
                 key: render_key::<A>(&key),
@@ -217,7 +217,7 @@ impl<'a> Ops<'a> {
         match outcome {
             Ok(()) => Ok(()),
             Err(Refused(reason)) => {
-                self.record_policy_refusal(reason);
+                self.record_policy_refusal(reason, RefusalOrigin::PostSavePolicy);
                 Err(EngineError::PolicyRefused {
                     code: reason.code(),
                 })
@@ -225,9 +225,9 @@ impl<'a> Ops<'a> {
         }
     }
 
-    pub(crate) fn record_policy_refusal(&mut self, reason: Reason) {
+    pub(crate) fn record_policy_refusal(&mut self, reason: Reason, origin: RefusalOrigin) {
         if self.staged.policy_refusal.is_none() {
-            self.staged.policy_refusal = Some(reason);
+            self.staged.policy_refusal = Some(StagedRefusal { reason, origin });
         }
     }
 

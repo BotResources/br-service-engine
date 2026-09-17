@@ -208,7 +208,7 @@ the black-box battery greps — is the wording the engine now emits.
 ### Adopter migration
 
 - write: `Aggregate: Clone` — derive `Clone` on every aggregate.
-- write: a post-save policy takes `Saved<'_, A>` — `saved.next` is the former saved-aggregate argument and `saved.prior` the stored image (`None` on a create); read the transition with `saved.transitioned(…)`. Add `register_post_delete_policy` where you hard-delete, implement `Persistence::delete` on stores that delete and route hard deletes through `cx.delete`, and drop the hand-written `cx.create` key guard (the engine now refuses reuse with `KEY_REUSED`).
+- write: a post-save policy takes `Saved<'_, A>` — `saved.next` is the former saved-aggregate argument and `saved.prior` the stored image (`None` on a create); read the transition with `saved.transitioned(…)`. Add `register_post_delete_policy` where you hard-delete, implement `Persistence::delete` on stores that delete and route hard deletes through `cx.delete`, and keep only the same-content idempotent ack of the hand-written `cx.create` key guard, through the locked `cx.load` — drop its different-content branch and any raw-connection read, the engine refuses a different-content reuse with `KEY_REUSED`.
 - write: `OUTBOX_TABLE` is now `service_engine.integration_outbox`; never create `integration_outbox` yourself again — keep an existing `*_outbox.sql` only where a database has already applied it (its rows are adopted at migrate time, then the legacy table is dropped).
 - boot: `BootPlan` loses `nats_url` and `app_role`; build `config` as
   `EngineConfig::from_env()?.with_service(..)` (which now reads `NATS_URL` and

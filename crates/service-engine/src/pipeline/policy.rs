@@ -12,6 +12,7 @@ use crate::impact::Dims;
 use crate::persistence::{Aggregate, Persistence};
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::{OutboundCommand, OutboundEvent};
+use crate::pipeline::staged::RefusalOrigin;
 use crate::time::Timestamp;
 use crate::wire::Noun;
 
@@ -81,7 +82,8 @@ impl<'a, 'ops> PostSave<'a, 'ops> {
     }
 
     pub fn refuse(&mut self, reason: Reason) -> Refused {
-        self.ops.record_policy_refusal(reason);
+        self.ops
+            .record_policy_refusal(reason, RefusalOrigin::PostSavePolicy);
         Refused(reason)
     }
 }

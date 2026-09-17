@@ -105,11 +105,11 @@ where
         let mut cx = Mutation::new(ops, &principal, &services.presence, &mut presence_puts);
         handler(&mut cx, input).await
     };
-    if let Some(reason) = staged.policy_refusal {
+    if let Some(refusal) = staged.policy_refusal {
         let _ = tx.rollback().await;
         return Err(MutationError::refused(
-            Some(reason),
-            "a post-save policy refused the write",
+            Some(refusal.reason),
+            refusal.origin.detail(),
         ));
     }
     let output = match result {
@@ -177,11 +177,11 @@ where
         let mut cx = Bulk::new(ops, &principal);
         handler(&mut cx, input).await
     };
-    if let Some(reason) = staged.policy_refusal {
+    if let Some(refusal) = staged.policy_refusal {
         let _ = tx.rollback().await;
         return Err(MutationError::refused(
-            Some(reason),
-            "a post-save policy refused the write",
+            Some(refusal.reason),
+            refusal.origin.detail(),
         ));
     }
     let output = match result {

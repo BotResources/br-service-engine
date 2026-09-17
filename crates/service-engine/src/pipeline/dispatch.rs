@@ -191,11 +191,12 @@ impl DirectPipeline {
             );
             invoke(invoker.as_ref(), &mut cx, &msg.body).await
         };
-        if let Some(reason) = staged.policy_refusal {
+        if let Some(refusal) = staged.policy_refusal {
             let _ = tx.rollback().await;
             return DispatchOutcome::Failed(DispatchError::terminal(format!(
-                "a post-save policy refused this reaction's write with reason {}",
-                reason.code()
+                "{} in this reaction with reason {}",
+                refusal.origin.detail(),
+                refusal.reason.code()
             )));
         }
         if let Err(error) = handler {
