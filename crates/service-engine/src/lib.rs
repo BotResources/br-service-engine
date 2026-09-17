@@ -172,3 +172,5 @@ pub use visibility::{
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};
 
 pub use mirror::{OfferManifest, manifest_key};
+
+pub use graphql::{FORBIDDEN_CODE, coded_error, forbidden};

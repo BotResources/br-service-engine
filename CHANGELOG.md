@@ -197,6 +197,9 @@ the black-box battery greps — is the wording the engine now emits.
 
 ### lane: graphql
 
+- Subscription-union envelope types are derived from the SDL (item 10). `SchemaSlices::verify` and `SliceFragment::derive` exempt the object members of any union that also lists `LanesPaused` and `LanesResumed` — the reactive delta envelope the `subscription_union!` macro always emits — so two subscription slices sharing one delta union compose with no synthetic slice claiming the `*Payload` types. The synthetic `reactive` slice is gone from the sample.
+- Coded refusals on queries and subscriptions (item 11). `graphql::coded_error(code, message)` and `graphql::forbidden()` (code `FORBIDDEN`) are new, re-exported at `service_engine::` and `service_engine::graphql::`; `mutation_error` is now implemented over `coded_error`. A resolver refusal rides async-graphql's own framing — HTTP `200` with `errors[].extensions.code` on a query, and a `next` payload carrying the error then `complete` on a subscription open, never a transport `error`.
+
 ### lane: metrics
 
 ### Adopter migration
@@ -229,6 +232,9 @@ the black-box battery greps — is the wording the engine now emits.
 - mirror (7, additive): delete per-projector version guards on engine-produced offers; the engine now reads the offer manifest and dead-letters a prefix mismatch.
 - mirror (N9, additive): delete the hand-written per-value guards on a non-engine producer and implement `Consumed::wire_version` instead.
 - mirror (8, additive): a mirror that needs a configuration key declares `Mirror::require_key::<C>(key)` (the key must live under `C::PREFIX`); a `project`-time `Err(EngineError::Config)` guard on that key is now the mirror's readiness declaration.
+
+- graphql (item 10): delete any synthetic slice that claimed the `*Payload` subscription-envelope types — the engine derives them from the delta union that also lists `LanesPaused`/`LanesResumed`.
+- graphql (item 11): replace hand-rolled `forbidden()` copies (accounts `graphql.rs`, `context.rs`) with `service_engine::graphql::forbidden()`; a query or subscription refusal that needs another code uses `graphql::coded_error(code, message)`.
 
 ### Replaced or dropped
 

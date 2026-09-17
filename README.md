@@ -57,7 +57,7 @@ battery-backed.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, `with_edge_observability` (mounts `/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud); each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, `with_edge_observability` (mounts `/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -479,10 +479,27 @@ field-shaped line is never mistaken for a phantom root field) and fails boot wit
 but no fragment claims — the seam of a capability merged into the composed roots
 yet never registered. The engine's own injected object types (the mutation ack,
 the lane payloads) are themselves derived from the engine's wrapper types and
-allowed unclaimed, so the completeness gate is exactly "every non-engine object
-type is owned by a fragment". The axum layer resolves the principal from the
+allowed unclaimed. A second exempt set is read from the type system too: the
+object members of any union that also lists `LanesPaused` and `LanesResumed` —
+the reactive delta envelope the `subscription_union!` macro always emits
+(`Reset`/`Upsert`/`Remove` payloads) — are derived from that union and both
+excluded from a fragment's owned types and allowed unclaimed by the gate, so two
+subscription slices sharing one delta union compose with no hand-written slice
+claiming the envelope. The completeness gate is then exactly "every object type
+that is neither engine-injected nor a reactive delta envelope is owned by a
+fragment". The axum layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
 kit does authZ only, never authN.
+
+Refusals on the wire. A refusal is a coded GraphQL error, never a transport
+error. A mutation refusal is `mutation_error(reason)`; a query or subscription
+refusal is `graphql::coded_error(code, message)`, or `graphql::forbidden()` for
+the `FORBIDDEN` case — both re-exported at `service_engine::` and carrying the
+code in the `code` extension the frontend reads. On a query the client sees HTTP
+`200` with `errors[].extensions.code` and a null datum; on a subscription open
+the client sees a `next` payload carrying that same error then `complete`, never
+a transport-level `error` frame — the framing is async-graphql's own, unchanged
+by the engine.
 
 `register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
