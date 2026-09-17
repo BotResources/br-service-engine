@@ -51,9 +51,6 @@ pub(crate) struct PassContext<'a, P: Principal> {
     pub(crate) registry: &'a RenderRegistry<P>,
     pub(crate) chunks: &'a ChunkReader,
     pub(crate) config: &'a EngineConfig,
-    /// The store a projection failure is dead-lettered into. `None` on the pure
-    /// repair passes, which re-render an already-recorded fault rather than
-    /// discovering a fresh one.
     pub(crate) dead_letters: Option<&'a DeadLetters>,
 }
 
@@ -130,6 +127,7 @@ pub(crate) async fn run_pass_focused<P: Principal>(
         pg: ctx.pg,
         chunks: ctx.chunks,
         rls: ctx.registry.rls(),
+        dead_letters: ctx.dead_letters,
     };
     let mut rendered: BTreeMap<GroupKey, Rendered> = BTreeMap::new();
     for (group_key, group) in &groups {
@@ -154,7 +152,6 @@ pub(crate) async fn run_pass_focused<P: Principal>(
                 rendered.insert(group_key.clone(), views);
             }
             Err(error) => {
-                dead_letter_projection(ctx, &error).await;
                 for (id, windows) in &plans {
                     if windows.iter().any(|window| &window.group() == group_key) {
                         faults.record(*id, &error);
@@ -173,34 +170,6 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     deliver_pass(ctx, table, &delivery, &mut report, &mut faults, focus);
     repair_faulted(ctx, table, faults, &mut report).await;
     Ok(report)
-}
-
-/// Land a render-frame projection failure in the dead-letter table.
-///
-/// Only [`EngineError::Projection`] is poison — a stored document a projector
-/// could not render. Every other render error (a transient database fault, an
-/// RLS misconfiguration) is repairable by re-reading, so it faults the session
-/// and repairs without dead-lettering. The recording failing is itself logged,
-/// never propagated: a pod that cannot write the ops row still keeps serving.
-async fn dead_letter_projection<P: Principal>(ctx: &PassContext<'_, P>, error: &EngineError) {
-    let EngineError::Projection { projector, key, .. } = error else {
-        return;
-    };
-    let Some(dead_letters) = ctx.dead_letters else {
-        return;
-    };
-    if let Err(recording) = dead_letters
-        .record_render(projector.as_str(), key, &describe(error))
-        .await
-    {
-        tracing::error!(
-            projector = %projector,
-            key = %key,
-            reason = %recording,
-            "a projection failure could not be recorded to the dead-letter table; the faulted \
-             sessions are still repaired and ended, but this poison document leaves no ops trail"
-        );
-    }
 }
 
 struct Delivery<'a, P: Principal> {

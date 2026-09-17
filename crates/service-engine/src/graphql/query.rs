@@ -205,6 +205,7 @@ impl<'a, P: Principal> Query<'a, P> {
             pg: self.state.pg(),
             chunks: runtime.chunks(),
             rls: runtime.registry().rls(),
+            dead_letters: None,
         };
         let cohort = erased.cohort(self.principal);
         let (rendered, _cost) = renderer
