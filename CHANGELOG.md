@@ -5,6 +5,33 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
+## [0.3.0] - Unreleased
+
+### lane: reset
+
+### lane: write
+
+### lane: boot
+
+### lane: chart
+
+### lane: cohort
+
+### lane: mirror
+
+### lane: graphql
+
+### lane: metrics
+
+### Adopter migration
+
+### Replaced or dropped
+
+- `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper; the one-lock-domain rule is in `intent.md`.
+- `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields (see `intent.md`).
+- No write-set check: the mirror kit's `upsert`/`replace` are change-detecting instead, so an unchanged row stages nothing.
+- `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
+
 ## 0.2.0 - 2026-09-16
 
 This release answers `ws-cc-platform#126`. The `services`-rewrite experiment and
