@@ -142,7 +142,7 @@ pub use pipeline::{
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
     Reaction, Refused,
 };
-pub use population::{Interest, Inverse, Population, WindowQuery};
+pub use population::{Interest, Inverse, InverseLookup, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope};
