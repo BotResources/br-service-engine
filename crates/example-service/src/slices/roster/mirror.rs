@@ -77,6 +77,7 @@ impl Project<Uuid> for DirectoryProjection {
                         display_name: person.display_name,
                     })
                     .await
+                    .map(|_| ())
                 }
                 None => cx.retire::<KnownPersonRow>(vec![col("user_id", id)]).await,
             }

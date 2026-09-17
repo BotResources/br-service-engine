@@ -96,13 +96,13 @@ impl Project<DeclKey> for DeclarativeProjection {
                         .get(&user_key(id))
                         .cloned()
                     {
-                        Some(user) => {
-                            cx.upsert(KnownUserRow {
+                        Some(user) => cx
+                            .upsert(KnownUserRow {
                                 id,
                                 email: user.email,
                             })
                             .await
-                        }
+                            .map(|_| ()),
                         None => cx.retire::<KnownUserRow>(vec![col("user_id", id)]).await,
                     }
                 }
@@ -112,13 +112,13 @@ impl Project<DeclKey> for DeclarativeProjection {
                         .get(&group_key(id))
                         .cloned()
                     {
-                        Some(group) => {
-                            cx.upsert(KnownGroupRow {
+                        Some(group) => cx
+                            .upsert(KnownGroupRow {
                                 id,
                                 name: group.name,
                             })
                             .await
-                        }
+                            .map(|_| ()),
                         None => cx.retire::<KnownGroupRow>(vec![col("group_id", id)]).await,
                     }
                 }

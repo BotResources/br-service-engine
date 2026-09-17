@@ -15,7 +15,7 @@ pub use change::{Change, ChangeOp};
 pub use consumed::{Consumed, ConsumedManifest, ManifestMismatch, is_raw_json};
 pub use extension::Extended;
 pub use handle::{MirrorHandle, MirrorRun};
-pub use known::{Bind, Column, KnownRow, col};
+pub use known::{Bind, Column, KnownRow, Written, col};
 pub use leader::MirrorLeader;
 pub use projection::{Known, KnownScope, Project, Projection};
 pub use shadow::{Shadow, Shadows};
