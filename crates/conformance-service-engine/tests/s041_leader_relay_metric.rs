@@ -6,7 +6,7 @@ use conformance_service_engine::sample::LeaderRunSampleRelay;
 use service_engine::Beat;
 use service_engine::EngineConfig;
 use service_engine::housekeeping::relay::RelayRuntime;
-use service_engine::metrics::{LABEL_OUTCOME, LEADER_SLOT_CLAIMS_TOTAL};
+use service_engine::metrics::{LABEL_NAME, LABEL_OUTCOME, LEADER, LEADER_SLOT_CLAIMS_TOTAL};
 use service_engine::name::{ChannelName, PodId, RelayName};
 
 const ONE_SLOT: Duration = Duration::from_secs(3600);
@@ -72,7 +72,9 @@ async fn s041_the_leader_slot_metric_counts_a_relay_win_not_only_a_cron_win() {
     .with_lease(Duration::from_secs(7200));
     let mut beat = Beat::from_config(&config).expect("the beat assembles");
     beat.relays()
-        .register(LeaderRunSampleRelay::new(RelayName::from_static("leader")))
+        .register(LeaderRunSampleRelay::new(RelayName::from_static(
+            "s041_metric_leader",
+        )))
         .expect("the leader relay registers on the beat");
 
     let round = beat.tick(&pool).await;
@@ -86,6 +88,12 @@ async fn s041_the_leader_slot_metric_counts_a_relay_win_not_only_a_cron_win() {
         after > before,
         "the leader-slot-claims metric rose for a relay win, so its name no longer lies by \
          counting cron wins alone (before={before}, after={after})"
+    );
+
+    assert_eq!(
+        probe.labelled_gauge(LEADER, LABEL_NAME, "s041_metric_leader"),
+        Some(1.0),
+        "the pod that won the relay slot reports itself as the leader of that leased loop"
     );
 
     pool.close().await;
