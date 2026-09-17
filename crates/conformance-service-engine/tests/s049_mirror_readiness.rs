@@ -17,8 +17,8 @@ use service_engine::name::{PodId, RelayName};
 use service_engine::nats::RelayHealth;
 use service_engine::relays::outbox::HostedOutboxRelay;
 use service_engine::relays::outbox::OutboxRelay;
+use service_engine::stop::Stop;
 use service_engine::{Readiness, ReadinessHandle};
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 const OBSERVED_WITHIN: Duration = Duration::from_secs(20);
@@ -57,7 +57,7 @@ async fn s049_readiness_is_down_until_the_directory_mirror_converges_and_down_ag
         "a registered mirror holds the gate down before the supervisor has run it once"
     );
 
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let mut tasks = supervisor.start(shutdown.clone());
     assert!(
         tokio::time::timeout(OBSERVED_WITHIN, tasks.converged())
@@ -105,7 +105,7 @@ async fn s049_readiness_is_down_until_the_directory_mirror_converges_and_down_ag
     );
     assert!(tasks.restarts() >= 1);
 
-    shutdown.notify_waiters();
+    shutdown.stop();
     db.cleanup().await;
 }
 

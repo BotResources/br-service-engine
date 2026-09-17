@@ -2,12 +2,6 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream::AckKind;
-use async_nats::jetstream::consumer::pull::Config as PullConfig;
-use async_nats::jetstream::consumer::{AckPolicy, Consumer, DeliverPolicy, ReplayPolicy};
-use futures_util::{FutureExt, StreamExt};
-use tokio::sync::Notify;
-
 use crate::accumulator::ChunkSeq;
 use crate::accumulator::runtime::AccumulatorRuntime;
 use crate::chain::describe;
@@ -15,6 +9,11 @@ use crate::error::EngineError;
 use crate::inbound::{HealthTracker, ServeExit};
 use crate::name::AccumulatorName;
 use crate::nats::{Nats, StreamFrame, streaming_filter, streaming_stream};
+use crate::stop::Stop;
+use async_nats::jetstream::AckKind;
+use async_nats::jetstream::consumer::pull::Config as PullConfig;
+use async_nats::jetstream::consumer::{AckPolicy, Consumer, DeliverPolicy, ReplayPolicy};
+use futures_util::{FutureExt, StreamExt};
 
 const INACTIVE_THRESHOLD: Duration = Duration::from_secs(300);
 
@@ -75,14 +74,14 @@ impl StreamingIngress {
     async fn serve(
         &self,
         consumer: Consumer<PullConfig>,
-        stop: &Arc<Notify>,
+        stop: &Arc<Stop>,
     ) -> Result<ServeExit, EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
                 "the lane-A ingress could not open its message stream: {error}"
             ))
         })?;
-        let stopping = stop.notified();
+        let stopping = stop.stopped();
         tokio::pin!(stopping);
         loop {
             let message = tokio::select! {
@@ -105,7 +104,7 @@ impl StreamingIngress {
     pub(crate) async fn serve_with_promotion(
         &self,
         consumer: Consumer<PullConfig>,
-        stop: &Arc<Notify>,
+        stop: &Arc<Stop>,
         tracker: &mut HealthTracker,
         uptime: Duration,
     ) -> Result<ServeExit, EngineError> {

@@ -1,11 +1,10 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use conformance_service_engine::TestDb;
 use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments};
 use service_engine::impact::Dims;
-use tokio::sync::Notify;
+use service_engine::stop::Stop;
 use uuid::Uuid;
 
 const WINDOW: Duration = Duration::from_millis(800);
@@ -42,7 +41,7 @@ async fn s011_leading_emission() {
         .expect("a session opens with its Reset");
 
     let (feed, events) = ImpactFeed::new();
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let loop_handle = tokio::spawn(engine.clone().run(events, shutdown.clone()));
 
     retitle(&pool, subject, "alpha renamed").await;
@@ -75,7 +74,7 @@ async fn s011_leading_emission() {
         "two impacts inside one window must not yield two deltas"
     );
 
-    shutdown.notify_waiters();
+    shutdown.stop();
     let _ = tokio::time::timeout(SOON, loop_handle).await;
     db.cleanup().await;
 }

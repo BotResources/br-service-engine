@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use futures_util::FutureExt;
-use tokio::sync::{Notify, watch};
+use tokio::sync::watch;
+
 use tokio::task::JoinHandle;
 
 use uuid::Uuid;
@@ -22,6 +23,7 @@ use crate::housekeeping::backoff::Backoff;
 use crate::inbound::{DeadLetterSource, DeadLetters};
 use crate::mirror::MirrorHandle;
 use crate::name::MirrorName;
+use crate::stop::Stop;
 
 pub use health::{MirrorCondition, MirrorsHealth, MirrorsHealthReceiver};
 
@@ -90,7 +92,7 @@ impl MirrorSupervisor {
         self.restarts.load(Ordering::Relaxed)
     }
 
-    pub fn start(self, shutdown: Arc<Notify>) -> MirrorTasks {
+    pub fn start(self, shutdown: Arc<Stop>) -> MirrorTasks {
         let tasks = self
             .mirrors
             .iter()
@@ -171,15 +173,14 @@ async fn supervise(
     board: Board,
     restarts: Arc<AtomicU64>,
     dead_letters: Option<DeadLetters>,
-    shutdown: Arc<Notify>,
+    shutdown: Arc<Stop>,
 ) {
     let name = mirror.name().clone();
     let mut backoff = Backoff::default();
     let mut progress_at_last_stop = mirror.progress();
     let mut backfilled = false;
-    let stopping = shutdown.notified();
+    let stopping = shutdown.stopped();
     tokio::pin!(stopping);
-    stopping.as_mut().enable();
     loop {
         set(&board, &name, MirrorCondition::Converging);
         let reason = match guard(converge(&mirror, &mut backfilled)).await {

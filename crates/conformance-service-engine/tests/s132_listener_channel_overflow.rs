@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use conformance_service_engine::TestDb;
@@ -9,7 +8,7 @@ use conformance_service_engine::sample::render::{
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments};
 use service_engine::delta::Delta;
 use service_engine::impact::Dims;
-use tokio::sync::Notify;
+use service_engine::stop::Stop;
 use uuid::Uuid;
 
 const SOON: Duration = Duration::from_secs(15);
@@ -51,7 +50,7 @@ async fn s132_a_burst_larger_than_the_in_process_channel_resets_every_live_sessi
         feed.impacts(vec![resource(&watched, Dims::EMPTY)]);
     }
 
-    let stop = Arc::new(Notify::new());
+    let stop = Stop::new();
     let running = tokio::spawn(engine.clone().run(source, stop.clone()));
 
     let reset = await_reset(&mut stream).await;
@@ -70,7 +69,7 @@ async fn s132_a_burst_larger_than_the_in_process_channel_resets_every_live_sessi
     );
 
     drop(feed);
-    stop.notify_one();
+    stop.stop();
     running.await.expect("the render task stops");
     db.cleanup().await;
 }

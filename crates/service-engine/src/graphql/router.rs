@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
+use crate::graphql::state::GraphqlState;
 use crate::readiness::{ReadinessHandle, readiness_route};
+use crate::stop::Stop;
 use async_graphql::http::ALL_WEBSOCKET_PROTOCOLS;
 use async_graphql::{Data, ObjectType, Schema, SubscriptionType};
 use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse};
@@ -12,10 +15,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
 use br_util_observability::{MetricsHandle, http_metrics_layer, liveness_route, metrics_route};
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
-
-use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
-use crate::graphql::state::GraphqlState;
 
 struct AppState<P: PassportPrincipal, Q, M, S> {
     schema: Schema<Q, M, S>,
@@ -75,13 +74,9 @@ where
     })
 }
 
-pub async fn serve(
-    listener: TcpListener,
-    app: Router,
-    shutdown: Arc<Notify>,
-) -> std::io::Result<()> {
+pub async fn serve(listener: TcpListener, app: Router, shutdown: Arc<Stop>) -> std::io::Result<()> {
     axum::serve(listener, app)
-        .with_graceful_shutdown(async move { shutdown.notified().await })
+        .with_graceful_shutdown(async move { shutdown.stopped().await })
         .await
 }
 

@@ -4,7 +4,6 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
-use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::config::EngineConfig;
@@ -21,6 +20,7 @@ use crate::nats::Nats;
 use crate::presence::PresenceRegistry;
 use crate::principal::Principal;
 use crate::runtime::SessionRuntime;
+use crate::stop::Stop;
 use crate::time::Timestamp;
 use crate::transport::{ImpactTransport, PgListenNotify};
 
@@ -53,11 +53,10 @@ pub(super) async fn run_scheduled_messages(
     nats: Nats,
     dead_letters: DeadLetters,
     interval: Duration,
-    stop: Arc<Notify>,
+    stop: Arc<Stop>,
 ) {
-    let stopping = stop.notified();
+    let stopping = stop.stopped();
     tokio::pin!(stopping);
-    stopping.as_mut().enable();
     loop {
         if let Err(error) = fire_due(
             &pg,
@@ -86,7 +85,7 @@ pub(super) async fn open_presence_stream<P: Principal>(
     config: &EngineConfig,
     presence: &PresenceRegistry<P>,
     transport: &Arc<PgListenNotify>,
-    stop_presence: Arc<Notify>,
+    stop_presence: Arc<Stop>,
 ) -> Result<
     (
         BoxStream<'static, Result<TransportEvent, TransportError>>,

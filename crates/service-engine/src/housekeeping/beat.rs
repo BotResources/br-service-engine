@@ -16,6 +16,7 @@ use crate::housekeeping::lane::LaneSupervisor;
 use crate::housekeeping::ready::ReadinessAssembly;
 use crate::housekeeping::relay::{RelayRound, RelayRuntime};
 use crate::housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
+use crate::stop::Stop;
 use crate::transport::PgListenNotify;
 
 const MAX_BACKLOG_BURSTS: u32 = 64;
@@ -212,10 +213,9 @@ impl Beat {
         relays.more || scheduled.more
     }
 
-    pub async fn run(mut self, pg: PgPool, shutdown: Arc<Notify>, after_pass: Arc<Notify>) {
-        let stopping = shutdown.notified();
+    pub async fn run(mut self, pg: PgPool, shutdown: Arc<Stop>, after_pass: Arc<Notify>) {
+        let stopping = shutdown.stopped();
         tokio::pin!(stopping);
-        stopping.as_mut().enable();
         let mut next_tick = Instant::now();
         'run: loop {
             if Instant::now() >= next_tick {

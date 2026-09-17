@@ -42,6 +42,7 @@ pub mod schema;
 pub mod schema_version;
 pub mod scopes;
 pub mod session;
+pub mod stop;
 pub mod time;
 pub mod view;
 pub mod visibility;

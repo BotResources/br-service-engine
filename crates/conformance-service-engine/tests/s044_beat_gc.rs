@@ -8,6 +8,7 @@ use service_engine::cron::Schedule;
 use service_engine::housekeeping::beat::Beat;
 use service_engine::housekeeping::leader::{SlotName, claim_slot_at};
 use service_engine::name::{JobName, PodId, RelayName};
+use service_engine::stop::Stop;
 use service_engine::time;
 use sqlx::PgPool;
 use tokio::sync::Notify;
@@ -167,7 +168,7 @@ async fn s044_a_beat_whose_relays_keep_asking_for_another_round_still_stops_when
         .register_erased(busy.clone())
         .expect("the busy relay registers");
 
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let after_pass = Arc::new(Notify::new());
     let running = tokio::spawn(beat.run(pool, shutdown.clone(), after_pass));
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -181,7 +182,7 @@ async fn s044_a_beat_whose_relays_keep_asking_for_another_round_still_stops_when
         "the beat is still looping on the relay that never empties"
     );
 
-    shutdown.notify_waiters();
+    shutdown.stop();
     tokio::time::timeout(Duration::from_secs(5), running)
         .await
         .expect("a beat asked to stop must stop, however much work its relays keep reporting")

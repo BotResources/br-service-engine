@@ -130,6 +130,21 @@ pre-boot second NATS connection every adopter opened to read the stream `max_age
 gone. An explicit `with_message_retention` still wins when larger. The existing
 retention-mismatch boot check (`s174`) is unchanged.
 
+**N9.** Shutdown is latching, so a stop can no longer be lost. The engine's internal
+stop signals were bare `tokio::sync::Notify`: `notify_waiters()` wakes only the tasks
+already parked on the signal and stores nothing, so a worker that had not yet reached
+its first poll when shutdown was raised never saw it, and `run` then blocked forever
+joining it. A pod shut down shortly after boot could hang until the kubelet's
+`terminationGracePeriod` expired and SIGKILL landed; the scheduled-message loop was
+the one this bit most often, because it is spawned last and joined first.
+`service_engine::stop::Stop` replaces `Notify` on every internal stop path — an
+atomic latch beside the notify, where `stop()` raises the latch before waking and
+`stopped()` reads it on its first poll — so the signal is level-triggered and the
+order of stop and first poll no longer matters. Public signatures that take a stop
+handle move from `Arc<Notify>` to `Arc<Stop>`: `AccumulatorRuntime::run`,
+`Beat::run`, `MirrorSupervisor::start`, `SessionRuntime::run` and `graphql::serve`.
+`Engine::shutdown_handle()` is unchanged.
+
 **14.** `readiness` re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
 from `br-util-axum-readiness = "v1.3.0"`; the engine holds no copy. Paths are kept,
 and the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording — the one
