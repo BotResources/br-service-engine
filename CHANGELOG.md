@@ -130,7 +130,7 @@ pre-boot second NATS connection every adopter opened to read the stream `max_age
 gone. An explicit `with_message_retention` still wins when larger. The existing
 retention-mismatch boot check (`s174`) is unchanged.
 
-**N9.** Shutdown is latching, so a stop can no longer be lost. The engine's internal
+**N11.** Shutdown is latching, so a stop can no longer be lost. The engine's internal
 stop signals were bare `tokio::sync::Notify`: `notify_waiters()` wakes only the tasks
 already parked on the signal and stores nothing, so a worker that had not yet reached
 its first poll when shutdown was raised never saw it, and `run` then blocked forever
