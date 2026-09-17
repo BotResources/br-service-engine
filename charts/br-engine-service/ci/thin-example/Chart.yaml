@@ -1,0 +1,9 @@
+apiVersion: v2
+name: thin-example
+description: "CI fixture for the br-engine-service library chart — one dependency plus values, no hand-written topology; resources come from the library named templates."
+type: application
+version: 0.1.0
+dependencies:
+  - name: br-engine-service
+    version: "1.0.0"
+    repository: "file://../.."

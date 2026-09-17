@@ -1,0 +1,11 @@
+{{ include "br-engine-service.serviceaccount" . }}
+---
+{{ include "br-engine-service.deployment" . }}
+---
+{{ include "br-engine-service.service" . }}
+---
+{{ include "br-engine-service.pdb" . }}
+{{- if .Values.networkPolicy.enabled }}
+---
+{{ include "br-engine-service.networkpolicy" . }}
+{{- end }}
