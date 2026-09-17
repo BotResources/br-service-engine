@@ -5,20 +5,6 @@ use async_graphql::{ObjectType, SubscriptionType};
 use crate::error::EngineError;
 use crate::graphql::sdl;
 
-/// One capability's contribution to a service's GraphQL surface: the root
-/// fields it adds and the object types it owns.
-///
-/// A fragment is normally *derived* from its async-graphql root objects with
-/// [`SliceFragment::derive`] — the root fields and owned object types are read
-/// from the `#[Object]`/`#[SimpleObject]` impls, never restated by hand. A
-/// slice may register several fragments, one per capability file, all sharing
-/// one aggregate name; capabilities of the same aggregate may reference the
-/// same owned type, while two *different* aggregates claiming one type name is
-/// the collision the boot gate refuses.
-///
-/// [`SliceFragment::from_claims`] is the lower-level primitive `derive` is built
-/// on, for the rare fragment whose claims cannot be read from a real schema
-/// (synthetic test fixtures, chiefly). Prefer `derive` in service code.
 #[derive(Clone, Debug)]
 pub struct SliceFragment {
     slice: &'static str,
@@ -27,10 +13,6 @@ pub struct SliceFragment {
 }
 
 impl SliceFragment {
-    /// Derive a fragment from its root objects. `Q`, `M`, `S` are the query,
-    /// mutation and subscription roots of one capability; use
-    /// `async_graphql::EmptyMutation` / `async_graphql::EmptySubscription` for a
-    /// slot the capability does not populate.
     pub fn derive<Q, M, S>(slice: &'static str) -> Self
     where
         Q: ObjectType,
@@ -42,7 +24,7 @@ impl SliceFragment {
         let owned_types = members
             .object_types
             .into_iter()
-            .filter(|ty| !injected.contains(ty))
+            .filter(|ty| !injected.contains(ty) && !members.reactive_envelopes.contains(ty))
             .collect();
         Self {
             slice,
@@ -51,9 +33,6 @@ impl SliceFragment {
         }
     }
 
-    /// Construct a fragment from explicit claims. The primitive behind
-    /// [`SliceFragment::derive`]; prefer `derive` unless the claims genuinely
-    /// cannot be read from a schema.
     pub fn from_claims(
         slice: &'static str,
         root_fields: Vec<String>,
@@ -100,11 +79,6 @@ impl SchemaSlices {
         Ok(())
     }
 
-    /// Gate a composed schema against the registered fragments: every root
-    /// field and every object type the schema exposes must be claimed by a
-    /// fragment, or (for object types) injected by the engine. A member with no
-    /// claim is a seam a slice wired into the composed roots but never
-    /// registered — the boot fails loud rather than serving it unowned.
     pub fn verify(&self, sdl: &str) -> Result<(), EngineError> {
         let parsed = sdl::parse_schema_members(sdl)?;
         for field in parsed.root_fields {
@@ -117,7 +91,10 @@ impl SchemaSlices {
         }
         let injected = sdl::engine_injected_object_types();
         for ty in parsed.object_types {
-            if injected.contains(&ty) || self.types.contains_key(&ty) {
+            if injected.contains(&ty)
+                || parsed.reactive_envelopes.contains(&ty)
+                || self.types.contains_key(&ty)
+            {
                 continue;
             }
             return Err(EngineError::UndeclaredSchemaType { ty });
@@ -149,14 +126,12 @@ fn claim_type(
     slice: &'static str,
 ) -> Result<(), EngineError> {
     match registry.get(member) {
-        // Two distinct aggregates naming the same type is the real collision.
         Some(&first) if first != slice => Err(EngineError::DuplicateSchemaMember {
             kind: "type",
             member: member.to_string(),
             first,
             second: slice,
         }),
-        // Capabilities of the same aggregate share its types — claim once.
         Some(_) => Ok(()),
         None => {
             registry.insert(member.to_string(), slice);
@@ -247,9 +222,6 @@ mod tests {
         let slices =
             SchemaSlices::assemble(&[fragment("widget", &["widget", "peek"], &["WidgetView"])])
                 .unwrap();
-        // The root field `peek` is claimed, but the object type it returns,
-        // `AssignmentView`, is owned by no fragment — the seam of a slice
-        // merged into the roots yet never registered.
         let sdl = "type Query {\n\twidget(id: UUID!): WidgetView\n\tpeek: AssignmentView\n}\n\
                    type WidgetView {\n\tid: UUID!\n}\ntype AssignmentView {\n\tid: UUID!\n}\n";
         let err = slices.verify(sdl).unwrap_err();
@@ -262,8 +234,6 @@ mod tests {
     #[test]
     fn engine_injected_object_types_need_no_fragment_claim() {
         let slices = SchemaSlices::assemble(&[fragment("widget", &["closeWidget"], &[])]).unwrap();
-        // `MutationAck` is engine-injected: the schema exposes it, no fragment
-        // claims it, and the gate passes.
         let sdl = "type Mutation {\n\tcloseWidget(id: UUID!): MutationAck!\n}\n\
                    type MutationAck {\n\tsuccess: Boolean!\n}\n";
         slices
@@ -285,5 +255,40 @@ mod tests {
         slices
             .verify(sdl)
             .expect("declared and injected members verify");
+    }
+
+    #[test]
+    fn subscription_delta_envelope_types_are_exempt_without_a_fragment_claim() {
+        let slices =
+            SchemaSlices::assemble(&[fragment("widget", &["widgets"], &["WidgetView"])]).unwrap();
+        let sdl = "type Subscription {\n\twidgets: WidgetDelta\n}\n\
+                   union WidgetDelta = WidgetReset | WidgetUpsert | WidgetRemove | LanesPaused | LanesResumed\n\
+                   union ProjectedView = WidgetView\n\
+                   type WidgetView {\n\tid: UUID!\n}\n\
+                   type WidgetReset {\n\trevision: Int!\n}\ntype WidgetUpsert {\n\trevision: Int!\n}\n\
+                   type WidgetRemove {\n\trevision: Int!\n}\n\
+                   type LanesPaused {\n\tid: Int!\n}\ntype LanesResumed {\n\tid: Int!\n}\n";
+        slices
+            .verify(sdl)
+            .expect("delta envelope object types need no fragment claim");
+    }
+
+    #[test]
+    fn two_subscription_slices_sharing_one_delta_union_verify_without_a_synthetic_slice() {
+        let slices = SchemaSlices::assemble(&[
+            fragment("widget", &["widgets"], &["WidgetView"]),
+            fragment("assignment", &["assignments"], &["AssignmentView"]),
+        ])
+        .unwrap();
+        let sdl = "type Subscription {\n\twidgets: EngineDelta\n\tassignments: EngineDelta\n}\n\
+                   union EngineDelta = ResetPayload | UpsertPayload | RemovePayload | LanesPaused | LanesResumed\n\
+                   union ProjectedView = WidgetView | AssignmentView\n\
+                   type WidgetView {\n\tid: UUID!\n}\ntype AssignmentView {\n\tid: UUID!\n}\n\
+                   type ResetPayload {\n\trevision: Int!\n}\ntype UpsertPayload {\n\trevision: Int!\n}\n\
+                   type RemovePayload {\n\trevision: Int!\n}\n\
+                   type LanesPaused {\n\tid: Int!\n}\ntype LanesResumed {\n\tid: Int!\n}\n";
+        slices
+            .verify(sdl)
+            .expect("one shared delta union across two slices needs no reactive slice");
     }
 }
