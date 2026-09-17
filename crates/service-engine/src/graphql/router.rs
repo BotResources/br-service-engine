@@ -51,12 +51,7 @@ where
 
 const SDL_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
-/// Mount the operational edge — `/livez` (always 200), `/metrics` (Prometheus text),
-/// `/sdl` (the composed schema) — beside a service's [`app`] router, and wrap the whole
-/// router in the HTTP metrics layer. These endpoints ride the trusted internal network
-/// and carry no auth: liveness must answer even when a dependency is down, and the SDL
-/// and metrics are non-secret operational reads.
-pub fn with_edge_observability(app: Router, sdl: String, metrics: MetricsHandle) -> Router {
+pub(crate) fn with_edge_observability(app: Router, sdl: String, metrics: MetricsHandle) -> Router {
     app.route("/livez", liveness_route())
         .route("/metrics", metrics_route(metrics))
         .route("/sdl", sdl_route(sdl))
