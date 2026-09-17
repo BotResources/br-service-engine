@@ -17,7 +17,7 @@ impl Noun for SoftCounterNoun {
     const NAME: NounName = NounName::from_static("counter_soft");
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SoftCounter(pub CounterState);
 
 pub struct SoftCounterStore;

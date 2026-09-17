@@ -117,6 +117,19 @@ impl Persistence for DocStore {
             Ok(())
         })
     }
+
+    fn delete<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("DELETE FROM sample_doc WHERE id = $1")
+                .bind(key)
+                .execute(conn)
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 impl Aggregate for DocRow {
@@ -286,12 +299,7 @@ pub fn delete_doc<'m>(
             .load::<DocRow>(&input.id)
             .await?
             .ok_or(SampleFault::NotFound)?;
-        sqlx::query("DELETE FROM sample_doc WHERE id = $1")
-            .bind(doc.id)
-            .execute(cx.connection())
-            .await
-            .map_err(|error| SampleFault::Store(error.to_string()))?;
-        cx.delete(&doc)?;
+        cx.delete(&doc).await?;
         cx.impact_caused::<Doc, _>(&doc.id, "deleted")?;
         Ok(())
     })

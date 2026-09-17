@@ -17,7 +17,7 @@ impl Noun for LocklessCounterNoun {
     const NAME: NounName = NounName::from_static("counter_lockless");
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LocklessCounter(pub CounterState);
 
 pub struct LocklessCounterStore;

@@ -30,6 +30,7 @@ pub mod stream;
 pub mod titles;
 pub mod transport;
 pub mod widget;
+pub mod widget_tag;
 
 use sqlx::PgPool;
 use sqlx::migrate::{MigrateError, Migrator};
@@ -48,7 +49,6 @@ pub const TABLES: &[&str] = &[
     "sample_member",
     "sample_assignment",
     "sample_note",
-    "integration_outbox",
     "sample_relay_row",
     "sample_relay_claim",
     "sample_kv_pending",
@@ -69,6 +69,7 @@ pub const TABLES: &[&str] = &[
     "sample_erase_memo_fact",
     "sample_erase_ledger_event",
     "sample_erase_ledger_snapshot",
+    "sample_widget_tag",
 ];
 
 pub use mirror::{
@@ -109,8 +110,10 @@ pub use engine::{
 };
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 pub use engine_pipeline::{
-    boot_blob_engine, boot_offer_engine, boot_offer_engine_leased, boot_offer_engine_reconciling,
-    boot_panic_engine, boot_pipeline_engine, boot_policy_engine, boot_unhonoured_seam_engine,
+    boot_blob_engine, boot_delete_policy_engine, boot_offer_engine, boot_offer_engine_leased,
+    boot_offer_engine_reconciling, boot_offer_trigger_engine, boot_panic_engine,
+    boot_pipeline_engine, boot_policy_engine, boot_transition_policy_engine,
+    boot_unhonoured_seam_engine,
 };
 
 pub use assignment::{
@@ -156,3 +159,6 @@ pub use transport::{
     RecordingTransport, SAMPLE_CHANNEL, StagingGate, StagingTransport, staged_impacts,
 };
 pub use widget::{Widget, WidgetFacts, WidgetProjector, WidgetRow, WidgetStore, WidgetView};
+pub use widget_tag::{
+    DeleteWidgetTag, SetWidgetTag, WidgetTag, WidgetTagStore, delete_widget_tag, set_widget_tag,
+};
