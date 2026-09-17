@@ -48,8 +48,8 @@ battery-backed.
 | `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
-| `offer` | `Offer` trait, `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `replace`/`replace_one`/`remove`, leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
+| `offer` | `Offer` trait (`VERSION`), `register_offer`, leader-drained dirty keys, versioned watermark, boot + periodic reconcile, `OfferManifest` published at reconcile |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `replace`/`replace_one`/`remove` (change-detecting, returns `Written`), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
@@ -287,13 +287,24 @@ the projector — or manually through `replace_one` / `replace` / `remove` over 
 single-key upsert. A producer that extends a shared type is consumed with
 `Extended<Core, Ext>`: the project names its own extension as the second type
 parameter and an unknown extension is denied at deserialization, never mirrored
-as opaque JSON. `Consumed::VERSION` and `manifest()` carry the offer's wire
-version, and `ConsumedManifest::accepts` is the pure verdict (`ManifestMismatch`)
-the engine *will* apply at scan and watch so a producer that reused a prefix for
-an incompatible version becomes a nameable dead letter rather than a silent
-mis-decode — the scan/watch enforcement that reads the producer manifest and
-dead-letters the key is not yet wired (it lands in the mirror runtime, reworked
-in parallel). The projection is leader-gated: only the pod holding the mirror lease projects,
+as opaque JSON. A mirror joins one or more offers, and the producer's wire
+version is checked two ways. An **engine producer** publishes an
+`OfferManifest { prefix, version }` under `manifest_key(prefix)` (a sibling key,
+outside the data prefix, `Offer::VERSION`) at every reconcile; the consumer reads
+it at scan against `Consumed::manifest()` (`ConsumedManifest::accepts`,
+`ManifestMismatch`) and, on a mismatch, dead-letters the whole prefix once
+(`DeadLetterSource::Mirror`, keyed `(mirror, prefix)`) and leaves that prefix's
+shadow empty; an absent manifest is the pre-0.3 producer case and is applied
+silently. For a **non-engine producer** that carries a per-value version field,
+the consumer declares `Consumed::wire_version(&value)`; the engine compares it to
+`Consumed::VERSION` at scan and at watch and dead-letters a single mismatched
+value (keyed `(mirror, key)`), leaving its shadow row absent while the rest of
+the prefix projects. Neither verdict ever touches readiness — content is never a
+readiness input. `Mirror::require_key::<C>(key)` names one key under `C::PREFIX`
+as **configuration**: the mirror is not ready (`REASON_REQUIRED_KEYS`, `/readyz`
+naming the key) until that key is present in the shadow, but nothing is
+dead-lettered and no restart budget burns; the mirror stays converged and keeps
+projecting. The projection is leader-gated: only the pod holding the mirror lease projects,
 standby pods keep their shadows current and take over on lease loss. The mirror
 persists a per-bucket watermark — the consumed stream's creation identity and
 the last sequence `S` its read reached, committed with the projections in one
