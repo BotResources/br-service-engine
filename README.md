@@ -1,13 +1,12 @@
 # br-service-engine
 
-The reactive personalized delivery and process skeleton every
-[BotResources](https://botresources.ai) service runs on — sessions, cohorts,
-impacts, projection, diff, multi-pod fan-out, streaming sources, boot, relays,
-cron, and mirror supervision. Two crates share one workspace version: the
-`service-engine` library a service builds on, and `conformance-service-engine`,
-its black-box conformance battery run against real PostgreSQL and NATS
-JetStream. Not published on crates.io and shipped as no image and no CLI: the
-git tag is the release.
+The reactive personalized delivery and process skeleton a service built on it
+runs on — sessions, cohorts, impacts, projection, diff, multi-pod fan-out,
+streaming sources, boot, relays, cron, and mirror supervision. Two crates share
+one workspace version: the `service-engine` library a service builds on, and
+`conformance-service-engine`, its black-box conformance battery run against real
+PostgreSQL and NATS JetStream. Not published on crates.io and shipped as no
+image and no CLI: the git tag is the release.
 
 ## Install
 
@@ -186,8 +185,8 @@ engine runs the **post-save policy** registered for that aggregate, if any
 (`register_post_save_policy::<A>`). The policy is pure domain logic over a
 `Saved<'_, A>` — `next` is the aggregate the pipeline just saved, `prior` is the
 stored image the pipeline loaded (`None` on a create), and `events` are its
-pending events (principle 18). It reads the transition (`saved.transitioned(|a|
-…)` compares a projection of `prior` and `next`), can stage impacts, commands and
+pending events. It reads the transition (`saved.transitioned(|a| …)` compares a
+projection of `prior` and `next`), can stage impacts, commands and
 events, or `PostSave::refuse(reason)` the write — a refusal rolls the transaction
 back and answers the mutation with that `Reason` code (a refusing reaction is
 dead-lettered with it). It cannot save, so it cannot recurse. This is the engine's
@@ -1014,8 +1013,9 @@ GitOps and the NATS fabric.
 Postgres connection strings are read as full DSNs from a Secret
 (`DATABASE_URL`, `DATABASE_URL_OWNER`) — the chart never interpolates a password
 into a URL, so a role password carrying a URL-reserved character cannot corrupt
-the connection string (constitution principle 32). The in-namespace Postgres host
-is opted out of `br-util-postgres`'s remote-TLS requirement through
+the connection string; a role password with a URL-reserved character must never
+be interpolated into a DSN. The in-namespace Postgres host is opted out of
+`br-util-postgres`'s remote-TLS requirement through
 `TRUSTED_NETWORK_HOSTS` (`postgres.trustedNetworkHosts`), a deliberate per-host
 plaintext declaration behind the default-deny NetworkPolicy.
 
@@ -1027,10 +1027,10 @@ Values a thin chart supplies: `image.{repository,tag}`, `port`, `serviceKey`,
 selectors are values. The chart itself is published to
 `oci://ghcr.io/botresources/charts/br-engine-service` by `chart-release.yml` on
 the first `main` push that changes `Chart.yaml` `version`, tagged
-`chart/br-engine-service/v<version>`, independent of the crate's `v*` tag. The dp
-thin charts, the Warehouse subscriptions on the chart paths and the library OCI,
-and the `helm-update-chart` promotion steps live in dp, sequenced after this
-release.
+`chart/br-engine-service/v<version>`, independent of the crate's `v*` tag. The
+downstream thin charts, the Warehouse subscriptions on the chart paths and the
+library OCI, and the `helm-update-chart` promotion steps live in the deploying
+GitOps repository, sequenced after this release.
 
 ## Configuration, degradation and observability
 
@@ -1093,7 +1093,7 @@ exposes the raw signal to a service or a test; `graphql::lane_notice_stream` and
 the union's generated `subscribe(deltas, notices)` merge it into a subscription
 (the reference `replyDeltas` / `typingDeltas` do this).
 
-The `serve` entry point installs the observability the whole platform shares, so
+The `serve` entry point installs the observability every engine service shares, so
 a service `main` never re-adds it by hand (`with_edge_observability` is crate-private
 — `serve` is the one door). It reuses the `br-rust-common` crates the engine pins
 (`br-util-observability`, `br-util-postgres`): `init_logging` for a structured JSON

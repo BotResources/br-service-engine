@@ -148,11 +148,11 @@ the black-box battery greps — is the wording the engine now emits.
   /livez`, one `http` port bound to `PORT`; `HOSTNAME` from `metadata.name`),
   `.service`, `.serviceaccount`, `.pdb`, and `.networkpolicy` (ingress selectors
   are values; the chart names no namespace). Postgres DSNs are read whole from a
-  Secret (`DATABASE_URL`, `DATABASE_URL_OWNER`) — no password interpolation
-  (constitution principle 32) — and `TRUSTED_NETWORK_HOSTS` carries the per-host
-  plaintext opt-out. `charts/br-engine-service/ci/thin-example/` is the fixture
-  thin chart (one dependency on the library plus values) and the shape the dp thin
-  charts take.
+  Secret (`DATABASE_URL`, `DATABASE_URL_OWNER`) — no password interpolation, a
+  role password with a URL-reserved character must never be interpolated into a
+  DSN — and `TRUSTED_NETWORK_HOSTS` carries the per-host plaintext opt-out. `charts/br-engine-service/ci/thin-example/` is the fixture
+  thin chart (one dependency on the library plus values) and the shape a
+  downstream thin chart takes.
 - **Chart major = ops contract version, under its own name.** Chart major 1 is
   ops contract v1. A change to any contract row (an entry point, an env var name,
   a probe path, the roll strategy) is a chart **major** shipped under a **new
@@ -169,10 +169,10 @@ the black-box battery greps — is the wording the engine now emits.
   `Chart.yaml` `version`, independent of `release-tags.yml`. The README gains the
   "Ops contract v1" section.
 - **Engine crate: no change.** This lane ships no Rust; there is no semver break
-  and no adopter code migration. The dp follow-up (thin charts per engine service,
-  the Warehouse chart-path and library-OCI subscriptions, the `helm-update-chart`
+  and no adopter code migration. The GitOps follow-up (thin charts per engine
+  service, the Warehouse chart-path and library-OCI subscriptions, the `helm-update-chart`
   promotion steps, deletion of the hand-written templates) is a separate,
-  sequenced-after change; be- service crates ship no chart.
+  sequenced-after change; service crates ship no chart.
 
 ### lane: cohort
 
@@ -249,14 +249,13 @@ the black-box battery greps — is the wording the engine now emits.
 
 ## 0.2.0 - 2026-09-16
 
-This release answers `ws-cc-platform#126`. The `services`-rewrite experiment and
-the Runners adoption proved the engine composes across independently-authored
-slices but leaks at the seams: every serious defect was cross-slice wiring a
+The `services`-rewrite experiment and the Runners adoption proved the engine
+composes across independently-authored slices but leaks at the seams: every serious defect was cross-slice wiring a
 slice was meant to call and never did. 0.2 makes those seams **declarative** —
 a missing interlock is now a loud boot error, not silent nothing — closes the
 contained render/parse/observability bugs, reworks the mirror so that empty is a
 converged state, and proves the multi-pod fleet behaviour that was untested. The
-entry is organised by the issue's items; every public API change is listed with
+entry is organised by those items; every public API change is listed with
 its one-line fix under **Adopter migration** at the end.
 
 ### A1. `Emission::Coalesced` no longer drops the delta cause
@@ -472,14 +471,14 @@ funnels through, via the new `projector::Projector::open_access_reason` method
 (default `None`, overridden by `ViewProjector` to surface its view's
 `OPEN_ACCESS_REASON`) — so a `ViewProjector` handed to `register_projector`
 directly is checked exactly like one registered through `register_view`. Opting
-out of the cohort gate is now a deliberate, reviewable statement (per constitution
-principle 15, amended in workspace `d8bdc0b`).
+out of the cohort gate is now a deliberate, reviewable statement: the second
+visibility layer is the engine's Visibility declaration or RLS, never a
+hand-written filter.
 
 ### B. Declarative cross-slice seams
 
-The design change the issue calls "the part that decides whether this engine
-reduces bugs over time": make missing wiring a boot error rather than silent
-nothing.
+The design change that decides whether this engine reduces bugs over time: make
+missing wiring a boot error rather than silent nothing.
 
 - **Post-save policies (declared subjection).** `Engine::register_post_save_policy::<A>(f)`
   registers a policy the engine runs after every `save`/`create` of aggregate `A`,
@@ -498,7 +497,7 @@ nothing.
   registered one — the same registration gate the schema type check applies, so a
   missing interlock is a loud boot error, not a silent absent call.
 
-(The read-side declarative seams the issue groups with B — typed consumption,
+(The read-side declarative seams that belong with B — typed consumption,
 principal-facts cohorts, the `Unrestricted` reason, and the inferred window shape
 that removes the `Keys`-vs-`Query` choice — ship under H4, H5, H6 above.)
 
@@ -513,8 +512,8 @@ that removes the `Keys`-vs-`Query` choice — ship under H4, H5, H6 above.)
   `load`/`load_many` in it to hold different nouns in one transaction), and it
   makes two concurrent multi-aggregate writes deadlock-free. Absent keys are
   omitted, as for a batched read. This is the answer to the synchronous
-  cross-slice write the issue flagged — the Runners retirement-blocker case that
-  took a global advisory lock at six sites.
+  cross-slice write that adoption flagged — the Runners retirement-blocker case
+  that took a global advisory lock at six sites.
 - **Reason codes are `SCREAMING_SNAKE_CASE`.** `Reason::new` validates its argument
   against `^[A-Z][A-Z0-9_]+$` (a leading capital, then capitals, digits or
   underscores); a mistyped literal is a compile error at the `const` site, and a

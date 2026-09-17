@@ -1,7 +1,7 @@
 [package]
 name = "service-engine"
 version.workspace = true
-description = "Reactive personalized delivery and process skeleton for BotResources services"
+description = "Reactive personalized delivery and process skeleton for services built on br-service-engine"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
