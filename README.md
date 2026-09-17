@@ -493,8 +493,11 @@ names its `type Noun` and `type Store`, a typed `Query`, its `type Visibility`, 
 writes only a native `async fn populate(cx, q)` over a `Populate` context and
 `project(row, principal) -> Result<Out, EngineError>`. `project` is fallible: a
 stored row it cannot render (a nested blob that will not deserialize) returns
-`Err`, and the engine dead-letters that poison with the projector as source and
-repairs, then ends, the faulted sessions rather than panicking the pod.
+`Err`, and the engine dead-letters that poison with the projector as source at
+**every render entry point** — a normal pass, the attach snapshot, a page, and a
+repair re-snapshot all record the poison the moment `project` fails, deduped on
+projector plus key — and repairs, then ends, the faulted sessions rather than
+panicking the pod.
 No hand-written future plumbing and no render load SQL live in the view: the engine
 loads the noun's rows through the store's `Persistence::read_many` and owns the
 `Facts` type, the `LoadScope::{Bulk, PerPrincipal}` match and the derived

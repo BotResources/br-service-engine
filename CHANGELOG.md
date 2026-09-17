@@ -9,6 +9,32 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### lane: reset
 
+#### 2. Reset paths — the reported race was not reproduced
+
+The reported "lost delta" race — a queued delta not yet read, then a projector
+reset that hands back a stale view — was not reproduced on 0.2 (`s196` green on
+0.2). `render/deliver.rs` writes every rendered upsert/remove into `last_sent`
+before discarding it under a reset, so a reset always carries the latest rendered
+view; the projector-reset path re-renders the dirtied members from the store, so
+the `Reset` carries the committed view, never the stale one the unread delta
+held. The three reset paths (`deliver.rs` incremental, `repair.rs::resnapshot`,
+`connect.rs` attach) were **left as is** — collapsing them onto `resnapshot` was
+not rated worth the churn on the delivery hot path this release. Every reset
+still costs a full window render — watch `service_engine_resets_total`. No API
+change; the write-set check this item once carried is dropped in favour of the
+change-detecting mirror kit (see `N3.`, lane: mirror).
+
+#### 12. Dead-letter at the render choke point
+
+A projection failure is now dead-lettered at **every render entry point**, not
+only during a normal render pass. The `Renderer` records the poison document
+(`DeadLetterSource::Render`, keyed on projector plus key, deduped) the moment
+`project` fails, so the attach snapshot (`runtime/connect.rs`), the page render
+(`runtime/paging.rs`) and the repair re-snapshot (`render/repair.rs`) all land
+the ops row that only the pass path recorded before — those three built a
+dead-letter-less renderer. `render/pass.rs::dead_letter_projection` is gone; the
+choke point is the `Renderer` itself. No API change.
+
 ### lane: write
 
 ### lane: boot
