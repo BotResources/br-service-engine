@@ -8,6 +8,7 @@ use super::aggregate::{CardEvent, CardState, Status};
 
 pub const EVENT_VERSION: i32 = 1;
 
+#[derive(Clone)]
 pub struct CardAggregate(pub CardState);
 
 fn row_to_card(row: &sqlx::postgres::PgRow) -> CardState {

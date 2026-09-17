@@ -295,6 +295,18 @@ pub enum EngineError {
     PolicyRefused { code: &'static str },
 
     #[error(
+        "create refused: an aggregate already exists under key {key} in store {store}; \
+         a creator-generated id is used once and the engine never overwrites through create"
+    )]
+    KeyReused { store: &'static str, key: String },
+
+    #[error(
+        "store {store} does not implement Persistence::delete, so the engine cannot hard-delete \
+         one of its aggregates through cx.delete"
+    )]
+    DeleteUnsupported { store: &'static str },
+
+    #[error(
         "a slice declared aggregate `{aggregate}` subject to a post-save policy, but no slice \
          registered one; the seam is unhonoured, so the write path it must guard would run \
          unguarded"

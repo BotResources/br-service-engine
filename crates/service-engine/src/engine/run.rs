@@ -8,7 +8,7 @@ use crate::engine::loops::{join_presence, run_scheduled_messages};
 use crate::error::EngineError;
 use crate::housekeeping::ready::REASON_WORKER_STOPPED;
 use crate::inbound::InboundLoop;
-use crate::pipeline::DirectPipeline;
+use crate::pipeline::{DirectPipeline, Policies};
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
 use crate::transport::ImpactTransport;
@@ -25,10 +25,8 @@ impl<P: Principal> Engine<P> {
         if let Some(sdl) = &self.schema_sdl {
             slices.verify(sdl)?;
         }
-        // Every declared subjection must be honoured by a registered policy, or
-        // boot fails loudly here — the same registration gate the schema type
-        // check applies, so a missing cross-slice guard cannot ship silent.
-        self.post_save_seams.verify(&self.post_save)?;
+        self.policy_seams
+            .verify(&self.post_save, &self.post_delete)?;
         let render = self.render_runtime();
         let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =
             if self.erasables.is_empty() {
@@ -48,6 +46,7 @@ impl<P: Principal> Engine<P> {
             inbound_reactions,
             offers,
             post_save,
+            post_delete,
             presence,
             blobs,
             shutdown,
@@ -56,7 +55,10 @@ impl<P: Principal> Engine<P> {
             ..
         } = self;
         let offers = Arc::new(offers);
-        let post_save = Arc::new(post_save);
+        let policies = Arc::new(Policies {
+            save: post_save,
+            delete: post_delete,
+        });
         let readiness_guard = readiness.clone();
         let (mut beat, dead_letters, inbound_health) = crate::engine::wiring::wire_beat(
             beat,
@@ -181,7 +183,7 @@ impl<P: Principal> Engine<P> {
                 transport.clone() as Arc<dyn ImpactTransport>,
                 accumulators.clone(),
                 offers.clone(),
-                post_save.clone(),
+                policies.clone(),
                 reactions.clone(),
                 blob_handle.clone(),
                 config.lock_timeout,

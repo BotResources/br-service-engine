@@ -13,7 +13,7 @@ use crate::offers::OfferStagers;
 use crate::pipeline::MutationError;
 use crate::pipeline::context::{Bulk, Mutation};
 use crate::pipeline::effect::{MutationServices, run_bulk, run_mutation};
-use crate::pipeline::policy::PostSavePolicies;
+use crate::pipeline::policy::Policies;
 use crate::presence::PresenceHandle;
 use crate::principal::Principal;
 use crate::transport::ImpactTransport;
@@ -111,7 +111,7 @@ impl<P: Principal> MutationRegistry<P> {
         transport: Arc<dyn ImpactTransport>,
         accumulators: Arc<AccumulatorRuntime>,
         offers: Arc<OfferStagers>,
-        policies: Arc<PostSavePolicies>,
+        policies: Arc<Policies>,
         presence: PresenceHandle<P>,
         blobs: Option<BlobHandle>,
         lock_timeout: Duration,
