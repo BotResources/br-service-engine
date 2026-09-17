@@ -1,0 +1,84 @@
+name: chart-release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/br-engine-service/Chart.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: chart-release
+  cancel-in-progress: false
+
+env:
+  CHART_DIR: charts/br-engine-service
+  OCI_REPO: oci://ghcr.io/botresources/charts
+
+jobs:
+  release:
+    name: Package and push the br-engine-service library chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve the chart version and whether it changed
+        id: ver
+        run: |
+          set -euo pipefail
+          chart_yaml="${CHART_DIR}/Chart.yaml"
+          current=$(grep -m1 '^version:' "$chart_yaml" | sed -E 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+          if [ -z "$current" ]; then
+            echo "::error file=${chart_yaml}::could not extract the chart version"
+            exit 1
+          fi
+          before="${{ github.event.before }}"
+          previous=""
+          if [ -n "$before" ] && git cat-file -e "${before}:${chart_yaml}" 2>/dev/null; then
+            previous=$(git show "${before}:${chart_yaml}" | grep -m1 '^version:' | sed -E 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+          fi
+          echo "version=${current}" >> "$GITHUB_OUTPUT"
+          if [ "$current" = "$previous" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "→ chart version unchanged (${current}); nothing to release"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "→ chart version ${previous:-none} -> ${current}"
+          fi
+
+      - name: helm registry login
+        if: steps.ver.outputs.changed == 'true'
+        run: helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+
+      - name: helm package and push
+        if: steps.ver.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          out=$(mktemp -d)
+          helm package "$CHART_DIR" --destination "$out"
+          helm push "${out}/br-engine-service-${version}.tgz" "$OCI_REPO"
+
+      - name: Tag the chart release
+        if: steps.ver.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          tag="chart/br-engine-service/v${version}"
+          if git rev-parse --verify "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "✓ tag ${tag} already exists"
+          else
+            git tag -a "${tag}" -m "br-engine-service chart ${version}"
+            git push origin "${tag}"
+          fi
