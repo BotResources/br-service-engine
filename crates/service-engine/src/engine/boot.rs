@@ -134,14 +134,13 @@ where
     engine.run_with(app).await
 }
 
-/// Run the engine and service migration sets under the owner role, then grant the app
-/// role access to both the engine schema and the public schema, before dropping the
-/// owner pool. Idempotent: safe to re-run on every boot and across concurrent pods
-/// (sqlx serializes the migration run under a Postgres advisory lock).
 async fn prepare_database(service_migrator: Migrator, app_role: &str) -> Result<(), EngineError> {
     let owner = init_migration_pool().await.map_err(pg_error)?;
     crate::schema::migrate(&owner).await?;
     service_migrator.run(&owner).await?;
+    let mut conn = owner.acquire().await.map_err(EngineError::Db)?;
+    crate::relays::outbox::adopt_legacy_outbox(&mut conn).await?;
+    drop(conn);
     crate::schema::grant_engine_access(&owner, app_role).await?;
     grant_app_access(&owner, app_role).await.map_err(pg_error)?;
     owner.close().await;

@@ -7,7 +7,7 @@ use br_core_integration::{OutboxStatus, Transition};
 
 use crate::schema::TABLE_MESSAGE_CLAIM;
 
-pub const OUTBOX_TABLE: &str = "integration_outbox";
+pub const OUTBOX_TABLE: &str = crate::schema::TABLE_INTEGRATION_OUTBOX;
 pub const OUTBOX_NOTIFY_CHANNEL: &str = "integration_outbox";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,14 +37,14 @@ impl OutboxStore {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        let row: Option<OutboxRow> = sqlx::query_as(
+        let row: Option<OutboxRow> = sqlx::query_as(&format!(
             "SELECT id, subject, payload, attempts, producer, seq_key, seq \
-             FROM integration_outbox \
+             FROM {OUTBOX_TABLE} \
              WHERE status = 'PENDING' AND id > $1 \
              ORDER BY id \
              LIMIT 1 \
-             FOR UPDATE SKIP LOCKED",
-        )
+             FOR UPDATE SKIP LOCKED"
+        ))
         .bind(after)
         .fetch_optional(executor)
         .await?;
@@ -67,7 +67,7 @@ impl OutboxStore {
             "published_at = published_at"
         };
         let sql = format!(
-            "UPDATE integration_outbox \
+            "UPDATE {OUTBOX_TABLE} \
              SET status = $2, attempts = $3, last_error = $4, {published_at_clause} \
              WHERE id = $1"
         );
@@ -85,12 +85,12 @@ impl OutboxStore {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        let row: (i64, Option<f64>) = sqlx::query_as(
+        let row: (i64, Option<f64>) = sqlx::query_as(&format!(
             "SELECT count(*), \
                     extract(epoch FROM now() - min(created_at)) \
-             FROM integration_outbox \
-             WHERE status = 'PENDING'",
-        )
+             FROM {OUTBOX_TABLE} \
+             WHERE status = 'PENDING'"
+        ))
         .fetch_one(executor)
         .await?;
         Ok(row)
@@ -104,12 +104,12 @@ impl OutboxStore {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        let done = sqlx::query(
-            "DELETE FROM integration_outbox \
+        let done = sqlx::query(&format!(
+            "DELETE FROM {OUTBOX_TABLE} \
              WHERE status = 'PUBLISHED' \
                AND published_at IS NOT NULL \
-               AND published_at < now() - make_interval(secs => $1)",
-        )
+               AND published_at < now() - make_interval(secs => $1)"
+        ))
         .bind(older_than.as_secs_f64())
         .execute(executor)
         .await?;
@@ -124,11 +124,11 @@ impl OutboxStore {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        let done = sqlx::query(
-            "DELETE FROM integration_outbox \
+        let done = sqlx::query(&format!(
+            "DELETE FROM {OUTBOX_TABLE} \
              WHERE status = 'FAILED' \
-               AND created_at < now() - make_interval(secs => $1)",
-        )
+               AND created_at < now() - make_interval(secs => $1)"
+        ))
         .bind(older_than.as_secs_f64())
         .execute(executor)
         .await?;
