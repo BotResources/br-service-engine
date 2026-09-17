@@ -13,7 +13,7 @@ mod subscription;
 mod union;
 mod ws;
 
-pub use error::{CODE_EXTENSION, mutation_error};
+pub use error::{CODE_EXTENSION, FORBIDDEN_CODE, coded_error, forbidden, mutation_error};
 pub use mutation::{MutationAck, ack, ack_bulk, execute, execute_bulk};
 pub use paging::{attach_with_session, page};
 pub use principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, PrincipalRejected};

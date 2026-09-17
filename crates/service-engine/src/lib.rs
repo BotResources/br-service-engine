@@ -171,3 +171,5 @@ pub use visibility::{
     check_window_matches_visibility,
 };
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};
+
+pub use graphql::{FORBIDDEN_CODE, coded_error, forbidden};
