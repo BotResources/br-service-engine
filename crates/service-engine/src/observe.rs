@@ -8,12 +8,12 @@ use crate::housekeeping::beat::BeatRound;
 use crate::metrics::{
     BLOBS_REAPED_TOTAL, CHUNK_CONFLICTS_TOTAL, CHUNK_FLUSH_DURATION_SECONDS, CHUNK_FLUSH_SIZE,
     COHORTS, CRON_DURATION_SECONDS, CRON_RUNS_TOTAL, DEAD_LETTERS_TOTAL, DEPENDENCY_UP,
-    IMPACTS_COMMITTED_TOTAL, IMPACTS_RECEIVED_TOTAL, LABEL_DEPENDENCY, LABEL_JOB, LABEL_MIRROR,
-    LABEL_OUTCOME, LABEL_POD, LABEL_REASON, LABEL_SERVICE, LABEL_SOURCE, LEADER_SLOT_CLAIMS_TOTAL,
-    MIRROR_RESTARTS_TOTAL, NOTIFICATION_QUEUE_USAGE, OUTBOX_OLDEST_AGE_SECONDS, OUTBOX_PENDING,
-    PASS_DELTAS, PASS_DURATION_SECONDS, PASS_IMPACTS, PASS_OVERFLOWS_TOTAL, PENDING_SESSIONS,
-    RELAY_DRAINS_TOTAL, RELAY_ROWS_TOTAL, RESETS_TOTAL, SESSIONS, SESSIONS_ENDED_TOTAL,
-    TRANSPORT_RECONNECTS_TOTAL,
+    IMPACTS_COMMITTED_TOTAL, IMPACTS_RECEIVED_TOTAL, LABEL_DEPENDENCY, LABEL_JOB, LABEL_KIND,
+    LABEL_MIRROR, LABEL_NAME, LABEL_OUTCOME, LABEL_POD, LABEL_REASON, LABEL_SERVICE, LABEL_SOURCE,
+    LEADER, LEADER_SLOT_CLAIMS_TOTAL, MIRROR_RESTARTS_TOTAL, NOTIFICATION_QUEUE_USAGE,
+    OUTBOX_OLDEST_AGE_SECONDS, OUTBOX_PENDING, PASS_DELTAS, PASS_DURATION_SECONDS, PASS_IMPACTS,
+    PASS_OVERFLOWS_TOTAL, PENDING_SESSIONS, RELAY_DRAINS_TOTAL, RELAY_ROWS_TOTAL, RESETS_TOTAL,
+    SESSIONS, SESSIONS_ENDED_TOTAL, TRANSPORT_RECONNECTS_TOTAL,
 };
 use crate::name::{JobName, MirrorName};
 use crate::render::pass::PassReport;
@@ -28,6 +28,9 @@ pub const DEP_LISTENER: &str = "listener";
 pub const DEP_NATS: &str = "nats";
 pub const DEP_MIRRORS: &str = "mirrors";
 pub const DEP_INBOUND: &str = "inbound";
+
+pub const LEADER_OFFER: &str = "offer";
+pub const LEADER_MIRROR: &str = "mirror";
 
 static IDENTITY: OnceLock<Vec<Label>> = OnceLock::new();
 
@@ -114,6 +117,17 @@ pub fn record_dead_letter(source: &'static str) {
         labelled([(LABEL_SOURCE, source.to_string())])
     )
     .increment(1);
+}
+
+pub fn record_leader(kind: &'static str, name: &str, holder: bool) {
+    metrics::gauge!(
+        LEADER,
+        labelled([
+            (LABEL_KIND, kind.to_string()),
+            (LABEL_NAME, name.to_string()),
+        ])
+    )
+    .set(if holder { 1.0 } else { 0.0 });
 }
 
 pub fn record_dependency(dependency: &'static str, up: bool) {
