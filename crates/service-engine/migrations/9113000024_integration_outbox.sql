@@ -1,4 +1,4 @@
-CREATE TABLE integration_outbox (
+CREATE TABLE service_engine.integration_outbox (
     id           uuid        PRIMARY KEY,
     subject      text        NOT NULL,
     payload      jsonb       NOT NULL,
@@ -12,4 +12,4 @@ CREATE TABLE integration_outbox (
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX integration_outbox_pending_idx ON integration_outbox (status, id);
+CREATE INDEX integration_outbox_pending_idx ON service_engine.integration_outbox (status, id);

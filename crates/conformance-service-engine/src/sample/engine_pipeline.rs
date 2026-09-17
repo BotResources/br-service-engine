@@ -15,11 +15,14 @@ use crate::sample::offer::{MintThenReject, WidgetOffer, mint_then_reject};
 use crate::sample::pipeline::{
     CloseWidget, CreateWidget, DeleteWidget, DetonateWidget, ImportWidgets, LockWidget, MintSecret,
     RelabelBoth, RelabelWidget, ScheduleCreate, close_widget, create_widget, delete_widget,
-    detonate_widget, import_widgets, lock_widget, mint_secret, refuse_breach_label, relabel_both,
-    relabel_widget, schedule_create,
+    detonate_widget, import_widgets, lock_widget, mint_secret, refuse_breach_label,
+    refuse_pinned_delete, refuse_unchanged_label, relabel_both, relabel_widget, schedule_create,
 };
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
 use crate::sample::widget::{WidgetProjector, WidgetRow};
+use crate::sample::widget_tag::{
+    DeleteWidgetTag, SetWidgetTag, WidgetTag, delete_widget_tag, set_widget_tag,
+};
 
 pub async fn boot_blob_engine(
     db: &TestDb,
@@ -210,8 +213,6 @@ pub async fn boot_offer_engine_leased(
     engine
 }
 
-/// A pipeline engine that declares the widget subject to a post-save policy and
-/// registers one, plus the `relabel_both` (`load_many`) mutation.
 pub async fn boot_policy_engine(
     db: &TestDb,
     nats: Nats,
@@ -250,8 +251,6 @@ pub async fn boot_policy_engine(
     engine
 }
 
-/// A pipeline engine that declares the widget subject to a post-save policy but
-/// registers none, so `run` must fail the seam-completeness check at boot.
 pub async fn boot_unhonoured_seam_engine(
     db: &TestDb,
     nats: Nats,
@@ -275,5 +274,116 @@ pub async fn boot_unhonoured_seam_engine(
     engine
         .require_post_save_policy::<WidgetRow>()
         .expect("declare the subjection but deliberately never honour it");
+    engine
+}
+
+pub async fn boot_transition_policy_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the transition-policy engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(WidgetProjector)
+        .expect("register the widget projector, which auto-binds the widget noun");
+    engine
+        .require_post_save_policy::<WidgetRow>()
+        .expect("declare the widget subject to a post-save policy");
+    engine
+        .register_post_save_policy::<WidgetRow, _>(refuse_unchanged_label)
+        .expect("honour the subjection with the unchanged-label policy");
+    engine
+        .register_mutation::<MintSecret, _>(mint_secret)
+        .expect("register the mint mutation");
+    engine
+        .register_mutation::<RelabelWidget, _>(relabel_widget)
+        .expect("register the relabel mutation");
+    engine
+}
+
+pub async fn boot_delete_policy_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod).with_lock_timeout(Duration::from_millis(300)),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the delete-policy engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(WidgetProjector)
+        .expect("register the widget projector, which auto-binds the widget noun");
+    engine
+        .require_post_delete_policy::<WidgetRow>()
+        .expect("declare the widget subject to a post-delete policy");
+    engine
+        .register_post_delete_policy::<WidgetRow, _>(refuse_pinned_delete)
+        .expect("honour the subjection with the pinned-delete policy");
+    engine
+        .register_mutation::<MintSecret, _>(mint_secret)
+        .expect("register the mint mutation");
+    engine
+        .register_mutation::<DeleteWidget, _>(delete_widget)
+        .expect("register the delete mutation");
+    engine
+}
+
+pub async fn boot_offer_trigger_engine(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    reconcile: Duration,
+) -> Engine<SamplePrincipal> {
+    let mut engine = Engine::boot(
+        engine_config(channel, pod)
+            .with_lock_timeout(Duration::from_millis(300))
+            .with_offer_reconcile(reconcile),
+        db.app_pool().clone(),
+        nats,
+        ReadinessHandle::ready(),
+    )
+    .await
+    .expect("the offer-trigger engine boots under the low-privilege app role");
+    engine
+        .register_principal_resolver(SamplePrincipalResolver)
+        .expect("register the principal resolver");
+    engine
+        .register_projector(WidgetProjector)
+        .expect("register the widget projector, which auto-binds the widget noun");
+    engine
+        .register_mutation::<MintSecret, _>(mint_secret)
+        .expect("register the mint mutation");
+    engine
+        .register_mutation::<SetWidgetTag, _>(set_widget_tag)
+        .expect("register the set-tag mutation");
+    engine
+        .register_mutation::<DeleteWidgetTag, _>(delete_widget_tag)
+        .expect("register the delete-tag mutation");
+    engine
+        .register_offer::<WidgetOffer>()
+        .expect("register the widget offer");
+    engine
+        .register_offer_trigger::<WidgetOffer, WidgetTag>()
+        .expect("register the widget-tag trigger for the widget offer");
     engine
 }

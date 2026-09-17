@@ -3,22 +3,45 @@ use serde::Deserialize;
 use service_engine::error::EngineError;
 use service_engine::gate::Reason;
 use service_engine::pipeline::{
-    Bulk, Mutation, MutationFault, MutationInput, OneShot, PostSave, Refused,
+    Bulk, Mutation, MutationFault, MutationInput, OneShot, PostSave, Refused, Saved,
 };
 use uuid::Uuid;
 
 use crate::sample::principal::SamplePrincipal;
 use crate::sample::widget::{Widget, WidgetProjector, WidgetRow};
 
-/// A post-save policy reason: a widget whose label starts with `BREACH` is
-/// refused. It stands in for the Services breach interlock — a pure check over
-/// the aggregate the pipeline just saved, enforced by the engine after every
-/// save with no per-handler call site.
 pub const BREACH_LABEL: Reason = Reason::new("BREACH_LABEL");
+pub const UNCHANGED_LABEL: Reason = Reason::new("UNCHANGED_LABEL");
+pub const PINNED_DELETE: Reason = Reason::new("PINNED_DELETE");
 
-pub fn refuse_breach_label(widget: &WidgetRow, ps: &mut PostSave<'_, '_>) -> Result<(), Refused> {
-    if widget.label.starts_with("BREACH") {
+pub fn refuse_breach_label(
+    saved: Saved<'_, WidgetRow>,
+    ps: &mut PostSave<'_, '_>,
+) -> Result<(), Refused> {
+    if saved.next.label.starts_with("BREACH") {
         Err(ps.refuse(BREACH_LABEL))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn refuse_unchanged_label(
+    saved: Saved<'_, WidgetRow>,
+    ps: &mut PostSave<'_, '_>,
+) -> Result<(), Refused> {
+    if saved.transitioned(|widget| widget.label.clone()) {
+        Ok(())
+    } else {
+        Err(ps.refuse(UNCHANGED_LABEL))
+    }
+}
+
+pub fn refuse_pinned_delete(
+    saved: Saved<'_, WidgetRow>,
+    ps: &mut PostSave<'_, '_>,
+) -> Result<(), Refused> {
+    if saved.next.label.starts_with("PINNED") {
+        Err(ps.refuse(PINNED_DELETE))
     } else {
         Ok(())
     }
@@ -175,12 +198,7 @@ pub fn delete_widget<'m>(
             .load::<WidgetRow>(&input.id)
             .await?
             .ok_or(SampleFault::NotFound)?;
-        sqlx::query("DELETE FROM sample_widget WHERE id = $1")
-            .bind(widget.id)
-            .execute(cx.connection())
-            .await
-            .map_err(|error| SampleFault::Store(error.to_string()))?;
-        cx.delete(&widget)?;
+        cx.delete(&widget).await?;
         cx.impact_caused::<Widget, _>(&widget.id, "deleted")?;
         Ok(())
     })
@@ -261,9 +279,6 @@ impl MutationInput for RelabelBoth {
     const NAME: &'static str = "relabel_both";
 }
 
-/// Relabel two widgets in one transaction through a single `load_many`: both
-/// are locked in the engine's deterministic order, mutated, and saved together,
-/// so no global advisory lock is needed and the write is atomic.
 pub fn relabel_both<'m>(
     cx: &'m mut Mutation<'m, SamplePrincipal>,
     input: RelabelBoth,

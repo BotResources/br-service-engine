@@ -37,6 +37,26 @@ pub trait Persistence: Send + Sync + 'static {
         Box::pin(async { Ok(()) })
     }
 
+    fn row_lock<'a>(
+        conn: &'a mut PgConnection,
+        table: &'static str,
+        key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<(), EngineError>>
+    where
+        Self::Key: sqlx::Type<sqlx::Postgres>,
+        for<'q> &'q Self::Key: sqlx::Encode<'q, sqlx::Postgres>,
+    {
+        Box::pin(async move {
+            let sql = format!("SELECT 1 FROM {table} WHERE id = $1 FOR UPDATE");
+            sqlx::query(&sql)
+                .bind(key)
+                .execute(conn)
+                .await
+                .map_err(EngineError::Db)?;
+            Ok(())
+        })
+    }
+
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Self::Key],
@@ -63,27 +83,19 @@ pub trait Persistence: Send + Sync + 'static {
         aggregate: &'a Self::Aggregate,
         events: &'a [Self::Event],
     ) -> BoxFuture<'a, Result<(), EngineError>>;
+
+    fn delete<'a>(
+        _conn: &'a mut PgConnection,
+        _key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async {
+            Err(EngineError::DeleteUnsupported {
+                store: std::any::type_name::<Self>(),
+            })
+        })
+    }
 }
 
-/// A store that can list the keys of the rows in a set of cohorts with **one
-/// indexed query**, so a cohort view's `populate` reads only the caller's rows
-/// instead of scanning the table and filtering in memory.
-///
-/// # The cohort-column rule
-///
-/// **A cohort key MUST be a stored column on the row** — `project_id`,
-/// `org_id`, `is_public`, or a `(row, cohort_key)` index row written when the
-/// row is saved. A cohort that would need a per-row lookup (a join, a call into
-/// another store) to decide membership is **not** a cohort: it cannot be a
-/// `WHERE … = ANY($cohorts)` predicate, and `keys_in_cohorts` would degrade to
-/// the table scan this seam exists to avoid.
-///
-/// The `cohorts` are the caller's memberships
-/// ([`crate::visibility::Visibility::memberships`]); a row is returned when at
-/// least one of its own cohorts ([`crate::visibility::Visibility::cohorts`]) is
-/// among them. Bind the keys with [`CohortKey::as_bytes`] against the column
-/// (or index) that holds each row's cohort keys. An empty `cohorts` slice
-/// returns no keys.
 pub trait CohortIndex: Persistence {
     fn keys_in_cohorts<'a>(
         conn: &'a mut PgConnection,
@@ -91,7 +103,7 @@ pub trait CohortIndex: Persistence {
     ) -> BoxFuture<'a, Result<Vec<Self::Key>, EngineError>>;
 }
 
-pub trait Aggregate: Send + Sync + Sized + 'static {
+pub trait Aggregate: Clone + Send + Sync + Sized + 'static {
     type Store: Persistence<Aggregate = Self>;
 
     fn key(&self) -> <Self::Store as Persistence>::Key;

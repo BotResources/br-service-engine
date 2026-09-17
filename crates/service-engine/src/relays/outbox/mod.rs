@@ -1,8 +1,10 @@
+mod adopt;
 mod hosted;
 mod report;
 mod stage;
 mod store;
 
+pub use adopt::adopt_legacy_outbox;
 pub use hosted::{DEFAULT_SWEEP_INTERVAL, HostedOutboxRelay};
 pub use report::{
     DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_MESSAGES, FailureClass, RelayPass, RelayPolicy,

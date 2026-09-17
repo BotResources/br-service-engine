@@ -77,9 +77,6 @@ impl<P: Principal> Engine<P> {
         &mut self,
         view: V,
     ) -> Result<(), EngineError> {
-        // The empty-reason guard lives in `register_projector` (the common
-        // sink), so it fires whether a view arrives here or through a
-        // hand-built `ViewProjector` passed to `register_projector` directly.
         self.register_projector(crate::view::ViewProjector::new(view))
     }
 
@@ -162,17 +159,13 @@ impl<P: Principal> Engine<P> {
             .subscriptions()
     }
 
-    /// Register the post-save policy for aggregate `A`: the engine runs it after
-    /// every `save`/`create` of `A`, inside the transaction, before the commit.
-    /// The policy observes the saved aggregate and either refuses the write
-    /// through [`crate::pipeline::PostSave::refuse`] or stages impacts, commands
-    /// and events. This honours a subjection a slice declared with
-    /// [`Engine::require_post_save_policy`]; there is no per-handler call site to
-    /// add, so none to forget.
     pub fn register_post_save_policy<A, F>(&mut self, policy: F) -> Result<(), EngineError>
     where
         A: crate::persistence::Aggregate,
-        F: Fn(&A, &mut crate::pipeline::PostSave<'_, '_>) -> Result<(), crate::pipeline::Refused>
+        F: Fn(
+                crate::pipeline::Saved<'_, A>,
+                &mut crate::pipeline::PostSave<'_, '_>,
+            ) -> Result<(), crate::pipeline::Refused>
             + Send
             + Sync
             + 'static,
@@ -180,16 +173,33 @@ impl<P: Principal> Engine<P> {
         self.post_save.register::<A, F>(policy)
     }
 
-    /// Declare that aggregate `A` is subject to a post-save policy. Boot fails
-    /// with [`EngineError::UnhonouredSeam`] unless some slice registered one with
-    /// [`Engine::register_post_save_policy`]. A slice that owns an aggregate a
-    /// later slice must guard uses this to make the missing guard a boot error
-    /// rather than a silent gap.
     pub fn require_post_save_policy<A>(&mut self) -> Result<(), EngineError>
     where
         A: crate::persistence::Aggregate,
     {
-        self.post_save_seams.require::<A>();
+        self.policy_seams.require_save::<A>();
+        Ok(())
+    }
+
+    pub fn register_post_delete_policy<A, F>(&mut self, policy: F) -> Result<(), EngineError>
+    where
+        A: crate::persistence::Aggregate,
+        F: Fn(
+                crate::pipeline::Saved<'_, A>,
+                &mut crate::pipeline::PostSave<'_, '_>,
+            ) -> Result<(), crate::pipeline::Refused>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.post_delete.register::<A, F>(policy)
+    }
+
+    pub fn require_post_delete_policy<A>(&mut self) -> Result<(), EngineError>
+    where
+        A: crate::persistence::Aggregate,
+    {
+        self.policy_seams.require_delete::<A>();
         Ok(())
     }
 
@@ -204,6 +214,14 @@ impl<P: Principal> Engine<P> {
         self.beat.relays().register_erased(Arc::new(relay))?;
         self.offers.register::<O>();
         Ok(())
+    }
+
+    pub fn register_offer_trigger<O, T>(&mut self) -> Result<(), EngineError>
+    where
+        O: crate::offer::Offer,
+        T: crate::offer::OfferTrigger<O>,
+    {
+        self.offers.register_trigger::<O, T>()
     }
 
     pub fn register_presence<Pr: Presence>(

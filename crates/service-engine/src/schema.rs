@@ -26,6 +26,7 @@ pub const TABLE_SCHEMA_VERSION: &str = "service_engine.schema_version";
 pub const TABLE_EVENT_LOG: &str = "service_engine.event_log";
 pub const TABLE_EVENT_SNAPSHOT: &str = "service_engine.event_snapshot";
 pub const TABLE_MIRROR_WATERMARK: &str = "service_engine.mirror_watermark";
+pub const TABLE_INTEGRATION_OUTBOX: &str = "service_engine.integration_outbox";
 
 pub const TABLES: &[&str] = &[
     TABLE_SCHEDULED_IMPACT,
@@ -44,6 +45,7 @@ pub const TABLES: &[&str] = &[
     TABLE_EVENT_LOG,
     TABLE_EVENT_SNAPSHOT,
     TABLE_MIRROR_WATERMARK,
+    TABLE_INTEGRATION_OUTBOX,
 ];
 
 const MAX_ROLE_NAME_LEN: usize = 63;
@@ -120,7 +122,7 @@ mod tests {
 
     #[test]
     fn every_engine_table_lives_in_the_engines_own_schema() {
-        assert_eq!(TABLES.len(), 16);
+        assert_eq!(TABLES.len(), 17);
         for table in TABLES {
             assert!(table.starts_with(&format!("{SCHEMA}.")));
         }
