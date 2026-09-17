@@ -10,7 +10,7 @@ use crate::dyn_compat::ErasedFacts;
 use crate::error::EngineError;
 use crate::impact::{ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};
-use crate::population::{Interest, Inverse, Population};
+use crate::population::{Interest, Inverse, InverseLookup, Population};
 use crate::principal::Principal;
 use crate::projector::{Emission, LoadScope, Projector};
 use crate::session::WindowParams;
@@ -65,11 +65,32 @@ pub enum ErasedPopulation {
     Query(ErasedWindowQuery),
 }
 
-#[derive(Debug, Clone)]
+pub type ErasedLookup = Arc<
+    dyn for<'a> Fn(
+            &'a mut PgConnection,
+            &'a ForeignKey,
+        ) -> BoxFuture<'a, Result<BTreeSet<KeyBytes>, EngineError>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Clone)]
 pub enum ErasedInverse {
     Keys(BTreeSet<KeyBytes>),
     Query(ErasedWindowQuery),
+    Lookup(ErasedLookup),
     None,
+}
+
+impl std::fmt::Debug for ErasedInverse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErasedInverse::Keys(keys) => f.debug_tuple("Keys").field(keys).finish(),
+            ErasedInverse::Query(query) => f.debug_tuple("Query").field(query).finish(),
+            ErasedInverse::Lookup(_) => f.debug_struct("Lookup").finish_non_exhaustive(),
+            ErasedInverse::None => f.write_str("None"),
+        }
+    }
 }
 
 pub enum ErasedLoadScope<'a, P: Principal> {
@@ -161,6 +182,18 @@ fn erase_keys<Pr: Projector>(
     keys.into_iter().map(|k| KeyBytes::encode(&k)).collect()
 }
 
+fn erase_lookup<Pr: Projector>(lookup: InverseLookup<Pr::Key>) -> ErasedLookup {
+    Arc::new(move |conn, foreign| {
+        let lookup = lookup.clone();
+        Box::pin(async move {
+            let keys = lookup(conn, foreign).await?;
+            keys.iter()
+                .map(KeyBytes::encode)
+                .collect::<Result<BTreeSet<KeyBytes>, EngineError>>()
+        })
+    })
+}
+
 fn decode_keys<Pr: Projector>(keys: &[KeyBytes]) -> Result<Vec<Pr::Key>, EngineError> {
     keys.iter().map(|k| k.decode::<Pr::Key>()).collect()
 }
@@ -215,6 +248,7 @@ impl<Pr: Projector> ErasedProjector<Pr::Principal> for ProjectorAdapter<Pr> {
         match self.0.inverse(foreign) {
             Inverse::Keys(keys) => Ok(ErasedInverse::Keys(erase_keys::<Pr>(keys)?)),
             Inverse::Query(query) => Ok(ErasedInverse::Query(erase_query::<Pr>(query)?)),
+            Inverse::Lookup(lookup) => Ok(ErasedInverse::Lookup(erase_lookup::<Pr>(lookup))),
             Inverse::None => Ok(ErasedInverse::None),
         }
     }
@@ -278,9 +312,6 @@ impl<Pr: Projector> ErasedProjector<Pr::Principal> for ProjectorAdapter<Pr> {
                     projector: self.0.name(),
                 })?;
         let decoded = key.decode::<Pr::Key>()?;
-        // A projection failure names its projector and key so the render pass
-        // can dead-letter it as poison; a key that will not even decode is an
-        // engine fault, not a projection one, and keeps its own error above.
         match self.0.project(facts, &decoded, principal) {
             Ok(Some(view)) => Ok(Some(ViewBytes::encode(&view)?)),
             Ok(None) => Ok(None),

@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::blobs::BlobRef;
-use crate::cohort::CohortKey;
+use crate::cohort::Cohort;
 use crate::error::EngineError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,7 +99,7 @@ pub trait Persistence: Send + Sync + 'static {
 pub trait CohortIndex: Persistence {
     fn keys_in_cohorts<'a>(
         conn: &'a mut PgConnection,
-        cohorts: &'a [CohortKey],
+        cohorts: &'a [Cohort],
     ) -> BoxFuture<'a, Result<Vec<Self::Key>, EngineError>>;
 }
 

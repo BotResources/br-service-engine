@@ -86,7 +86,7 @@ pub(crate) async fn run_pass_focused<P: Principal>(
     }
 
     let refreshed = refresh_principals(ctx, table, impacts, &mut report).await?;
-    let inverses = route::resolve_inverses(impacts, ctx.registry);
+    let inverses = route::resolve_inverses(impacts, ctx.registry, ctx.pg).await;
     let mut work = route::route(
         impacts,
         ctx.registry,

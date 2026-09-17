@@ -84,7 +84,7 @@ pub use accumulator::{
 pub use blobs::{
     Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
 };
-pub use cohort::CohortKey;
+pub use cohort::{Cohort, CohortKey, CohortValue};
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use db::{connect_pool, validate_database_tls};
@@ -141,7 +141,7 @@ pub use pipeline::{
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
     Reaction, Refused,
 };
-pub use population::{Interest, Inverse, Population, WindowQuery};
+pub use population::{Interest, Inverse, InverseLookup, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope};

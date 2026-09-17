@@ -11,6 +11,7 @@ pub mod erase;
 pub mod gate;
 pub mod gated;
 pub mod graphql;
+pub mod linked;
 pub mod mirror;
 pub mod note;
 pub mod offer;
@@ -48,6 +49,7 @@ pub async fn migrate(pool: &PgPool) -> Result<(), MigrateError> {
 pub const TABLES: &[&str] = &[
     "sample_member",
     "sample_assignment",
+    "sample_assignment_link",
     "sample_note",
     "sample_relay_row",
     "sample_relay_claim",
@@ -125,6 +127,7 @@ pub use gated::{
     AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, VisibleAssignments,
     reasons,
 };
+pub use linked::{LINK_NAMESPACE, LinkedAssignments, link_assignment};
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use offer::{
     MintThenReject, PublishedWidget, WidgetOffer, mint_then_reject, offer_dirty_keys,

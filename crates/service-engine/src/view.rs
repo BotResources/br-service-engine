@@ -63,15 +63,11 @@ pub trait Projector: Send + Sync + 'static {
         query: &Self::Query,
     ) -> impl Future<Output = Result<Population<ViewKey<Self>>, EngineError>> + Send;
 
-    /// Render this row into its view for the principal.
-    ///
-    /// Return `Err` when the stored row cannot be projected — a nested blob that
-    /// will not deserialize, a value the view type cannot represent. The engine
-    /// treats that as a poison document: it dead-letters the failure with this
-    /// projector as the source and repairs, then ends, the faulted sessions,
-    /// rather than letting a panic take the pod down. A total projection that
-    /// never fails returns `Ok(view)`.
     fn project(row: &ViewRow<Self>, principal: &Self::Principal) -> Result<Self::Out, EngineError>;
+
+    fn inverse(_foreign: &ForeignKey) -> Inverse<ViewKey<Self>> {
+        Inverse::None
+    }
 
     fn visible(row: &ViewRow<Self>, principal: &Self::Principal) -> bool {
         <Self::Visibility as Visibility>::visible(row, principal)
@@ -86,21 +82,6 @@ pub trait Projector: Send + Sync + 'static {
     }
 }
 
-/// Turn a set of visible keys into the window `Population` **derived** from the
-/// view's declared visibility, so the `Keys`-vs-`Query` choice is a property of
-/// the declaration rather than a per-`populate` decision that can be got wrong.
-///
-/// - [`Visibility::LIVE`] `== true` (the default for a cohort view) yields a
-///   `Population::Query` seeded with `keys` and carrying an `Interest` on the
-///   view's `Noun` and [`Visibility::DEPS`]. That `Interest` is what makes a
-///   newly created in-cohort row reach an open session (it would never arrive
-///   as a `Keys`/`Fixed` window, since a fresh key is not yet a member) and
-///   what makes a membership change repopulate the window.
-/// - `LIVE == false` yields a `Population::Keys` (a closed `Fixed` snapshot),
-///   the explicit override for a view that is not a live surface.
-///
-/// A `populate` that returns a `Population` directly bypasses this inference
-/// entirely — the other override.
 pub fn windowed<V>(keys: BTreeSet<ViewKey<V>>) -> Population<ViewKey<V>>
 where
     V: Projector,
@@ -118,12 +99,6 @@ where
     }
 }
 
-/// Populate a cohort view by reading **only the caller's rows** through the
-/// store's [`CohortIndex`] seam — one indexed query on the cohort column,
-/// never a table scan filtered in memory — then derive the window shape with
-/// [`windowed`]. This is the read path that principal facts drive: the caller's
-/// [`Visibility::memberships`] (rebuilt from the principal's freshly loaded
-/// facts) become the cohorts the seam queries.
 pub async fn cohort_window<V>(
     cx: &Populate<'_, V::Principal>,
 ) -> Result<Population<ViewKey<V>>, EngineError>
@@ -221,8 +196,8 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
         })
     }
 
-    fn inverse(&self, _foreign: &ForeignKey) -> Inverse<ViewKey<V>> {
-        Inverse::None
+    fn inverse(&self, foreign: &ForeignKey) -> Inverse<ViewKey<V>> {
+        V::inverse(foreign)
     }
 
     fn load<'a>(

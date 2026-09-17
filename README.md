@@ -54,7 +54,7 @@ battery-backed.
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
-| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`/`inverse`. The low-level `projector::Projector` is the join escape hatch |
+| `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
 | `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, `with_edge_observability` (mounts `/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud); each slice's SDL fragment is emitted as a committed `schema.graphql` |
@@ -550,10 +550,15 @@ explicit override for a closed `Keys` snapshot; returning a `Population` from
 `populate` directly bypasses inference. A cohort view reads **only the caller's
 rows** through the store's `CohortIndex` seam
 (`keys_in_cohorts(conn, &memberships)`) — one indexed query on the cohort
-column, never a table scan filtered in memory. The rule the seam enforces: a
-**cohort key must be a stored column on the row** (an `org_id`, an `is_public`,
-or a `(row, cohort_key)` index row written on save); a cohort that would need a
-per-row lookup is not a cohort.
+columns, never a table scan filtered in memory. A cohort is a `(dimension,
+value)` the service names — `Cohort::uuid("manager", id)`, `Cohort::flag("public",
+true)`, `Cohort::text`, `Cohort::int`; the engine hashes it to a `CohortKey` for
+routing, and the store never stores the hash. `keys_in_cohorts` binds against the
+**natural columns** that hold each row's dimension values: `Cohort::uuids(cohorts,
+"manager")`, `Cohort::texts`, and `Cohort::holds(dimension, bool)` extract them so
+a store's binding is three lines (`WHERE manager_id = ANY($1) OR $2`). A shadow
+`bytea` column is a defect, not a technique; a cohort that would need a per-row
+lookup to decide membership is not a cohort.
 
 A projector that filters through Postgres RLS instead of cohorts, or one that is
 open to every viewer, declares `type Visibility = Unrestricted<Row, Principal,
@@ -903,7 +908,7 @@ and no black-box scenario exercises a blob.
   and `memberships` return the same cohorts for the same input on every call, and
   two cohorts the projector means to keep distinct must serialise to distinct
   bytes. The engine keys an RLS render group on the exact `PrincipalId` and a
-  declared cohort on the exact bytes of its parts, never a 64-bit hash, so it is
+  declared cohort on the exact bytes of its dimension and value, never a 64-bit hash, so it is
   the totality and injectivity of the declaration — not a hash width — that keeps
   two principals, or two distinct cohorts, from ever sharing one render.
 - `Persistence::load` and `read_many` must stay non-locking; the engine serialises

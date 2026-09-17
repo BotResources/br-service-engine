@@ -16,16 +16,16 @@ struct Viewer {
     projects: Vec<Uuid>,
 }
 
-fn org(id: Uuid) -> CohortKey {
-    CohortKey::of(&[("org", id)])
+fn org(id: Uuid) -> Cohort {
+    Cohort::uuid("org", id)
 }
 
-fn member(id: Uuid) -> CohortKey {
-    CohortKey::of(&[("member", id)])
+fn member(id: Uuid) -> Cohort {
+    Cohort::uuid("member", id)
 }
 
-fn public() -> CohortKey {
-    CohortKey::of::<&str>(&["public"])
+fn public() -> Cohort {
+    Cohort::flag("public", true)
 }
 
 struct ProjectVisibility;
@@ -191,7 +191,6 @@ fn the_check_flags_a_window_that_drops_a_visible_key() {
 #[test]
 fn a_real_cohort_visibility_declares_no_open_access_reason_and_is_live_by_default() {
     assert_eq!(ProjectVisibility::OPEN_ACCESS_REASON, None);
-    // Bound through locals so these read as observed values, not const asserts.
     let live = ProjectVisibility::LIVE;
     let deps_empty = ProjectVisibility::DEPS.is_empty();
     assert!(live, "a cohort view is a live surface unless it opts out");

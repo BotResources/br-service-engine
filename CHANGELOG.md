@@ -176,6 +176,18 @@ the black-box battery greps — is the wording the engine now emits.
 
 ### lane: cohort
 
+#### 5. Structured cohort descriptor
+
+- `Cohort { dimension, value }` with `CohortValue::{Uuid, Text, Bool, Int}` (`#[non_exhaustive]`) replaces `CohortKey::of`. A cohort is a `(dimension, value)` the service names — `Cohort::uuid("manager", id)`, `Cohort::text`, `Cohort::flag("public", true)`, `Cohort::int` — and `Cohort::key()` is its routing image (tag + dimension + typed value bytes).
+- `Visibility::{cohorts, memberships}` return `Vec<Cohort>`, and `CohortIndex::keys_in_cohorts` takes `&[Cohort]` and binds against each row's **natural columns** through the helpers `Cohort::uuids`/`texts`/`holds` (`WHERE manager_id = ANY($1) OR $2`) — the shadow `cohort_key bytea` column and its writer are gone from the sample.
+- `CohortKey::of` is removed; `CohortKey::principal` (the RLS render group) stays. The cohort-column rule text moved out of `persistence.rs` into the README H5 paragraph.
+- Honest line: this does not change the windowed views of a service whose visibility is clock-windowed (see `intent.md`, "Not an engine matter") — a time-windowed active link is a Services write (`end_date IS NULL`), not an engine cohort, and the engine will not schedule a midnight wake for one.
+
+#### N8. DB-backed inverse for link-table dependencies
+
+- `Inverse` gains `Lookup(InverseLookup<K>)`: the store answers "which keys depend on this foreign key" with a query, so a dependency held in a **link table** — not derivable from the key (`Keys`) nor a predicate over the window (`Query`) — declares its inverse instead of falling back to a `projector_reset`. The engine resolves each lookup once per impact with a pooled connection at the pass boundary (`render/pass.rs`), then routing stays synchronous and treats it as `Keys`.
+- The four inverses are now `Keys`, `Query`, `Lookup`, `None`. A `view::Projector` declares one through `fn inverse(foreign) -> Inverse` (default `None`); the low-level `projector::Projector` already carried the hook. The engine names no producer — the mirror namespace is the service's.
+
 ### lane: mirror
 
 ### lane: graphql
@@ -203,6 +215,10 @@ the black-box battery greps — is the wording the engine now emits.
   kit; the kit sets it on both sets.
 - boot: `with_edge_observability` is no longer public; a hand-wired `main` uses
   `serve` instead.
+- cohort: `Visibility::{cohorts, memberships}` now return `Vec<Cohort>` and `CohortIndex::keys_in_cohorts` takes `&[Cohort]` — replace every `CohortKey::of(&[…])` with a typed `Cohort` (`Cohort::uuid("manager", id)`, `Cohort::flag("public", true)`, `Cohort::text`, `Cohort::int`), and bind `keys_in_cohorts` against the row's natural columns with `Cohort::uuids`/`texts`/`holds`.
+- cohort: `CohortKey::of` is removed — a routing `CohortKey` derived from a declared cohort is now `Cohort::…(…).key()`; a per-principal render group stays `CohortKey::principal(id)`.
+- cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
+- cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
 
 ### Replaced or dropped
 
