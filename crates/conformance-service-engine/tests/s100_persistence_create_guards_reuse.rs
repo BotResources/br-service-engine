@@ -62,9 +62,10 @@ async fn s100_a_unique_constraint_rejects_a_concurrent_duplicate_create_and_its_
         .into_iter()
         .find_map(Result::err)
         .expect("one create was refused");
-    assert!(
-        refused.reason.is_none(),
-        "a unique-constraint rejection is a storage violation, not a gate refusal",
+    assert_eq!(
+        refused.code(),
+        Some("KEY_REUSED"),
+        "the per-key lock serializes the duplicate into a deterministic create-guard refusal",
     );
 
     assert_eq!(
