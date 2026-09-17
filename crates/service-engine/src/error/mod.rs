@@ -333,4 +333,10 @@ pub enum EngineError {
         session: SessionId,
         projector: ProjectorName,
     },
+
+    #[error(
+        "the store is not fully migrated (engine set pending: {engine}, service set pending: \
+         {service}); serve refuses to run until migrate has applied both sets to the shared ledger"
+    )]
+    MigrationsPending { engine: bool, service: bool },
 }

@@ -50,7 +50,7 @@ pub const TABLES: &[&str] = &[
 
 const MAX_ROLE_NAME_LEN: usize = 63;
 
-fn migrator() -> Migrator {
+pub(crate) fn migrator() -> Migrator {
     let mut migrator = sqlx::migrate!("./migrations");
     migrator.set_ignore_missing(true);
     migrator

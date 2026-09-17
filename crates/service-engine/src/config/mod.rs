@@ -32,6 +32,7 @@ pub const DEFAULT_MESSAGE_RETENTION: Duration = Duration::from_secs(60 * 60);
 pub const DEFAULT_BLOB_REAPER_INTERVAL: Duration = Duration::from_secs(60);
 pub const DEFAULT_SCHEMA_VERSION_LIVENESS: Duration = Duration::from_secs(30);
 pub const DEFAULT_HTTP_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8080);
+pub const DEFAULT_MIGRATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -64,8 +65,11 @@ pub struct EngineConfig {
     pub blob_reaper_interval: Duration,
     pub schema_version_liveness: Duration,
     pub http_addr: SocketAddr,
+    pub migrate_connect_timeout: Duration,
     pub channel: ChannelName,
     pub pod_id: PodId,
+    pub nats_url: String,
+    pub app_role: String,
     pub service: Option<String>,
     pub service_version: Option<String>,
     pub blob: Option<BlobConfig>,
@@ -102,8 +106,11 @@ impl EngineConfig {
             blob_reaper_interval: DEFAULT_BLOB_REAPER_INTERVAL,
             schema_version_liveness: DEFAULT_SCHEMA_VERSION_LIVENESS,
             http_addr: DEFAULT_HTTP_ADDR,
+            migrate_connect_timeout: DEFAULT_MIGRATE_CONNECT_TIMEOUT,
             channel,
             pod_id,
+            nats_url: String::new(),
+            app_role: String::new(),
             service: None,
             service_version: None,
             blob: None,
@@ -286,6 +293,21 @@ impl EngineConfig {
 
     pub fn with_http_addr(mut self, http_addr: SocketAddr) -> Self {
         self.http_addr = http_addr;
+        self
+    }
+
+    pub fn with_migrate_connect_timeout(mut self, migrate_connect_timeout: Duration) -> Self {
+        self.migrate_connect_timeout = migrate_connect_timeout;
+        self
+    }
+
+    pub fn with_nats_url(mut self, nats_url: impl Into<String>) -> Self {
+        self.nats_url = nats_url.into();
+        self
+    }
+
+    pub fn with_app_role(mut self, app_role: impl Into<String>) -> Self {
+        self.app_role = app_role.into();
         self
     }
 }
