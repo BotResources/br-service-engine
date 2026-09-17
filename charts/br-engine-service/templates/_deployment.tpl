@@ -40,9 +40,6 @@ spec:
             - name: APP_ROLE
               value: {{ required "postgres.appRole is required" .Values.postgres.appRole | quote }}
             {{- include "br-engine-service.trustedNetworkEnv" . | nindent 12 }}
-            {{- with .Values.env }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
       containers:
         - name: serve
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
