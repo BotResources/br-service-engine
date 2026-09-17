@@ -61,6 +61,37 @@ pub fn free_port() -> u16 {
     port
 }
 
+pub fn spawn_subcommand(env: &SpawnEnv, subcommand: &str, tag: &str) -> (Child, PathBuf) {
+    let log = std::env::temp_dir().join(format!("bb-{tag}-{}-{}.log", env.pod, env.port));
+    let out = std::fs::File::create(&log).expect("create the child log file");
+    let err = out.try_clone().expect("clone the child log handle");
+    let mut command = Command::new(example_service_bin());
+    command.arg(subcommand);
+    configure(&mut command, env);
+    command.stdout(Stdio::from(out)).stderr(Stdio::from(err));
+    let child = command
+        .spawn()
+        .expect("spawn the example-service subcommand");
+    (child, log)
+}
+
+pub fn read_log(path: &std::path::Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_default()
+}
+
+pub async fn wait_exit(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().expect("read the child process state") {
+            return Some(status);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 pub struct SpawnEnv {
     pub database_url: String,
     pub owner_database_url: String,
@@ -78,10 +109,6 @@ pub struct SessionBounds {
     pub max_age: Duration,
 }
 
-/// The lease and beat the spawned binary runs its leader elections and beat loop
-/// under. Production leaves both at the engine defaults (30 s lease, 1 s beat); a
-/// multi-pod failover scenario shortens them so a lease expires inside a test's
-/// bounded wait instead of after half a minute.
 pub struct MirrorBounds {
     pub lease: Duration,
     pub beat: Duration,
@@ -101,42 +128,65 @@ pub struct Spawned {
     log: PathBuf,
 }
 
+fn configure(command: &mut Command, env: &SpawnEnv) {
+    command
+        .env("DATABASE_URL", &env.database_url)
+        .env("DATABASE_URL_OWNER", &env.owner_database_url)
+        .env("APP_ROLE", &env.app_role)
+        .env("NATS_URL", &env.nats_url)
+        .env("ENGINE_CHANNEL", "example")
+        .env("HOSTNAME", &env.pod)
+        .env("PORT", env.port.to_string())
+        .env("HOST", "127.0.0.1")
+        .env("RUST_LOG", "info");
+    if let Some(blob) = &env.blobs {
+        command
+            .env("S3_ENDPOINT", &blob.endpoint)
+            .env("S3_BUCKET", &blob.bucket)
+            .env("S3_ACCESS_KEY", &blob.access_key)
+            .env("S3_SECRET_KEY", &blob.secret_key)
+            .env("S3_REGION", &blob.region);
+    }
+    if let Some(bounds) = &env.session_bounds {
+        command
+            .env("SESSION_TTL_MS", bounds.ttl.as_millis().to_string())
+            .env("SESSION_MAX_AGE_MS", bounds.max_age.as_millis().to_string());
+    }
+    if let Some(mirror) = &env.mirror {
+        command
+            .env("ENGINE_LEASE_MS", mirror.lease.as_millis().to_string())
+            .env("ENGINE_BEAT_MS", mirror.beat.as_millis().to_string());
+    }
+}
+
 impl Spawned {
     pub async fn service(env: SpawnEnv) -> Spawned {
         let log = std::env::temp_dir().join(format!("bb-{}-{}.log", env.pod, env.port));
         let out = std::fs::File::create(&log).expect("create the child log file");
         let err = out.try_clone().expect("clone the child log handle");
 
+        let mut migrate = Command::new(example_service_bin());
+        migrate.arg("migrate");
+        configure(&mut migrate, &env);
+        let status = migrate
+            .stdout(Stdio::from(
+                out.try_clone().expect("clone the child log handle"),
+            ))
+            .stderr(Stdio::from(
+                out.try_clone().expect("clone the child log handle"),
+            ))
+            .status()
+            .expect("run migrate before serve");
+        assert!(
+            status.success(),
+            "migrate exits 0 before serve: {}",
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+
         let mut command = Command::new(example_service_bin());
-        command
-            .env("DATABASE_URL", &env.database_url)
-            .env("DATABASE_URL_OWNER", &env.owner_database_url)
-            .env("APP_ROLE", &env.app_role)
-            .env("NATS_URL", &env.nats_url)
-            .env("ENGINE_CHANNEL", "example")
-            .env("POD_ID", &env.pod)
-            .env("HTTP_ADDR", format!("127.0.0.1:{}", env.port))
-            .env("RUST_LOG", "info")
-            .stdout(Stdio::from(out))
-            .stderr(Stdio::from(err));
-        if let Some(blob) = &env.blobs {
-            command
-                .env("S3_ENDPOINT", &blob.endpoint)
-                .env("S3_BUCKET", &blob.bucket)
-                .env("S3_ACCESS_KEY", &blob.access_key)
-                .env("S3_SECRET_KEY", &blob.secret_key)
-                .env("S3_REGION", &blob.region);
-        }
-        if let Some(bounds) = &env.session_bounds {
-            command
-                .env("SESSION_TTL_MS", bounds.ttl.as_millis().to_string())
-                .env("SESSION_MAX_AGE_MS", bounds.max_age.as_millis().to_string());
-        }
-        if let Some(mirror) = &env.mirror {
-            command
-                .env("ENGINE_LEASE_MS", mirror.lease.as_millis().to_string())
-                .env("ENGINE_BEAT_MS", mirror.beat.as_millis().to_string());
-        }
+        command.arg("serve");
+        configure(&mut command, &env);
+        command.stdout(Stdio::from(out)).stderr(Stdio::from(err));
 
         let child = command.spawn().expect("spawn the example-service binary");
         let base_url = format!("http://127.0.0.1:{}", env.port);
@@ -201,9 +251,6 @@ impl Spawned {
         let _ = std::fs::remove_file(&self.log);
     }
 
-    /// Kill this pod without consuming its handle — the way Kubernetes takes a pod
-    /// down under it during a rolling roll or a node loss. A later `shutdown` on the
-    /// same handle is a harmless no-op: the child is already reaped.
     pub fn kill_now(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
