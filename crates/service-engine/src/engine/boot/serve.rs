@@ -46,7 +46,7 @@ where
         return Err(error);
     }
 
-    let nats = Nats::connect(config.nats_url()).await?;
+    let nats = Nats::connect(&config.nats_url).await?;
     let metrics = init_metrics(component)
         .map_err(|e| EngineError::Config(format!("metrics recorder install failed: {e}")))?;
     let http_addr = config.http_addr;

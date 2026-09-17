@@ -75,6 +75,25 @@ pub fn spawn_subcommand(env: &SpawnEnv, subcommand: &str, tag: &str) -> (Child, 
     (child, log)
 }
 
+pub fn spawn_migrate_owner_only(env: &SpawnEnv, tag: &str) -> (Child, PathBuf) {
+    let log = std::env::temp_dir().join(format!("bb-{tag}-{}.log", env.pod));
+    let out = std::fs::File::create(&log).expect("create the child log file");
+    let err = out.try_clone().expect("clone the child log handle");
+    let mut command = Command::new(example_service_bin());
+    command
+        .arg("migrate")
+        .env_clear()
+        .env("DATABASE_URL_OWNER", &env.owner_database_url)
+        .env("APP_ROLE", &env.app_role)
+        .env("RUST_LOG", "info")
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err));
+    let child = command
+        .spawn()
+        .expect("spawn the example-service migrate subcommand");
+    (child, log)
+}
+
 pub fn read_log(path: &std::path::Path) -> String {
     std::fs::read_to_string(path).unwrap_or_default()
 }

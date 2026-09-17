@@ -26,11 +26,15 @@ role: it refuses to run — `EngineError::MigrationsPending { engine, service }`
 is unapplied (checked through the app role against the shared ledger), then boots
 the engine and serves. `schema` prints the SDL and touches no infra. `run_service`
 dispatches on argv (`migrate` / `serve` / `schema`; no argv serves).
-`EngineConfig::from_env()` reads the whole app-env group in one place —
-`ENGINE_CHANNEL`, `HOSTNAME` (replaces `POD_ID`), `PORT`/`HOST` (replace `HTTP_ADDR`),
-`NATS_URL`, `APP_ROLE`, and the optional session/lease/beat timings — so a service
-`main` reads no engine env var by hand; `BootPlan.config` is `from_env()?` plus the
-service's own `with_service` / `with_blob_storage` / `with_session_ttl`. `BootPlan`
+`EngineConfig::from_env()` reads the ops contract in one place and dispatches on the
+same argv the boot kit does: `serve` reads the whole app-env group — `ENGINE_CHANNEL`,
+`HOSTNAME` (replaces `POD_ID`), `PORT`/`HOST` (replace `HTTP_ADDR`), `NATS_URL`,
+`APP_ROLE`, and the optional session/lease/beat timings; `migrate` reads only
+`APP_ROLE` (placeholder channel/pod, default connect timeout) so the migrate init
+container needs the owner Secret and `APP_ROLE` alone, never the serve env; `schema`
+reads nothing. A service `main` reads no engine env var by hand; `BootPlan.config` is
+`from_env()?` plus the service's own `with_service` / `with_blob_storage` /
+`with_session_ttl`. `BootPlan`
 loses `nats_url` and `app_role` (both now read by `from_env` into `EngineConfig`).
 `with_edge_observability` is crate-private: `serve` is the one boot door, and no
 observability helper is re-exported at the crate root.

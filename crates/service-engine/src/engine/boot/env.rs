@@ -17,6 +17,16 @@ impl EngineConfig {
             ));
         }
 
+        if super::wants_migrate() {
+            let app_role = std::env::var("APP_ROLE")
+                .map_err(|_| EngineError::Config("APP_ROLE must be set for migrate".to_string()))?;
+            return Ok(EngineConfig::new(
+                ChannelName::from_static("migrate"),
+                PodId::from_static("migrate"),
+            )
+            .with_app_role(app_role));
+        }
+
         let channel = required("ENGINE_CHANNEL")?;
         let hostname = required("HOSTNAME")?;
         let nats_url = required("NATS_URL")?;

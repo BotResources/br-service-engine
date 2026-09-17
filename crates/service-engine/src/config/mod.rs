@@ -310,12 +310,4 @@ impl EngineConfig {
         self.app_role = app_role.into();
         self
     }
-
-    pub fn nats_url(&self) -> &str {
-        &self.nats_url
-    }
-
-    pub fn app_role(&self) -> &str {
-        &self.app_role
-    }
 }

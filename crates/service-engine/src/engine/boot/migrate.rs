@@ -23,7 +23,7 @@ pub(crate) async fn migrate<Q, M, S, R>(plan: BootPlan<Q, M, S, R>) -> Result<()
     service_migrator.set_ignore_missing(true);
     service_migrator.run(&owner).await?;
 
-    let app_role = plan.config.app_role();
+    let app_role = &plan.config.app_role;
     wait_for_role(&owner, app_role, plan.config.migrate_connect_timeout).await?;
     crate::schema::grant_engine_access(&owner, app_role).await?;
     grant_app_access(&owner, app_role).await.map_err(pg_error)?;

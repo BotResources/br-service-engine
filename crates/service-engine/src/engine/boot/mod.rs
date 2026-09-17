@@ -68,6 +68,10 @@ pub(crate) fn wants_schema() -> bool {
     std::env::args().nth(1).as_deref() == Some(SCHEMA_SUBCOMMAND)
 }
 
+pub(crate) fn wants_migrate() -> bool {
+    std::env::args().nth(1).as_deref() == Some(MIGRATE_SUBCOMMAND)
+}
+
 fn subcommand() -> Result<Subcommand, EngineError> {
     match std::env::args().nth(1).as_deref() {
         None | Some(SERVE_SUBCOMMAND) => Ok(Subcommand::Serve),
