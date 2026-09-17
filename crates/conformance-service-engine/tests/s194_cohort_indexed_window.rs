@@ -1,10 +1,3 @@
-//! H5 read-side seam: a cohort view populated through the `CohortIndex` store
-//! seam (`keys_in_cohorts`) shows exactly the caller's cohort rows, reads only
-//! those rows with one indexed query, and — being a live window (B: the shape
-//! is derived from the declared `Visibility`, `Population::Query` here) — gains
-//! an `Upsert` when a membership is granted, a `Remove` when it is revoked, and
-//! delivers a freshly created in-cohort row without a membership change.
-
 use std::time::Duration;
 
 use conformance_service_engine::TestDb;
@@ -77,9 +70,6 @@ async fn s194_a_membership_grant_upserts_and_a_revoke_removes_on_the_cohort_inde
     let reset = next_delta(&mut stream, SOON).await.expect("a Reset");
     assert_eq!(assignment_ids(reset_views(&reset)), vec![mine]);
 
-    // Revoke: move the principal to a tenant with no rows. Its facts change,
-    // the live window repopulates through the seam, and the row it can no
-    // longer see leaves as a Remove.
     move_member(&pool, principal.id().as_uuid(), limbo).await;
     engine
         .render(vec![Impact::principal_facts(
@@ -95,8 +85,6 @@ async fn s194_a_membership_grant_upserts_and_a_revoke_removes_on_the_cohort_inde
     );
     assert_eq!(removed_key(&gone), mine);
 
-    // Grant: move the principal into the tenant that owns `theirs`. The seam
-    // now returns that cohort's row and it arrives as an Upsert.
     move_member(&pool, principal.id().as_uuid(), elsewhere).await;
     engine
         .render(vec![Impact::principal_facts(
@@ -136,10 +124,6 @@ async fn s194_a_live_cohort_window_delivers_a_freshly_created_in_cohort_row() {
     let reset = next_delta(&mut stream, SOON).await.expect("a Reset");
     assert_eq!(assignment_ids(reset_views(&reset)), vec![mine]);
 
-    // A brand-new row created in the caller's own cohort — no membership
-    // change. A Fixed/Keys window would never deliver it (a fresh key is not
-    // yet a member); the derived Query window repopulates through the seam and
-    // the new row arrives as an Upsert.
     let fresh = cohort_assignment(&pool, home, "fresh").await;
     engine
         .render(vec![resource(&fresh, Dims::ALL)])

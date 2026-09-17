@@ -523,10 +523,15 @@ explicit override for a closed `Keys` snapshot; returning a `Population` from
 `populate` directly bypasses inference. A cohort view reads **only the caller's
 rows** through the store's `CohortIndex` seam
 (`keys_in_cohorts(conn, &memberships)`) — one indexed query on the cohort
-column, never a table scan filtered in memory. The rule the seam enforces: a
-**cohort key must be a stored column on the row** (an `org_id`, an `is_public`,
-or a `(row, cohort_key)` index row written on save); a cohort that would need a
-per-row lookup is not a cohort.
+columns, never a table scan filtered in memory. A cohort is a `(dimension,
+value)` the service names — `Cohort::uuid("manager", id)`, `Cohort::flag("public",
+true)`, `Cohort::text`, `Cohort::int`; the engine hashes it to a `CohortKey` for
+routing, and the store never stores the hash. `keys_in_cohorts` binds against the
+**natural columns** that hold each row's dimension values: `Cohort::uuids(cohorts,
+"manager")`, `Cohort::texts`, and `Cohort::holds(dimension, bool)` extract them so
+a store's binding is three lines (`WHERE manager_id = ANY($1) OR $2`). A shadow
+`bytea` column is a defect, not a technique; a cohort that would need a per-row
+lookup to decide membership is not a cohort.
 
 A projector that filters through Postgres RLS instead of cohorts, or one that is
 open to every viewer, declares `type Visibility = Unrestricted<Row, Principal,
@@ -867,7 +872,7 @@ and no black-box scenario exercises a blob.
   and `memberships` return the same cohorts for the same input on every call, and
   two cohorts the projector means to keep distinct must serialise to distinct
   bytes. The engine keys an RLS render group on the exact `PrincipalId` and a
-  declared cohort on the exact bytes of its parts, never a 64-bit hash, so it is
+  declared cohort on the exact bytes of its dimension and value, never a 64-bit hash, so it is
   the totality and injectivity of the declaration — not a hash width — that keeps
   two principals, or two distinct cohorts, from ever sharing one render.
 - `Persistence::load` and `read_many` must stay non-locking; the engine serialises

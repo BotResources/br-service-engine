@@ -84,7 +84,7 @@ pub use accumulator::{
 pub use blobs::{
     Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
 };
-pub use cohort::CohortKey;
+pub use cohort::{Cohort, CohortKey, CohortValue};
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use db::{connect_pool, validate_database_tls};

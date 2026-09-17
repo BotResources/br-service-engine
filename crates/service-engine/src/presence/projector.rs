@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 
-use crate::cohort::CohortKey;
+use crate::cohort::{Cohort, CohortKey};
 use crate::error::EngineError;
 use crate::impact::{Dims, ForeignKey};
 use crate::name::{NounName, ProjectorName};
@@ -92,6 +92,6 @@ impl<P: Principal, Pr: Presence> Projector for PresenceProjector<P, Pr> {
     }
 
     fn cohort(&self, _principal: &P) -> CohortKey {
-        CohortKey::of(&[Pr::NAME.as_str()])
+        Cohort::text("presence", Pr::NAME.as_str()).key()
     }
 }
