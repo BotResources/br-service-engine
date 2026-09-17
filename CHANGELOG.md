@@ -15,6 +15,43 @@ and a single git tag `v{version}` releases the set. Format follows
 
 ### lane: chart
 
+- **Library chart `br-engine-service`, ops contract v1.** The engine now
+  publishes the shared deployment topology as a Helm **library** chart
+  (`charts/br-engine-service/`, `type: library`) on its own version line starting
+  at `1.0.0` — the crate version appears nowhere in the chart. Named templates
+  render the topology from a thin chart's values: `br-engine-service.deployment`
+  (`Recreate`; init container `migrate` = the service image with argv `migrate`
+  and the owner Secret + `APP_ROLE` mounted there only; main container argv
+  `serve` with the app env only; `readinessProbe /readyz`, `livenessProbe
+  /livez`, one `http` port bound to `PORT`; `HOSTNAME` from `metadata.name`),
+  `.service`, `.serviceaccount`, `.pdb`, and `.networkpolicy` (ingress selectors
+  are values; the chart names no namespace). Postgres DSNs are read whole from a
+  Secret (`DATABASE_URL`, `DATABASE_URL_OWNER`) — no password interpolation
+  (constitution principle 32) — and `TRUSTED_NETWORK_HOSTS` carries the per-host
+  plaintext opt-out. `charts/br-engine-service/ci/thin-example/` is the fixture
+  thin chart (one dependency on the library plus values) and the shape the dp thin
+  charts take.
+- **Chart major = ops contract version, under its own name.** Chart major 1 is
+  ops contract v1. A change to any contract row (an entry point, an env var name,
+  a probe path, the roll strategy) is a chart **major** shipped under a **new
+  chart name** (`br-engine-service-v2`); the old chart keeps serving old images.
+  `check-chart-version.sh` fails a `charts/**` change that does not bump
+  `Chart.yaml` `version`, but it cannot tell a minor from a contract-breaking
+  major — the README states the rule and the reviewer enforces it.
+- **CI.** `ci.yml` gains a `chart` job (`helm lint` the library, `helm dependency
+  build` + `helm lint` + `helm template` the fixture — asserting a Deployment with
+  init `migrate`, main `serve`, probes `/readyz`/`/livez`, `Recreate` — then
+  `check-chart-version.sh`). New `chart-release.yml` packages and pushes the chart
+  to `oci://ghcr.io/botresources/charts/br-engine-service` and tags
+  `chart/br-engine-service/v<version>` on the first `main` push that changes
+  `Chart.yaml` `version`, independent of `release-tags.yml`. The README gains the
+  "Ops contract v1" section.
+- **Engine crate: no change.** This lane ships no Rust; there is no semver break
+  and no adopter code migration. The dp follow-up (thin charts per engine service,
+  the Warehouse chart-path and library-OCI subscriptions, the `helm-update-chart`
+  promotion steps, deletion of the hand-written templates) is a separate,
+  sequenced-after change; be- service crates ship no chart.
+
 ### lane: cohort
 
 ### lane: mirror

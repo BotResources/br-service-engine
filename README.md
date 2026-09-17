@@ -902,6 +902,63 @@ row — another version has claimed the singleton while this pod ran, so it has 
 displaced — the pod lowers readiness to DOWN rather than keep serving over a store
 it no longer owns; it recovers when it once again owns the row.
 
+## Ops contract v1 — chart `br-engine-service` 1.x
+
+The engine publishes the shared deployment topology as a Helm **library** chart,
+`br-engine-service` (`charts/br-engine-service/`), on its own version line that
+starts at `1.0.0`. Chart major 1 **is** ops contract v1; the crate version
+appears nowhere in the chart. A per-service **thin** chart depends on the library
+and supplies only values — no hand-written topology; the fixture
+`charts/br-engine-service/ci/thin-example/` pins that shape. The named templates
+(`br-engine-service.deployment`, `.service`, `.serviceaccount`, `.pdb`,
+`.networkpolicy`) render the topology from those values, and a thin chart invokes
+them from one include-only template. A change to any row in the table below is a
+chart **major** shipped under a **new chart name** (`br-engine-service-v2`); the
+old chart keeps serving old images. `check-chart-version.sh` refuses a `charts/**`
+change without a `Chart.yaml` `version` bump, but it cannot tell a minor from a
+contract-breaking major — that rule is the reviewer's to enforce.
+
+Only names the engine reads belong in the contract: `EngineConfig::from_env`
+reads the app group in one place, `migrate` reads the owner group, and the rest
+of what a pod needs (role and database provisioning, secret material) stays in
+GitOps and the NATS fabric.
+
+| Surface | Contract |
+|---|---|
+| Entry points | `<binary> migrate` (owner role; exits 0 when both migration sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
+| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access) |
+| App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE`, `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
+| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` — read as a group only when the plan calls `with_blob_storage`; the library chart emits them only under `objectStore.enabled` |
+| Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
+| Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
+| HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
+| Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
+| Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS`, `migrate` only) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, both migrators run with `ignore_missing` |
+| NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; `{PREFIX}_manifest` per engine offer |
+| Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
+| Metrics | `service_engine_*` (`metrics::ALL`) + `service_engine_leader{kind,name}`; common labels `service`, `pod`, `component` |
+
+Postgres connection strings are read as full DSNs from a Secret
+(`DATABASE_URL`, `DATABASE_URL_OWNER`) — the chart never interpolates a password
+into a URL, so a role password carrying a URL-reserved character cannot corrupt
+the connection string (constitution principle 32). The in-namespace Postgres host
+is opted out of `br-util-postgres`'s remote-TLS requirement through
+`TRUSTED_NETWORK_HOSTS` (`postgres.trustedNetworkHosts`), a deliberate per-host
+plaintext declaration behind the default-deny NetworkPolicy.
+
+Values a thin chart supplies: `image.{repository,tag}`, `port`, `serviceKey`,
+`postgres.{appRole,appSecret,ownerSecret,trustedNetworkHosts}`, `nats.url`,
+`engine.channel`, `objectStore.enabled` (+ the S3 config and secret ref),
+`env: []`, `resources`, `replicaCount`, `topologySpreadEnabled`,
+`networkPolicy.{enabled,ingress}`. The library names no namespace; ingress
+selectors are values. The chart itself is published to
+`oci://ghcr.io/botresources/charts/br-engine-service` by `chart-release.yml` on
+the first `main` push that changes `Chart.yaml` `version`, tagged
+`chart/br-engine-service/v<version>`, independent of the crate's `v*` tag. The dp
+thin charts, the Warehouse subscriptions on the chart paths and the library OCI,
+and the `helm-update-chart` promotion steps live in dp, sequenced after this
+release.
+
 ## Configuration, degradation and observability
 
 `EngineConfig` carries one clock and a handful of bounds, every one validated
