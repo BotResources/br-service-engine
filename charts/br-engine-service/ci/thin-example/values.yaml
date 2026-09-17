@@ -48,7 +48,7 @@ networkPolicy:
     - from:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: gateway
+              app.kubernetes.io/name: ingress
       ports:
         - protocol: TCP
           port: 8080
