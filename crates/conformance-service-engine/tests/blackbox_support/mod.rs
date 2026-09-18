@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use br_core_auth::{AuthMethod, Passport, PassportClaims, PassportHeader};
 use conformance_service_engine::infra::TestNats;
+use conformance_service_engine::infra::nats::INTEGRATION_MAX_AGE;
 use example_contract::{PublishedPerson, SERVICE};
 use service_engine::nats::Nats;
 use sqlx::PgPool;
@@ -34,28 +35,30 @@ pub struct World {
 
 impl World {
     pub async fn start(pod: &str) -> World {
-        World::start_inner(pod, None, None).await
+        World::start_inner(pod, None, None, INTEGRATION_MAX_AGE).await
     }
 
     pub async fn start_with_bounds(pod: &str, session_bounds: Option<SessionBounds>) -> World {
-        World::start_inner(pod, session_bounds, None).await
+        World::start_inner(pod, session_bounds, None, INTEGRATION_MAX_AGE).await
     }
 
-    /// Boot the first pod under a short lease/beat so a later failover is observable
-    /// inside a bounded wait. This pod boots alone, so it is the pod that takes every
-    /// leader lease — deterministically the leader a failover scenario then kills.
+    pub async fn start_with_integration_max_age(pod: &str, max_age: Duration) -> World {
+        World::start_inner(pod, None, None, max_age).await
+    }
+
     pub async fn start_with_mirror(pod: &str, mirror: MirrorBounds) -> World {
-        World::start_inner(pod, None, Some(mirror)).await
+        World::start_inner(pod, None, Some(mirror), INTEGRATION_MAX_AGE).await
     }
 
     async fn start_inner(
         pod: &str,
         session_bounds: Option<SessionBounds>,
         mirror: Option<MirrorBounds>,
+        integration_max_age: Duration,
     ) -> World {
         let db = BlackboxDb::fresh().await;
         let nats_server = TestNats::spawn().await;
-        nats_server.provision().await;
+        nats_server.provision_integration(integration_max_age).await;
         nats_server
             .provision_presence(SERVICE, Duration::from_secs(300))
             .await;
@@ -107,8 +110,6 @@ impl World {
         self.spawn_pod_inner(pod, None).await
     }
 
-    /// Spawn a second pod against the same Postgres and NATS under a short lease/beat,
-    /// so it converges as a standby and can take over inside a bounded wait.
     pub async fn spawn_pod_with_mirror(&self, pod: &str, mirror: MirrorBounds) -> Spawned {
         self.spawn_pod_inner(pod, Some(mirror)).await
     }
@@ -128,9 +129,6 @@ impl World {
         .await
     }
 
-    /// Take the first pod down under the running test, the way Kubernetes evicts it
-    /// during a rolling roll. The handle stays valid; `cleanup` reaps it a second time
-    /// harmlessly.
     pub fn shutdown_service(&mut self) {
         self.service.kill_now();
     }

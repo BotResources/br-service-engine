@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use service_engine::CohortKey;
 use service_engine::error::EngineError;
 use service_engine::impact::Impact;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
 use service_engine::view::{Populate, Projector as ViewProjector, cohort_window};
+use service_engine::{Cohort, CohortKey};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -155,16 +155,10 @@ impl ViewProjector for CohortAssignments {
     }
 
     fn cohort(principal: &SamplePrincipal) -> CohortKey {
-        CohortKey::of(&[principal.tenant()])
+        Cohort::uuid("tenant", principal.tenant()).key()
     }
 }
 
-/// A live cohort view whose window is read through the [`CohortIndex`] seam:
-/// one indexed query returns only the caller's cohort rows, and the window
-/// shape is **derived** from `AssignmentVisibility` (LIVE ⇒ a `Population::Query`
-/// on the assignment noun and the membership dep), not hand-picked.
-///
-/// [`CohortIndex`]: service_engine::persistence::CohortIndex
 #[derive(Default)]
 pub struct CohortIndexedAssignments;
 

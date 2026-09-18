@@ -22,6 +22,7 @@ use crate::registry::RenderRegistry;
 use crate::render::pass::{PassContext, PassReport};
 use crate::session::store::SessionTable;
 use crate::session::stream::DropList;
+use crate::stop::Stop;
 
 pub use counters::RenderMetrics;
 pub use paging::PageReport;
@@ -229,15 +230,14 @@ impl<P: Principal> SessionRuntime<P> {
     pub async fn run(
         self: Arc<Self>,
         source: BoxStream<'static, Result<TransportEvent, TransportError>>,
-        shutdown: Arc<Notify>,
+        shutdown: Arc<Stop>,
     ) {
         let (sink, receiver) = tokio::sync::mpsc::channel(self.config.listener_channel_capacity);
-        let drain_stop = Arc::new(Notify::new());
+        let drain_stop = crate::stop::Stop::new();
         let listener = tokio::spawn(drain::drain_listener(source, sink, drain_stop.clone()));
         let mut events = drain::receiver_stream(receiver);
-        let stopping = shutdown.notified();
+        let stopping = shutdown.stopped();
         tokio::pin!(stopping);
-        stopping.as_mut().enable();
         loop {
             let event = tokio::select! {
                 () = &mut stopping => break,
@@ -252,7 +252,7 @@ impl<P: Principal> SessionRuntime<P> {
             }
         }
         self.shutdown().await;
-        drain_stop.notify_one();
+        drain_stop.stop();
         let _ = listener.await;
     }
 

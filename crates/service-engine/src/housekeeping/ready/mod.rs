@@ -16,9 +16,11 @@ use crate::observe::{
 
 use verdict::verdict;
 pub use verdict::{
-    REASON_INBOUND_STOPPED, REASON_NATS_UNREACHABLE, REASON_RELAY_DEGRADED,
+    REASON_INBOUND_STOPPED, REASON_NATS_UNREACHABLE, REASON_RELAY_DEGRADED, REASON_REQUIRED_KEYS,
     REASON_SCHEMA_VERSION_DISPLACED, REASON_SHUTTING_DOWN, REASON_WORKER_STOPPED,
 };
+
+const DEP_REQUIRED_KEYS: &str = "required_keys";
 
 struct NatsProbe {
     nats: Nats,
@@ -44,6 +46,7 @@ pub struct ReadinessAssembly {
     inbound: Option<watch::Receiver<bool>>,
     nats: Option<NatsProbe>,
     schema_displaced: Option<watch::Receiver<bool>>,
+    required_keys: Vec<watch::Receiver<Vec<String>>>,
 }
 
 impl ReadinessAssembly {
@@ -58,11 +61,17 @@ impl ReadinessAssembly {
             inbound: None,
             nats: None,
             schema_displaced: None,
+            required_keys: Vec::new(),
         }
     }
 
     pub fn with_schema_version(mut self, displaced: watch::Receiver<bool>) -> Self {
         self.schema_displaced = Some(displaced);
+        self
+    }
+
+    pub fn with_required_keys(mut self, required_keys: Vec<watch::Receiver<Vec<String>>>) -> Self {
+        self.required_keys = required_keys;
         self
     }
 
@@ -102,10 +111,14 @@ impl ReadinessAssembly {
         self.assess().0
     }
 
-    /// One sample of every board, so the operator copy and the detail that
-    /// follows it describe the same instant. Re-borrowing a board for the detail
-    /// would let the label and the reason come from two different snapshots.
-    fn assess(&self) -> (Option<&'static str>, MirrorsHealth) {
+    fn missing_required_keys(&self) -> Vec<String> {
+        self.required_keys
+            .iter()
+            .flat_map(|rx| rx.borrow().clone())
+            .collect()
+    }
+
+    fn assess(&self) -> (Option<&'static str>, MirrorsHealth, Vec<String>) {
         if self
             .schema_displaced
             .as_ref()
@@ -114,6 +127,7 @@ impl ReadinessAssembly {
             return (
                 Some(REASON_SCHEMA_VERSION_DISPLACED),
                 self.mirrors.borrow().clone(),
+                Vec::new(),
             );
         }
         let fabric: Vec<RelayHealth> = self
@@ -134,7 +148,7 @@ impl ReadinessAssembly {
         if let Some(nats) = nats {
             record_dependency(DEP_NATS, nats.is_up());
         }
-        let verdict = verdict(
+        let base = verdict(
             listener_up,
             nats,
             inbound_up,
@@ -142,18 +156,23 @@ impl ReadinessAssembly {
             self.relays.as_ref().map(|r| r.borrow().clone()).as_ref(),
             &fabric,
         );
-        (verdict, mirrors)
+        let missing = self.missing_required_keys();
+        if !self.required_keys.is_empty() {
+            record_dependency(DEP_REQUIRED_KEYS, missing.is_empty());
+        }
+        let verdict = base.or_else(|| (!missing.is_empty()).then_some(REASON_REQUIRED_KEYS));
+        (verdict, mirrors, missing)
     }
 
     pub fn refresh(&self) -> Readiness {
-        let (verdict, mirrors) = self.assess();
+        let (verdict, mirrors, missing) = self.assess();
         match verdict {
             None => {
                 self.handle.set_ready();
                 Readiness::Ready
             }
             Some(reason) => {
-                let reason = detailed(reason, &mirrors);
+                let reason = detailed(reason, &mirrors, &missing);
                 self.handle.set_not_ready(reason.clone());
                 Readiness::NotReady { reason }
             }
@@ -161,15 +180,18 @@ impl ReadinessAssembly {
     }
 }
 
-/// The fixed operator copy, followed by each unconverged mirror's own reason so
-/// `/readyz` names what is holding the pod out of rotation.
-fn detailed(reason: &'static str, mirrors: &MirrorsHealth) -> String {
+fn detailed(reason: &'static str, mirrors: &MirrorsHealth, missing: &[String]) -> String {
     let mut detailed = reason.to_string();
     if reason == REASON_MIRRORS {
         for (name, condition) in mirrors.iter() {
             if let Some(detail) = condition.reason() {
                 detailed.push_str(&format!("; {name}: {detail}"));
             }
+        }
+    }
+    if reason == REASON_REQUIRED_KEYS {
+        for key in missing {
+            detailed.push_str(&format!("; {key}"));
         }
     }
     detailed

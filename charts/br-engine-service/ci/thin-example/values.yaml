@@ -1,0 +1,54 @@
+serviceKey: catalog
+
+image:
+  repository: ghcr.io/example/br-svc-catalog
+  tag: "0.1.0"
+
+port: 8080
+
+replicaCount: 2
+
+topologySpreadEnabled: true
+
+postgres:
+  appRole: catalog_app
+  appSecret:
+    name: catalog-postgres
+    key: DATABASE_URL
+  ownerSecret:
+    name: catalog-postgres
+    key: DATABASE_URL_OWNER
+  trustedNetworkHosts:
+    - catalog-db-rw.catalog.svc
+
+nats:
+  url: nats://nats.nats.svc:4222
+
+engine:
+  channel: catalog
+
+objectStore:
+  enabled: false
+
+env:
+  - name: ENVIRONMENT
+    value: prod
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress
+      ports:
+        - protocol: TCP
+          port: 8080

@@ -153,12 +153,13 @@ impl<P: Principal> SessionRuntime<P> {
 
     async fn resnapshot_one(&self, id: SessionId) -> Result<(), EngineError> {
         let mut table = self.table.lock().await;
+        let dead_letters = self.dead_letters();
         let ctx = PassContext {
             pg: &self.pg,
             registry: &self.registry,
             chunks: &self.chunks,
             config: &self.config,
-            dead_letters: None,
+            dead_letters: Some(&dead_letters),
         };
         let cost = resnapshot(&ctx, &mut table, id).await?;
         drop(table);
@@ -172,12 +173,13 @@ impl<P: Principal> SessionRuntime<P> {
         let mut table = self.table.lock().await;
         table.mark_pending_overflowed();
         let ids = table.live_ids();
+        let dead_letters = self.dead_letters();
         let ctx = PassContext {
             pg: &self.pg,
             registry: &self.registry,
             chunks: &self.chunks,
             config: &self.config,
-            dead_letters: None,
+            dead_letters: Some(&dead_letters),
         };
         let mut reset = 0;
         for id in ids {
@@ -231,10 +233,12 @@ impl<P: Principal> SessionRuntime<P> {
         principal: &P,
         specs: &[WindowSpec],
     ) -> Result<Vec<WindowSnapshot>, AttachError> {
+        let dead_letters = self.dead_letters();
         let renderer = Renderer {
             pg: &self.pg,
             chunks: &self.chunks,
             rls: self.registry.rls(),
+            dead_letters: Some(&dead_letters),
         };
         let mut snapshots = Vec::with_capacity(specs.len());
         for spec in specs {

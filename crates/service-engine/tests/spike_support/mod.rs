@@ -8,7 +8,7 @@ use futures_util::future::BoxFuture;
 use idle_runtime::idle_runtime;
 use serde::{Deserialize, Serialize};
 use service_engine::accumulator::{Accumulator, AccumulatorRuntime, ChunkReader, ChunkSeq};
-use service_engine::cohort::CohortKey;
+use service_engine::cohort::{Cohort, CohortKey};
 use service_engine::delta::ErasedView;
 use service_engine::dyn_compat::{
     ErasedLoadScope, ErasedPopulation, ErasedProjector, erase_projector,
@@ -129,7 +129,7 @@ impl Projector for Assignments {
     }
 
     fn cohort(&self, principal: &Viewer) -> CohortKey {
-        CohortKey::of(&[principal.tenant])
+        Cohort::uuid("tenant", principal.tenant).key()
     }
 }
 

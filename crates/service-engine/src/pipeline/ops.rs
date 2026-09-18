@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,23 +17,26 @@ use crate::persistence::{Aggregate, Persistence};
 use crate::pipeline::outbound::{
     OutboundCommand, OutboundContext, OutboundEvent, command_record, event_record,
 };
-use crate::pipeline::policy::{PostSave, PostSavePolicies, Refused};
-use crate::pipeline::staged::{ScheduledMessage, Staged};
+use crate::pipeline::policy::{AggregatePolicy, Policies, PostSave, Refused, Saved};
+use crate::pipeline::staged::{RefusalOrigin, ScheduledMessage, Staged, StagedRefusal};
 use crate::principal::PrincipalId;
 use crate::relays::outbox::OutboxRecord;
 use crate::time::Timestamp;
 use crate::wire::{Cause, Noun, encode_key};
+
+const KEY_REUSED: Reason = Reason::new("KEY_REUSED");
 
 pub struct Ops<'a> {
     pub(crate) conn: &'a mut PgConnection,
     pub(crate) staged: &'a mut Staged,
     pub(crate) accumulators: &'a AccumulatorRuntime,
     pub(crate) offers: Arc<OfferStagers>,
-    pub(crate) policies: Arc<PostSavePolicies>,
+    pub(crate) policies: Arc<Policies>,
     pub(crate) blobs: Option<&'a BlobHandle>,
     pub(crate) now: Timestamp,
     outbound: Option<OutboundContext>,
     blob_seen: HashMap<(TypeId, Vec<u8>), Vec<BlobRef>>,
+    loaded: HashMap<(TypeId, Vec<u8>), Box<dyn Any + Send + Sync>>,
 }
 
 impl<'a> Ops<'a> {
@@ -42,7 +45,7 @@ impl<'a> Ops<'a> {
         staged: &'a mut Staged,
         accumulators: &'a AccumulatorRuntime,
         offers: Arc<OfferStagers>,
-        policies: Arc<PostSavePolicies>,
+        policies: Arc<Policies>,
         blobs: Option<&'a BlobHandle>,
         now: Timestamp,
     ) -> Self {
@@ -56,6 +59,7 @@ impl<'a> Ops<'a> {
             now,
             outbound: None,
             blob_seen: HashMap::new(),
+            loaded: HashMap::new(),
         }
     }
 
@@ -89,29 +93,11 @@ impl<'a> Ops<'a> {
         lock_aggregate::<A>(self.conn, key).await?;
         let loaded = A::Store::load(self.conn, key).await?;
         if let Some(aggregate) = &loaded {
-            let reconcile_key = reconcile_key::<A>(aggregate)?;
-            self.blob_seen.insert(reconcile_key, aggregate.blob_refs());
+            self.remember::<A>(aggregate)?;
         }
         Ok(loaded)
     }
 
-    /// Load several aggregates of one noun in a single pipeline transaction,
-    /// each locked for the transaction, so their invariants can be judged and
-    /// their writes committed together with no partial visibility.
-    ///
-    /// The keys are deduplicated and then locked in ascending order of their
-    /// encoded bytes before any row is read. This ascending order is the
-    /// engine's global aggregate-lock discipline: because every transaction
-    /// that touches an overlapping set acquires the shared locks in the same
-    /// order, two concurrent multi-aggregate writes can never deadlock, and a
-    /// service that needs to mutate several aggregates atomically never has to
-    /// reach for a global advisory lock of its own. To hold aggregates of
-    /// *different* nouns in one transaction, call `load`/`load_many` in
-    /// ascending order of `(store type name, encoded key bytes)` — the same
-    /// order this method imposes within a noun.
-    ///
-    /// Absent keys are omitted from the result, as with a batched read; the
-    /// returned aggregates are in the locked (ascending-key) order.
     pub async fn load_many<A: Aggregate>(
         &mut self,
         keys: &[<A::Store as Persistence>::Key],
@@ -122,15 +108,10 @@ impl<'a> Ops<'a> {
         }
         let sorted_keys: Vec<_> = ordered.into_iter().map(|(key, _)| key).collect();
         let loaded = A::Store::read_many(self.conn, &sorted_keys).await?;
-        // `read_many` may return rows in any order — a `WHERE id = ANY($1)` set
-        // query yields Postgres physical order, not key order — so re-key the
-        // batch and emit it in the locked ascending-key order the rustdoc
-        // promises. Absent keys are simply not produced.
         let ordered_aggregates = in_locked_order::<A>(loaded, &sorted_keys);
         let mut aggregates = Vec::with_capacity(ordered_aggregates.len());
         for aggregate in ordered_aggregates {
-            let reconcile_key = reconcile_key::<A>(&aggregate)?;
-            self.blob_seen.insert(reconcile_key, aggregate.blob_refs());
+            self.remember::<A>(&aggregate)?;
             aggregates.push(aggregate);
         }
         Ok(aggregates)
@@ -140,55 +121,43 @@ impl<'a> Ops<'a> {
         let outcome = A::Store::save(self.conn, aggregate, aggregate.pending_events()).await;
         self.note_terminal(&outcome);
         outcome?;
-        self.run_post_save::<A>(aggregate)?;
+        self.run_save_policy::<A>(aggregate)?;
         self.offers
             .stage_for(aggregate, &mut self.staged.offer_dirty)?;
-        self.reconcile_blobs::<A>(aggregate)
+        self.reconcile_blobs::<A>(aggregate)?;
+        self.remember::<A>(aggregate)
     }
 
     pub async fn create<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let key = aggregate.key();
+        lock_aggregate::<A>(self.conn, &key).await?;
+        if A::Store::load(self.conn, &key).await?.is_some() {
+            self.record_policy_refusal(KEY_REUSED, RefusalOrigin::CreatePrecondition);
+            return Err(EngineError::KeyReused {
+                store: std::any::type_name::<A::Store>(),
+                key: render_key::<A>(&key),
+            });
+        }
         let outcome = A::Store::create(self.conn, aggregate, aggregate.pending_events()).await;
         self.note_terminal(&outcome);
         outcome?;
-        self.run_post_save::<A>(aggregate)?;
+        self.run_create_policy::<A>(aggregate)?;
         self.offers
             .stage_for(aggregate, &mut self.staged.offer_dirty)?;
-        self.reconcile_blobs::<A>(aggregate)
+        self.reconcile_blobs::<A>(aggregate)?;
+        self.remember::<A>(aggregate)
     }
 
-    /// Run the post-save policy registered for `A`, if any, over the aggregate
-    /// the store just wrote. A refusal is recorded on `staged` and surfaced as
-    /// [`EngineError::PolicyRefused`]; the pipeline maps it to the mutation's
-    /// reason code (or a reaction dead-letter) and rolls the transaction back.
-    fn run_post_save<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
-        let Some(policy) = self.policies.get::<A>() else {
-            return Ok(());
-        };
-        let outcome = {
-            let mut post_save = PostSave::new(self);
-            policy.run(aggregate, &mut post_save)
-        };
-        match outcome {
-            Ok(()) => Ok(()),
-            Err(Refused(reason)) => {
-                self.record_policy_refusal(reason);
-                Err(EngineError::PolicyRefused {
-                    code: reason.code(),
-                })
-            }
-        }
-    }
-
-    pub(crate) fn record_policy_refusal(&mut self, reason: Reason) {
-        if self.staged.policy_refusal.is_none() {
-            self.staged.policy_refusal = Some(reason);
-        }
-    }
-
-    pub fn delete<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+    pub async fn delete<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        self.run_delete_policy::<A>(aggregate)?;
+        let key = aggregate.key();
+        let outcome = A::Store::delete(self.conn, &key).await;
+        self.note_terminal(&outcome);
+        outcome?;
         self.offers
             .stage_for(aggregate, &mut self.staged.offer_dirty)?;
         let reconcile_key = reconcile_key::<A>(aggregate)?;
+        self.loaded.remove(&reconcile_key);
         let mut released = self.blob_seen.remove(&reconcile_key).unwrap_or_default();
         for reference in aggregate.blob_refs() {
             if !released.contains(&reference) {
@@ -200,6 +169,74 @@ impl<'a> Ops<'a> {
                 .blob_ops
                 .push(BlobRowOp::Orphan(reference, self.now));
         }
+        Ok(())
+    }
+
+    fn run_save_policy<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let Some(policy) = self.policies.save.get::<A>() else {
+            return Ok(());
+        };
+        let reconcile_key = reconcile_key::<A>(aggregate)?;
+        let prior: Option<A> = self
+            .loaded
+            .get(&reconcile_key)
+            .and_then(|held| held.downcast_ref::<A>())
+            .cloned();
+        self.dispatch_policy::<A>(policy, prior.as_ref(), aggregate)
+    }
+
+    fn run_create_policy<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let Some(policy) = self.policies.save.get::<A>() else {
+            return Ok(());
+        };
+        self.dispatch_policy::<A>(policy, None, aggregate)
+    }
+
+    fn run_delete_policy<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let Some(policy) = self.policies.delete.get::<A>() else {
+            return Ok(());
+        };
+        self.dispatch_policy::<A>(policy, Some(aggregate), aggregate)
+    }
+
+    fn dispatch_policy<A: Aggregate>(
+        &mut self,
+        policy: Arc<dyn AggregatePolicy<A>>,
+        prior: Option<&A>,
+        aggregate: &A,
+    ) -> Result<(), EngineError> {
+        let saved = Saved {
+            prior,
+            next: aggregate,
+            events: aggregate.pending_events(),
+        };
+        let outcome = {
+            let mut post_save = PostSave::new(self);
+            policy.run(saved, &mut post_save)
+        };
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(Refused(reason)) => {
+                self.record_policy_refusal(reason, RefusalOrigin::PostSavePolicy);
+                Err(EngineError::PolicyRefused {
+                    code: reason.code(),
+                })
+            }
+        }
+    }
+
+    pub(crate) fn record_policy_refusal(&mut self, reason: Reason, origin: RefusalOrigin) {
+        if self.staged.policy_refusal.is_none() {
+            self.staged.policy_refusal = Some(StagedRefusal { reason, origin });
+        }
+    }
+
+    fn remember<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
+        let reconcile_key = reconcile_key::<A>(aggregate)?;
+        self.blob_seen
+            .insert(reconcile_key.clone(), aggregate.blob_refs());
+        self.loaded
+            .insert(reconcile_key, Box::new(aggregate.clone()));
         Ok(())
     }
 
@@ -215,7 +252,6 @@ impl<'a> Ops<'a> {
                 }
             }
         }
-        self.blob_seen.insert(reconcile_key, new_refs);
         Ok(())
     }
 
@@ -327,13 +363,12 @@ fn key_bytes<A: Aggregate>(key: &<A::Store as Persistence>::Key) -> Result<Vec<u
     })
 }
 
-/// An aggregate key paired with its canonical encoded bytes, the value the lock
-/// order is taken over.
+fn render_key<A: Aggregate>(key: &<A::Store as Persistence>::Key) -> String {
+    serde_json::to_string(key).unwrap_or_else(|_| "<unrenderable key>".to_string())
+}
+
 type KeyWithBytes<A> = (<<A as Aggregate>::Store as Persistence>::Key, Vec<u8>);
 
-/// Deduplicate `keys` and pair each with its encoded bytes, sorted ascending by
-/// those bytes. This is the deterministic order `load_many` locks in, so any two
-/// transactions locking an overlapping set take the shared locks in one order.
 fn lock_order<A: Aggregate>(
     keys: &[<A::Store as Persistence>::Key],
 ) -> Result<Vec<KeyWithBytes<A>>, EngineError> {
@@ -349,13 +384,6 @@ fn lock_order<A: Aggregate>(
     Ok(ordered)
 }
 
-/// Re-key a `read_many` batch and yield its aggregates in `order` — the locked
-/// ascending-key order `load_many` promises. `read_many` may return rows in any
-/// order (an `id = ANY($1)` set query gives Postgres physical order), so the
-/// batch is indexed by key and drained in `order`. A key in `order` that is
-/// absent from the batch (an aggregate that does not exist) is skipped, and a
-/// row whose key is not in `order` cannot occur — the batch was read for exactly
-/// these keys.
 fn in_locked_order<A: Aggregate>(
     loaded: Vec<(<A::Store as Persistence>::Key, A)>,
     order: &[<A::Store as Persistence>::Key],
@@ -364,9 +392,6 @@ fn in_locked_order<A: Aggregate>(
     order.iter().filter_map(|key| by_key.remove(key)).collect()
 }
 
-/// Take the transaction-scoped advisory lock and the store's row lock for one
-/// aggregate key, in that order. The advisory lock serializes concurrent
-/// commands on the same aggregate even for stores whose `lock` is a no-op.
 async fn lock_aggregate<A: Aggregate>(
     conn: &mut PgConnection,
     key: &<A::Store as Persistence>::Key,
@@ -396,6 +421,7 @@ mod lock_order_tests {
     use crate::persistence::PersistenceStyle;
     use futures_util::future::BoxFuture;
 
+    #[derive(Clone)]
     struct Widget(String);
     struct WidgetStore;
 
@@ -444,8 +470,6 @@ mod lock_order_tests {
 
     #[test]
     fn keys_are_locked_in_ascending_encoded_order_whatever_the_input_order() {
-        // Two transactions handed the same set in opposite orders must lock it
-        // in one order, or they can deadlock.
         assert_eq!(order(&["c", "a", "b"]), vec!["a", "b", "c"]);
         assert_eq!(order(&["b", "c", "a"]), vec!["a", "b", "c"]);
     }
@@ -466,9 +490,6 @@ mod lock_order_tests {
 
     #[test]
     fn a_batch_returned_out_of_order_is_re_emitted_in_the_locked_order() {
-        // `read_many` handed back in c, a, b order (as a set query would); the
-        // locked order is a, b, c. The result must follow the locked order, not
-        // the batch's arrival order.
         let loaded = vec![
             ("c".to_string(), widget("c")),
             ("a".to_string(), widget("a")),
@@ -484,7 +505,6 @@ mod lock_order_tests {
 
     #[test]
     fn an_absent_key_is_omitted_and_the_rest_keep_the_locked_order() {
-        // `b` was not found by the read; the result skips it and keeps a, c.
         let loaded = vec![
             ("c".to_string(), widget("c")),
             ("a".to_string(), widget("a")),

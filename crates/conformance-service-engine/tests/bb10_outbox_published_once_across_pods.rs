@@ -109,7 +109,7 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
     loop {
         let published = scalar_by_subject(
             &world.db.app,
-            "SELECT count(*) FROM integration_outbox WHERE subject = $1 AND status = 'PUBLISHED'",
+            "SELECT count(*) FROM service_engine.integration_outbox WHERE subject = $1 AND status = 'PUBLISHED'",
             &subject,
         )
         .await;
@@ -127,7 +127,7 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
     assert_eq!(
         scalar_by_subject(
             &world.db.app,
-            "SELECT count(*) FROM integration_outbox WHERE subject = $1",
+            "SELECT count(*) FROM service_engine.integration_outbox WHERE subject = $1",
             &subject,
         )
         .await,
@@ -137,7 +137,7 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
     assert_eq!(
         scalar_by_subject(
             &world.db.app,
-            "SELECT count(*) FROM integration_outbox WHERE subject = $1 AND status = 'PUBLISHED'",
+            "SELECT count(*) FROM service_engine.integration_outbox WHERE subject = $1 AND status = 'PUBLISHED'",
             &subject,
         )
         .await,

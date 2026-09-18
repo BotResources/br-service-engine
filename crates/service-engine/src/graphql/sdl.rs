@@ -1,15 +1,3 @@
-//! Reading GraphQL membership from the type system itself, never from a
-//! hand-maintained table.
-//!
-//! Two shapes are read here. A *fragment* is derived from the async-graphql
-//! `#[Object]`/`#[SimpleObject]` impls of its root objects, through the
-//! introspection [`Registry`] every output type registers itself into — so a
-//! slice never restates the root fields and object types it already declared in
-//! code. The composed *schema* is read back from its exported SDL with the real
-//! GraphQL parser, so the boot gate sees exactly what clients will see —
-//! block-string descriptions, wrapped prose and all — instead of a
-//! line-oriented guess that mistook a wrapped description for a phantom field.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -20,16 +8,15 @@ use async_graphql::{EmptyMutation, EmptySubscription, ObjectType, SubscriptionTy
 
 use crate::error::EngineError;
 
-/// The root field names and owned object-type names a set of root objects
-/// introduce, read from the type system rather than declared by hand.
+const LANES_PAUSED_TYPE: &str = "LanesPaused";
+const LANES_RESUMED_TYPE: &str = "LanesResumed";
+
 pub(crate) struct DerivedMembers {
     pub root_fields: Vec<String>,
     pub object_types: Vec<String>,
+    pub reactive_envelopes: BTreeSet<String>,
 }
 
-/// Derive the members a capability fragment contributes from its three root
-/// objects. Absent roots are the async-graphql idiom `EmptyMutation` /
-/// `EmptySubscription`; their (empty) type infos contribute nothing.
 pub(crate) fn derive_members<Q, M, S>() -> DerivedMembers
 where
     Q: ObjectType,
@@ -37,8 +24,6 @@ where
     S: SubscriptionType,
 {
     let mut registry = Registry::default();
-    // `create_type_info` returns the wrapped type reference (`BoardQuery!`),
-    // while the registry is keyed by the concrete type name (`BoardQuery`).
     let query = MetaTypeName::concrete_typename(&Q::create_type_info(&mut registry)).to_string();
     let mutation = MetaTypeName::concrete_typename(&M::create_type_info(&mut registry)).to_string();
     let subscription =
@@ -52,31 +37,42 @@ where
 fn members_from_registry(registry: &Registry, roots: &BTreeSet<&str>) -> DerivedMembers {
     let mut root_fields = Vec::new();
     let mut object_types = Vec::new();
+    let mut unions = Vec::new();
     for (name, ty) in &registry.types {
         if name.starts_with("__") {
             continue;
         }
-        let MetaType::Object { fields, .. } = ty else {
-            continue;
-        };
-        if roots.contains(name.as_str()) {
-            root_fields.extend(fields.keys().filter(|f| !f.starts_with("__")).cloned());
-        } else {
-            object_types.push(name.clone());
+        match ty {
+            MetaType::Object { fields, .. } => {
+                if roots.contains(name.as_str()) {
+                    root_fields.extend(fields.keys().filter(|f| !f.starts_with("__")).cloned());
+                } else {
+                    object_types.push(name.clone());
+                }
+            }
+            MetaType::Union { possible_types, .. } => {
+                unions.push(possible_types.iter().cloned().collect());
+            }
+            _ => {}
         }
     }
     DerivedMembers {
         root_fields,
         object_types,
+        reactive_envelopes: reactive_envelopes(&unions),
     }
 }
 
-/// The object types the engine injects into every service's schema, derived
-/// from the engine's own wrapper types rather than a magic-string list — a new
-/// engine wrapper is recognised by adding it to [`EngineWrappers`], one place,
-/// engine-side. These are excluded from a fragment's owned types (so two slices
-/// referencing `MutationAck` do not collide) and allowed by the completeness
-/// gate (so they need no fragment to claim them).
+fn reactive_envelopes(unions: &[BTreeSet<String>]) -> BTreeSet<String> {
+    let mut envelopes = BTreeSet::new();
+    for members in unions {
+        if members.contains(LANES_PAUSED_TYPE) && members.contains(LANES_RESUMED_TYPE) {
+            envelopes.extend(members.iter().cloned());
+        }
+    }
+    envelopes
+}
+
 pub(crate) fn engine_injected_object_types() -> &'static BTreeSet<String> {
     static SET: OnceLock<BTreeSet<String>> = OnceLock::new();
     SET.get_or_init(|| {
@@ -87,8 +83,6 @@ pub(crate) fn engine_injected_object_types() -> &'static BTreeSet<String> {
     })
 }
 
-/// A reference query that names every engine-injected output object type, so
-/// the set above is read from the type system, not restated as strings.
 #[derive(Default)]
 struct EngineWrappers;
 
@@ -107,16 +101,12 @@ impl EngineWrappers {
     }
 }
 
-/// The root fields and object types a composed schema exposes, read from its
-/// exported SDL with the GraphQL parser.
 pub(crate) struct ParsedSchema {
     pub root_fields: Vec<String>,
     pub object_types: Vec<String>,
+    pub reactive_envelopes: BTreeSet<String>,
 }
 
-/// Parse a composed schema's SDL and read back the fields on its root types and
-/// the object types it defines. Uses the real parser, so a wrapped or
-/// block-string field description is never mistaken for a root field.
 pub(crate) fn parse_schema_members(sdl: &str) -> Result<ParsedSchema, EngineError> {
     let document = parse_schema(sdl).map_err(|error| EngineError::SchemaParse {
         detail: error.to_string(),
@@ -124,6 +114,7 @@ pub(crate) fn parse_schema_members(sdl: &str) -> Result<ParsedSchema, EngineErro
 
     let mut declared_roots: Option<BTreeSet<String>> = None;
     let mut objects: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut unions: Vec<BTreeSet<String>> = Vec::new();
     for definition in document.definitions {
         match definition {
             TypeSystemDefinition::Schema(schema) => {
@@ -139,17 +130,29 @@ pub(crate) fn parse_schema_members(sdl: &str) -> Result<ParsedSchema, EngineErro
             }
             TypeSystemDefinition::Type(type_def) => {
                 let type_def = type_def.node;
-                if let TypeKind::Object(object) = type_def.kind {
-                    let name = type_def.name.node.to_string();
-                    if name.starts_with("__") {
-                        continue;
+                let name = type_def.name.node.to_string();
+                if name.starts_with("__") {
+                    continue;
+                }
+                match type_def.kind {
+                    TypeKind::Object(object) => {
+                        let fields = object
+                            .fields
+                            .into_iter()
+                            .map(|field| field.node.name.node.to_string())
+                            .collect();
+                        objects.insert(name, fields);
                     }
-                    let fields = object
-                        .fields
-                        .into_iter()
-                        .map(|field| field.node.name.node.to_string())
-                        .collect();
-                    objects.insert(name, fields);
+                    TypeKind::Union(union) => {
+                        unions.push(
+                            union
+                                .members
+                                .into_iter()
+                                .map(|member| member.node.to_string())
+                                .collect(),
+                        );
+                    }
+                    _ => {}
                 }
             }
             TypeSystemDefinition::Directive(_) => {}
@@ -176,6 +179,7 @@ pub(crate) fn parse_schema_members(sdl: &str) -> Result<ParsedSchema, EngineErro
     Ok(ParsedSchema {
         root_fields,
         object_types,
+        reactive_envelopes: reactive_envelopes(&unions),
     })
 }
 
@@ -185,9 +189,6 @@ mod tests {
 
     #[test]
     fn a_block_string_description_that_wraps_onto_a_field_shaped_line_is_not_a_root_field() {
-        // The exact shape that broke boot: a `"""` description whose second line
-        // begins `word (` — a line-oriented scanner reads it as a phantom root
-        // field, the parser does not.
         let sdl = "\"\"\"\nDescribes the widget query (see the manual).\nfoo: not a field\n\"\"\"\n\
                    type Query {\n\twidget(id: UUID!): WidgetView\n}\n\
                    type WidgetView {\n\tid: UUID!\n}\n";
@@ -219,5 +220,27 @@ mod tests {
         assert!(injected.contains("MutationAck"));
         assert!(injected.contains("LanesPaused"));
         assert!(injected.contains("LanesResumed"));
+    }
+
+    #[test]
+    fn a_delta_union_with_both_lane_notices_yields_its_object_members_as_envelopes() {
+        let sdl = "type Subscription {\n\twidgets: WidgetDelta\n}\n\
+                   union WidgetDelta = WidgetReset | WidgetUpsert | WidgetRemove | LanesPaused | LanesResumed\n\
+                   type WidgetReset {\n\trevision: Int!\n}\ntype WidgetUpsert {\n\trevision: Int!\n}\n\
+                   type WidgetRemove {\n\trevision: Int!\n}\n\
+                   type LanesPaused {\n\tid: Int!\n}\ntype LanesResumed {\n\tid: Int!\n}\n";
+        let parsed = parse_schema_members(sdl).expect("a delta union parses");
+        assert!(parsed.reactive_envelopes.contains("WidgetReset"));
+        assert!(parsed.reactive_envelopes.contains("WidgetUpsert"));
+        assert!(parsed.reactive_envelopes.contains("WidgetRemove"));
+    }
+
+    #[test]
+    fn a_view_union_without_the_lane_notices_yields_no_envelopes() {
+        let sdl = "type Query {\n\twidget: WidgetView\n}\n\
+                   union ProjectedView = WidgetView | AssignmentView\n\
+                   type WidgetView {\n\tid: Int!\n}\ntype AssignmentView {\n\tid: Int!\n}\n";
+        let parsed = parse_schema_members(sdl).expect("a view union parses");
+        assert!(parsed.reactive_envelopes.is_empty());
     }
 }

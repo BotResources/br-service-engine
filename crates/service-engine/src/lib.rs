@@ -42,6 +42,7 @@ pub mod schema;
 pub mod schema_version;
 pub mod scopes;
 pub mod session;
+pub mod stop;
 pub mod time;
 pub mod view;
 pub mod visibility;
@@ -84,7 +85,7 @@ pub use accumulator::{
 pub use blobs::{
     Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
 };
-pub use cohort::CohortKey;
+pub use cohort::{Cohort, CohortKey, CohortValue};
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use db::{connect_pool, validate_database_tls};
@@ -103,7 +104,6 @@ pub use graphql::{
     PassportPrincipal, PrincipalRejected, Query, SchemaSlices, SliceFragment, ack, ack_bulk, app,
     attach, attach_with_session, cause_json, engine_schema, execute, execute_bulk, key_json,
     lane_notice_stream, mutation_error, page, serve, typed_presence_view, typed_view,
-    with_edge_observability,
 };
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
@@ -142,7 +142,7 @@ pub use pipeline::{
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
     Reaction, Refused,
 };
-pub use population::{Interest, Inverse, Population, WindowQuery};
+pub use population::{Interest, Inverse, InverseLookup, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope};
@@ -171,3 +171,7 @@ pub use visibility::{
     check_window_matches_visibility,
 };
 pub use wire::{Cause, KeyBytes, Noun, ViewBytes};
+
+pub use mirror::{OfferManifest, manifest_key};
+
+pub use graphql::{FORBIDDEN_CODE, coded_error, forbidden};

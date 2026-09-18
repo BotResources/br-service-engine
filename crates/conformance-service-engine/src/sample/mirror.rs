@@ -10,7 +10,7 @@ use service_engine::mirror::{
 use service_engine::name::MirrorName;
 use service_engine::nats::{KvKey, Nats};
 use service_engine::transport::ImpactTransport;
-use service_engine::{Consumed, Shadows};
+use service_engine::{Consumed, OfferManifest, Shadows, manifest_key};
 use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
@@ -18,13 +18,21 @@ pub const DIRECTORY_MIRROR: MirrorName = MirrorName::from_static("directory");
 const USER_PREFIX: &str = "identity/users/";
 const USER_NAMESPACE: &str = "identity.user";
 
+pub const REQUIRED_USER_KEY: &str = "identity/users/00000000-0000-0000-0000-000000000009";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SamplePublishedUser {
     pub email: String,
+    #[serde(default)]
+    pub wire: Option<u16>,
 }
 
 impl Consumed for SamplePublishedUser {
     const PREFIX: &'static str = USER_PREFIX;
+
+    fn wire_version(value: &Self) -> Option<u16> {
+        value.wire
+    }
 }
 
 pub struct SampleDirectory {
@@ -41,6 +49,7 @@ impl SampleDirectory {
                         *id,
                         SamplePublishedUser {
                             email: (*email).to_string(),
+                            wire: None,
                         },
                     )
                 })
@@ -81,6 +90,111 @@ pub async fn retract_user(nats: &Nats, id: Uuid) {
         .retract(&user_key(id))
         .await
         .expect("retract a roster row the way identity would");
+}
+
+pub async fn publish_versioned_user(nats: &Nats, id: Uuid, email: &str, wire: u16) {
+    let bucket = nats
+        .published_language::<SamplePublishedUser>()
+        .await
+        .expect("bind the published-language bucket");
+    bucket
+        .put(
+            &user_key(id),
+            &SamplePublishedUser {
+                email: email.to_string(),
+                wire: Some(wire),
+            },
+        )
+        .await
+        .expect("publish a versioned roster row");
+}
+
+pub async fn publish_required_user(nats: &Nats, email: &str) {
+    let bucket = nats
+        .published_language::<SamplePublishedUser>()
+        .await
+        .expect("bind the published-language bucket");
+    bucket
+        .put(
+            &KvKey::new(REQUIRED_USER_KEY).expect("the required key is valid"),
+            &SamplePublishedUser {
+                email: email.to_string(),
+                wire: None,
+            },
+        )
+        .await
+        .expect("publish the required configuration key");
+}
+
+pub async fn retract_required_user(nats: &Nats) {
+    let bucket = nats
+        .published_language::<SamplePublishedUser>()
+        .await
+        .expect("bind the published-language bucket");
+    bucket
+        .retract(&KvKey::new(REQUIRED_USER_KEY).expect("the required key is valid"))
+        .await
+        .expect("retract the required configuration key");
+}
+
+pub async fn publish_offer_manifest(nats: &Nats, prefix: &str, version: u16) {
+    let bucket = nats
+        .published_language::<OfferManifest>()
+        .await
+        .expect("bind the published-language bucket");
+    bucket
+        .put(
+            &manifest_key(prefix).expect("a prefix yields a manifest key"),
+            &OfferManifest {
+                prefix: prefix.to_string(),
+                version,
+            },
+        )
+        .await
+        .expect("publish an offer manifest the way a producer would");
+}
+
+pub async fn read_offer_manifest(nats: &Nats, prefix: &str) -> Option<OfferManifest> {
+    let bucket = nats
+        .published_language::<OfferManifest>()
+        .await
+        .expect("bind the published-language bucket");
+    bucket
+        .get(&manifest_key(prefix).expect("a prefix yields a manifest key"))
+        .await
+        .expect("read an offer manifest")
+}
+
+pub async fn mirror_dead_letters(pool: &PgPool) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT reaction, subject FROM service_engine.dead_letter \
+         WHERE source = 'mirror' ORDER BY subject",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read the mirror dead-letter rows")
+}
+
+pub fn user_prefix() -> &'static str {
+    USER_PREFIX
+}
+
+pub fn required_key_mirror() -> MirrorReady<Uuid, impl Project<Uuid>> {
+    Mirror::new(DIRECTORY_MIRROR)
+        .consume::<SamplePublishedUser>()
+        .require_key::<SamplePublishedUser>(REQUIRED_USER_KEY)
+        .keyed_by(|_shadows: &Shadows, change: &Change| {
+            id_of(&change.key).into_iter().collect::<Vec<Uuid>>()
+        })
+        .project(DirectoryProjection)
+        .reconcile_keys(|pool: PgPool| {
+            Box::pin(async move {
+                let ids: Vec<Uuid> = sqlx::query_scalar("SELECT user_id FROM known_users")
+                    .fetch_all(&pool)
+                    .await?;
+                Ok(ids)
+            }) as BoxFuture<'static, Result<Vec<Uuid>, EngineError>>
+        })
 }
 
 struct KnownUser {

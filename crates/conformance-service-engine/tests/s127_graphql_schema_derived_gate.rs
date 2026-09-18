@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
-use conformance_service_engine::sample::graphql::boot_undeclared_root_field;
+use conformance_service_engine::sample::graphql::{
+    boot_graphql_service, boot_undeclared_root_field,
+};
 use service_engine::EngineError;
 
 #[tokio::test]
@@ -28,6 +30,19 @@ async fn s127_a_root_field_the_composed_schema_exposes_but_no_slice_declared_fai
          outside the collision gate: {outcome:?}"
     );
 
+    drop(nats);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s127_two_subscription_slices_sharing_one_delta_union_boot_without_a_synthetic_slice() {
+    let db = TestDb::fresh().await;
+    let nats = TestNats::spawn().await;
+    nats.provision().await;
+
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s127b", "pod-s127b").await;
+
+    service.shutdown().await;
     drop(nats);
     db.cleanup().await;
 }

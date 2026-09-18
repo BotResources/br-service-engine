@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use sqlx::{PgConnection, PgPool};
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::oneshot;
 
 use crate::accumulator::flush::{FlushBuffer, FlushOutcome, PendingChunk};
 use crate::accumulator::reader::ChunkReader;
@@ -13,6 +13,7 @@ use crate::chain::describe;
 use crate::error::EngineError;
 use crate::name::AccumulatorName;
 use crate::nats::{Nats, chunk_subject, streaming_stream, subject_token};
+use crate::stop::Stop;
 use crate::time::{self, Timestamp};
 use crate::transport::ImpactTransport;
 use crate::wire::{KeyBytes, Noun, encode_key};
@@ -192,7 +193,7 @@ impl AccumulatorRuntime {
         }
     }
 
-    pub async fn run(self: Arc<Self>, window: Duration, shutdown: Arc<Notify>) {
+    pub async fn run(self: Arc<Self>, window: Duration, shutdown: Arc<Stop>) {
         flush::run(self, window, shutdown).await
     }
 

@@ -8,6 +8,7 @@ use tokio::sync::OnceCell;
 
 use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
+use crate::mirror::OfferManifest;
 use crate::name::RelayName;
 use crate::nats::{KvBucket, Nats, NatsError, Revision};
 use crate::offer::Offer;
@@ -25,6 +26,7 @@ pub(crate) struct OfferRelay<O: Offer> {
     nats: Nats,
     leader: OfferLeader,
     bucket: OnceCell<KvBucket<O::Published>>,
+    manifest: OnceCell<KvBucket<OfferManifest>>,
     reconcile_period: Duration,
     last_reconcile: Mutex<Option<Instant>>,
     _offer: PhantomData<fn() -> O>,
@@ -42,6 +44,7 @@ impl<O: Offer> OfferRelay<O> {
             nats,
             leader,
             bucket: OnceCell::new(),
+            manifest: OnceCell::new(),
             reconcile_period,
             last_reconcile: Mutex::new(None),
             _offer: PhantomData,
@@ -77,6 +80,17 @@ impl<O: Offer> OfferRelay<O> {
             .await
     }
 
+    async fn manifest(&self) -> Result<&KvBucket<OfferManifest>, RelayError> {
+        self.manifest
+            .get_or_try_init(|| async {
+                self.nats
+                    .published_language::<OfferManifest>()
+                    .await
+                    .map_err(published_language)
+            })
+            .await
+    }
+
     async fn hosted_run(&self, pg: &PgPool, batch: usize) -> Result<Drained, RelayError> {
         let batch = batch.max(1);
         let Some(mut lease) = self.leader.claim(pg, &self.name).await? else {
@@ -85,8 +99,17 @@ impl<O: Offer> OfferRelay<O> {
         let due = self.reconcile_due();
         if due {
             let bucket = self.bucket().await?;
-            reconcile::reconcile::<O>(pg, &self.name, bucket, &self.leader, &mut lease, batch)
-                .await?;
+            let manifest = self.manifest().await?;
+            reconcile::reconcile::<O>(
+                pg,
+                &self.name,
+                bucket,
+                manifest,
+                &self.leader,
+                &mut lease,
+                batch,
+            )
+            .await?;
             self.mark_reconciled();
         }
         let drained = self.drain_batch(pg, &mut lease, batch).await?;

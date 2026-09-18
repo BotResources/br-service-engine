@@ -35,7 +35,7 @@ async fn s087_a_one_shot_secret_is_returned_only_on_the_synchronous_channel() {
     let secret = secret.into_inner();
     assert_eq!(secret, format!("secret-for-{widget}"));
 
-    let outbox: i64 = sqlx::query_scalar("SELECT count(*) FROM integration_outbox")
+    let outbox: i64 = sqlx::query_scalar("SELECT count(*) FROM service_engine.integration_outbox")
         .fetch_one(&pool)
         .await
         .expect("count outbox rows");

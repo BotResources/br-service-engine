@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use tokio::sync::Notify;
 use tokio::task::{JoinError, JoinHandle};
 
 use crate::engine::loops::join_presence;
@@ -10,16 +9,17 @@ use crate::inbound::InboundLoop;
 use crate::principal::Principal;
 use crate::readiness::ReadinessHandle;
 use crate::runtime::SessionRuntime;
+use crate::stop::Stop;
 
 pub(crate) struct StopHandles {
-    pub render: Arc<Notify>,
-    pub beat: Arc<Notify>,
-    pub flush: Arc<Notify>,
-    pub mirrors: Arc<Notify>,
-    pub presence: Arc<Notify>,
-    pub sched: Arc<Notify>,
-    pub ingress: Arc<Notify>,
-    pub purge: Arc<Notify>,
+    pub render: Arc<Stop>,
+    pub beat: Arc<Stop>,
+    pub flush: Arc<Stop>,
+    pub mirrors: Arc<Stop>,
+    pub presence: Arc<Stop>,
+    pub sched: Arc<Stop>,
+    pub ingress: Arc<Stop>,
+    pub purge: Arc<Stop>,
 }
 
 pub(crate) struct RunTasks<P: Principal> {
@@ -42,14 +42,14 @@ pub(crate) async fn finish<P: Principal>(
 ) -> Result<(), EngineError> {
     readiness_guard.set_not_ready(REASON_SHUTTING_DOWN);
     tasks.render_handle.begin_shutdown();
-    stops.render.notify_one();
-    stops.beat.notify_waiters();
-    stops.flush.notify_one();
-    stops.mirrors.notify_waiters();
-    stops.presence.notify_waiters();
-    stops.sched.notify_waiters();
-    stops.ingress.notify_one();
-    stops.purge.notify_one();
+    stops.render.stop();
+    stops.beat.stop();
+    stops.flush.stop();
+    stops.mirrors.stop();
+    stops.presence.stop();
+    stops.sched.stop();
+    stops.ingress.stop();
+    stops.purge.stop();
     if let Some(inbound) = tasks.inbound.take() {
         inbound.stop();
         inbound.join().await;

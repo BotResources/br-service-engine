@@ -47,24 +47,6 @@ fn rls_assignment_slice() -> SliceFragment {
     claims("rls_assignment", &["rlsAssignment"], &["AssignmentView"])
 }
 
-// The reactive delta envelope the `subscription_union!` macro generates
-// (`ResetPayload`/`UpsertPayload`/`RemovePayload`) is shared by every
-// subscription slice and owned by none of them — the subscription analogue of
-// the engine-injected `MutationAck`, but with names the macro invocation
-// chooses, so the static injected set cannot know them. A production slice
-// gives each aggregate its own union and lets `SliceFragment::derive` read
-// those payload types back; this synthetic fixture shares one union across the
-// widget and assignment slices, so it claims the envelope once, here, through
-// the low-level `from_claims` primitive. (`ProjectedView`/`EngineDelta` are
-// GraphQL unions, not object types, so the boot gate never asks for a claim.)
-fn reactive_envelope_slice() -> SliceFragment {
-    claims(
-        "reactive",
-        &[],
-        &["ResetPayload", "UpsertPayload", "RemovePayload"],
-    )
-}
-
 pub fn root_field_collision() -> SliceFragment {
     claims("shadow", &["widget"], &["ShadowView"])
 }
@@ -75,8 +57,8 @@ pub fn type_collision() -> SliceFragment {
 
 pub struct GraphqlService {
     pub base_url: String,
-    engine_stop: Arc<Notify>,
-    handle: JoinHandle<Result<(), service_engine::EngineError>>,
+    pub(super) engine_stop: Arc<Notify>,
+    pub(super) handle: JoinHandle<Result<(), service_engine::EngineError>>,
 }
 
 impl GraphqlService {
@@ -94,7 +76,7 @@ impl GraphqlService {
     }
 }
 
-fn base_config(channel: &str, pod: &str) -> EngineConfig {
+pub(super) fn base_config(channel: &str, pod: &str) -> EngineConfig {
     EngineConfig::new(
         ChannelName::new(channel).expect("a valid notify channel"),
         PodId::new(pod).expect("a valid pod id"),
@@ -105,7 +87,7 @@ fn base_config(channel: &str, pod: &str) -> EngineConfig {
     .with_lock_timeout(Duration::from_millis(300))
 }
 
-async fn free_loopback_addr() -> std::net::SocketAddr {
+pub(super) async fn free_loopback_addr() -> std::net::SocketAddr {
     let probe = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind a loopback port to discover a free address");
@@ -150,9 +132,6 @@ pub async fn boot_graphql_service(
     engine
         .register_schema_slice(assignment_slice())
         .expect("the assignment slice composes without colliding with the widget slice");
-    engine
-        .register_schema_slice(reactive_envelope_slice())
-        .expect("the shared reactive delta envelope is claimed once, by no domain slice");
 
     let readiness = engine.readiness();
     let engine_stop = engine.shutdown_handle();

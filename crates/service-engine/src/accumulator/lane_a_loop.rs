@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use async_nats::jetstream::consumer::Consumer;
 use async_nats::jetstream::consumer::pull::Config as PullConfig;
-use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::accumulator::ingress::StreamingIngress;
@@ -13,6 +12,7 @@ use crate::chain::describe;
 use crate::error::EngineError;
 use crate::inbound::{HealthTracker, InboundHealth, ServeExit, SupervisorConfig};
 use crate::nats::{Nats, streaming_stream, subject_token};
+use crate::stop::Stop;
 
 pub(crate) async fn validate_stream(
     nats: &Nats,
@@ -61,8 +61,8 @@ pub(crate) async fn spawn_lane_a(
     ack_wait: Duration,
     max_ack_pending: i64,
     health: InboundHealth,
-    stop_ingress: Arc<Notify>,
-    stop_purge: Arc<Notify>,
+    stop_ingress: Arc<Stop>,
+    stop_purge: Arc<Stop>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>), EngineError> {
     validate_stream(nats, &service, seal_retention).await?;
     let ingress_task = tokio::spawn(run_lane_a_supervised(
@@ -94,7 +94,7 @@ async fn run_lane_a_supervised(
     ack_wait: Duration,
     max_ack_pending: i64,
     health: InboundHealth,
-    stop: Arc<Notify>,
+    stop: Arc<Stop>,
 ) {
     let cfg = SupervisorConfig::default();
     let mut tracker = HealthTracker::new(
@@ -150,10 +150,10 @@ async fn run_lane_a_supervised(
     }
 }
 
-async fn sleep_or_notified(delay: Duration, stop: &Arc<Notify>) -> bool {
+async fn sleep_or_notified(delay: Duration, stop: &Arc<Stop>) -> bool {
     tokio::select! {
         biased;
-        () = stop.notified() => true,
+        () = stop.stopped() => true,
         () = tokio::time::sleep(delay) => false,
     }
 }
@@ -163,9 +163,9 @@ pub(crate) async fn run_purge(
     accumulators: Arc<AccumulatorRuntime>,
     service: String,
     interval: Duration,
-    shutdown: Arc<Notify>,
+    shutdown: Arc<Stop>,
 ) {
-    let stopping = shutdown.notified();
+    let stopping = shutdown.stopped();
     tokio::pin!(stopping);
     loop {
         tokio::select! {

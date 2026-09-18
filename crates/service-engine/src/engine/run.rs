@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
-use tokio::sync::Notify;
-
 use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
 use crate::engine::loops::{join_presence, run_scheduled_messages};
 use crate::error::EngineError;
 use crate::housekeeping::ready::REASON_WORKER_STOPPED;
 use crate::inbound::InboundLoop;
-use crate::pipeline::DirectPipeline;
+use crate::pipeline::{DirectPipeline, Policies};
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
+use crate::stop::Stop;
 use crate::transport::ImpactTransport;
 
 enum Boot {
@@ -25,10 +24,8 @@ impl<P: Principal> Engine<P> {
         if let Some(sdl) = &self.schema_sdl {
             slices.verify(sdl)?;
         }
-        // Every declared subjection must be honoured by a registered policy, or
-        // boot fails loudly here — the same registration gate the schema type
-        // check applies, so a missing cross-slice guard cannot ship silent.
-        self.post_save_seams.verify(&self.post_save)?;
+        self.policy_seams
+            .verify(&self.post_save, &self.post_delete)?;
         let render = self.render_runtime();
         let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =
             if self.erasables.is_empty() {
@@ -48,6 +45,7 @@ impl<P: Principal> Engine<P> {
             inbound_reactions,
             offers,
             post_save,
+            post_delete,
             presence,
             blobs,
             shutdown,
@@ -56,7 +54,10 @@ impl<P: Principal> Engine<P> {
             ..
         } = self;
         let offers = Arc::new(offers);
-        let post_save = Arc::new(post_save);
+        let policies = Arc::new(Policies {
+            save: post_save,
+            delete: post_delete,
+        });
         let readiness_guard = readiness.clone();
         let (mut beat, dead_letters, inbound_health) = crate::engine::wiring::wire_beat(
             beat,
@@ -71,12 +72,12 @@ impl<P: Principal> Engine<P> {
             erasure_drain,
         )?;
 
-        let stop_render = Arc::new(Notify::new());
-        let stop_beat = Arc::new(Notify::new());
-        let stop_flush = Arc::new(Notify::new());
-        let stop_mirrors = Arc::new(Notify::new());
-        let stop_presence = Arc::new(Notify::new());
-        let stop_sched = Arc::new(Notify::new());
+        let stop_render = Stop::new();
+        let stop_beat = Stop::new();
+        let stop_flush = Stop::new();
+        let stop_mirrors = Stop::new();
+        let stop_presence = Stop::new();
+        let stop_sched = Stop::new();
 
         let stopping = shutdown.notified();
         tokio::pin!(stopping);
@@ -92,12 +93,12 @@ impl<P: Principal> Engine<P> {
         match boot {
             Boot::Converged => {}
             Boot::ShuttingDown => {
-                stop_mirrors.notify_waiters();
+                stop_mirrors.stop();
                 render.shutdown().await;
                 return Ok(());
             }
             Boot::MirrorStopped => {
-                stop_mirrors.notify_waiters();
+                stop_mirrors.stop();
                 render.shutdown().await;
                 readiness_guard.set_not_ready(REASON_WORKER_STOPPED);
                 return Err(EngineError::WorkerStopped { worker: "mirror" });
@@ -130,8 +131,8 @@ impl<P: Principal> Engine<P> {
             }
             Err((error, reason)) => {
                 readiness_guard.set_not_ready(reason);
-                stop_mirrors.notify_waiters();
-                stop_presence.notify_waiters();
+                stop_mirrors.stop();
+                stop_presence.stop();
                 join_presence(presence_task.take()).await;
                 render.shutdown().await;
                 return Err(error);
@@ -144,8 +145,8 @@ impl<P: Principal> Engine<P> {
             tokio::pin!(handshake);
             let outcome = tokio::select! {
                 () = &mut stopping => {
-                    stop_mirrors.notify_waiters();
-                    stop_presence.notify_waiters();
+                    stop_mirrors.stop();
+                    stop_presence.stop();
                     join_presence(presence_task.take()).await;
                     render.shutdown().await;
                     return Ok(());
@@ -159,8 +160,8 @@ impl<P: Principal> Engine<P> {
                     "scope declaration did not complete; the pod stays out of rotation rather \
                      than serving with unconfirmed scopes"
                 );
-                stop_mirrors.notify_waiters();
-                stop_presence.notify_waiters();
+                stop_mirrors.stop();
+                stop_presence.stop();
                 join_presence(presence_task.take()).await;
                 render.shutdown().await;
                 return Err(EngineError::Scope(error));
@@ -181,7 +182,7 @@ impl<P: Principal> Engine<P> {
                 transport.clone() as Arc<dyn ImpactTransport>,
                 accumulators.clone(),
                 offers.clone(),
-                post_save.clone(),
+                policies.clone(),
                 reactions.clone(),
                 blob_handle.clone(),
                 config.lock_timeout,
@@ -211,8 +212,8 @@ impl<P: Principal> Engine<P> {
                 Ok(loop_handle) => Some(loop_handle),
                 Err(error) => {
                     readiness_guard.set_not_ready(crate::inbound::inbound_start_reason(&error));
-                    stop_mirrors.notify_waiters();
-                    stop_presence.notify_waiters();
+                    stop_mirrors.stop();
+                    stop_presence.stop();
                     join_presence(presence_task.take()).await;
                     render.shutdown().await;
                     return Err(error);
@@ -231,8 +232,8 @@ impl<P: Principal> Engine<P> {
             Ok(tasks) => tasks,
             Err(error) => {
                 readiness_guard.set_not_ready(crate::engine::lane_a::ingress_reason(&error));
-                stop_mirrors.notify_waiters();
-                stop_presence.notify_waiters();
+                stop_mirrors.stop();
+                stop_presence.stop();
                 join_presence(presence_task.take()).await;
                 if let Some(inbound) = inbound.take() {
                     inbound.stop();

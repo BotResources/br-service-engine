@@ -65,7 +65,7 @@ async fn s113_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_s
         .expect("the minted widget is in the view");
     assert_eq!(view["label"], serde_json::json!("vault"));
 
-    let outbox: i64 = sqlx::query_scalar("SELECT count(*) FROM integration_outbox")
+    let outbox: i64 = sqlx::query_scalar("SELECT count(*) FROM service_engine.integration_outbox")
         .fetch_one(&pool)
         .await
         .expect("count outbox rows");

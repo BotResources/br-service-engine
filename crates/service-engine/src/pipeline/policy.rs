@@ -1,20 +1,3 @@
-//! Post-save policies — the engine's answer to the cross-slice wiring that a
-//! slice was meant to call but never did.
-//!
-//! A slice declares, once, that an aggregate is *subject* to a policy; the
-//! engine then runs that policy after every `save`/`create` of the aggregate,
-//! inside the same transaction, before the commit. There is no call site to add
-//! at every mutation and reaction that touches the aggregate, so there is none
-//! to forget — the interlock cannot be written, tested, and then called from
-//! nowhere (the shape of every HIGH defect in the 0.1 rewrite).
-//!
-//! A policy is pure in the sense principle 18 means: it observes the aggregate
-//! the pipeline just saved and produces data — a refusal, or staged impacts,
-//! commands and events. Its two known uses are the Services **breach
-//! interlock** (refuse marking an item implemented while it carries an open
-//! breach) and the Runners **reconcile journal impact** (stage an impact for
-//! the reconcile journal after a runner is saved).
-
 use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
@@ -26,16 +9,13 @@ use sqlx::PgConnection;
 use crate::error::EngineError;
 use crate::gate::Reason;
 use crate::impact::Dims;
-use crate::persistence::Aggregate;
+use crate::persistence::{Aggregate, Persistence};
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::{OutboundCommand, OutboundEvent};
+use crate::pipeline::staged::RefusalOrigin;
 use crate::time::Timestamp;
 use crate::wire::Noun;
 
-/// The refusal a post-save policy returns to reject the write it just observed.
-///
-/// Obtain one from [`PostSave::refuse`] so the reason is recorded on the
-/// pipeline; returning `Err(Refused(..))` then propagates it out of the policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Refused(pub Reason);
 
@@ -45,11 +25,25 @@ impl From<Reason> for Refused {
     }
 }
 
-/// The context a post-save policy runs in.
-///
-/// It can read facts through [`PostSave::connection`], stage impacts, commands
-/// and events, and [`PostSave::refuse`] the write. It deliberately cannot save:
-/// a policy can never trigger itself, so there is no recursion to guard.
+pub struct Saved<'a, A: Aggregate> {
+    pub prior: Option<&'a A>,
+    pub next: &'a A,
+    pub events: &'a [<A::Store as Persistence>::Event],
+}
+
+impl<A: Aggregate> Saved<'_, A> {
+    pub fn transitioned<T, F>(&self, project: F) -> bool
+    where
+        T: PartialEq,
+        F: Fn(&A) -> T,
+    {
+        match self.prior {
+            Some(prior) => project(prior) != project(self.next),
+            None => true,
+        }
+    }
+}
+
 pub struct PostSave<'a, 'ops> {
     ops: &'a mut Ops<'ops>,
 }
@@ -87,18 +81,17 @@ impl<'a, 'ops> PostSave<'a, 'ops> {
         self.ops.emit(event)
     }
 
-    /// Refuse the write. The transaction is rolled back and the mutation answers
-    /// this reason code; a reaction that refuses is dead-lettered with it.
     pub fn refuse(&mut self, reason: Reason) -> Refused {
-        self.ops.record_policy_refusal(reason);
+        self.ops
+            .record_policy_refusal(reason, RefusalOrigin::PostSavePolicy);
         Refused(reason)
     }
 }
 
 type PolicyOutcome = Result<(), Refused>;
 
-pub(crate) trait ErasedPolicy: Send + Sync {
-    fn run(&self, aggregate: &dyn Any, ps: &mut PostSave<'_, '_>) -> PolicyOutcome;
+pub(crate) trait AggregatePolicy<A: Aggregate>: Send + Sync {
+    fn run(&self, saved: Saved<'_, A>, ps: &mut PostSave<'_, '_>) -> PolicyOutcome;
 }
 
 struct PolicyFor<A, F> {
@@ -106,53 +99,39 @@ struct PolicyFor<A, F> {
     _aggregate: PhantomData<fn() -> A>,
 }
 
-impl<A, F> ErasedPolicy for PolicyFor<A, F>
+impl<A, F> AggregatePolicy<A> for PolicyFor<A, F>
 where
     A: Aggregate,
-    F: Fn(&A, &mut PostSave<'_, '_>) -> PolicyOutcome + Send + Sync + 'static,
+    F: Fn(Saved<'_, A>, &mut PostSave<'_, '_>) -> PolicyOutcome + Send + Sync + 'static,
 {
-    fn run(&self, aggregate: &dyn Any, ps: &mut PostSave<'_, '_>) -> PolicyOutcome {
-        match aggregate.downcast_ref::<A>() {
-            Some(aggregate) => (self.policy)(aggregate, ps),
-            // Unreachable: dispatch is keyed by `TypeId::of::<A>()`, so the
-            // erased value is always an `A`. Treated as a no-op rather than a
-            // panic to keep the save path infallible on a would-be bug.
-            None => {
-                debug_assert!(
-                    false,
-                    "a post-save policy was dispatched on the wrong aggregate"
-                );
-                Ok(())
-            }
-        }
+    fn run(&self, saved: Saved<'_, A>, ps: &mut PostSave<'_, '_>) -> PolicyOutcome {
+        (self.policy)(saved, ps)
     }
 }
 
-/// The per-aggregate post-save policies, keyed by aggregate `TypeId`.
 #[derive(Default, Clone)]
-pub(crate) struct PostSavePolicies {
-    by_aggregate: BTreeMap<TypeId, Arc<dyn ErasedPolicy>>,
+pub(crate) struct AggregatePolicies {
+    by_aggregate: BTreeMap<TypeId, Arc<dyn Any + Send + Sync>>,
 }
 
-impl PostSavePolicies {
+impl AggregatePolicies {
     pub(crate) fn register<A, F>(&mut self, policy: F) -> Result<(), EngineError>
     where
         A: Aggregate,
-        F: Fn(&A, &mut PostSave<'_, '_>) -> PolicyOutcome + Send + Sync + 'static,
+        F: Fn(Saved<'_, A>, &mut PostSave<'_, '_>) -> PolicyOutcome + Send + Sync + 'static,
     {
         if self.by_aggregate.contains_key(&TypeId::of::<A>()) {
             return Err(EngineError::Config(format!(
-                "a post-save policy is already registered for aggregate {}",
+                "a policy is already registered for aggregate {}",
                 std::any::type_name::<A>()
             )));
         }
-        self.by_aggregate.insert(
-            TypeId::of::<A>(),
-            Arc::new(PolicyFor::<A, F> {
-                policy,
-                _aggregate: PhantomData,
-            }),
-        );
+        let erased: Arc<dyn AggregatePolicy<A>> = Arc::new(PolicyFor::<A, F> {
+            policy,
+            _aggregate: PhantomData,
+        });
+        self.by_aggregate
+            .insert(TypeId::of::<A>(), Arc::new(erased));
         Ok(())
     }
 
@@ -160,41 +139,62 @@ impl PostSavePolicies {
         self.by_aggregate.contains_key(&aggregate)
     }
 
-    pub(crate) fn get<A: Aggregate>(&self) -> Option<Arc<dyn ErasedPolicy>> {
-        self.by_aggregate.get(&TypeId::of::<A>()).cloned()
+    pub(crate) fn get<A: Aggregate>(&self) -> Option<Arc<dyn AggregatePolicy<A>>> {
+        self.by_aggregate
+            .get(&TypeId::of::<A>())
+            .and_then(|erased| erased.downcast_ref::<Arc<dyn AggregatePolicy<A>>>())
+            .cloned()
     }
 }
 
-/// Declared subjections that boot must find honoured.
-///
-/// A slice that owns an aggregate a *later* slice must guard cannot write the
-/// guard's call site — the later slice does not exist yet. So it declares the
-/// requirement here instead, and [`PostSaveSeams::verify`] turns an unhonoured
-/// declaration into a loud boot failure, the way the schema type gate turns an
-/// undeclared root field into one. A missing seam then has a positive form the
-/// compiler and the operator can see, rather than being the silent absence of a
-/// call.
+#[derive(Default, Clone)]
+pub(crate) struct Policies {
+    pub(crate) save: AggregatePolicies,
+    pub(crate) delete: AggregatePolicies,
+}
+
 #[derive(Default)]
-pub(crate) struct PostSaveSeams {
-    required: Vec<(TypeId, &'static str)>,
+pub(crate) struct PolicySeams {
+    save: Vec<(TypeId, &'static str)>,
+    delete: Vec<(TypeId, &'static str)>,
 }
 
-impl PostSaveSeams {
-    pub(crate) fn require<A: Aggregate>(&mut self) {
-        let type_id = TypeId::of::<A>();
-        if !self.required.iter().any(|(id, _)| *id == type_id) {
-            self.required.push((type_id, std::any::type_name::<A>()));
-        }
+impl PolicySeams {
+    pub(crate) fn require_save<A: Aggregate>(&mut self) {
+        require::<A>(&mut self.save);
     }
 
-    pub(crate) fn verify(&self, policies: &PostSavePolicies) -> Result<(), EngineError> {
-        for (type_id, aggregate) in &self.required {
-            if !policies.contains(*type_id) {
-                return Err(EngineError::UnhonouredSeam { aggregate });
-            }
-        }
-        Ok(())
+    pub(crate) fn require_delete<A: Aggregate>(&mut self) {
+        require::<A>(&mut self.delete);
     }
+
+    pub(crate) fn verify(
+        &self,
+        save: &AggregatePolicies,
+        delete: &AggregatePolicies,
+    ) -> Result<(), EngineError> {
+        verify_against(&self.save, save)?;
+        verify_against(&self.delete, delete)
+    }
+}
+
+fn require<A: Aggregate>(into: &mut Vec<(TypeId, &'static str)>) {
+    let type_id = TypeId::of::<A>();
+    if !into.iter().any(|(id, _)| *id == type_id) {
+        into.push((type_id, std::any::type_name::<A>()));
+    }
+}
+
+fn verify_against(
+    required: &[(TypeId, &'static str)],
+    policies: &AggregatePolicies,
+) -> Result<(), EngineError> {
+    for (type_id, aggregate) in required {
+        if !policies.contains(*type_id) {
+            return Err(EngineError::UnhonouredSeam { aggregate });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -204,8 +204,10 @@ mod tests {
     use futures_util::future::BoxFuture;
     use sqlx::PgConnection;
 
+    #[derive(Clone)]
     struct Alpha;
     struct AlphaStore;
+    #[derive(Clone)]
     struct Beta;
     struct BetaStore;
 
@@ -250,41 +252,61 @@ mod tests {
 
     #[test]
     fn a_second_policy_for_one_aggregate_is_refused() {
-        let mut policies = PostSavePolicies::default();
+        let mut policies = AggregatePolicies::default();
         policies
-            .register::<Alpha, _>(|_a, _ps| Ok(()))
+            .register::<Alpha, _>(|_s, _ps| Ok(()))
             .expect("first policy registers");
-        let again = policies.register::<Alpha, _>(|_a, _ps| Ok(()));
+        let again = policies.register::<Alpha, _>(|_s, _ps| Ok(()));
         assert!(matches!(again, Err(EngineError::Config(_))));
     }
 
     #[test]
-    fn an_unhonoured_subjection_fails_verification_naming_the_aggregate() {
-        let mut seams = PostSaveSeams::default();
-        seams.require::<Alpha>();
-        let policies = PostSavePolicies::default();
-        let error = seams.verify(&policies).unwrap_err();
+    fn a_registered_policy_is_recovered_by_aggregate_type() {
+        let mut policies = AggregatePolicies::default();
+        policies.register::<Alpha, _>(|_s, _ps| Ok(())).unwrap();
+        assert!(policies.get::<Alpha>().is_some());
+        assert!(policies.get::<Beta>().is_none());
+    }
+
+    #[test]
+    fn an_unhonoured_save_subjection_fails_verification_naming_the_aggregate() {
+        let mut seams = PolicySeams::default();
+        seams.require_save::<Alpha>();
+        let policies = Policies::default();
+        let error = seams.verify(&policies.save, &policies.delete).unwrap_err();
         assert!(
             matches!(error, EngineError::UnhonouredSeam { aggregate } if aggregate.contains("Alpha"))
         );
     }
 
     #[test]
-    fn a_subjection_honoured_by_a_registered_policy_verifies() {
-        let mut seams = PostSaveSeams::default();
-        seams.require::<Alpha>();
-        seams.require::<Alpha>(); // idempotent
-        let mut policies = PostSavePolicies::default();
-        policies.register::<Alpha, _>(|_a, _ps| Ok(())).unwrap();
-        assert!(seams.verify(&policies).is_ok());
+    fn an_unhonoured_delete_subjection_fails_verification_naming_the_aggregate() {
+        let mut seams = PolicySeams::default();
+        seams.require_delete::<Beta>();
+        let mut policies = Policies::default();
+        policies.save.register::<Beta, _>(|_s, _ps| Ok(())).unwrap();
+        let error = seams.verify(&policies.save, &policies.delete).unwrap_err();
+        assert!(
+            matches!(error, EngineError::UnhonouredSeam { aggregate } if aggregate.contains("Beta")),
+            "a save policy does not honour a delete subjection"
+        );
     }
 
     #[test]
-    fn a_policy_for_a_different_aggregate_does_not_honour_the_seam() {
-        let mut seams = PostSaveSeams::default();
-        seams.require::<Alpha>();
-        let mut policies = PostSavePolicies::default();
-        policies.register::<Beta, _>(|_b, _ps| Ok(())).unwrap();
-        assert!(seams.verify(&policies).is_err());
+    fn a_subjection_honoured_by_a_registered_policy_verifies() {
+        let mut seams = PolicySeams::default();
+        seams.require_save::<Alpha>();
+        seams.require_save::<Alpha>();
+        seams.require_delete::<Alpha>();
+        let mut policies = Policies::default();
+        policies
+            .save
+            .register::<Alpha, _>(|_s, _ps| Ok(()))
+            .unwrap();
+        policies
+            .delete
+            .register::<Alpha, _>(|_s, _ps| Ok(()))
+            .unwrap();
+        assert!(seams.verify(&policies.save, &policies.delete).is_ok());
     }
 }

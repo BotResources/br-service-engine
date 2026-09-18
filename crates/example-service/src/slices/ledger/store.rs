@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use super::aggregate::{EVENT_VERSION, LedgerEvent, LedgerState, upcast};
 
+#[derive(Clone)]
 pub struct LedgerAggregate(pub LedgerState);
 
 pub type LedgerStore = FullEda<LedgerAggregate>;

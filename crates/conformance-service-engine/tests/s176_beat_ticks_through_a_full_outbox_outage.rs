@@ -85,20 +85,22 @@ async fn s176_a_full_outbox_never_freezes_the_beat_while_nats_is_down() {
         "readiness reflects the outage even while housekeeping keeps ticking"
     );
 
-    let pending: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'PENDING'")
-            .fetch_one(&pool)
-            .await
-            .expect("count the pending outbox rows");
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'PENDING'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count the pending outbox rows");
     assert_eq!(
         pending, BACKLOG as i64,
         "every committed row still waits: none was abandoned as FAILED during the outage"
     );
-    let failed: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'FAILED'")
-            .fetch_one(&pool)
-            .await
-            .expect("count the failed outbox rows");
+    let failed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'FAILED'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count the failed outbox rows");
     assert_eq!(failed, 0, "no outbox row is FAILED by an outage");
 
     running.abort();

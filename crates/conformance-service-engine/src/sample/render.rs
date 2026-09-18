@@ -15,7 +15,6 @@ use service_engine::session::{AttachRequest, SessionStream, WindowParams, Window
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use service_engine::CohortKey;
 use service_engine::wire::Cause;
 
 use crate::sample::assignment::Assignment;
@@ -109,23 +108,15 @@ pub async fn assignment(pool: &PgPool, tenant: Uuid, title: &str) -> Uuid {
     id
 }
 
-/// Seed an assignment with its cohort key materialised, so the `CohortIndex`
-/// seam on `AssignmentStore` can find it. `cohort_key` is exactly the key
-/// `AssignmentVisibility` derives from a principal in that tenant.
 pub async fn cohort_assignment(pool: &PgPool, tenant: Uuid, title: &str) -> Uuid {
     let id = Uuid::now_v7();
-    let cohort_key = CohortKey::of(&[tenant]);
-    sqlx::query(
-        "INSERT INTO sample_assignment (id, tenant_id, title, cohort_key) \
-         VALUES ($1, $2, $3, $4)",
-    )
-    .bind(id)
-    .bind(tenant)
-    .bind(title)
-    .bind(cohort_key.as_bytes())
-    .execute(pool)
-    .await
-    .expect("insert the cohort-indexed sample assignment");
+    sqlx::query("INSERT INTO sample_assignment (id, tenant_id, title) VALUES ($1, $2, $3)")
+        .bind(id)
+        .bind(tenant)
+        .bind(title)
+        .execute(pool)
+        .await
+        .expect("insert the cohort-indexed sample assignment");
     id
 }
 

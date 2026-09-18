@@ -28,11 +28,10 @@ fn url_for(admin: &str, role: &str, database: &str) -> String {
     )
 }
 
-/// The black-box database, provisioned the way GitOps provisions production: an owner
-/// role that owns the database, a low-privilege app role with only CONNECT, and nothing
-/// migrated. The spawned binary's boot kit runs the migrations under the owner role and
-/// grants the app role — so every black-box run exercises the real boot path, not a
-/// database the harness quietly migrated first.
+pub fn role_url(role: &str, database: &str) -> String {
+    url_for(&admin_url(), role, database)
+}
+
 pub struct BlackboxDb {
     pub admin: PgPool,
     pub app: PgPool,

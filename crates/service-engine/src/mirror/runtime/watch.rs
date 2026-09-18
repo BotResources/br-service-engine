@@ -6,20 +6,13 @@ use tokio::time::MissedTickBehavior;
 
 use crate::error::EngineError;
 
-use super::super::builder::Update;
+use super::super::consumption::{Effect, Update};
 use super::super::projection::Project;
 use super::super::watermark::{self, Mark, Snapshot};
-use super::{MirrorRuntime, Revisions, dedup, merge_forward};
+use super::{MirrorRuntime, Revisions, dedup, merge_forward, wire_version_reason};
 
-/// How many times a watch start may rescan a bucket whose read boundary is
-/// zero. A JetStream sequence never returns to zero, so one rescan settles it;
-/// the bound is there so a broker answering oddly cannot spin this loop.
 const ZERO_BOUNDARY_RESCANS: u32 = 3;
 
-/// One watch's items, followed by the marker that names it when it ends.
-/// `select_all` drops an exhausted stream silently, so a bucket could stop being
-/// watched with nothing said until the next periodic reconcile; the marker turns
-/// that silence into a reopen.
 enum Served {
     Update(Result<Update, EngineError>),
     Ended(&'static str),
@@ -39,13 +32,6 @@ where
         loop {
             let resume = self.settled_boundary().await?;
             let watches = self.open_watches(&resume).await?;
-            // The watches exist now. A bucket that resumed from zero opened a
-            // future-only `watch_all()`, so a put that landed between the
-            // boundary and this subscription reached nobody. Fresh metadata read
-            // *after* the subscription closes that window: whatever the bucket
-            // gained is either already on the open watch or is read here, and a
-            // reconcile settles both. Zero is every consumer's first boot, so
-            // this window is the common case, not the rare one.
             if self.zero_boundary_gained(&resume).await? {
                 drop(watches);
                 self.periodic_reconcile().await?;
@@ -78,11 +64,6 @@ where
         Ok(watches)
     }
 
-    /// `watch_all_from(0)` is future-only in the pinned client, so a bucket
-    /// whose read boundary is zero would hide a write that landed between the
-    /// scan and the watch. Rescan first, before opening anything, so no watch is
-    /// opened only to be dropped, and resume from a boundary that is either
-    /// nonzero or a genuinely empty bucket with nothing to miss.
     async fn settled_boundary(&self) -> Result<Revisions, EngineError> {
         for _ in 0..ZERO_BOUNDARY_RESCANS {
             let resume = self.read_revision.read().await.clone();
@@ -94,9 +75,6 @@ where
         Ok(self.read_revision.read().await.clone())
     }
 
-    /// Whether a bucket this mirror is resuming from zero has gained a sequence
-    /// since. A JetStream sequence never returns to zero, so an answer of `true`
-    /// is final: the bucket leaves the zero case for the life of the stream.
     async fn zero_boundary_gained(&self, resume: &Revisions) -> Result<bool, EngineError> {
         for (bucket, snapshot) in resume {
             if snapshot.revision == 0
@@ -111,9 +89,6 @@ where
         Ok(false)
     }
 
-    /// Runs the open watches until every one of them is gone (`true`), or until
-    /// one bucket needs its watch reopened (`false`): the periodic scan replaced
-    /// the boundary they resume from, or a single watch ended under them.
     async fn serve(&self, watches: Watches) -> Result<bool, EngineError> {
         let mut merged = futures_util::stream::select_all(watches);
         let mut beat = tokio::time::interval(self.renew_period());
@@ -131,8 +106,6 @@ where
                 }
                 _ = reconcile.tick() => {
                     self.periodic_reconcile().await?;
-                    // Reopen from the new boundary: whatever is buffered behind
-                    // these watches predates the scan that just replaced it.
                     return Ok(false);
                 }
                 item = merged.next() => match item {
@@ -159,22 +132,8 @@ where
             .await
             .get(update.bucket)
             .map(|snapshot| snapshot.created.clone());
-        // A watch opens only on a bucket a full read has snapshotted. If that
-        // ever stops holding, the event is skipped rather than panicked on: the
-        // next read is what would give it an identity to advance against.
         let Some(created) = snapshotted else {
             return Ok(());
-        };
-        let touched = {
-            let mut shadows = self.shadows.write().await;
-            // Key the change on both sides of it. A retract whose projection key
-            // lived only in the payload has no key left once the value is gone,
-            // and a put that moves a row to another key must retire the one it
-            // left; keying before and after covers both without a store scan.
-            let mut touched = (self.keyed_by)(&shadows, &update.change);
-            (update.apply)(&mut shadows);
-            touched.extend((self.keyed_by)(&shadows, &update.change));
-            dedup(touched)
         };
         let mut advance = Revisions::new();
         advance.insert(
@@ -184,9 +143,38 @@ where
                 revision: update.revision,
             },
         );
-        merge_forward(&mut *self.last_seen.write().await, &advance);
-        self.project_under_lease(touched, &advance, Mark::Advance)
-            .await?;
+        match update.effect {
+            Effect::Boundary => {
+                merge_forward(&mut *self.last_seen.write().await, &advance);
+                self.project_under_lease(Vec::new(), &advance, Mark::Advance)
+                    .await?;
+            }
+            Effect::WireVersionRejected { expected, found } => {
+                if let Some(change) = &update.change {
+                    self.dead_letter(change.key.as_str(), &wire_version_reason(expected, found))
+                        .await;
+                }
+                merge_forward(&mut *self.last_seen.write().await, &advance);
+                self.project_under_lease(Vec::new(), &advance, Mark::Advance)
+                    .await?;
+            }
+            Effect::Apply(apply) => {
+                let Some(change) = update.change else {
+                    return Ok(());
+                };
+                let touched = {
+                    let mut shadows = self.shadows.write().await;
+                    let mut touched = (self.keyed_by)(&shadows, &change);
+                    apply(&mut shadows);
+                    touched.extend((self.keyed_by)(&shadows, &change));
+                    dedup(touched)
+                };
+                merge_forward(&mut *self.last_seen.write().await, &advance);
+                self.project_under_lease(touched, &advance, Mark::Advance)
+                    .await?;
+            }
+        }
+        self.publish_required_keys().await;
         Ok(())
     }
 }

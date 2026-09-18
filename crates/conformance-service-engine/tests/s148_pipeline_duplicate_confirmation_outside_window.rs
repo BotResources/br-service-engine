@@ -10,17 +10,19 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 async fn outbox_rows(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM integration_outbox")
+    sqlx::query_scalar("SELECT count(*) FROM service_engine.integration_outbox")
         .fetch_one(pool)
         .await
         .expect("count the outbox rows")
 }
 
 async fn published_rows(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'PUBLISHED'")
-        .fetch_one(pool)
-        .await
-        .expect("count the published outbox rows")
+    sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'PUBLISHED'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("count the published outbox rows")
 }
 
 async fn wait_ready(readiness: &service_engine::ReadinessHandle) {

@@ -104,6 +104,68 @@ impl GraphqlWs {
         }
     }
 
+    pub async fn next_payload(&mut self, within: Duration) -> Option<serde_json::Value> {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return None;
+            }
+            let message = match tokio::time::timeout(remaining, self.stream.next()).await {
+                Err(_) => return None,
+                Ok(None) => return None,
+                Ok(Some(message)) => message.expect("the websocket yields a frame"),
+            };
+            let Ok(text) = message.to_text() else {
+                continue;
+            };
+            if text.is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = match serde_json::from_str(text) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            match value.get("type").and_then(|t| t.as_str()) {
+                Some("next") => return value.get("payload").cloned(),
+                Some("error") => panic!(
+                    "a resolver refusal must ride a next frame, never a transport error: {value}"
+                ),
+                _ => continue,
+            }
+        }
+    }
+
+    pub async fn expect_complete(&mut self, within: Duration) {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "the subscription never delivered a complete within {within:?}"
+            );
+            let message = match tokio::time::timeout(remaining, self.stream.next()).await {
+                Err(_) => panic!("the subscription never delivered a complete within {within:?}"),
+                Ok(None) => panic!("the socket ended before a complete frame"),
+                Ok(Some(message)) => message.expect("the websocket yields a frame"),
+            };
+            let Ok(text) = message.to_text() else {
+                continue;
+            };
+            let value: serde_json::Value = match serde_json::from_str(text) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            match value.get("type").and_then(|t| t.as_str()) {
+                Some("complete") => return,
+                Some("error") => panic!(
+                    "a resolver refusal must complete cleanly, never a transport error: {value}"
+                ),
+                _ => continue,
+            }
+        }
+    }
+
     pub async fn expect_close(&mut self, within: Duration) -> (u16, String) {
         let deadline = tokio::time::Instant::now() + within;
         loop {

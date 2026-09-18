@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
+use tokio::sync::watch;
 
 use crate::error::EngineError;
 use crate::name::MirrorName;
@@ -17,6 +18,7 @@ pub struct MirrorHandle {
     watch: MirrorStep,
     backfill: Option<MirrorStep>,
     progress: Option<MirrorProgress>,
+    required_keys: Option<watch::Receiver<Vec<String>>>,
 }
 
 impl MirrorHandle {
@@ -31,7 +33,17 @@ impl MirrorHandle {
             watch: Arc::new(watch),
             backfill: None,
             progress: None,
+            required_keys: None,
         }
+    }
+
+    pub fn with_required_keys(mut self, required_keys: watch::Receiver<Vec<String>>) -> Self {
+        self.required_keys = Some(required_keys);
+        self
+    }
+
+    pub fn required_keys(&self) -> Option<watch::Receiver<Vec<String>>> {
+        self.required_keys.clone()
     }
 
     pub fn with_backfill(

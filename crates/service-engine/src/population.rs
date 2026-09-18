@@ -1,7 +1,11 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::impact::{Deps, Dims, Impact};
+use futures_util::future::BoxFuture;
+use sqlx::PgConnection;
+
+use crate::error::EngineError;
+use crate::impact::{Deps, Dims, ForeignKey, Impact};
 use crate::name::{Namespace, NounName};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -112,11 +116,32 @@ pub enum Population<K> {
     Query(WindowQuery<K>),
 }
 
-#[derive(Debug, Clone)]
+pub type InverseLookup<K> = Arc<
+    dyn for<'a> Fn(
+            &'a mut PgConnection,
+            &'a ForeignKey,
+        ) -> BoxFuture<'a, Result<BTreeSet<K>, EngineError>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Clone)]
 pub enum Inverse<K> {
     Keys(BTreeSet<K>),
     Query(WindowQuery<K>),
+    Lookup(InverseLookup<K>),
     None,
+}
+
+impl<K: std::fmt::Debug> std::fmt::Debug for Inverse<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Inverse::Keys(keys) => f.debug_tuple("Keys").field(keys).finish(),
+            Inverse::Query(query) => f.debug_tuple("Query").field(query).finish(),
+            Inverse::Lookup(_) => f.debug_struct("Lookup").finish_non_exhaustive(),
+            Inverse::None => f.write_str("None"),
+        }
+    }
 }
 
 #[cfg(test)]

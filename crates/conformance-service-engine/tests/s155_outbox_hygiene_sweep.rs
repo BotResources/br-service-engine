@@ -67,10 +67,12 @@ async fn s155_the_beat_sweeps_published_rows_and_stale_claims_but_keeps_recent_o
 }
 
 async fn published_rows(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'PUBLISHED'")
-        .fetch_one(pool)
-        .await
-        .expect("count the published rows")
+    sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'PUBLISHED'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("count the published rows")
 }
 
 async fn claim_rows(pool: &PgPool) -> i64 {
@@ -82,7 +84,7 @@ async fn claim_rows(pool: &PgPool) -> i64 {
 
 async fn backdate_published(pool: &PgPool, ids: &[Uuid]) {
     sqlx::query(
-        "UPDATE integration_outbox \
+        "UPDATE service_engine.integration_outbox \
          SET published_at = now() - make_interval(secs => $2) \
          WHERE id = ANY($1)",
     )

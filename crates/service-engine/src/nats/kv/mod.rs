@@ -2,7 +2,7 @@ mod create;
 mod ttl;
 mod watch;
 
-pub use watch::{KvEvent, KvWatch};
+pub use watch::{KvEvent, KvWatch, Watched};
 
 use std::marker::PhantomData;
 

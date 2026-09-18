@@ -160,13 +160,9 @@ impl Erasable for NoteDeleteEraser {
                     body: row.get("body"),
                     blob_ref: row.get("blob_ref"),
                 };
-                cx.delete(&note)?;
+                cx.delete(&note).await?;
                 out.rows(1);
             }
-            sqlx::query("DELETE FROM sample_erase_note WHERE owner = $1")
-                .bind(owner)
-                .execute(cx.connection())
-                .await?;
             Ok(out)
         })
     }

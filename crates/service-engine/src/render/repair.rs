@@ -58,6 +58,7 @@ pub(crate) async fn resnapshot<P: Principal>(
         pg: ctx.pg,
         chunks: ctx.chunks,
         rls: ctx.registry.rls(),
+        dead_letters: ctx.dead_letters,
     };
     let mut cost = RepairCost::default();
     let mut shots = Vec::with_capacity(specs.len());

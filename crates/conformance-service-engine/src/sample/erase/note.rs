@@ -123,6 +123,19 @@ impl Persistence for EraseNoteStore {
             Ok(())
         })
     }
+
+    fn delete<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Uuid,
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async move {
+            sqlx::query("DELETE FROM sample_erase_note WHERE id = $1")
+                .bind(key)
+                .execute(conn)
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 impl Aggregate for EraseNote {

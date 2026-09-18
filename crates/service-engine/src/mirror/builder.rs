@@ -1,69 +1,24 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
 use sqlx::PgPool;
+use tokio::sync::watch;
 
 use crate::error::EngineError;
 use crate::name::MirrorName;
-use crate::nats::{KvEvent, KvKey, KvPrefix, Nats};
+use crate::nats::Nats;
 use crate::transport::ImpactTransport;
 
-use super::change::{Change, ChangeOp};
 use super::consumed::{Consumed, ConsumedManifest, is_raw_json};
+use super::consumption::Consumption;
 use super::handle::MirrorHandle;
 use super::leader::{MirrorGate, MirrorLeader};
 use super::projection::Project;
+use super::required::RequiredKey;
 use super::runtime::MirrorRuntime;
 use super::shadow::Shadows;
 
-pub(super) type Applier = Box<dyn FnOnce(&mut Shadows) + Send + 'static>;
-
-pub(super) type ReconcileKeysFn<K> =
-    Arc<dyn Fn(PgPool) -> BoxFuture<'static, Result<Vec<K>, EngineError>> + Send + Sync>;
-
-pub(super) struct Update {
-    pub(super) bucket: &'static str,
-    pub(super) change: Change,
-    pub(super) apply: Applier,
-    pub(super) revision: u64,
-}
-
-pub(super) struct Loaded {
-    pub(super) entries: Vec<(KvKey, Applier)>,
-}
-
-type LoadFn = Arc<dyn Fn(Nats) -> BoxFuture<'static, Result<Loaded, EngineError>> + Send + Sync>;
-type OpenWatchFn = Arc<
-    dyn Fn(
-            Nats,
-            u64,
-        ) -> BoxFuture<
-            'static,
-            Result<BoxStream<'static, Result<Update, EngineError>>, EngineError>,
-        > + Send
-        + Sync,
->;
-type SnapshotFn = Arc<dyn Fn(&Shadows) -> Vec<Change> + Send + Sync>;
-
-pub(super) struct Consumption {
-    pub(super) prefix: &'static str,
-    pub(super) bucket: &'static str,
-    pub(super) load: LoadFn,
-    pub(super) open_watch: OpenWatchFn,
-    pub(super) snapshot: SnapshotFn,
-}
-
-fn service<E: std::error::Error + Send + Sync + 'static>(error: E) -> EngineError {
-    EngineError::Service(Box::new(error))
-}
-
-/// What a `.consume::<C>()` records for the engine to check at registration: the
-/// manifest the consumer expects, and whether the value is the raw
-/// `serde_json::Value` escape. It carries no closures, so reading it settles the
-/// typed-consumption law before any watch is opened.
 #[derive(Debug, Clone)]
 pub struct ConsumedGuard {
     prefix: &'static str,
@@ -90,109 +45,8 @@ impl ConsumedGuard {
         self.manifest
     }
 
-    /// A consumption of the raw `serde_json::Value` without the explicit escape
-    /// hatch is refused: the whole value must be typed.
     pub fn refuses_raw_json(&self) -> bool {
         self.is_raw_json && !self.escape
-    }
-}
-
-impl Consumption {
-    fn of<C: Consumed>() -> Self {
-        let load: LoadFn = Arc::new(|nats: Nats| {
-            Box::pin(async move {
-                let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
-                let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
-                let entries = bucket
-                    .entries_with_revisions(&prefix)
-                    .await
-                    .map_err(service)?;
-                let entries = entries
-                    .into_iter()
-                    .map(|(key, value, revision)| {
-                        let shadow_key = key.clone();
-                        // The revision rides with the value: the watch resumes
-                        // at the boundary this scan reached, so the two overlap
-                        // and the shadow keeps the newer of the two.
-                        let applier: Applier = Box::new(move |shadows: &mut Shadows| {
-                            shadows.put_at::<C>(key, value, revision.get());
-                        });
-                        (shadow_key, applier)
-                    })
-                    .collect();
-                Ok(Loaded { entries })
-            }) as BoxFuture<'static, Result<Loaded, EngineError>>
-        });
-        let open_watch: OpenWatchFn = Arc::new(|nats: Nats, from: u64| {
-            Box::pin(async move {
-                let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
-                let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
-                let watch = bucket.watch_all_from(from).await.map_err(service)?;
-                let stream = futures_util::stream::unfold(
-                    (watch, prefix),
-                    |(mut watch, prefix)| async move {
-                        match watch.next_under::<C>(&prefix).await {
-                            None => None,
-                            Some(Err(error)) => Some((Err(service(error)), (watch, prefix))),
-                            Some(Ok(event)) => Some((Ok(into_update::<C>(event)), (watch, prefix))),
-                        }
-                    },
-                )
-                .boxed();
-                Ok(stream)
-            })
-                as BoxFuture<
-                    'static,
-                    Result<BoxStream<'static, Result<Update, EngineError>>, EngineError>,
-                >
-        });
-        let snapshot: SnapshotFn = Arc::new(|shadows: &Shadows| {
-            shadows
-                .shadow::<C>()
-                .iter()
-                .map(|(key, _)| Change {
-                    prefix: C::PREFIX,
-                    key: key.clone(),
-                    op: ChangeOp::Put,
-                })
-                .collect()
-        });
-        Self {
-            prefix: C::PREFIX,
-            bucket: C::bucket(),
-            load,
-            open_watch,
-            snapshot,
-        }
-    }
-}
-
-fn into_update<C: Consumed>(event: KvEvent<C>) -> Update {
-    let (key, op, value, revision) = match event {
-        KvEvent::Put {
-            key,
-            value,
-            revision,
-        } => (key, ChangeOp::Put, Some(value), revision),
-        KvEvent::Delete { key, revision } => (key, ChangeOp::Delete, None, revision),
-    };
-    let change = Change {
-        prefix: C::PREFIX,
-        key: key.clone(),
-        op,
-    };
-    let revision = revision.get();
-    let apply: Applier = match value {
-        Some(value) => {
-            Box::new(move |shadows: &mut Shadows| shadows.put_at::<C>(key, value, revision))
-        }
-        None => Box::new(move |shadows: &mut Shadows| shadows.remove_at::<C>(&key, revision)),
-    };
-    Update {
-        bucket: C::bucket(),
-        change,
-        apply,
-        revision,
     }
 }
 
@@ -200,6 +54,7 @@ pub struct Mirror {
     name: MirrorName,
     consumptions: Vec<Consumption>,
     guards: Vec<ConsumedGuard>,
+    required: Vec<RequiredKey>,
 }
 
 impl Mirror {
@@ -208,6 +63,7 @@ impl Mirror {
             name,
             consumptions: Vec::new(),
             guards: Vec::new(),
+            required: Vec::new(),
         }
     }
 
@@ -217,26 +73,33 @@ impl Mirror {
         self
     }
 
+    pub fn require_key<C: Consumed>(mut self, key: &'static str) -> Self {
+        self.required.push(RequiredKey::of::<C>(key));
+        self
+    }
+
     pub fn keyed_by<K, F>(self, keyed_by: F) -> MirrorKeyed<K>
     where
         K: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
-        F: Fn(&Shadows, &Change) -> Vec<K> + Send + Sync + 'static,
+        F: Fn(&Shadows, &super::change::Change) -> Vec<K> + Send + Sync + 'static,
     {
         MirrorKeyed {
             name: self.name,
             consumptions: self.consumptions,
             guards: self.guards,
+            required: self.required,
             keyed_by: Arc::new(keyed_by),
         }
     }
 }
 
-type KeyedByFn<K> = Arc<dyn Fn(&Shadows, &Change) -> Vec<K> + Send + Sync>;
+type KeyedByFn<K> = Arc<dyn Fn(&Shadows, &super::change::Change) -> Vec<K> + Send + Sync>;
 
 pub struct MirrorKeyed<K> {
     name: MirrorName,
     consumptions: Vec<Consumption>,
     guards: Vec<ConsumedGuard>,
+    required: Vec<RequiredKey>,
     keyed_by: KeyedByFn<K>,
 }
 
@@ -249,6 +112,7 @@ where
             name: self.name,
             consumptions: self.consumptions,
             guards: self.guards,
+            required: self.required,
             keyed_by: self.keyed_by,
             project: Arc::new(project),
             reconcile_keys: None,
@@ -261,9 +125,10 @@ pub struct MirrorReady<K, Pr: Project<K>> {
     name: MirrorName,
     consumptions: Vec<Consumption>,
     guards: Vec<ConsumedGuard>,
+    required: Vec<RequiredKey>,
     keyed_by: KeyedByFn<K>,
     project: Arc<Pr>,
-    reconcile_keys: Option<ReconcileKeysFn<K>>,
+    reconcile_keys: Option<super::consumption::ReconcileKeysFn<K>>,
     reconcile_deadline: Duration,
 }
 
@@ -275,21 +140,25 @@ where
         &self.name
     }
 
-    /// What each `.consume::<C>()` recorded, in declaration order — the typed
-    /// consumption law the engine checks before it opens a watch.
     pub fn guards(&self) -> &[ConsumedGuard] {
         &self.guards
     }
 
-    /// Refuse a mirror that consumes the raw `serde_json::Value` without the
-    /// explicit escape hatch, so the whole value is always typed. Called by
-    /// `register_mirror`; a direct `build*` caller may call it too.
     pub fn validate(&self) -> Result<(), EngineError> {
         for guard in &self.guards {
             if guard.refuses_raw_json() {
                 return Err(EngineError::RawJsonConsumption {
                     mirror: self.name.clone(),
                     prefix: guard.prefix(),
+                });
+            }
+        }
+        for required in &self.required {
+            if !required.within_prefix() {
+                return Err(EngineError::RequiredKeyOutsidePrefix {
+                    mirror: self.name.clone(),
+                    prefix: required.prefix(),
+                    key: required.key(),
                 });
             }
         }
@@ -336,6 +205,18 @@ where
         transport: Arc<dyn ImpactTransport>,
         leader: Option<MirrorGate>,
     ) -> MirrorHandle {
+        let required_channel = (!self.required.is_empty()).then(|| {
+            let initial = self
+                .required
+                .iter()
+                .map(|required| format!("{}: {}", self.name, required.key()))
+                .collect::<Vec<_>>();
+            watch::channel(initial)
+        });
+        let (required_tx, required_rx) = match required_channel {
+            Some((tx, rx)) => (Some(Arc::new(tx)), Some(rx)),
+            None => (None, None),
+        };
         let runtime = Arc::new(MirrorRuntime::new(
             self.name.clone(),
             nats,
@@ -347,6 +228,8 @@ where
             self.reconcile_keys,
             leader,
             self.reconcile_deadline,
+            self.required,
+            required_tx,
         ));
         let name = self.name.clone();
         let reconcile = {
@@ -354,7 +237,11 @@ where
             move || runtime.clone().reconcile()
         };
         let watch = move || runtime.clone().watch();
-        MirrorHandle::new(name, reconcile, watch)
+        let handle = MirrorHandle::new(name, reconcile, watch);
+        match required_rx {
+            Some(rx) => handle.with_required_keys(rx),
+            None => handle,
+        }
     }
 }
 
@@ -411,5 +298,24 @@ mod tests {
         let guard = &ready.guards()[0];
         assert_eq!(guard.prefix(), "typed/v1/");
         assert_eq!(guard.manifest(), Typed::manifest());
+    }
+
+    #[test]
+    fn a_required_key_outside_the_consumed_prefix_is_refused() {
+        let refusal = Mirror::new(MirrorName::from_static("guarded"))
+            .consume::<Typed>()
+            .require_key::<Typed>("other/v1/needed")
+            .keyed_by(|_shadows, _change| Vec::<()>::new())
+            .project(NoProject)
+            .validate()
+            .unwrap_err();
+        assert!(matches!(
+            refusal,
+            EngineError::RequiredKeyOutsidePrefix {
+                prefix: "typed/v1/",
+                key: "other/v1/needed",
+                ..
+            }
+        ));
     }
 }

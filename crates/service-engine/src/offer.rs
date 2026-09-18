@@ -13,10 +13,15 @@ pub trait Offer: Send + Sync + 'static {
 
     const NAME: &'static str;
     const PREFIX: &'static str;
+    const VERSION: u16 = 1;
 
     fn key(row: &Self::Row) -> Result<KvKey, EngineError>;
 
     fn publish(row: &Self::Row) -> Option<Self::Published>;
 
     fn all(conn: &mut PgConnection) -> BoxFuture<'_, Result<Vec<Self::Row>, EngineError>>;
+}
+
+pub trait OfferTrigger<O: Offer>: Aggregate {
+    fn key_from(&self) -> Result<KvKey, EngineError>;
 }

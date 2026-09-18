@@ -120,6 +120,16 @@ pub enum EngineError {
         prefix: &'static str,
     },
 
+    #[error(
+        "mirror {mirror} requires key {key}, which is outside its consumed prefix {prefix}; a \
+         required key must live under a prefix the mirror consumes"
+    )]
+    RequiredKeyOutsidePrefix {
+        mirror: MirrorName,
+        prefix: &'static str,
+        key: &'static str,
+    },
+
     #[error("chunk sequence {seq} is above {max}, the largest a bigint column stores faithfully")]
     ChunkSeqOutOfRange { seq: u64, max: u64 },
 
@@ -295,6 +305,18 @@ pub enum EngineError {
     PolicyRefused { code: &'static str },
 
     #[error(
+        "create refused: an aggregate already exists under key {key} in store {store}; \
+         a creator-generated id is used once and the engine never overwrites through create"
+    )]
+    KeyReused { store: &'static str, key: String },
+
+    #[error(
+        "store {store} does not implement Persistence::delete, so the engine cannot hard-delete \
+         one of its aggregates through cx.delete"
+    )]
+    DeleteUnsupported { store: &'static str },
+
+    #[error(
         "a slice declared aggregate `{aggregate}` subject to a post-save policy, but no slice \
          registered one; the seam is unhonoured, so the write path it must guard would run \
          unguarded"
@@ -321,4 +343,10 @@ pub enum EngineError {
         session: SessionId,
         projector: ProjectorName,
     },
+
+    #[error(
+        "the store is not fully migrated (engine set pending: {engine}, service set pending: \
+         {service}); serve refuses to run until migrate has applied both sets to the shared ledger"
+    )]
+    MigrationsPending { engine: bool, service: bool },
 }

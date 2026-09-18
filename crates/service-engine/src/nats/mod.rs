@@ -8,7 +8,7 @@ mod streaming;
 pub use grace::{NatsCondition, NatsHealth, NatsHealthChannel, NatsHealthReceiver};
 pub use health::{REASON_NO_STREAM, RelayHealth, RelayHealthChannel, RelayHealthReceiver};
 pub use key::{KvKey, KvKeyError, KvPrefix};
-pub use kv::{KvBucket, KvEvent, KvWatch, Revision};
+pub use kv::{KvBucket, KvEvent, KvWatch, Revision, Watched};
 pub use publish::{NatsError, PublishFailure, PublishOutcome};
 pub use streaming::{
     StreamFrame, chunk_subject, streaming_filter, streaming_stream, subject_token,
