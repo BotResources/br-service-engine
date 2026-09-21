@@ -343,6 +343,31 @@ the public bucket (SigV4 signs `Host`, so a browser needs the public host), whil
 `ensure_bucket`, `head` and `delete` stay on the internal in-cluster host. The
 engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the config.
 
+### lane: example-lib
+
+- **The roster slice is extracted into `crates/example-lib-roster`, a standalone
+  library crate**, and embedded by `example-service` through the host prefix
+  `example` and `BootPlan.libraries` — the first end-to-end proof of the whole
+  library path: root fields prefixed by the host, value types unchanged, migrations
+  chained, grants and cross-schema access, with the `roster` feature still
+  removable.
+- **`roster_slice!`** (`#[macro_export]`, arm `(prefix = $prefix:ident ; principal =
+  $p:ty)`) emits the root objects, the root methods (`<prefix>_person` →
+  `examplePerson`, `<prefix>_roster_deltas` → `exampleRosterDeltas`) and the slice's
+  `register`, reaching `pastey` through `::service_engine::pastey`. `example-service`
+  embeds it with `slice roster ["roster"] from example_lib_roster::roster_slice { … }`
+  and `roster = ["dep:example-lib-roster"]`.
+- **`RosterUsers<P>`** is generic over a `RosterPrincipal` bound the host implements
+  in one line, and the delta union is declared once, outside the callback macro, with
+  the generic `subscription_union! { generics [P: RosterPrincipal] ; … }` arm.
+- **`known_persons` moves to schema `roster`** in band
+  `9_120_000_001..=9_120_999_999`; `example_lib_roster::migrations()` returns the
+  `LibraryMigrations`, and `bin/service.rs` passes it in `BootPlan.libraries`. The
+  library owns the read-slice (table, projector, GraphQL, migrations); the host wires
+  the directory mirror that feeds `roster.known_persons` and implements
+  `RosterPrincipal` — the project-specific seam.
+- No engine public-API change; value types keep their names in every embed (R4).
+
 ### Fixed
 
 - conformance `s176` no longer observes the NATS-down verdict through a fixed 2.4 s window (grace starts at disconnect detection, not `nats.stop`): it captures the beat's progress, then bounded-polls housekeeping (heartbeat + leader slots advance) and the readiness handle (`REASON_NATS_UNREACHABLE`) to generous deadlines, failing only on the deadline. Test-only; the engine is unchanged and matches the readiness contract ("the `nats_grace` probe alone takes the pod DOWN").

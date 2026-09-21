@@ -3,7 +3,9 @@ use example_lib_roster::{KNOWN_PERSON_NAMESPACE, KNOWN_PERSONS_TABLE};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col};
+use service_engine::mirror::{
+    Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col,
+};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Shadows};
@@ -68,15 +70,14 @@ impl Project<Uuid> for DirectoryProjection {
         Box::pin(async move {
             let person = cx.shadow::<ConsumedPerson>().get(&person_key(id)).cloned();
             match person {
-                Some(person) => {
-                    cx.upsert(KnownPersonRow {
+                Some(person) => cx
+                    .upsert(KnownPersonRow {
                         id,
                         email: person.email,
                         display_name: person.display_name,
                     })
                     .await
-                    .map(|_| ())
-                }
+                    .map(|_| ()),
                 None => cx.retire::<KnownPersonRow>(vec![col("user_id", id)]).await,
             }
         })
@@ -92,10 +93,9 @@ pub fn directory_mirror() -> MirrorReady<Uuid, impl Project<Uuid>> {
         .project(DirectoryProjection)
         .reconcile_keys(|pool: PgPool| {
             Box::pin(async move {
-                let ids: Vec<Uuid> =
-                    sqlx::query_scalar("SELECT user_id FROM roster.known_persons")
-                        .fetch_all(&pool)
-                        .await?;
+                let ids: Vec<Uuid> = sqlx::query_scalar("SELECT user_id FROM roster.known_persons")
+                    .fetch_all(&pool)
+                    .await?;
                 Ok(ids)
             }) as BoxFuture<'static, Result<Vec<Uuid>, EngineError>>
         })

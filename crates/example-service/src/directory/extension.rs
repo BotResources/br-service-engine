@@ -33,9 +33,10 @@ mod tests {
 
     #[test]
     fn a_role_this_project_models_deserializes() {
-        let value: ExtendedPerson =
-            serde_json::from_value(wire(serde_json::json!({ "Employee": { "team": "platform" } })))
-                .expect("a known role");
+        let value: ExtendedPerson = serde_json::from_value(wire(
+            serde_json::json!({ "Employee": { "team": "platform" } }),
+        ))
+        .expect("a known role");
         assert_eq!(
             value.0.extension,
             PersonRole::Employee {
@@ -48,6 +49,9 @@ mod tests {
     fn a_role_this_project_does_not_model_is_denied() {
         let denied: Result<ExtendedPerson, _> =
             serde_json::from_value(wire(serde_json::json!({ "Volunteer": { "cause": "x" } })));
-        assert!(denied.is_err(), "an unknown extension must be denied, not mirrored");
+        assert!(
+            denied.is_err(),
+            "an unknown extension must be denied, not mirrored"
+        );
     }
 }
