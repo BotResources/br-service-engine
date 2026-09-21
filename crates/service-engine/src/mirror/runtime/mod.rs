@@ -1,7 +1,8 @@
 mod lead;
+mod util;
 mod watch;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,6 +19,7 @@ use crate::transport::ImpactTransport;
 
 const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
+use self::util::{dedup, merge_forward, wire_version_reason};
 use super::change::{Change, ChangeOp};
 use super::consumed::OfferManifest;
 use super::consumption::{Consumption, Effect, ReconcileKeysFn};
@@ -284,31 +286,4 @@ struct Read {
     changes: Vec<Change>,
     read_revision: Revisions,
     rejected: BTreeSet<&'static str>,
-}
-
-fn wire_version_reason(expected: u16, found: u16) -> String {
-    format!(
-        "mirror value carries wire version {found}, but this consumer is coded against version \
-         {expected}; a breaking change moves the version into a new prefix"
-    )
-}
-
-fn merge_forward(into: &mut Revisions, from: &Revisions) {
-    for (bucket, snapshot) in from {
-        match into.get_mut(bucket) {
-            Some(held) if held.created == snapshot.created => {
-                held.revision = held.revision.max(snapshot.revision);
-            }
-            _ => {
-                into.insert(bucket.clone(), snapshot.clone());
-            }
-        }
-    }
-}
-
-fn dedup<K: Clone + Eq + Hash>(keys: Vec<K>) -> Vec<K> {
-    let mut seen = HashSet::new();
-    keys.into_iter()
-        .filter(|key| seen.insert(key.clone()))
-        .collect()
 }
