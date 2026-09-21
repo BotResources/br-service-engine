@@ -48,13 +48,7 @@ impl Persistence for CardStore {
         conn: &'a mut PgConnection,
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query("SELECT id FROM card WHERE id = $1 FOR UPDATE")
-                .bind(key)
-                .fetch_optional(conn)
-                .await?;
-            Ok(())
-        })
+        Self::row_lock(conn, "card", key)
     }
 
     fn read_many<'a>(

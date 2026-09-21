@@ -146,13 +146,7 @@ impl Persistence for ReplyStore {
         conn: &'a mut PgConnection,
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query("SELECT id FROM reply WHERE id = $1 FOR UPDATE")
-                .bind(key)
-                .fetch_optional(conn)
-                .await?;
-            Ok(())
-        })
+        Self::row_lock(conn, "reply", key)
     }
 
     fn read_many<'a>(

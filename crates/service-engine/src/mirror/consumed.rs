@@ -31,7 +31,11 @@ pub fn is_raw_json<C: Consumed>() -> bool {
 }
 
 pub fn manifest_key(prefix: &str) -> Result<KvKey, EngineError> {
-    let base = prefix.strip_suffix('/').unwrap_or(prefix);
+    let base = prefix.strip_suffix('/').ok_or_else(|| {
+        EngineError::Config(format!(
+            "prefix {prefix:?} must end with '/' so its manifest key sits outside the data prefix"
+        ))
+    })?;
     KvKey::new(format!("{base}_manifest"))
         .map_err(|error| EngineError::Config(format!("manifest key for prefix {prefix}: {error}")))
 }
@@ -133,6 +137,12 @@ mod tests {
         let key = manifest_key("typed/v1/").unwrap();
         assert_eq!(key.as_str(), "typed/v1_manifest");
         assert!(!key.as_str().starts_with("typed/v1/"));
+    }
+
+    #[test]
+    fn a_manifest_key_for_a_prefix_without_a_trailing_separator_is_refused() {
+        let refusal = manifest_key("identity/users").unwrap_err();
+        assert!(matches!(refusal, EngineError::Config(_)));
     }
 
     #[test]

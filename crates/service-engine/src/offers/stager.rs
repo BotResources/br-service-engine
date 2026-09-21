@@ -52,10 +52,11 @@ where
                 O::NAME
             ))
         })?;
+        let row_key = trigger.row_key()?;
         out.push(OfferDirty {
             offer: O::NAME,
             kv_key: trigger.key_from()?,
-            agg_key: KeyBytes::encode(&trigger.key())?,
+            agg_key: KeyBytes::encode(&row_key)?,
         });
         Ok(())
     }

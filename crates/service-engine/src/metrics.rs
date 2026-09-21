@@ -57,6 +57,7 @@ pub const ALL: &[&str] = &[
     OUTBOX_PENDING,
     OUTBOX_OLDEST_AGE_SECONDS,
     DEPENDENCY_UP,
+    LEADER,
 ];
 
 pub const LABEL_SERVICE: &str = "service";

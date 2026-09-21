@@ -5,7 +5,7 @@ use sqlx::PgConnection;
 
 use crate::error::EngineError;
 use crate::nats::KvKey;
-use crate::persistence::Aggregate;
+use crate::persistence::{Aggregate, Persistence};
 
 pub trait Offer: Send + Sync + 'static {
     type Row: Aggregate;
@@ -24,4 +24,6 @@ pub trait Offer: Send + Sync + 'static {
 
 pub trait OfferTrigger<O: Offer>: Aggregate {
     fn key_from(&self) -> Result<KvKey, EngineError>;
+
+    fn row_key(&self) -> Result<<<O::Row as Aggregate>::Store as Persistence>::Key, EngineError>;
 }

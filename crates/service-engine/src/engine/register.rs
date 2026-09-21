@@ -204,6 +204,14 @@ impl<P: Principal> Engine<P> {
     }
 
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
+        if !O::PREFIX.ends_with('/') {
+            return Err(EngineError::Config(format!(
+                "offer {} publishes prefix {:?} which must end with '/' so its manifest key sits \
+                 outside the data prefix",
+                O::NAME,
+                O::PREFIX,
+            )));
+        }
         let leader = crate::offers::OfferLeader::new(self.config.pod_id.clone(), self.config.lease);
         let relay = crate::offers::OfferRelay::<O>::new(
             self.nats.clone(),

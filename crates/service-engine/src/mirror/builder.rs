@@ -152,6 +152,14 @@ where
                     prefix: guard.prefix(),
                 });
             }
+            if !guard.prefix().ends_with('/') {
+                return Err(EngineError::Config(format!(
+                    "mirror {} consumes prefix {:?} which must end with '/' so its manifest key \
+                     sits outside the data prefix",
+                    self.name.as_str(),
+                    guard.prefix(),
+                )));
+            }
         }
         for required in &self.required {
             if !required.within_prefix() {

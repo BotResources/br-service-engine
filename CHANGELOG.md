@@ -104,9 +104,9 @@ to `DATABASE_URL`), retries the owner connection with backoff up to
 set then the service set on one shared `_sqlx_migrations` ledger — the kit sets
 `ignore_missing` on both migrators — waits for the app role to exist, then
 `grant_engine_access` + `grant_app_access`, and exits. `serve` runs under the app
-role: it refuses to run — `EngineError::MigrationsPending { engine, service }`,
-`REASON_MIGRATIONS_PENDING`, readiness DOWN and a non-zero exit — while either set
-is unapplied (checked through the app role against the shared ledger), then boots
+role: it refuses to run — `EngineError::MigrationsPending { engine, service }`, logs
+`REASON_MIGRATIONS_PENDING` and exits non-zero before it binds any port — while
+either set is unapplied (checked through the app role against the shared ledger), then boots
 the engine and serves. `schema` prints the SDL and touches no infra. `run_service`
 dispatches on argv (`migrate` / `serve` / `schema`; no argv serves).
 `EngineConfig::from_env()` reads the ops contract in one place and dispatches on the

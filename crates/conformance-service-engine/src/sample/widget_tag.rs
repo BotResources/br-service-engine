@@ -90,6 +90,10 @@ impl OfferTrigger<WidgetOffer> for WidgetTag {
     fn key_from(&self) -> Result<KvKey, EngineError> {
         widget_key(self.widget_id)
     }
+
+    fn row_key(&self) -> Result<Uuid, EngineError> {
+        Ok(self.widget_id)
+    }
 }
 
 #[derive(Debug, Deserialize)]
