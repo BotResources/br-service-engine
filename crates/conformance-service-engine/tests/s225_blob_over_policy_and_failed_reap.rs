@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
-use conformance_service_engine::sample::AttachVerifiedDoc;
 use conformance_service_engine::sample::blob::AttachDoc;
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
+use conformance_service_engine::sample::{AttachVerifiedDoc, SampleFault};
 use engine_twin::await_ready;
 use service_engine::{BlobPolicy, OneShot, UploadUrl};
 use sqlx::PgPool;
@@ -69,11 +69,12 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
+    let over_id = Uuid::now_v7();
     let over = executor
         .run::<AttachVerifiedDoc>(
             principal.clone(),
             AttachVerifiedDoc {
-                id: Uuid::now_v7(),
+                id: over_id,
                 tenant,
                 name: "huge.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
@@ -83,8 +84,20 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
         )
         .await;
     assert!(
-        over.is_err(),
-        "a verified size over max_bytes is refused at stage before any presign",
+        matches!(over, Err(SampleFault::Store(_))),
+        "a verified size over max_bytes surfaces the engine's BlobOverPolicy refusal: {over:?}",
+    );
+    let staged: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.blob b JOIN sample_doc d ON d.blob_ref = b.id \
+         WHERE d.id = $1",
+    )
+    .bind(over_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count staged rows for the over-policy attempt");
+    assert_eq!(
+        staged, 0,
+        "the ceiling refuses before any presign, so no blob row and no doc row are staged",
     );
 
     let doc = Uuid::now_v7();

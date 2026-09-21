@@ -39,6 +39,18 @@ async fn outbox_count(pool: &PgPool) -> i64 {
     .expect("count outbox rows")
 }
 
+async fn uploaded_event_metadata(pool: &PgPool) -> serde_json::Value {
+    let payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM service_engine.integration_outbox \
+         WHERE subject LIKE 'integration.evt.sample.attachment.uploaded%' \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("read the uploaded event payload");
+    payload
+}
+
 async fn wait_state(pool: &PgPool, id: Uuid, want: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
@@ -147,6 +159,22 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
     assert!(
         outbox_count(&pool).await >= 1,
         "the policy's emit committed to the outbox inside the promotion transaction",
+    );
+
+    let event = uploaded_event_metadata(&pool).await;
+    let metadata = &event["metadata"];
+    assert_eq!(
+        metadata["actor_kind"], "service",
+        "the reaper's emit carries the service actor, never the uploading human: {metadata}",
+    );
+    assert_eq!(
+        metadata["correlation_id"],
+        serde_json::Value::String(reference.to_string()),
+        "the emit correlates on the blob id",
+    );
+    assert!(
+        metadata["causation_id"].is_null(),
+        "the reaper's emit has no causation: {metadata}",
     );
 
     shutdown.notify_one();
