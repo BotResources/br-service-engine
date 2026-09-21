@@ -1,5 +1,10 @@
 scalar Affordances
 
+enum Disposition {
+	INLINE
+	ATTACHMENT
+}
+
 """
 A scalar that can represent any JSON value.
 """
@@ -28,12 +33,12 @@ type ReplyMutation {
 	exampleStartReply(id: UUID!, boardId: UUID!): MutationAck!
 	exampleSetTyping(board: UUID!, label: String!): MutationAck!
 	exampleCancelReply(id: UUID!): MutationAck!
-	exampleAttachReply(replyId: UUID!, name: String!, contentType: String!): JSON!
+	exampleAttachReply(replyId: UUID!, name: String!, contentType: String!, expected: UploadExpectationInput): JSON!
 }
 
 type ReplyQuery {
 	exampleReply(id: UUID!): ReplyView
-	exampleReplyDownload(replyId: UUID!, reference: UUID!): String
+	exampleReplyDownload(replyId: UUID!, reference: UUID!, disposition: Disposition! = ATTACHMENT): String
 }
 
 type ReplyRemove {
@@ -108,6 +113,11 @@ entities without requiring a central allocating authority.
 * [RFC4122: A Universally Unique Identifier (UUID) URN Namespace](http://tools.ietf.org/html/rfc4122)
 """
 scalar UUID
+
+input UploadExpectationInput {
+	size: Int!
+	sha256Hex: String!
+}
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.
