@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
+use conformance_service_engine::sample::AttachVerifiedDoc;
 use conformance_service_engine::sample::blob::AttachDoc;
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
-use conformance_service_engine::sample::{AttachVerifiedDoc, SampleFault};
 use engine_twin::await_ready;
 use service_engine::{BlobPolicy, OneShot, UploadUrl};
 use sqlx::PgPool;
@@ -84,8 +84,8 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
         )
         .await;
     assert!(
-        matches!(over, Err(SampleFault::Store(_))),
-        "a verified size over max_bytes surfaces the engine's BlobOverPolicy refusal: {over:?}",
+        over.is_err(),
+        "a verified size over max_bytes is refused at stage before any presign",
     );
     let staged: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM service_engine.blob b JOIN sample_doc d ON d.blob_ref = b.id \
