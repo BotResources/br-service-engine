@@ -90,11 +90,11 @@ async fn s223_the_download_disposition_switches_between_inline_and_attachment() 
         .into_string();
 
     assert!(
-        inline.contains("inline") && !inline.contains("attachment"),
+        inline.contains("response-content-disposition=inline"),
         "the inline presign carries an inline content-disposition: {inline}",
     );
     assert!(
-        attachment.contains("attachment"),
+        attachment.contains("response-content-disposition=attachment"),
         "the attachment presign carries an attachment content-disposition: {attachment}",
     );
     assert_ne!(

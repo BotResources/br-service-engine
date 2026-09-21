@@ -387,12 +387,23 @@ referencing aggregate and a rollback leaves no row; it returns a typed
 `content-length-range` is `[0, max_bytes]`, so an object over the cap is refused
 by object storage at upload and can never land, and whose `Content-Type`
 condition pins the reference row's recorded content type, so the object cannot be
-uploaded under a different type than the row claims. A download `DownloadUrl` — an
+uploaded under a different type than the row claims. `cx.blob_verified::<Kind>(name,
+content_type, UploadExpectation { size, sha256 })` (and `blob_owned_verified`)
+stages a **verified** upload: the POST policy then pins the exact byte count
+(`content-length-range [size, size]`) and the SHA-256 checksum
+(`x-amz-checksum-sha256`), so object storage refuses any body that is not those
+exact bytes and only the intended object can land; `expect.size > max_bytes` is
+refused at stage (`EngineError::BlobOverPolicy`) before any presign. Single-part
+only (≤ 5 GB); there is no composite/multipart checksum. `BlobConfig` may carry a
+`public_endpoint`: the upload POST URL and the download presign are then signed
+for that browser-facing host (SigV4 signs `Host`), while the engine's own bucket
+HEAD/DELETE stay on the internal in-cluster host. A download `DownloadUrl` — an
 S3 SigV4 presigned GET, short-lived, carrying `response-content-disposition` (the
-stored file name, as an attachment) and `response-content-type` (the recorded
-content type) so the object is served under its real name and type — is minted
-only through the gated
-`Query::download::<View>(key, reference)` gesture, never from a bare reference: a
+stored file name, `inline` or `attachment` per the requested `Disposition`) and
+`response-content-type` (the recorded content type) so the object is served under
+its real name and type — is minted only through the gated
+`Query::download::<View>(key, reference, disposition)` gesture, never from a bare
+reference: a
 reference travels in a view by design, so a bare-reference presign would make it a
 permanent bearer capability that outlives the row and the viewer. `download`
 takes the same visibility path as `fetch` — it presigns only when the caller can
@@ -404,16 +415,34 @@ through a raw presign; the reference reply slice's `replyDownload(replyId,
 reference)` field is the reference resolver. The bytes flow
 client-to-storage directly, so `size` is unknown at commit and is recorded from
 the object's head when the reaper first sees the upload has completed (promoting
-the row to `uploaded`), independent of the orphan window. A reference whose
-object has not landed yet (`pending`) resolves to **no** download URL. `UploadUrl`
+the row to `uploaded` and recording `size`, `etag` and `sha256`), independent of
+the orphan window. `engine.blob_reader().head(reference)` reads a live storage
+HEAD on demand: `BlobHead` takes `state` and `expected` from the row but `size`,
+`etag` and `sha256` **always** from storage, so a mutation running in the pending
+window (before the reaper sweeps) sees the storage checksum immediately, with
+`state: Pending` and `verified() == Some(true)`. A reference whose object has not
+landed yet (`pending`) resolves to **no** download URL; a `failed` row (a verified
+upload whose landed object did not match, or one a post-upload policy refused)
+resolves to none either. `UploadUrl`
 carries the POST endpoint and its signed form fields (no raw URL string) and
 `DownloadUrl` is not `Serialize`, so — like `OneShot` — neither can enter a view,
 an impact, an offer, an outbox row or a chunk; only the opaque reference travels.
-The beat runs a reaper whose scope is exactly the intent's two categories: it
-deletes an **incomplete upload** (a `pending` row past `orphan_after` whose object
-never landed) and an **unreferenced** blob (a reference released past
-`orphan_after`, whose object it also deletes from storage); it does not police
-size, because the POST policy already did, at upload. Orphan detection happens at
+The beat runs a reaper under a single `reaper:blob` **leader slot** (the cron
+idiom — `claim_current_slot` on a pooled connection, `complete_slot` after — so
+exactly one pod sweeps per interval; there is no advisory lock, the slot row claim
+is the whole guard). Per pending row it runs the storage HEAD **outside** any
+transaction, verifies size and checksum against the row's expectation, then
+promotes the row in one short `state='pending'`-guarded transaction that also runs
+the kind's **post-upload policy** (`register_post_upload_policy::<Kind>` /
+`require_post_upload_policy`) — the policy finds its referencing key on the
+promotion connection and impacts its own view; its `emit`/`command` go out as the
+service actor (correlation = the blob row id), and a refusal fails the row
+(`policy:<code>`) and deletes the object. The reaper still deletes an **incomplete
+upload** (a `pending` row past `orphan_after` whose object never landed) and an
+**unreferenced** or **failed** blob (past `orphan_after`, object and row both
+removed transactionally, so a crash between a fast-path delete and its commit
+leaks nothing); it does not police size, because the POST policy already did, at
+upload. Orphan detection happens at
 the **aggregate boundary**: `Aggregate::blob_refs` exposes a row's live
 references (default empty), and the pipeline diffs them between `load` and `save`
 — a dropped or repointed reference, and a `cx.delete`'d aggregate, release the
