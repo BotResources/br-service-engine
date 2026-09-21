@@ -91,8 +91,9 @@ one winner. Removes the principle-5 guard every service hand-wrote.
 `SELECT … FOR UPDATE` on the aggregate row — the one-line `lock` implementation for a
 store that wants a row lock beside the engine's advisory lock. `Persistence::lock`
 keeps its no-op default (the advisory lock already serializes every pipeline load).
-The one-lock-domain rule — every write to an aggregate's rows goes through
-`cx.load`/`cx.save`/`cx.delete` — is doctrine in `intent.md`.
+The one-lock-domain rule holds: every write to an aggregate's rows goes through
+`cx.load`/`cx.save`/`cx.delete`, which take the per-key transaction advisory lock,
+so two commands on one aggregate serialize even with the no-op `lock`.
 
 ### lane: boot
 
@@ -196,7 +197,7 @@ the black-box battery greps — is the wording the engine now emits.
 - `Cohort { dimension, value }` with `CohortValue::{Uuid, Text, Bool, Int}` (`#[non_exhaustive]`) replaces `CohortKey::of`. A cohort is a `(dimension, value)` the service names — `Cohort::uuid("manager", id)`, `Cohort::text`, `Cohort::flag("public", true)`, `Cohort::int` — and `Cohort::key()` is its routing image (tag + dimension + typed value bytes).
 - `Visibility::{cohorts, memberships}` return `Vec<Cohort>`, and `CohortIndex::keys_in_cohorts` takes `&[Cohort]` and binds against each row's **natural columns** through the helpers `Cohort::uuids`/`texts`/`holds` (`WHERE manager_id = ANY($1) OR $2`) — the shadow `cohort_key bytea` column and its writer are gone from the sample.
 - `CohortKey::of` is removed; `CohortKey::principal` (the RLS render group) stays. The cohort-column rule text moved out of `persistence.rs` into the README H5 paragraph.
-- Honest line: this does not change the windowed views of a service whose visibility is clock-windowed (see `intent.md`, "Not an engine matter") — a time-windowed active link is a Services write (`end_date IS NULL`), not an engine cohort, and the engine will not schedule a midnight wake for one.
+- Honest line: this does not change the windowed views of a service whose visibility is clock-windowed — a time-windowed active link is a service-side write (`end_date IS NULL`), not an engine cohort, and the engine will not schedule a midnight wake for one.
 
 #### N8. DB-backed inverse for link-table dependencies
 
@@ -257,8 +258,8 @@ the black-box battery greps — is the wording the engine now emits.
 
 ### Replaced or dropped
 
-- `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper; the one-lock-domain rule is in `intent.md`.
-- `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields (see `intent.md`).
+- `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper (`SELECT … FOR UPDATE` on the row's `id`).
+- `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields.
 - No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
 - `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
 

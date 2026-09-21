@@ -999,15 +999,15 @@ GitOps and the NATS fabric.
 | Surface | Contract |
 |---|---|
 | Entry points | `<binary> migrate` (owner role; exits 0 when both migration sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
-| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access) |
-| App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE`, `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
-| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` — read as a group only when the plan calls `with_blob_storage`; the library chart emits them only under `objectStore.enabled` |
+| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
+| App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
+| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` reads all five or falls through to no blob storage); the library chart emits them only under `objectStore.enabled` |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS`, `migrate` only) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, both migrators run with `ignore_missing` |
-| NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; `{PREFIX}_manifest` per engine offer |
+| NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing `/` stripped (`typed/v1/` → `typed/v1_manifest`), a sibling outside the data prefix |
 | Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
 | Metrics | `service_engine_*` (`metrics::ALL`) + `service_engine_leader{kind,name}`; common labels `service`, `pod`, `component` |
 
