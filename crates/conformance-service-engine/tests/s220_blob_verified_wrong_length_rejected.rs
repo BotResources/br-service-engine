@@ -59,8 +59,6 @@ async fn s220_a_correct_checksum_of_a_different_length_is_refused_by_the_content
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
-    // The checksum is the real sha256 of PAYLOAD, but the declared size is larger:
-    // the exact content-length-range must refuse the shorter upload.
     let doc = Uuid::now_v7();
     let upload: OneShot<UploadUrl> = executor
         .run::<AttachVerifiedDoc>(

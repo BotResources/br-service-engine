@@ -1,5 +1,6 @@
 pub mod assignment;
 pub mod blob;
+pub mod blob_boot;
 pub mod blob_verified;
 pub mod blob_view;
 pub mod counter;
@@ -108,6 +109,7 @@ pub use blob::{
     AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, DocRow, DocStore, RepointDoc,
     attach_doc, attach_owned_doc, delete_doc, detach_doc, repoint_doc,
 };
+pub use blob_boot::{boot_blob_policy_engine, boot_unhonoured_upload_seam_engine};
 pub use blob_verified::{
     AttachVerifiedDoc, AttachmentUploaded, attach_verified_doc, impact_doc_on_upload, refuse_upload,
 };
@@ -118,10 +120,10 @@ pub use engine::{
 };
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 pub use engine_pipeline::{
-    boot_blob_engine, boot_blob_policy_engine, boot_delete_policy_engine, boot_offer_engine,
-    boot_offer_engine_leased, boot_offer_engine_reconciling, boot_offer_trigger_engine,
-    boot_panic_engine, boot_pipeline_engine, boot_policy_engine, boot_transition_policy_engine,
-    boot_unhonoured_seam_engine, boot_unhonoured_upload_seam_engine,
+    boot_blob_engine, boot_delete_policy_engine, boot_offer_engine, boot_offer_engine_leased,
+    boot_offer_engine_reconciling, boot_offer_trigger_engine, boot_panic_engine,
+    boot_pipeline_engine, boot_policy_engine, boot_transition_policy_engine,
+    boot_unhonoured_seam_engine,
 };
 
 pub use assignment::{

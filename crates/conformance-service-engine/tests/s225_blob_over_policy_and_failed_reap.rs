@@ -69,7 +69,6 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
-    // Part 1: a verified expectation over the policy ceiling is refused at stage, before presign.
     let over = executor
         .run::<AttachVerifiedDoc>(
             principal.clone(),
@@ -88,7 +87,6 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
         "a verified size over max_bytes is refused at stage before any presign",
     );
 
-    // Part 2: a failed row with its object still in the bucket (the crash window) is reaped.
     let doc = Uuid::now_v7();
     let upload: OneShot<UploadUrl> = executor
         .run::<AttachDoc>(
@@ -117,7 +115,6 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
         "the object is present before the failed row is reaped",
     );
 
-    // Seed the crash window: a failed row whose fast-path delete never ran, past orphan_after.
     sqlx::query(
         "UPDATE service_engine.blob \
          SET state = 'failed', failed_reason = 'policy:SEEDED', failed_at = now() - interval '1 hour' \

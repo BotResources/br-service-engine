@@ -58,7 +58,6 @@ async fn s218_a_verified_upload_lands_and_head_reads_the_storage_checksum_in_the
         orphan_after: Duration::from_secs(3600),
     };
 
-    // Engine A: a long reaper interval, so the row stays pending through the head check.
     let quiet = boot_blob_engine(
         &db,
         nats.nats().await,
@@ -141,7 +140,6 @@ async fn s218_a_verified_upload_lands_and_head_reads_the_storage_checksum_in_the
     shutdown.notify_one();
     running.await.expect("join A").expect("A returns Ok");
 
-    // Engine B: a short reaper interval promotes the row and records the storage values.
     let engine = boot_blob_engine(
         &db,
         nats.nats().await,

@@ -90,7 +90,6 @@ async fn s222_two_pods_run_at_most_one_reaper_sweep_per_interval() {
     let status = post_upload(&http, upload.into_inner(), b"shared-bytes".to_vec()).await;
     assert!(status.is_success());
 
-    // Let several intervals elapse so both pods contend for the reaper:blob slot repeatedly.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let state: Option<String> =

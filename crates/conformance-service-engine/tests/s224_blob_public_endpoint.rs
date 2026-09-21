@@ -112,7 +112,6 @@ async fn s224_upload_and_download_urls_carry_the_public_host_while_the_reaper_us
         "the download URL carries the public host: {download}",
     );
 
-    // The reaper's HEAD runs against the internal host (127.0.0.1); a promotion proves it worked.
     wait_until(async || {
         let state: Option<String> =
             sqlx::query_scalar("SELECT state FROM service_engine.blob WHERE id = $1")

@@ -106,7 +106,6 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
         orphan_after: Duration::from_millis(400),
     };
 
-    // Unhonoured seam: requiring a post-upload policy without registering one fails boot.
     let unhonoured = boot_unhonoured_upload_seam_engine(
         &db,
         nats.nats().await,
@@ -125,7 +124,6 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
         "the boot error names the unhonoured blob kind: {error:?}",
     );
 
-    // Impacting policy: promotion commits and the policy's emit lands on the outbox.
     let principal = member(&pool, Uuid::now_v7(), tenant).await;
     let engine = boot_blob_policy_engine(
         &db,
@@ -154,8 +152,6 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
     shutdown.notify_one();
     running.await.expect("join").expect("run returns Ok");
 
-    // Refusing policy: the row goes failed with a policy:<code> reason, its object is deleted,
-    // and nothing new lands on the outbox.
     let principal = member(&pool, Uuid::now_v7(), tenant).await;
     let engine = boot_blob_policy_engine(
         &db,
