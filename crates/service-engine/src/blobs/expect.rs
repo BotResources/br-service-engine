@@ -16,11 +16,12 @@ impl Sha256Digest {
         if trimmed.len() != 64 {
             return Err(invalid(hex));
         }
+        let bytes = trimmed.as_bytes();
         let mut out = [0u8; 32];
-        for (index, pair) in trimmed.as_bytes().chunks_exact(2).enumerate() {
-            let hi = nibble(pair[0]).ok_or_else(|| invalid(hex))?;
-            let lo = nibble(pair[1]).ok_or_else(|| invalid(hex))?;
-            out[index] = (hi << 4) | lo;
+        for (index, byte) in out.iter_mut().enumerate() {
+            let hi = nibble(bytes[index * 2]).ok_or_else(|| invalid(hex))?;
+            let lo = nibble(bytes[index * 2 + 1]).ok_or_else(|| invalid(hex))?;
+            *byte = (hi << 4) | lo;
         }
         Ok(Self(out))
     }
