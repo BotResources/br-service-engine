@@ -288,7 +288,9 @@ mod tests {
         let mut seams = PolicySeams::default();
         seams.require_save::<Alpha>();
         let policies = Policies::default();
-        let error = seams.verify(&policies.save, &policies.delete, &policies.upload).unwrap_err();
+        let error = seams
+            .verify(&policies.save, &policies.delete, &policies.upload)
+            .unwrap_err();
         assert!(
             matches!(error, EngineError::UnhonouredSeam { aggregate } if aggregate.contains("Alpha"))
         );
@@ -300,7 +302,9 @@ mod tests {
         seams.require_delete::<Beta>();
         let mut policies = Policies::default();
         policies.save.register::<Beta, _>(|_s, _ps| Ok(())).unwrap();
-        let error = seams.verify(&policies.save, &policies.delete, &policies.upload).unwrap_err();
+        let error = seams
+            .verify(&policies.save, &policies.delete, &policies.upload)
+            .unwrap_err();
         assert!(
             matches!(error, EngineError::UnhonouredSeam { aggregate } if aggregate.contains("Beta")),
             "a save policy does not honour a delete subjection"
@@ -322,6 +326,10 @@ mod tests {
             .delete
             .register::<Alpha, _>(|_s, _ps| Ok(()))
             .unwrap();
-        assert!(seams.verify(&policies.save, &policies.delete, &policies.upload).is_ok());
+        assert!(
+            seams
+                .verify(&policies.save, &policies.delete, &policies.upload)
+                .is_ok()
+        );
     }
 }

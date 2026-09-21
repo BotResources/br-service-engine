@@ -74,7 +74,7 @@ async fn s119_a_pending_blob_whose_object_never_landed_has_no_download_url() {
     let reference = BlobRef(reference_of(&pool, doc).await);
 
     let before = reader
-        .download_url(reference)
+        .download_url(reference, service_engine::blobs::Disposition::Attachment)
         .await
         .expect("resolving a download URL does not error");
     assert!(
@@ -86,7 +86,7 @@ async fn s119_a_pending_blob_whose_object_never_landed_has_no_download_url() {
     assert!(status.is_success(), "the object lands");
 
     let after = reader
-        .download_url(reference)
+        .download_url(reference, service_engine::blobs::Disposition::Attachment)
         .await
         .expect("resolving a download URL does not error");
     assert!(

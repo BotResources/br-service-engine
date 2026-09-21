@@ -61,19 +61,28 @@ mod tests {
     #[test]
     fn a_matching_size_and_checksum_verifies() {
         let expected = UploadExpectation::new(10, digest(1));
-        assert_eq!(head(10, Some(digest(1)), Some(expected)).verified(), Some(true));
+        assert_eq!(
+            head(10, Some(digest(1)), Some(expected)).verified(),
+            Some(true)
+        );
     }
 
     #[test]
     fn a_size_mismatch_does_not_verify() {
         let expected = UploadExpectation::new(10, digest(1));
-        assert_eq!(head(11, Some(digest(1)), Some(expected)).verified(), Some(false));
+        assert_eq!(
+            head(11, Some(digest(1)), Some(expected)).verified(),
+            Some(false)
+        );
     }
 
     #[test]
     fn a_checksum_mismatch_or_absent_checksum_does_not_verify() {
         let expected = UploadExpectation::new(10, digest(1));
-        assert_eq!(head(10, Some(digest(2)), Some(expected)).verified(), Some(false));
+        assert_eq!(
+            head(10, Some(digest(2)), Some(expected)).verified(),
+            Some(false)
+        );
         assert_eq!(head(10, None, Some(expected)).verified(), Some(false));
     }
 

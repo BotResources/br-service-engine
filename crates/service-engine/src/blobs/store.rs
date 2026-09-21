@@ -15,6 +15,8 @@ use crate::time::Timestamp;
 pub const REASON_BLOB_BUCKET: &str = "blobs.bucket";
 pub const REASON_BLOB_UNCONFIGURED: &str = "blobs.unconfigured";
 
+type HeadRow = (String, String, Option<i64>, Option<Vec<u8>>);
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReferenceRow {
     pub id: Uuid,
@@ -140,7 +142,7 @@ impl BlobStore {
         pool: &PgPool,
         reference: BlobRef,
     ) -> Result<Option<BlobHead>, EngineError> {
-        let row: Option<(String, String, Option<i64>, Option<Vec<u8>>)> = sqlx::query_as(&format!(
+        let row: Option<HeadRow> = sqlx::query_as(&format!(
             "SELECT object_key, state, expected_size, expected_sha256 \
              FROM {TABLE_BLOB} WHERE id = $1"
         ))

@@ -1,9 +1,9 @@
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use super::{BATCH, BlobReaper, ReaperRound};
 use crate::blobs::head::{BlobHead, BlobState};
 use crate::blobs::policy::Uploaded;
-use super::{BATCH, BlobReaper, ReaperRound};
 use crate::blobs::store::BlobStore;
 use crate::blobs::{BlobRef, ObjectHead, Sha256Digest, UploadExpectation};
 use crate::erase::PersonId;
@@ -65,6 +65,7 @@ impl BlobReaper {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn promote_one(
         &self,
         pg: &PgPool,

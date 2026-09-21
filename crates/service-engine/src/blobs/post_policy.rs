@@ -90,10 +90,7 @@ pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, Engi
         ("x-amz-date".to_string(), amz_date),
     ];
     if let Some(checksum) = checksum_b64 {
-        fields.push((
-            "x-amz-checksum-algorithm".to_string(),
-            "SHA256".to_string(),
-        ));
+        fields.push(("x-amz-checksum-algorithm".to_string(), "SHA256".to_string()));
         fields.push(("x-amz-checksum-sha256".to_string(), checksum));
     }
     fields.push(("policy".to_string(), policy_b64));
@@ -197,10 +194,10 @@ mod tests {
     fn an_unverified_policy_carries_the_open_content_length_range_and_no_checksum() {
         let url = input(Duration::from_secs(900)).pipe_presign();
         let conds = conditions(&url);
-        assert!(conds.iter().any(|c| c
-            .as_array()
-            .is_some_and(|a| a.first().and_then(|v| v.as_str()) == Some("content-length-range")
-                && a.get(1).and_then(|v| v.as_i64()) == Some(0))));
+        assert!(conds.iter().any(|c| c.as_array().is_some_and(
+            |a| a.first().and_then(|v| v.as_str()) == Some("content-length-range")
+                && a.get(1).and_then(|v| v.as_i64()) == Some(0)
+        )));
         assert!(!has_field(&url, "x-amz-checksum-sha256"));
     }
 
@@ -219,10 +216,17 @@ mod tests {
             })),
             "the range must pin the exact expected byte count on both bounds"
         );
-        assert!(conds.iter().any(|c| c.get("x-amz-checksum-algorithm").and_then(|v| v.as_str())
-            == Some("SHA256")));
-        assert!(conds.iter().any(|c| c.get("x-amz-checksum-sha256").and_then(|v| v.as_str())
-            == Some(digest.to_base64().as_str())));
+        assert!(
+            conds.iter().any(
+                |c| c.get("x-amz-checksum-algorithm").and_then(|v| v.as_str()) == Some("SHA256")
+            )
+        );
+        assert!(
+            conds
+                .iter()
+                .any(|c| c.get("x-amz-checksum-sha256").and_then(|v| v.as_str())
+                    == Some(digest.to_base64().as_str()))
+        );
         assert!(has_field(&url, "x-amz-checksum-algorithm"));
         assert!(has_field(&url, "x-amz-checksum-sha256"));
     }

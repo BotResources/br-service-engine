@@ -57,10 +57,6 @@ mod tests {
     impl Blobs for Attachment {
         const KIND: &'static str = "attachment";
     }
-    struct Avatar;
-    impl Blobs for Avatar {
-        const KIND: &'static str = "avatar";
-    }
 
     #[test]
     fn a_second_policy_for_one_kind_is_refused() {

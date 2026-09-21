@@ -37,7 +37,12 @@ impl<'a> Ops<'a> {
         owner: PersonId,
         expect: UploadExpectation,
     ) -> Result<Blob, EngineError> {
-        self.stage_blob::<B>(file_name.into(), content_type.into(), Some(owner), Some(expect))
+        self.stage_blob::<B>(
+            file_name.into(),
+            content_type.into(),
+            Some(owner),
+            Some(expect),
+        )
     }
 
     pub fn release_blob(&mut self, reference: BlobRef) -> Result<(), EngineError> {
