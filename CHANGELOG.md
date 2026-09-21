@@ -263,6 +263,11 @@ the black-box battery greps — is the wording the engine now emits.
   highest applied version on the next `migrate`, nothing to renumber (`s217`).
 - `apply_migration_chain` and `ensure_migrated` are public on `engine::boot` for
   black-box conformance (`s213`–`s217`, real Postgres).
+
+### Fixed
+
+- conformance `s176` no longer observes the NATS-down verdict through a fixed 2.4 s window (grace starts at disconnect detection, not `nats.stop`): it captures the beat's progress, then bounded-polls housekeeping (heartbeat + leader slots advance) and the readiness handle (`REASON_NATS_UNREACHABLE`) to generous deadlines, failing only on the deadline. Test-only; the engine is unchanged and matches the readiness contract ("the `nats_grace` probe alone takes the pod DOWN").
+
 ### Adopter migration
 
 - prefix: add `prefix = <snake_ident>;` after `principal` in `compose_service!` and rename every root method to `<prefix>_<method>` (the served field becomes `<prefix><Method>`; a method named exactly the prefix is refused). A service that hand-registers fragments (no `compose_service!`) must call `engine.declare_root_prefix(RootPrefix::from_snake("…")?)` before `run`. `SchemaSlices::assemble` takes a second `Option<&RootPrefix>` argument. Clients regenerate from the new SDL; the gateway supergraph changes once at the first deploy.
