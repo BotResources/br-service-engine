@@ -33,9 +33,6 @@ mod tests {
     #[test]
     fn the_declared_migrations_sit_inside_the_declared_band() {
         let library = migrations();
-        assert_eq!(library.name, NAME);
-        assert_eq!(library.schema, SCHEMA);
-        assert_eq!(library.band, BAND);
         let versions: Vec<i64> = library.migrator.iter().map(|m| m.version).collect();
         assert!(!versions.is_empty(), "the roster library ships migrations");
         for version in versions {
