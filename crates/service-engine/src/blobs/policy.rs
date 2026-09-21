@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use futures_util::future::BoxFuture;
+
 use crate::blobs::head::BlobHead;
 use crate::blobs::{BlobRef, Blobs};
 use crate::erase::PersonId;
@@ -16,8 +18,11 @@ pub struct Uploaded<'a> {
     pub owner: Option<PersonId>,
 }
 
-pub(crate) type UploadPolicy =
-    Arc<dyn Fn(Uploaded<'_>, &mut PostSave<'_, '_>) -> Result<(), Refused> + Send + Sync>;
+pub(crate) type UploadPolicy = Arc<
+    dyn for<'a> Fn(Uploaded<'a>, &'a mut PostSave<'_, '_>) -> BoxFuture<'a, Result<(), Refused>>
+        + Send
+        + Sync,
+>;
 
 #[derive(Default, Clone)]
 pub(crate) struct UploadPolicies {
@@ -28,7 +33,10 @@ impl UploadPolicies {
     pub(crate) fn register<B, F>(&mut self, policy: F) -> Result<(), EngineError>
     where
         B: Blobs,
-        F: Fn(Uploaded<'_>, &mut PostSave<'_, '_>) -> Result<(), Refused> + Send + Sync + 'static,
+        F: for<'a> Fn(Uploaded<'a>, &'a mut PostSave<'_, '_>) -> BoxFuture<'a, Result<(), Refused>>
+            + Send
+            + Sync
+            + 'static,
     {
         if self.by_kind.contains_key(B::KIND) {
             return Err(EngineError::Config(format!(
@@ -62,10 +70,10 @@ mod tests {
     fn a_second_policy_for_one_kind_is_refused() {
         let mut policies = UploadPolicies::default();
         policies
-            .register::<Attachment, _>(|_u, _ps| Ok(()))
+            .register::<Attachment, _>(|_u, _ps| Box::pin(async { Ok(()) }))
             .expect("first policy registers");
         assert!(matches!(
-            policies.register::<Attachment, _>(|_u, _ps| Ok(())),
+            policies.register::<Attachment, _>(|_u, _ps| Box::pin(async { Ok(()) })),
             Err(EngineError::Config(_))
         ));
     }
@@ -74,7 +82,7 @@ mod tests {
     fn a_policy_is_recovered_by_the_row_kind_string() {
         let mut policies = UploadPolicies::default();
         policies
-            .register::<Attachment, _>(|_u, _ps| Ok(()))
+            .register::<Attachment, _>(|_u, _ps| Box::pin(async { Ok(()) }))
             .unwrap();
         assert!(policies.get("attachment").is_some());
         assert!(policies.contains("attachment"));

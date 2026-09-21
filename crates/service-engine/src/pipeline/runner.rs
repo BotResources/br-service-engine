@@ -86,7 +86,7 @@ impl PolicyRunner {
             )
             .with_outbound(outbound);
             let mut post_save = PostSave::new(&mut ops, RefusalOrigin::Upload);
-            policy(uploaded, &mut post_save)
+            policy(uploaded, &mut post_save).await
         };
         if let Err(Refused(reason)) = outcome {
             let _ = tx.rollback().await;

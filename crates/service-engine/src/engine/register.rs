@@ -206,10 +206,10 @@ impl<P: Principal> Engine<P> {
     pub fn register_post_upload_policy<B, F>(&mut self, policy: F) -> Result<(), EngineError>
     where
         B: crate::blobs::Blobs,
-        F: Fn(
-                crate::blobs::Uploaded<'_>,
-                &mut crate::pipeline::PostSave<'_, '_>,
-            ) -> Result<(), crate::pipeline::Refused>
+        F: for<'a> Fn(
+                crate::blobs::Uploaded<'a>,
+                &'a mut crate::pipeline::PostSave<'_, '_>,
+            ) -> BoxFuture<'a, Result<(), crate::pipeline::Refused>>
             + Send
             + Sync
             + 'static,
