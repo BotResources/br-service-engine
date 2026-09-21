@@ -101,11 +101,13 @@ pub use gate::{
 };
 pub use graphql::{
     AuthReject, CODE_EXTENSION, FORBIDDEN_CODE, GraphqlState, JsonScalar, MutationAck,
-    PASSPORT_HEADER, PassportPrincipal, PrincipalRejected, Query, SchemaSlices, SliceFragment, ack,
-    ack_bulk, app, attach, attach_with_session, cause_json, coded_error, engine_schema, execute,
-    execute_bulk, forbidden, key_json, lane_notice_stream, mutation_error, page, serve,
-    typed_presence_view, typed_view,
+    PASSPORT_HEADER, PassportPrincipal, PrincipalRejected, Query, RootPrefix, SchemaSlices,
+    SliceFragment, ack, ack_bulk, app, attach, attach_with_session, cause_json, coded_error,
+    engine_schema, execute, execute_bulk, forbidden, key_json, lane_notice_stream, mutation_error,
+    page, serve, typed_presence_view, typed_view,
 };
+
+pub use paste;
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
 pub use housekeeping::gc::{Gc, GcRound, SessionGc};

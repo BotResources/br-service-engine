@@ -22,6 +22,22 @@ impl<P: Principal> Engine<P> {
         Ok(())
     }
 
+    pub fn declare_root_prefix(
+        &mut self,
+        prefix: crate::graphql::RootPrefix,
+    ) -> Result<(), EngineError> {
+        match &self.root_prefix {
+            Some(existing) if existing != &prefix => Err(EngineError::RootPrefixRedeclared {
+                first: existing.snake().to_string(),
+                second: prefix.snake().to_string(),
+            }),
+            _ => {
+                self.root_prefix = Some(prefix);
+                Ok(())
+            }
+        }
+    }
+
     pub fn register_rls<R: RlsApplier<P>>(&mut self, r: R) -> Result<(), EngineError> {
         self.with_registry(|registry| {
             registry.register_rls(r);
