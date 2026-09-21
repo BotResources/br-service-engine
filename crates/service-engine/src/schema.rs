@@ -62,19 +62,30 @@ pub async fn migrate(pool: &PgPool) -> Result<(), EngineError> {
 }
 
 pub async fn grant_engine_access(pool: &PgPool, app_role: &str) -> Result<(), EngineError> {
+    grant_schema_access(pool, SCHEMA, app_role).await
+}
+
+pub async fn grant_schema_access(
+    pool: &PgPool,
+    schema: &str,
+    app_role: &str,
+) -> Result<(), EngineError> {
     validate_role_name(app_role)?;
+    if !validate_pg_identifier(schema) {
+        return Err(EngineError::InvalidSchemaName(schema.to_string()));
+    }
     for sql in [
-        format!("GRANT USAGE ON SCHEMA {SCHEMA} TO \"{app_role}\""),
+        format!("GRANT USAGE ON SCHEMA {schema} TO \"{app_role}\""),
         format!(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {SCHEMA} TO \"{app_role}\""
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO \"{app_role}\""
         ),
         format!(
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} \
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} \
              GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"{app_role}\""
         ),
-        format!("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {SCHEMA} TO \"{app_role}\""),
+        format!("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO \"{app_role}\""),
         format!(
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} \
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} \
              GRANT USAGE, SELECT ON SEQUENCES TO \"{app_role}\""
         ),
     ] {
@@ -83,16 +94,19 @@ pub async fn grant_engine_access(pool: &PgPool, app_role: &str) -> Result<(), En
     Ok(())
 }
 
-fn validate_role_name(name: &str) -> Result<(), EngineError> {
+pub(crate) fn validate_pg_identifier(name: &str) -> bool {
     let mut chars = name.chars();
-    let first = chars.next();
-    let shaped = match first {
+    let shaped = match chars.next() {
         Some(c) if c.is_ascii_lowercase() => {
             chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         }
         _ => false,
     };
-    if shaped && name.len() <= MAX_ROLE_NAME_LEN {
+    shaped && name.len() <= MAX_ROLE_NAME_LEN
+}
+
+fn validate_role_name(name: &str) -> Result<(), EngineError> {
+    if validate_pg_identifier(name) {
         Ok(())
     } else {
         Err(EngineError::InvalidRoleName(name.to_string()))

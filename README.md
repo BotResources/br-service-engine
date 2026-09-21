@@ -39,7 +39,7 @@ battery-backed.
 
 | Module | Responsibility |
 |---|---|
-| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies both migration sets, waits for the app role, grants it), `serve` (app role, refuses an unmigrated store by name, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies the engine, library and service migration sets in that order, waits for the app role, grants it every schema), `serve` (app role, refuses an unmigrated store and names the pending set, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
@@ -812,6 +812,25 @@ call that dispatches on argv: `migrate` runs the owner→migrate→grant sequenc
 logging + `/livez` + `/metrics` + `/sdl` and serves under `DATABASE_URL`, and
 `schema` prints the SDL. `main` reads no engine env var by hand and holds no infra
 wiring of its own; it is the reference for how a service boots.
+
+A service that embeds a library crate declares its migrations through
+`BootPlan.libraries: Vec<LibraryMigrations>` (`vec![]` when it embeds none). Each
+`LibraryMigrations` names the library, the Postgres **schema** it owns, a reserved
+version **band** (`RangeInclusive<i64>`, disjoint from the engine's reserved range
+and from every other library's), and its `sqlx::migrate!` set. `migrate` applies the
+sets in a fixed order — engine, then each library in `Vec` order, then the service —
+so a library table exists before a service migration references it; a cross-schema
+foreign key from a service table into a library schema is expected and works, since
+every service owns its whole database. `migrate` then grants the app role each schema
+(engine, every library, public). All sets share the one `_sqlx_migrations` ledger and
+run with `ignore_missing`, so sqlx applies any set's unapplied versions regardless of
+the highest version already applied: a 0.2 adopter that later adopts a library at a
+low band gets those versions applied below `max(applied)` on the next `migrate`, with
+nothing to renumber. `libraries::validate` refuses — before any SQL — a schema that
+shadows `public` or `service_engine`, a duplicate library, an overlapping band, a
+library migration outside its band, or a service migration inside a reserved band;
+`serve` re-runs the same validation and refuses a store where any declared set is
+still pending, naming the pending library.
 `compose_service!` takes each slice's module, cargo feature and root objects on
 **one line** and generates, for the whole set, the `pub mod` declarations, the
 `QueryRoot`/`MutationRoot`/`SubscriptionRoot` merged objects and the `register`
@@ -1028,7 +1047,7 @@ GitOps and the NATS fabric.
 
 | Surface | Contract |
 |---|---|
-| Entry points | `<binary> migrate` (owner role; exits 0 when both migration sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
+| Entry points | `<binary> migrate` (owner role; exits 0 when the engine, library and service sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
 | Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
 | App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
 | Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` reads all five or falls through to no blob storage); the library chart emits them only under `objectStore.enabled` |
@@ -1036,7 +1055,7 @@ GitOps and the NATS fabric.
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
-| Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS`, `migrate` only) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, both migrators run with `ignore_missing` |
+| Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS`, `migrate` only) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
 | NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing `/` stripped (`typed/v1/` → `typed/v1_manifest`), a sibling outside the data prefix |
 | Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
 | Metrics | `service_engine_*` (`metrics::ALL`) + `service_engine_leader{kind,name}`; common labels `service`, `pod`, `component` |
@@ -1138,9 +1157,9 @@ exported here without extra wiring), and `/sdl` (the composed schema as
 subcommand prints that same SDL and exits without touching Postgres or NATS, so a
 build step can extract the schema from the binary alone. The database follows the
 engine's posture rule (the runtime role must not own its schema), and the two
-entry points split along it: `migrate` runs the engine and service migration sets
-on one shared ledger, waits for the app role to exist, and grants it, all under the
-**owner** role named by `DATABASE_URL_OWNER` (strict — no fallback to `DATABASE_URL`);
+entry points split along it: `migrate` runs the engine, library and service migration
+sets on one shared ledger, waits for the app role to exist, and grants it every schema,
+all under the **owner** role named by `DATABASE_URL_OWNER` (strict — no fallback to `DATABASE_URL`);
 `serve` connects only the RLS-subject **app** pool named by `DATABASE_URL`, refuses
 to run — it logs `REASON_MIGRATIONS_PENDING` and exits non-zero before it binds any
 port — while either set is unapplied, and derives `message_retention`

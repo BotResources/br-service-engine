@@ -90,7 +90,7 @@ pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use db::{connect_pool, validate_database_tls};
 pub use delta::{Delta, ErasedView, Revision};
-pub use engine::boot::{BootPlan, REASON_MIGRATIONS_PENDING, run_service};
+pub use engine::boot::{BootPlan, LibraryMigrations, REASON_MIGRATIONS_PENDING, run_service};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};

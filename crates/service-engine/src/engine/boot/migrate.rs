@@ -3,9 +3,11 @@ use std::time::{Duration, Instant};
 use br_util_observability::init_logging;
 use br_util_postgres::grant_app_access;
 use sqlx::PgPool;
+use sqlx::migrate::Migrator;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::engine::boot::env::owner_database_url;
+use crate::engine::boot::libraries::{self, LibraryMigrations};
 use crate::engine::boot::{BootPlan, pg_error};
 use crate::error::EngineError;
 
@@ -18,21 +20,51 @@ pub(crate) async fn migrate<Q, M, S, R>(plan: BootPlan<Q, M, S, R>) -> Result<()
     let owner_url = owner_database_url()?;
     let owner = connect_owner(&owner_url, plan.config.migrate_connect_timeout).await?;
 
-    crate::schema::migrate(&owner).await?;
-    let mut service_migrator = plan.service_migrator;
+    apply_migration_chain(
+        &owner,
+        plan.libraries,
+        plan.service_migrator,
+        &plan.config.app_role,
+        plan.config.migrate_connect_timeout,
+    )
+    .await?;
+
+    owner.close().await;
+    Ok(())
+}
+
+pub async fn apply_migration_chain(
+    owner: &PgPool,
+    libraries: Vec<LibraryMigrations>,
+    service_migrator: Migrator,
+    app_role: &str,
+    role_timeout: Duration,
+) -> Result<(), EngineError> {
+    libraries::validate(&libraries, &service_migrator)?;
+
+    crate::schema::migrate(owner).await?;
+
+    let schemas: Vec<&'static str> = libraries.iter().map(|library| library.schema).collect();
+    for library in libraries {
+        let mut migrator = library.migrator;
+        migrator.set_ignore_missing(true);
+        migrator.run(owner).await?;
+    }
+
+    let mut service_migrator = service_migrator;
     service_migrator.set_ignore_missing(true);
-    service_migrator.run(&owner).await?;
+    service_migrator.run(owner).await?;
 
     let mut conn = owner.acquire().await.map_err(EngineError::Db)?;
     crate::relays::outbox::adopt_legacy_outbox(&mut conn).await?;
     drop(conn);
 
-    let app_role = &plan.config.app_role;
-    wait_for_role(&owner, app_role, plan.config.migrate_connect_timeout).await?;
-    crate::schema::grant_engine_access(&owner, app_role).await?;
-    grant_app_access(&owner, app_role).await.map_err(pg_error)?;
-
-    owner.close().await;
+    wait_for_role(owner, app_role, role_timeout).await?;
+    crate::schema::grant_schema_access(owner, crate::schema::SCHEMA, app_role).await?;
+    for schema in schemas {
+        crate::schema::grant_schema_access(owner, schema, app_role).await?;
+    }
+    grant_app_access(owner, app_role).await.map_err(pg_error)?;
     Ok(())
 }
 

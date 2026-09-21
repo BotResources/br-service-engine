@@ -248,6 +248,33 @@ pub enum EngineError {
     #[error("invalid role name: {0}")]
     InvalidRoleName(String),
 
+    #[error(
+        "invalid schema name {0}: a library schema must be a lowercase Postgres identifier and \
+         may not be public or service_engine"
+    )]
+    InvalidSchemaName(String),
+
+    #[error("two libraries contribute the same name or schema: {name}")]
+    DuplicateLibrary { name: String },
+
+    #[error(
+        "migration bands overlap between {first} and {second}; every library band and the engine's \
+         reserved range must be pairwise disjoint"
+    )]
+    MigrationBandOverlap {
+        first: &'static str,
+        second: &'static str,
+    },
+
+    #[error("migration {version} of library {owner} falls outside the band the library declares")]
+    MigrationOutsideBand { owner: &'static str, version: i64 },
+
+    #[error(
+        "service migration {version} falls inside the reserved band of {owner}; service migrations \
+         must sit outside every reserved band"
+    )]
+    ServiceMigrationInReservedBand { version: i64, owner: &'static str },
+
     #[error(transparent)]
     Transport(#[from] TransportError),
 
@@ -371,8 +398,13 @@ pub enum EngineError {
     },
 
     #[error(
-        "the store is not fully migrated (engine set pending: {engine}, service set pending: \
-         {service}); serve refuses to run until migrate has applied both sets to the shared ledger"
+        "the store is not fully migrated (engine set pending: {engine}, pending libraries: \
+         {libraries:?}, service set pending: {service}); serve refuses to run until migrate has \
+         applied the engine, library and service sets to the shared ledger"
     )]
-    MigrationsPending { engine: bool, service: bool },
+    MigrationsPending {
+        engine: bool,
+        libraries: Vec<&'static str>,
+        service: bool,
+    },
 }

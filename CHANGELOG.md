@@ -234,6 +234,35 @@ the black-box battery greps — is the wording the engine now emits.
 - **Generic `gated!` and `subscription_union!` arms.** `gated! { generics [P: Bound] ; Aggregate<P>, Principal ; … }` emits `impl<P: Bound>` blocks so a library writes its affordance gate once, generic over the principal. `subscription_union! { generics [P: Bound] ; view = … ; delta = … ; … }` makes `from_erased`/`from_delta` generic over the principal (the emitted GraphQL types stay non-generic, one name each); a callback resolver calls `Delta::from_delta::<P>(&delta)`. The non-generic arms are unchanged.
 - Conformance: `s210` (a fragment root field outside the declared prefix fails the boot loud with slice/field/prefix), `s211` (fragments registered with no prefix declared → `RootPrefixUndeclared`), `s212` (a prefixed service boots, serves `sampleWidget`/`sampleCloseWidget`/`sampleWidgets`, and every composed root field is under the prefix). Every hand-registered root field, resolver method and GraphQL literal in the conformance sample moves under the `sample` prefix, and the example-service under `example`.
 
+### lane: migrate
+
+- **Library migration chain.** `BootPlan` gains `libraries: Vec<LibraryMigrations>`
+  (`vec![]` when a service embeds no library). A `LibraryMigrations` names the library,
+  the Postgres **schema** it owns, a reserved version **band** (`RangeInclusive<i64>`)
+  and its `sqlx::migrate!` set. `migrate` applies engine → each library (in `Vec` order)
+  → service on the one shared `_sqlx_migrations` ledger, then grants the app role every
+  schema (engine, each library, public); `grant_engine_access` is generalized to
+  `grant_schema_access(pool, schema, role)`. A library's first migration creates its own
+  schema in the service database (`CREATE SCHEMA IF NOT EXISTS …`) — a schema inside the
+  service's own database is not infra. A cross-schema foreign key from a service table
+  into a library schema is supported by the fixed order.
+- **Boot-time validation before any SQL** (`libraries::validate`, run by both `migrate`
+  and `serve`): a library schema that is not a lowercase Postgres identifier or that
+  shadows `public`/`service_engine` → `EngineError::InvalidSchemaName`; a duplicate
+  library name or schema → `EngineError::DuplicateLibrary`; the engine's reserved range
+  and every library band must be pairwise disjoint → `EngineError::MigrationBandOverlap`
+  naming both; a library migration outside its band → `EngineError::MigrationOutsideBand`;
+  a service migration inside a reserved band → `EngineError::ServiceMigrationInReservedBand`.
+- **`serve` names the pending set.** `EngineError::MigrationsPending` gains a
+  `libraries: Vec<&'static str>` field and its message and `REASON_MIGRATIONS_PENDING`
+  now name the engine, library and service sets; `serve` refuses a store where any
+  declared library set is unapplied and reports the pending library.
+- **Ledger fact (upgrade path).** All sets share one ledger with `ignore_missing`, so
+  sqlx applies any set's unapplied versions regardless of `max(applied)`: a 0.2 adopter
+  that later declares a library at a low band gets those versions applied below the
+  highest applied version on the next `migrate`, nothing to renumber (`s217`).
+- `apply_migration_chain` and `ensure_migrated` are public on `engine::boot` for
+  black-box conformance (`s213`–`s217`, real Postgres).
 ### Adopter migration
 
 - prefix: add `prefix = <snake_ident>;` after `principal` in `compose_service!` and rename every root method to `<prefix>_<method>` (the served field becomes `<prefix><Method>`; a method named exactly the prefix is refused). A service that hand-registers fragments (no `compose_service!`) must call `engine.declare_root_prefix(RootPrefix::from_snake("…")?)` before `run`. `SchemaSlices::assemble` takes a second `Option<&RootPrefix>` argument. Clients regenerate from the new SDL; the gateway supergraph changes once at the first deploy.
@@ -261,6 +290,7 @@ the black-box battery greps — is the wording the engine now emits.
 - cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
 - cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
 
+- migrate (break): `BootPlan` gains `libraries: Vec<LibraryMigrations>` — add `libraries: vec![]` to every `BootPlan { .. }`. `EngineError::MigrationsPending` gains a `libraries` field — exhaustive matches update. A service embedding a library declares each `LibraryMigrations { name, schema, band, migrator }` and passes them here.
 - metrics (13, additive): a new `service_engine_leader{kind,name}` gauge; no adopter code change — dashboards and alerts gain the per-loop leader series.
 - mirror (N3, break): `Projection::upsert` / `replace` return `Written` instead of `()`; delete the hand-written roster comparison that avoided a spurious impact set.
 - mirror (7, additive): delete per-projector version guards on engine-produced offers; the engine now reads the offer manifest and dead-letters a prefix mismatch.
