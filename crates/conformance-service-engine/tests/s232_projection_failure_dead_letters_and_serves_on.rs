@@ -14,7 +14,7 @@ const SOON: Duration = Duration::from_secs(2);
 const QUIET: Duration = Duration::from_millis(300);
 
 #[tokio::test]
-async fn s194_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
+async fn s232_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

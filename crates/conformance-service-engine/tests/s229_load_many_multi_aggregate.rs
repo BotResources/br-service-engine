@@ -6,7 +6,7 @@ use conformance_service_engine::sample::render::member;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s194_two_aggregates_relabelled_in_one_tx_are_both_visible_after_commit_and_neither_before()
+async fn s229_two_aggregates_relabelled_in_one_tx_are_both_visible_after_commit_and_neither_before()
 {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
@@ -20,7 +20,7 @@ async fn s194_two_aggregates_relabelled_in_one_tx_are_both_visible_after_commit_
     insert_widget(&pool, first, tenant, "before").await;
     insert_widget(&pool, second, tenant, "before").await;
 
-    let engine = boot_pipeline_engine(&db, nats.nats().await, "se_s194", "pod-s194").await;
+    let engine = boot_pipeline_engine(&db, nats.nats().await, "se_s229", "pod-s229").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let running = tokio::spawn(engine.run());
@@ -50,7 +50,7 @@ async fn s194_two_aggregates_relabelled_in_one_tx_are_both_visible_after_commit_
 }
 
 #[tokio::test]
-async fn s194_a_relabel_both_over_a_missing_aggregate_commits_nothing() {
+async fn s229_a_relabel_both_over_a_missing_aggregate_commits_nothing() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -62,7 +62,7 @@ async fn s194_a_relabel_both_over_a_missing_aggregate_commits_nothing() {
     let absent = Uuid::now_v7();
     insert_widget(&pool, present, tenant, "before").await;
 
-    let engine = boot_pipeline_engine(&db, nats.nats().await, "se_s194b", "pod-s194b").await;
+    let engine = boot_pipeline_engine(&db, nats.nats().await, "se_s229b", "pod-s229b").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let running = tokio::spawn(engine.run());

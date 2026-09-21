@@ -9,7 +9,7 @@ use conformance_service_engine::sample::{
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s194_the_declarative_kit_joins_two_offers_into_two_known_tables_from_empty() {
+async fn s230_the_declarative_kit_joins_two_offers_into_two_known_tables_from_empty() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;

@@ -96,7 +96,7 @@ impl Project<Uuid> for GatedProjection {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s194_a_put_inside_the_zero_boundary_window_reaches_known_without_the_reconcile() {
+async fn s231_a_put_inside_the_zero_boundary_window_reaches_known_without_the_reconcile() {
     OPENING
         .set((
             tokio::sync::Notify::new(),
