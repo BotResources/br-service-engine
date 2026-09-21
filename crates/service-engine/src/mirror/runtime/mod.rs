@@ -1,7 +1,7 @@
 mod lead;
 mod watch;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,6 +47,7 @@ pub(super) struct MirrorRuntime<K, Pr: Project<K>> {
     shadows: Arc<RwLock<Shadows>>,
     read_revision: Arc<RwLock<Revisions>>,
     last_seen: Arc<RwLock<Revisions>>,
+    rejected_prefixes: Arc<RwLock<BTreeSet<&'static str>>>,
 }
 
 impl<K, Pr> MirrorRuntime<K, Pr>
@@ -85,6 +86,7 @@ where
             shadows: Arc::new(RwLock::new(Shadows::new())),
             read_revision: Arc::new(RwLock::new(Revisions::new())),
             last_seen: Arc::new(RwLock::new(Revisions::new())),
+            rejected_prefixes: Arc::new(RwLock::new(BTreeSet::new())),
         }
     }
 
@@ -114,9 +116,11 @@ where
             shadows,
             changes,
             read_revision,
+            rejected,
         } = self.full_read().await?;
         let touched = self.touched_for(&shadows, &changes).await?;
         *self.shadows.write().await = shadows;
+        *self.rejected_prefixes.write().await = rejected;
         merge_forward(&mut *self.read_revision.write().await, &read_revision);
         merge_forward(&mut *self.last_seen.write().await, &read_revision);
         self.publish_required_keys().await;
@@ -161,9 +165,11 @@ where
             .map_err(EngineError::Nats)?;
         let mut shadows = Shadows::new();
         let mut changes = Vec::new();
+        let mut rejected = BTreeSet::new();
         for consumption in self.consumptions.iter() {
             if let Some(reason) = self.manifest_rejection(consumption, &manifests).await? {
                 self.dead_letter(consumption.prefix, &reason).await;
+                rejected.insert(consumption.prefix);
                 continue;
             }
             let loaded = (consumption.load)(self.nats.clone()).await?;
@@ -177,7 +183,9 @@ where
                         });
                         apply(&mut shadows);
                     }
-                    Effect::WireVersionRejected { expected, found } => {
+                    Effect::WireVersionRejected {
+                        expected, found, ..
+                    } => {
                         self.dead_letter(key.as_str(), &wire_version_reason(expected, found))
                             .await;
                     }
@@ -189,6 +197,7 @@ where
             shadows,
             changes,
             read_revision,
+            rejected,
         })
     }
 
@@ -271,6 +280,7 @@ struct Read {
     shadows: Shadows,
     changes: Vec<Change>,
     read_revision: Revisions,
+    rejected: BTreeSet<&'static str>,
 }
 
 fn wire_version_reason(expected: u16, found: u16) -> String {

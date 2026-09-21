@@ -149,19 +149,37 @@ where
                 self.project_under_lease(Vec::new(), &advance, Mark::Advance)
                     .await?;
             }
-            Effect::WireVersionRejected { expected, found } => {
-                if let Some(change) = &update.change {
+            Effect::WireVersionRejected {
+                expected,
+                found,
+                retire,
+            } => {
+                let touched = if let Some(change) = &update.change {
                     self.dead_letter(change.key.as_str(), &wire_version_reason(expected, found))
                         .await;
-                }
+                    let mut shadows = self.shadows.write().await;
+                    let mut touched = (self.keyed_by)(&shadows, change);
+                    retire(&mut shadows);
+                    touched.extend((self.keyed_by)(&shadows, change));
+                    dedup(touched)
+                } else {
+                    Vec::new()
+                };
                 merge_forward(&mut *self.last_seen.write().await, &advance);
-                self.project_under_lease(Vec::new(), &advance, Mark::Advance)
+                self.project_under_lease(touched, &advance, Mark::Advance)
                     .await?;
             }
             Effect::Apply(apply) => {
                 let Some(change) = update.change else {
                     return Ok(());
                 };
+                if self.rejected_prefixes.read().await.contains(change.prefix) {
+                    merge_forward(&mut *self.last_seen.write().await, &advance);
+                    self.project_under_lease(Vec::new(), &advance, Mark::Advance)
+                        .await?;
+                    self.publish_required_keys().await;
+                    return Ok(());
+                }
                 let touched = {
                     let mut shadows = self.shadows.write().await;
                     let mut touched = (self.keyed_by)(&shadows, &change);

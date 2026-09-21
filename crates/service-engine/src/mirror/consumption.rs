@@ -19,7 +19,11 @@ pub(super) type ReconcileKeysFn<K> =
 
 pub(super) enum Effect {
     Apply(Applier),
-    WireVersionRejected { expected: u16, found: u16 },
+    WireVersionRejected {
+        expected: u16,
+        found: u16,
+        retire: Applier,
+    },
     Boundary,
 }
 
@@ -66,6 +70,7 @@ fn wire_effect<C: Consumed>(key: KvKey, value: C, revision: u64) -> Effect {
         Some(found) if found != C::VERSION => Effect::WireVersionRejected {
             expected: C::VERSION,
             found,
+            retire: Box::new(move |shadows: &mut Shadows| shadows.remove_at::<C>(&key, revision)),
         },
         _ => Effect::Apply(Box::new(move |shadows: &mut Shadows| {
             shadows.put_at::<C>(key, value, revision)
