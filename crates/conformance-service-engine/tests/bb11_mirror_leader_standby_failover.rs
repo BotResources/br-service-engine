@@ -16,7 +16,7 @@ async fn await_projected(pool: &PgPool, id: Uuid, note: &str) {
     let deadline = Instant::now() + WITHIN;
     loop {
         let known: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM known_persons WHERE user_id = $1")
+            sqlx::query_scalar("SELECT count(*) FROM roster.known_persons WHERE user_id = $1")
                 .bind(id)
                 .fetch_one(pool)
                 .await
