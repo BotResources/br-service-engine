@@ -8,6 +8,7 @@ use sqlx::migrate::Migrator;
 
 use crate::engine::Engine;
 use crate::engine::boot::env::app_database_url;
+use crate::engine::boot::libraries::LibraryMigrations;
 use crate::engine::boot::{BootPlan, REASON_MIGRATIONS_PENDING, pg_error};
 use crate::error::EngineError;
 use crate::graphql::PassportPrincipal;
@@ -25,6 +26,7 @@ where
 {
     let BootPlan {
         component,
+        libraries,
         service_migrator,
         config,
         query,
@@ -38,7 +40,7 @@ where
 
     let readiness = ReadinessHandle::not_ready("booting");
     let pool = init_pool(&app_database_url()?).await.map_err(pg_error)?;
-    if let Err(error) = ensure_migrated(&pool, &service_migrator).await {
+    if let Err(error) = ensure_migrated(&pool, &libraries, &service_migrator).await {
         if matches!(error, EngineError::MigrationsPending { .. }) {
             readiness.set_not_ready(REASON_MIGRATIONS_PENDING);
             tracing::error!(%error, "refusing to serve a store that migrate has not finished");
@@ -73,18 +75,33 @@ where
     engine.run_with(app).await
 }
 
-async fn ensure_migrated(pool: &PgPool, service_migrator: &Migrator) -> Result<(), EngineError> {
+pub async fn ensure_migrated(
+    pool: &PgPool,
+    libraries: &[LibraryMigrations],
+    service_migrator: &Migrator,
+) -> Result<(), EngineError> {
     let engine_pending = !migrations_status(pool, &crate::schema::migrator())
         .await
         .map_err(pg_error)?
         .embedded_applied();
+    let mut pending_libraries = Vec::new();
+    for library in libraries {
+        let applied = migrations_status(pool, &library.migrator)
+            .await
+            .map_err(pg_error)?
+            .embedded_applied();
+        if !applied {
+            pending_libraries.push(library.name);
+        }
+    }
     let service_pending = !migrations_status(pool, service_migrator)
         .await
         .map_err(pg_error)?
         .embedded_applied();
-    if engine_pending || service_pending {
+    if engine_pending || !pending_libraries.is_empty() || service_pending {
         return Err(EngineError::MigrationsPending {
             engine: engine_pending,
+            libraries: pending_libraries,
             service: service_pending,
         });
     }

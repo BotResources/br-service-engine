@@ -1,6 +1,11 @@
 mod env;
+mod libraries;
 mod migrate;
 mod serve;
+
+pub use libraries::LibraryMigrations;
+pub use migrate::apply_migration_chain;
+pub use serve::ensure_migrated;
 
 use async_graphql::{ObjectType, SubscriptionType};
 use br_util_postgres::PostgresError;
@@ -16,10 +21,12 @@ pub const SERVE_SUBCOMMAND: &str = "serve";
 pub const SCHEMA_SUBCOMMAND: &str = "schema";
 
 pub const REASON_MIGRATIONS_PENDING: &str =
-    "the store is not fully migrated; migrate must apply both migration sets before serve runs";
+    "the store is not fully migrated; migrate must apply the engine, library and service migration \
+     sets before serve runs";
 
 pub struct BootPlan<Q, M, S, R> {
     pub component: &'static str,
+    pub libraries: Vec<LibraryMigrations>,
     pub service_migrator: Migrator,
     pub config: EngineConfig,
     pub query: Q,

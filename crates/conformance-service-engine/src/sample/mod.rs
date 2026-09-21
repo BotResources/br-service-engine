@@ -11,6 +11,7 @@ pub mod erase;
 pub mod gate;
 pub mod gated;
 pub mod graphql;
+pub mod library;
 pub mod linked;
 pub mod mirror;
 pub mod note;

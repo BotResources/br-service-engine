@@ -19,6 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     run_service(BootPlan {
         component: "example-service",
+        libraries: vec![],
         service_migrator: example_service::db::migrator(),
         config,
         query: QueryRoot::default(),
