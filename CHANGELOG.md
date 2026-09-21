@@ -5,7 +5,7 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
-## [0.3.0] - 2026-09-18
+## 0.3.0 - 2026-09-18
 
 ### lane: reset
 
