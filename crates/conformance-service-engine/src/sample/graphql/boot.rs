@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use service_engine::config::EngineConfig;
-use service_engine::graphql::SliceFragment;
+use service_engine::graphql::{RootPrefix, SliceFragment};
 use service_engine::name::{ChannelName, PodId};
 use service_engine::nats::Nats;
 use service_engine::{Engine, engine_schema};
@@ -27,10 +27,19 @@ fn claims(slice: &'static str, root_fields: &[&str], types: &[&str]) -> SliceFra
     )
 }
 
-fn widget_slice() -> SliceFragment {
+pub(super) fn sample_prefix() -> RootPrefix {
+    RootPrefix::from_snake("sample").expect("`sample` is a valid root prefix")
+}
+
+pub(super) fn widget_slice() -> SliceFragment {
     claims(
         "widget",
-        &["widget", "closeWidget", "mintSecret", "widgets"],
+        &[
+            "sampleWidget",
+            "sampleCloseWidget",
+            "sampleMintSecret",
+            "sampleWidgets",
+        ],
         &["WidgetView"],
     )
 }
@@ -38,21 +47,29 @@ fn widget_slice() -> SliceFragment {
 fn assignment_slice() -> SliceFragment {
     claims(
         "assignment",
-        &["assignment", "assignments"],
+        &["sampleAssignment", "sampleAssignments"],
         &["AssignmentView"],
     )
 }
 
 fn rls_assignment_slice() -> SliceFragment {
-    claims("rls_assignment", &["rlsAssignment"], &["AssignmentView"])
+    claims(
+        "rls_assignment",
+        &["sampleRlsAssignment"],
+        &["AssignmentView"],
+    )
 }
 
 pub fn root_field_collision() -> SliceFragment {
-    claims("shadow", &["widget"], &["ShadowView"])
+    claims("shadow", &["sampleWidget"], &["ShadowView"])
 }
 
 pub fn type_collision() -> SliceFragment {
-    claims("shadow", &["shadow"], &["WidgetView"])
+    claims("shadow", &["sampleShadow"], &["WidgetView"])
+}
+
+pub fn outside_prefix_slice() -> SliceFragment {
+    claims("outsider", &["outsider"], &[])
 }
 
 pub struct GraphqlService {
@@ -127,6 +144,9 @@ pub async fn boot_graphql_service(
         .register_mutation::<MintSecret, _>(mint_secret)
         .expect("register the mint mutation");
     engine
+        .declare_root_prefix(sample_prefix())
+        .expect("declare the sample root prefix");
+    engine
         .register_schema_slice(widget_slice())
         .expect("the widget slice owns its root fields and types");
     engine
@@ -190,6 +210,9 @@ pub async fn boot_rls_query_service(
         .register_projector(RlsAssignmentProjector)
         .expect("register the RLS-backed assignment projector");
     engine
+        .declare_root_prefix(sample_prefix())
+        .expect("declare the sample root prefix");
+    engine
         .register_schema_slice(rls_assignment_slice())
         .expect("the rls-assignment slice owns its root field and type");
 
@@ -221,76 +244,4 @@ pub async fn boot_rls_query_service(
         engine_stop,
         handle,
     }
-}
-
-pub async fn boot_undeclared_root_field(
-    db: &TestDb,
-    nats: Nats,
-    channel: &str,
-    pod: &str,
-) -> Result<(), service_engine::EngineError> {
-    let config = base_config(channel, pod);
-
-    let mut engine = Engine::<SamplePrincipal>::boot(
-        config,
-        db.app_pool().clone(),
-        nats,
-        ReadinessHandle::ready(),
-    )
-    .await?;
-    engine.register_principal_resolver(SamplePrincipalResolver)?;
-    engine.register_projector(WidgetProjector)?;
-    engine.register_projector(AssignmentProjector)?;
-    engine.register_schema_slice(widget_slice())?;
-
-    let readiness = engine.readiness();
-    let state = Arc::new(engine.graphql_state());
-    let schema = engine_schema(
-        QueryRoot::default(),
-        MutationRoot,
-        SubscriptionRoot,
-        state.clone(),
-    );
-    engine.set_schema_sdl(schema.sdl());
-    let app = service_engine::app(schema, state, readiness);
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind a loopback port for the undeclared-root-field boot");
-    engine.run_with_listener(listener, app).await
-}
-
-pub async fn boot_colliding_slices(
-    db: &TestDb,
-    nats: Nats,
-    channel: &str,
-    pod: &str,
-    colliding: SliceFragment,
-) -> Result<(), service_engine::EngineError> {
-    let config = base_config(channel, pod);
-
-    let mut engine = Engine::<SamplePrincipal>::boot(
-        config,
-        db.app_pool().clone(),
-        nats,
-        ReadinessHandle::ready(),
-    )
-    .await?;
-    engine.register_principal_resolver(SamplePrincipalResolver)?;
-    engine.register_projector(WidgetProjector)?;
-    engine.register_schema_slice(widget_slice())?;
-    engine.register_schema_slice(colliding)?;
-
-    let readiness = engine.readiness();
-    let state = Arc::new(engine.graphql_state());
-    let schema = engine_schema(
-        QueryRoot::default(),
-        MutationRoot,
-        SubscriptionRoot,
-        state.clone(),
-    );
-    let app = service_engine::app(schema, state, readiness);
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind a loopback port for the colliding-slice boot");
-    engine.run_with_listener(listener, app).await
 }

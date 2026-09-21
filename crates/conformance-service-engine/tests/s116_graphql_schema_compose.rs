@@ -7,27 +7,27 @@ fn s116_two_slices_sdl_fragments_compose_into_one_valid_schema() {
     let sdl = schema.sdl();
 
     assert!(
-        sdl.contains("widget("),
+        sdl.contains("sampleWidget("),
         "the widget slice's query fragment is in the composed schema:\n{sdl}"
     );
     assert!(
-        sdl.contains("assignment("),
+        sdl.contains("sampleAssignment("),
         "a second slice's query fragment composes into the same schema:\n{sdl}"
     );
     assert!(
-        sdl.contains("closeWidget("),
+        sdl.contains("sampleCloseWidget("),
         "the widget slice contributes its mutation:\n{sdl}"
     );
     assert!(
-        sdl.contains("mintSecret("),
+        sdl.contains("sampleMintSecret("),
         "the one-shot mutation is in the schema:\n{sdl}"
     );
     assert!(
-        sdl.contains("widgets"),
+        sdl.contains("sampleWidgets"),
         "the subscription fragment composes too:\n{sdl}"
     );
     assert!(
-        sdl.contains("assignments"),
+        sdl.contains("sampleAssignments"),
         "a second slice contributes its own subscription field:\n{sdl}"
     );
     assert!(

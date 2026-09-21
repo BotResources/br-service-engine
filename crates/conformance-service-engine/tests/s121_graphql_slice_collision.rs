@@ -27,7 +27,7 @@ async fn s121_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud(
                 first: "widget",
                 second: "shadow",
                 ref member,
-            }) if member == "widget"
+            }) if member == "sampleWidget"
         ),
         "a real engine that registered two slices claiming the same root field refuses to serve, \
          naming both slices, instead of standing up an ambiguous schema: {outcome:?}"

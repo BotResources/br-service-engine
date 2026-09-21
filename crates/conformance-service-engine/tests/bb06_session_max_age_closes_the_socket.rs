@@ -11,7 +11,7 @@ const CLOSE_WITHIN: Duration = Duration::from_secs(10);
 const SESSION_TTL: Duration = Duration::from_millis(500);
 const SESSION_MAX_AGE: Duration = Duration::from_millis(2000);
 const CLOSE_CODE_GOING_AWAY: u16 = 1001;
-const SUB: &str = "subscription{boardDeltas{__typename \
+const SUB: &str = "subscription{exampleBoardDeltas{__typename \
     ... on BoardReset{revision views{... on BoardView{id archived}}} \
     ... on BoardUpsert{revision view{... on BoardView{id archived}}} \
     ... on BoardRemove{revision}}}";
@@ -35,7 +35,7 @@ async fn bb06_a_socket_older_than_session_max_age_is_closed_and_cannot_resubscri
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Aged board" }),
         )
         .await);
@@ -47,7 +47,7 @@ async fn bb06_a_socket_older_than_session_max_age_is_closed_and_cannot_resubscri
         .await
         .expect("the fresh socket attaches and delivers a Reset");
     assert_eq!(
-        reset["boardDeltas"]["__typename"], "BoardReset",
+        reset["exampleBoardDeltas"]["__typename"], "BoardReset",
         "a fresh socket opens with a Reset: {reset}"
     );
 
@@ -76,7 +76,7 @@ async fn bb06_a_socket_older_than_session_max_age_is_closed_and_cannot_resubscri
         .await
         .expect("a fresh socket still attaches: the bound is on the connection, not the service");
     assert_eq!(
-        fresh_reset["boardDeltas"]["__typename"], "BoardReset",
+        fresh_reset["exampleBoardDeltas"]["__typename"], "BoardReset",
         "reconnecting on a new socket opens a new session from committed state: {fresh_reset}"
     );
 

@@ -10,7 +10,7 @@ use conformance_service_engine::sample::render::member;
 use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
 
-const SUBSCRIPTION: &str = "subscription { widgets { __typename \
+const SUBSCRIPTION: &str = "subscription { sampleWidgets { __typename \
     ... on ResetPayload { revision views { __typename ... on WidgetView { id closed affordances } } } \
     ... on UpsertPayload { revision view { __typename ... on WidgetView { id closed affordances } } } \
     ... on RemovePayload { revision projector } } }";
@@ -38,7 +38,7 @@ async fn s112_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_
         .next_data(Duration::from_secs(15))
         .await
         .expect("the attach delivers the opening Reset");
-    let delta = &reset["widgets"];
+    let delta = &reset["sampleWidgets"];
     assert_eq!(delta["__typename"], serde_json::json!("ResetPayload"));
     assert_eq!(
         delta["revision"],
@@ -61,7 +61,7 @@ async fn s112_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_
         serde_json::json!(true)
     );
 
-    let mutation = format!("mutation {{ closeWidget(id: \"{widget}\") {{ success }} }}");
+    let mutation = format!("mutation {{ sampleCloseWidget(id: \"{widget}\") {{ success }} }}");
     let (status, body) = post_json(
         &service.base_url,
         Some(&passport),
@@ -71,7 +71,7 @@ async fn s112_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_
     .await;
     assert_eq!(status, 200);
     assert_eq!(
-        body["data"]["closeWidget"]["success"],
+        body["data"]["sampleCloseWidget"]["success"],
         serde_json::json!(true)
     );
 
@@ -79,7 +79,7 @@ async fn s112_a_subscription_resets_then_upserts_the_same_view_after_an_allowed_
         .next_data(Duration::from_secs(15))
         .await
         .expect("committing the close reaches the session as an Upsert");
-    let delta = &upsert["widgets"];
+    let delta = &upsert["sampleWidgets"];
     assert_eq!(delta["__typename"], serde_json::json!("UpsertPayload"));
     assert_eq!(
         delta["revision"],

@@ -19,7 +19,7 @@ async fn two_pods_serve_identical_committed_state() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:true){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:true){success}}",
             serde_json::json!({ "id": b, "n": "Shared" }),
         )
         .await);
@@ -28,13 +28,13 @@ async fn two_pods_serve_identical_committed_state() {
         .gql_at(
             &pod_b,
             &pass,
-            "query($id:UUID!){board(id:$id){name affordances}}",
+            "query($id:UUID!){exampleBoard(id:$id){name affordances}}",
             serde_json::json!({ "id": b }),
         )
         .await;
-    assert_eq!(ok(&on_b)["board"]["name"], "Shared");
+    assert_eq!(ok(&on_b)["exampleBoard"]["name"], "Shared");
     assert_eq!(
-        ok(&on_b)["board"]["affordances"]["archive"]["allowed"],
+        ok(&on_b)["exampleBoard"]["affordances"]["archive"]["allowed"],
         true
     );
 
@@ -54,12 +54,12 @@ async fn a_subscriber_on_pod_b_receives_the_upsert_caused_by_a_write_on_pod_a() 
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:true){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:true){success}}",
             serde_json::json!({ "id": board, "n": "Cross-pod" }),
         )
         .await);
 
-    let query = "subscription{boardDeltas{\
+    let query = "subscription{exampleBoardDeltas{\
         __typename \
         ... on BoardReset{revision views{... on BoardView{id name archived}}} \
         ... on BoardUpsert{revision view{... on BoardView{id name archived}}} \
@@ -68,28 +68,28 @@ async fn a_subscriber_on_pod_b_receives_the_upsert_caused_by_a_write_on_pod_a() 
 
     let reset = sub.next_payload(RECV).await;
     assert_eq!(
-        reset["boardDeltas"]["__typename"], "BoardReset",
+        reset["exampleBoardDeltas"]["__typename"], "BoardReset",
         "the subscriber on pod B receives a Reset on attach"
     );
 
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": board }),
         )
         .await);
 
     let flip = loop {
         let delta = sub.next_payload(RECV).await;
-        if delta["boardDeltas"]["__typename"] == "BoardUpsert"
-            && delta["boardDeltas"]["view"]["id"] == board.to_string()
+        if delta["exampleBoardDeltas"]["__typename"] == "BoardUpsert"
+            && delta["exampleBoardDeltas"]["view"]["id"] == board.to_string()
         {
             break delta;
         }
     };
     assert_eq!(
-        flip["boardDeltas"]["view"]["archived"], true,
+        flip["exampleBoardDeltas"]["view"]["archived"], true,
         "a write on pod A reaches the subscriber on pod B as an Upsert through the impact bus"
     );
 

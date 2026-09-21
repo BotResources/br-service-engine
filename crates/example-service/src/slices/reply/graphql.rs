@@ -32,13 +32,13 @@ pub struct ReplyQuery;
 
 #[Object]
 impl ReplyQuery {
-    async fn reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<ReplyView>> {
+    async fn example_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<ReplyView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view::<RepliesView>(&id)
             .await
     }
 
-    async fn reply_download(
+    async fn example_reply_download(
         &self,
         ctx: &Context<'_>,
         reply_id: Uuid,
@@ -56,7 +56,7 @@ pub struct ReplyMutation;
 
 #[Object]
 impl ReplyMutation {
-    async fn start_reply(
+    async fn example_start_reply(
         &self,
         ctx: &Context<'_>,
         id: Uuid,
@@ -65,7 +65,7 @@ impl ReplyMutation {
         service_engine::ack::<AppPrincipal, StartReply>(ctx, StartReply { id, board_id }).await
     }
 
-    async fn set_typing(
+    async fn example_set_typing(
         &self,
         ctx: &Context<'_>,
         board: Uuid,
@@ -74,11 +74,11 @@ impl ReplyMutation {
         service_engine::ack::<AppPrincipal, SetTyping>(ctx, SetTyping { board, label }).await
     }
 
-    async fn cancel_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
+    async fn example_cancel_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, CancelReply>(ctx, CancelReply { id }).await
     }
 
-    async fn attach_reply(
+    async fn example_attach_reply(
         &self,
         ctx: &Context<'_>,
         reply_id: Uuid,
@@ -110,7 +110,7 @@ pub struct ReplySubscription;
 
 #[Subscription]
 impl ReplySubscription {
-    async fn reply_deltas(
+    async fn example_reply_deltas(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<ReplyDelta>>> {
@@ -127,7 +127,7 @@ impl ReplySubscription {
         Ok(ReplyDelta::subscribe(stream, notices))
     }
 
-    async fn typing_deltas(
+    async fn example_typing_deltas(
         &self,
         ctx: &Context<'_>,
         board: Uuid,

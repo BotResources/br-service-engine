@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 const BOARD_ARCHIVE: &str = "example:board_archive";
 const RECV: Duration = Duration::from_secs(15);
-const SUB: &str = "subscription{boardDeltas{__typename \
+const SUB: &str = "subscription{exampleBoardDeltas{__typename \
     ... on BoardReset{revision views{... on BoardView{id archived}}} \
     ... on BoardUpsert{revision view{... on BoardView{id archived}}} \
     ... on BoardRemove{revision}}}";
@@ -33,7 +33,7 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
         .gql_at(
             doomed.base_url(),
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Rolled board" }),
         )
         .await);
@@ -44,14 +44,14 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
         .next_data(RECV)
         .await
         .expect("the doomed pod opens the session with a Reset");
-    assert_eq!(reset["boardDeltas"]["__typename"], "BoardReset");
+    assert_eq!(reset["exampleBoardDeltas"]["__typename"], "BoardReset");
 
     // A live delta proves the client is genuinely mid-session on the doomed pod.
     ok(&world
         .gql_at(
             doomed.base_url(),
             &pass,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": board }),
         )
         .await);
@@ -60,12 +60,12 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
             .next_data(RECV)
             .await
             .expect("the doomed pod delivers the archive delta while the client is attached");
-        if delta["boardDeltas"]["__typename"] == "BoardUpsert" {
+        if delta["exampleBoardDeltas"]["__typename"] == "BoardUpsert" {
             break delta;
         }
     };
     assert_eq!(
-        upsert["boardDeltas"]["view"]["archived"],
+        upsert["exampleBoardDeltas"]["view"]["archived"],
         serde_json::json!(true),
         "the client saw the archive land on the doomed pod: {upsert}"
     );
@@ -81,13 +81,13 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
         .next_data(RECV)
         .await
         .expect("the surviving pod opens a fresh session for the reconnecting client");
-    assert_eq!(fresh["boardDeltas"]["__typename"], "BoardReset");
+    assert_eq!(fresh["exampleBoardDeltas"]["__typename"], "BoardReset");
     assert_eq!(
-        fresh["boardDeltas"]["revision"],
+        fresh["exampleBoardDeltas"]["revision"],
         serde_json::json!(1),
         "the reconnect is a new session opening at revision 1: {fresh}"
     );
-    let carries_committed = fresh["boardDeltas"]["views"]
+    let carries_committed = fresh["exampleBoardDeltas"]["views"]
         .as_array()
         .expect("the reconnect Reset carries its views")
         .iter()

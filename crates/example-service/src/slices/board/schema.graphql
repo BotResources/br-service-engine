@@ -3,16 +3,16 @@ scalar Affordances
 union BoardDelta = BoardReset | BoardUpsert | BoardRemove | LanesPaused | LanesResumed
 
 type BoardMutation {
-	createBoard(id: UUID!, name: String!, isPublic: Boolean!): MutationAck!
-	archiveBoard(id: UUID!): MutationAck!
-	mintBoardInvite(id: UUID!): String!
-	setBoardMembership(boardId: UUID!, userId: UUID!, member: Boolean!): MutationAck!
+	exampleCreateBoard(id: UUID!, name: String!, isPublic: Boolean!): MutationAck!
+	exampleArchiveBoard(id: UUID!): MutationAck!
+	exampleMintBoardInvite(id: UUID!): String!
+	exampleSetBoardMembership(boardId: UUID!, userId: UUID!, member: Boolean!): MutationAck!
 }
 
 type BoardQuery {
-	board(id: UUID!): BoardView
-	boards: [BoardView!]!
-	orgBoards: [BoardView!]!
+	exampleBoard(id: UUID!): BoardView
+	exampleBoards: [BoardView!]!
+	exampleOrgBoards: [BoardView!]!
 }
 
 type BoardRemove {
@@ -28,8 +28,8 @@ type BoardReset {
 }
 
 type BoardSubscription {
-	boardDeltas: BoardDelta!
-	orgBoardDeltas: OrgBoardDelta!
+	exampleBoardDeltas: BoardDelta!
+	exampleOrgBoardDeltas: OrgBoardDelta!
 }
 
 type BoardUpsert {

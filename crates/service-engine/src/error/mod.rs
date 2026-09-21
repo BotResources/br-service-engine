@@ -332,6 +332,32 @@ pub enum EngineError {
     #[error("the composed graphql schema could not be parsed for slice verification: {detail}")]
     SchemaParse { detail: String },
 
+    #[error("root prefix {value:?} is invalid: it {reason}")]
+    RootPrefixInvalid { value: String, reason: &'static str },
+
+    #[error(
+        "a schema slice is registered but no root prefix is declared; compose_service! must set \
+         `prefix =`, and a service that hand-registers fragments must call declare_root_prefix \
+         before run"
+    )]
+    RootPrefixUndeclared,
+
+    #[error(
+        "the root prefix is declared as {first:?} and again as {second:?}; a service has one root \
+         prefix"
+    )]
+    RootPrefixRedeclared { first: String, second: String },
+
+    #[error(
+        "slice {slice} exposes the graphql root field `{field}`, which is not under the declared \
+         root prefix `{prefix}`; every root field of a service must be `<prefix><UpperName>`"
+    )]
+    RootFieldOutsidePrefix {
+        slice: &'static str,
+        field: String,
+        prefix: String,
+    },
+
     #[error(
         "no live session {session} on this pod, so its window cannot be paged; a page request \
          must be issued over the session's own connection, which pins it to the pod that holds it"

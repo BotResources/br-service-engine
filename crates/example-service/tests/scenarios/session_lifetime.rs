@@ -11,7 +11,7 @@ const SESSION_TTL: Duration = Duration::from_millis(500);
 const SESSION_MAX_AGE: Duration = Duration::from_millis(2000);
 const CLOSE_CODE_GOING_AWAY: u16 = 1001;
 
-const SUB: &str = "subscription{boardDeltas{\
+const SUB: &str = "subscription{exampleBoardDeltas{\
     __typename \
     ... on BoardReset{revision views{... on BoardView{id archived affordances}}} \
     ... on BoardUpsert{revision view{... on BoardView{id archived affordances}}} \
@@ -29,7 +29,7 @@ async fn a_socket_older_than_session_max_age_is_closed_and_a_fresh_socket_carrie
     ok(&world
         .gql(
             &with_archive,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Session board" }),
         )
         .await);
@@ -37,10 +37,10 @@ async fn a_socket_older_than_session_max_age_is_closed_and_a_fresh_socket_carrie
     let mut aged = Subscription::open(&world.subscription_url(), &with_archive, SUB).await;
     let reset = aged.next_payload(RECV).await;
     assert_eq!(
-        reset["boardDeltas"]["__typename"], "BoardReset",
+        reset["exampleBoardDeltas"]["__typename"], "BoardReset",
         "the socket attaches with a Reset"
     );
-    let allowed_now = reset["boardDeltas"]["views"]
+    let allowed_now = reset["exampleBoardDeltas"]["views"]
         .as_array()
         .expect("the Reset carries its views")
         .iter()
@@ -73,10 +73,10 @@ async fn a_socket_older_than_session_max_age_is_closed_and_a_fresh_socket_carrie
     let mut fresh = Subscription::open(&world.subscription_url(), &revoked, SUB).await;
     let after = fresh.next_payload(RECV).await;
     assert_eq!(
-        after["boardDeltas"]["__typename"], "BoardReset",
+        after["exampleBoardDeltas"]["__typename"], "BoardReset",
         "the fresh socket attaches with a Reset"
     );
-    let allowed_after = after["boardDeltas"]["views"]
+    let allowed_after = after["exampleBoardDeltas"]["views"]
         .as_array()
         .expect("the Reset carries its views")
         .iter()

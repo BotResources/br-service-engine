@@ -18,7 +18,7 @@ pub struct RosterQuery;
 
 #[Object]
 impl RosterQuery {
-    async fn person(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<RosterView>> {
+    async fn example_person(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<RosterView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch::<RosterUsers>(&id)
             .await
@@ -30,7 +30,7 @@ pub struct RosterSubscription;
 
 #[Subscription]
 impl RosterSubscription {
-    async fn roster_deltas(
+    async fn example_roster_deltas(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<RosterDelta>>> {

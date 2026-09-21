@@ -8,7 +8,8 @@ use graphql_support::post_json;
 use uuid::Uuid;
 
 async fn rls_assignment(base_url: &str, passport: &str, id: Uuid) -> serde_json::Value {
-    let query = format!("query {{ rlsAssignment(id: \"{id}\") {{ id title closed canClose }} }}");
+    let query =
+        format!("query {{ sampleRlsAssignment(id: \"{id}\") {{ id title closed canClose }} }}");
     let (status, body) = post_json(base_url, Some(passport), &query, serde_json::json!({})).await;
     assert_eq!(status, 200, "the rls query answers over HTTP: {body}");
     body
@@ -34,14 +35,14 @@ async fn s126_a_query_time_fetch_runs_under_the_registered_rls_applier_so_a_forb
 
     let body = rls_assignment(&service.base_url, &passport, mine).await;
     assert_eq!(
-        body["data"]["rlsAssignment"]["id"],
+        body["data"]["sampleRlsAssignment"]["id"],
         serde_json::json!(mine.to_string()),
         "the principal's own row renders through the query path: {body}"
     );
 
     let body = rls_assignment(&service.base_url, &passport, theirs).await;
     assert!(
-        body["data"]["rlsAssignment"].is_null(),
+        body["data"]["sampleRlsAssignment"].is_null(),
         "the projector's populate returns the forbidden key and its project applies no tenant \
          filter, so the row is hidden only because the query-time load ran under the registered \
          RLS applier's session context: {body}"

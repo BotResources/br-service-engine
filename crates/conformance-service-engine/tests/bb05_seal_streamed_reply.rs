@@ -25,7 +25,7 @@ async fn bb05_a_streamed_reply_seals_against_its_hash_in_the_running_binary() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$b:UUID!){startReply(id:$id,boardId:$b){success}}",
+            "mutation($id:UUID!,$b:UUID!){exampleStartReply(id:$id,boardId:$b){success}}",
             serde_json::json!({ "id": reply, "b": board }),
         )
         .await);
@@ -51,12 +51,15 @@ async fn bb05_a_streamed_reply_seals_against_its_hash_in_the_running_binary() {
         let view = world
             .gql(
                 &pass,
-                "query($id:UUID!){reply(id:$id){text status}}",
+                "query($id:UUID!){exampleReply(id:$id){text status}}",
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        if ok(&view)["reply"]["status"] == "complete" {
-            break ok(&view)["reply"]["text"].as_str().unwrap().to_string();
+        if ok(&view)["exampleReply"]["status"] == "complete" {
+            break ok(&view)["exampleReply"]["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
         }
         assert!(
             Instant::now() < deadline,

@@ -181,3 +181,69 @@ fn a_reason_decoded_from_the_wire_is_rejected_unless_it_is_screaming_snake() {
         serde_json::from_value(serde_json::json!({ "allowed": false, "reason": "already_closed" }));
     assert!(bad.is_err());
 }
+
+trait CloserPrincipal {
+    fn may_close(&self) -> bool;
+}
+
+struct TestCloser {
+    scoped: bool,
+}
+
+impl CloserPrincipal for TestCloser {
+    fn may_close(&self) -> bool {
+        self.scoped
+    }
+}
+
+struct Widget<P> {
+    closed: bool,
+    _principal: std::marker::PhantomData<P>,
+}
+
+crate::gated! {
+    generics [P: CloserPrincipal] ;
+    Widget<P>, P ;
+    "close" => fn widget_close(this, principal) {
+        if !principal.may_close() {
+            Gate::blocked(reasons::NO_SCOPE)
+        } else if this.closed {
+            Gate::blocked(reasons::ALREADY_CLOSED)
+        } else {
+            Gate::allowed()
+        }
+    }
+}
+
+#[test]
+fn a_generic_aggregate_gated_over_its_principal_matches_actions_and_affordances() {
+    let widget: Widget<TestCloser> = Widget {
+        closed: false,
+        _principal: std::marker::PhantomData,
+    };
+    let scoped = TestCloser { scoped: true };
+    assert_eq!(
+        <Widget<TestCloser>>::ACTIONS,
+        &[ActionName::from_static("close")]
+    );
+    assert_eq!(widget.widget_close(&scoped), Gate::allowed());
+    assert_eq!(
+        widget.gate(ActionName::from_static("close"), &scoped),
+        Some(Gate::allowed())
+    );
+    check_gates_match_affordances(&widget, &scoped)
+        .expect("the generic gated! arm keeps gate and affordance identical");
+}
+
+#[test]
+fn a_generic_aggregate_blocks_when_its_principal_lacks_the_scope() {
+    let widget: Widget<TestCloser> = Widget {
+        closed: false,
+        _principal: std::marker::PhantomData,
+    };
+    let unscoped = TestCloser { scoped: false };
+    assert_eq!(
+        widget.widget_close(&unscoped).reason().map(|r| r.code()),
+        Some("MISSING_SCOPE")
+    );
+}

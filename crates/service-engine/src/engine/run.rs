@@ -20,7 +20,8 @@ enum Boot {
 
 impl<P: Principal> Engine<P> {
     pub async fn run(self) -> Result<(), EngineError> {
-        let slices = crate::graphql::SchemaSlices::assemble(&self.schema_slices)?;
+        let slices =
+            crate::graphql::SchemaSlices::assemble(&self.schema_slices, self.root_prefix.as_ref())?;
         if let Some(sdl) = &self.schema_sdl {
             slices.verify(sdl)?;
         }

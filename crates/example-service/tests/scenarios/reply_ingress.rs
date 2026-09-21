@@ -26,7 +26,7 @@ async fn chunks_streamed_over_nats_by_a_separate_process_reach_viewers_on_two_po
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$b:UUID!){startReply(id:$id,boardId:$b){success}}",
+            "mutation($id:UUID!,$b:UUID!){exampleStartReply(id:$id,boardId:$b){success}}",
             serde_json::json!({ "id": reply, "b": board }),
         )
         .await);
@@ -52,12 +52,16 @@ async fn chunks_streamed_over_nats_by_a_separate_process_reach_viewers_on_two_po
                 .gql_at(
                     service,
                     &pass,
-                    "query($id:UUID!){reply(id:$id){text status}}",
+                    "query($id:UUID!){exampleReply(id:$id){text status}}",
                     serde_json::json!({ "id": reply }),
                 )
                 .await;
-            (view["data"]["reply"]["status"] == "complete")
-                .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
+            (view["data"]["exampleReply"]["status"] == "complete").then(|| {
+                view["data"]["exampleReply"]["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
         });
         assert_eq!(
             text, "Hello NATS",

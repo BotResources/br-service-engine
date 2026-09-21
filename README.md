@@ -57,7 +57,7 @@ battery-backed.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`), `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `paste` re-exported for library slices, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -818,7 +818,29 @@ wiring of its own; it is the reference for how a service boots.
 function — so `register.rs` calls the generated `slices::register(engine)` and
 `graphql.rs` mounts the generated roots, and neither is touched when a slice
 comes or goes. Removing a slice deletes its folder and its one line in the
-`compose_service!` block; adding one is the reverse. This holds even for a slice
+`compose_service!` block; adding one is the reverse.
+
+`compose_service!` takes a **mandatory** `prefix = <snake_ident>;` after
+`principal` (a block without it does not compile), and every root field the
+service exposes must be `<prefix><UpperName>`: name each resolver method
+`<prefix>_<name>` (so `example_board` serves `exampleBoard`), never a bare
+`<prefix>` — a root method named exactly the prefix is refused. The engine
+validates the ident, derives the lowerCamel prefix once, declares it before any
+slice registers, and refuses at boot (`RootPrefixInvalid` /
+`RootPrefixUndeclared` / `RootFieldOutsidePrefix`, the pod never serves) any
+service that leaves a root field outside its prefix. A service that hand-registers
+`SliceFragment`s without `compose_service!` calls
+`engine.declare_root_prefix(RootPrefix::from_snake("…")?)` itself before `run`.
+The prefix is the only defense against two services claiming one root: the gateway
+composer merges a duplicate plain-SDL root field silently and routes it to one
+graph rather than refusing it (recorded by the plan's composition probe), so the
+engine refuses the collision at its own boot instead of leaving it to compose
+away. A library packaged as a slice contributes its roots through the
+`slice <name> ["feat"] from <lib>::<macro> { … }` arm — the library macro is
+invoked at the host's prefix and principal, writes its aggregate gate once with
+the generic `gated! { generics [P: …] ; … }` arm and its delta union once with the
+generic `subscription_union! { generics [P: …] ; … }` arm, and reaches `paste`
+through `::service_engine::paste` without its own dependency. This holds even for a slice
 that contributes scopes or a principal fact: the slice declares its scope key and
 registers its principal-fact loader from its **own** `register`
 (`engine.contribute_scopes(&[..])`, `engine.register_principal_fact(..)`), and the
