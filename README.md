@@ -411,7 +411,7 @@ currently see the referencing view (`populate` → membership) **and** the loade
 referencing aggregate still lists the reference in `Aggregate::blob_refs`; a
 non-viewer, or a reference the named aggregate no longer holds, resolves to
 `None`. A resolver therefore mints a download through `Query::download` and never
-through a raw presign; the reference reply slice's `replyDownload(replyId,
+through a raw presign; the reference reply slice's `exampleReplyDownload(replyId,
 reference)` field is the reference resolver. The bytes flow
 client-to-storage directly, so `size` is unknown at commit and is recorded from
 the object's head when the reaper first sees the upload has completed (promoting
@@ -1170,7 +1170,7 @@ sequence unbroken. A direct-lane subscription is unaffected — mutations still
 commit under an outage, so its views keep flowing. `Engine::lane_notices()`
 exposes the raw signal to a service or a test; `graphql::lane_notice_stream` and
 the union's generated `subscribe(deltas, notices)` merge it into a subscription
-(the reference `replyDeltas` / `typingDeltas` do this).
+(the reference `exampleReplyDeltas` / `exampleTypingDeltas` do this).
 
 The `serve` entry point installs the observability every engine service shares, so
 a service `main` never re-adds it by hand (`with_edge_observability` is crate-private

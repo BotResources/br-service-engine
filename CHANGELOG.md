@@ -264,54 +264,6 @@ the black-box battery greps — is the wording the engine now emits.
 - `apply_migration_chain` and `ensure_migrated` are public on `engine::boot` for
   black-box conformance (`s213`–`s217`, real Postgres).
 
-### Fixed
-
-- conformance `s176` no longer observes the NATS-down verdict through a fixed 2.4 s window (grace starts at disconnect detection, not `nats.stop`): it captures the beat's progress, then bounded-polls housekeeping (heartbeat + leader slots advance) and the readiness handle (`REASON_NATS_UNREACHABLE`) to generous deadlines, failing only on the deadline. Test-only; the engine is unchanged and matches the readiness contract ("the `nats_grace` probe alone takes the pod DOWN").
-
-### Adopter migration
-
-- prefix: add `prefix = <snake_ident>;` after `principal` in `compose_service!` and rename every root method to `<prefix>_<method>` (the served field becomes `<prefix><Method>`; a method named exactly the prefix is refused). A service that hand-registers fragments (no `compose_service!`) must call `engine.declare_root_prefix(RootPrefix::from_snake("…")?)` before `run`. `SchemaSlices::assemble` takes a second `Option<&RootPrefix>` argument. Clients regenerate from the new SDL; the gateway supergraph changes once at the first deploy.
-- write: `Aggregate: Clone` — derive `Clone` on every aggregate.
-- write: a post-save policy takes `Saved<'_, A>` — `saved.next` is the former saved-aggregate argument and `saved.prior` the stored image (`None` on a create); read the transition with `saved.transitioned(…)`. Add `register_post_delete_policy` where you hard-delete, implement `Persistence::delete` on stores that delete and route hard deletes through `cx.delete`, and keep only the same-content idempotent ack of the hand-written `cx.create` key guard, through the locked `cx.load` — drop its different-content branch and any raw-connection read, the engine refuses a different-content reuse with `KEY_REUSED`.
-- write: `OUTBOX_TABLE` is now `service_engine.integration_outbox`; never create `integration_outbox` yourself again — keep an existing `*_outbox.sql` only where a database has already applied it (its rows are adopted at migrate time, then the legacy table is dropped).
-- boot: `BootPlan` loses `nats_url` and `app_role`; build `config` as
-  `EngineConfig::from_env()?.with_service(..)` (which now reads `NATS_URL` and
-  `APP_ROLE`) and drop those two fields from the `BootPlan` literal.
-- boot: `run_service` dispatches on argv — the pod runs `migrate` as the library
-  chart's init container and `serve` as the main container; e2e harnesses spawn
-  `migrate` then `serve` instead of one no-argv process.
-- boot: delete every hand-read engine env var from `main`; `EngineConfig::from_env()`
-  reads them. Rename `POD_ID` → `HOSTNAME` and `HTTP_ADDR` → `PORT`/`HOST` in the
-  deployment; `serve` reads `DATABASE_URL`, `migrate` reads `DATABASE_URL_OWNER`
-  (strict, no fallback).
-- boot: delete the pre-boot NATS connection that read the stream `max_age` and the
-  hand-set `with_message_retention`; `serve` derives it.
-- boot: delete `set_ignore_missing(true)` from the service migrator handed to the
-  kit; the kit sets it on both sets.
-- boot: `with_edge_observability` is no longer public; a hand-wired `main` uses
-  `serve` instead.
-- cohort: `Visibility::{cohorts, memberships}` now return `Vec<Cohort>` and `CohortIndex::keys_in_cohorts` takes `&[Cohort]` — replace every `CohortKey::of(&[…])` with a typed `Cohort` (`Cohort::uuid("manager", id)`, `Cohort::flag("public", true)`, `Cohort::text`, `Cohort::int`), and bind `keys_in_cohorts` against the row's natural columns with `Cohort::uuids`/`texts`/`holds`.
-- cohort: `CohortKey::of` is removed — a routing `CohortKey` derived from a declared cohort is now `Cohort::…(…).key()`; a per-principal render group stays `CohortKey::principal(id)`.
-- cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
-- cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
-
-- migrate (break): `BootPlan` gains `libraries: Vec<LibraryMigrations>` — add `libraries: vec![]` to every `BootPlan { .. }`. `EngineError::MigrationsPending` gains a `libraries` field — exhaustive matches update. A service embedding a library declares each `LibraryMigrations { name, schema, band, migrator }` and passes them here.
-- metrics (13, additive): a new `service_engine_leader{kind,name}` gauge; no adopter code change — dashboards and alerts gain the per-loop leader series.
-- mirror (N3, break): `Projection::upsert` / `replace` return `Written` instead of `()`; delete the hand-written roster comparison that avoided a spurious impact set.
-- mirror (7, additive): delete per-projector version guards on engine-produced offers; the engine now reads the offer manifest and dead-letters a prefix mismatch.
-- mirror (N9, additive): delete the hand-written per-value guards on a non-engine producer and implement `Consumed::wire_version` instead.
-- mirror (8, additive): a mirror that needs a configuration key declares `Mirror::require_key::<C>(key)` (the key must live under `C::PREFIX`); a `project`-time `Err(EngineError::Config)` guard on that key is now the mirror's readiness declaration.
-
-- graphql (item 10): delete any synthetic slice that claimed the `*Payload` subscription-envelope types — the engine derives them from the delta union that also lists `LanesPaused`/`LanesResumed`.
-- graphql (item 11): replace hand-rolled `forbidden()` copies (accounts `graphql.rs`, `context.rs`) with `service_engine::graphql::forbidden()`; a query or subscription refusal that needs another code uses `graphql::coded_error(code, message)`.
-
-### Replaced or dropped
-
-- `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper (`SELECT … FOR UPDATE` on the row's `id`).
-- `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields.
-- No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
-- `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
-
 ### lane: blobs
 
 #### C1. Verified upload — checksum and exact size pinned in the presign
@@ -390,6 +342,54 @@ second bucket on the public host; the upload POST URL and the download presign u
 the public bucket (SigV4 signs `Host`, so a browser needs the public host), while
 `ensure_bucket`, `head` and `delete` stay on the internal in-cluster host. The
 engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the config.
+
+### Fixed
+
+- conformance `s176` no longer observes the NATS-down verdict through a fixed 2.4 s window (grace starts at disconnect detection, not `nats.stop`): it captures the beat's progress, then bounded-polls housekeeping (heartbeat + leader slots advance) and the readiness handle (`REASON_NATS_UNREACHABLE`) to generous deadlines, failing only on the deadline. Test-only; the engine is unchanged and matches the readiness contract ("the `nats_grace` probe alone takes the pod DOWN").
+
+### Adopter migration
+
+- prefix: add `prefix = <snake_ident>;` after `principal` in `compose_service!` and rename every root method to `<prefix>_<method>` (the served field becomes `<prefix><Method>`; a method named exactly the prefix is refused). A service that hand-registers fragments (no `compose_service!`) must call `engine.declare_root_prefix(RootPrefix::from_snake("…")?)` before `run`. `SchemaSlices::assemble` takes a second `Option<&RootPrefix>` argument. Clients regenerate from the new SDL; the gateway supergraph changes once at the first deploy.
+- write: `Aggregate: Clone` — derive `Clone` on every aggregate.
+- write: a post-save policy takes `Saved<'_, A>` — `saved.next` is the former saved-aggregate argument and `saved.prior` the stored image (`None` on a create); read the transition with `saved.transitioned(…)`. Add `register_post_delete_policy` where you hard-delete, implement `Persistence::delete` on stores that delete and route hard deletes through `cx.delete`, and keep only the same-content idempotent ack of the hand-written `cx.create` key guard, through the locked `cx.load` — drop its different-content branch and any raw-connection read, the engine refuses a different-content reuse with `KEY_REUSED`.
+- write: `OUTBOX_TABLE` is now `service_engine.integration_outbox`; never create `integration_outbox` yourself again — keep an existing `*_outbox.sql` only where a database has already applied it (its rows are adopted at migrate time, then the legacy table is dropped).
+- boot: `BootPlan` loses `nats_url` and `app_role`; build `config` as
+  `EngineConfig::from_env()?.with_service(..)` (which now reads `NATS_URL` and
+  `APP_ROLE`) and drop those two fields from the `BootPlan` literal.
+- boot: `run_service` dispatches on argv — the pod runs `migrate` as the library
+  chart's init container and `serve` as the main container; e2e harnesses spawn
+  `migrate` then `serve` instead of one no-argv process.
+- boot: delete every hand-read engine env var from `main`; `EngineConfig::from_env()`
+  reads them. Rename `POD_ID` → `HOSTNAME` and `HTTP_ADDR` → `PORT`/`HOST` in the
+  deployment; `serve` reads `DATABASE_URL`, `migrate` reads `DATABASE_URL_OWNER`
+  (strict, no fallback).
+- boot: delete the pre-boot NATS connection that read the stream `max_age` and the
+  hand-set `with_message_retention`; `serve` derives it.
+- boot: delete `set_ignore_missing(true)` from the service migrator handed to the
+  kit; the kit sets it on both sets.
+- boot: `with_edge_observability` is no longer public; a hand-wired `main` uses
+  `serve` instead.
+- cohort: `Visibility::{cohorts, memberships}` now return `Vec<Cohort>` and `CohortIndex::keys_in_cohorts` takes `&[Cohort]` — replace every `CohortKey::of(&[…])` with a typed `Cohort` (`Cohort::uuid("manager", id)`, `Cohort::flag("public", true)`, `Cohort::text`, `Cohort::int`), and bind `keys_in_cohorts` against the row's natural columns with `Cohort::uuids`/`texts`/`holds`.
+- cohort: `CohortKey::of` is removed — a routing `CohortKey` derived from a declared cohort is now `Cohort::…(…).key()`; a per-principal render group stays `CohortKey::principal(id)`.
+- cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
+- cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
+
+- migrate (break): `BootPlan` gains `libraries: Vec<LibraryMigrations>` — add `libraries: vec![]` to every `BootPlan { .. }`. `EngineError::MigrationsPending` gains a `libraries` field — exhaustive matches update. A service embedding a library declares each `LibraryMigrations { name, schema, band, migrator }` and passes them here.
+- metrics (13, additive): a new `service_engine_leader{kind,name}` gauge; no adopter code change — dashboards and alerts gain the per-loop leader series.
+- mirror (N3, break): `Projection::upsert` / `replace` return `Written` instead of `()`; delete the hand-written roster comparison that avoided a spurious impact set.
+- mirror (7, additive): delete per-projector version guards on engine-produced offers; the engine now reads the offer manifest and dead-letters a prefix mismatch.
+- mirror (N9, additive): delete the hand-written per-value guards on a non-engine producer and implement `Consumed::wire_version` instead.
+- mirror (8, additive): a mirror that needs a configuration key declares `Mirror::require_key::<C>(key)` (the key must live under `C::PREFIX`); a `project`-time `Err(EngineError::Config)` guard on that key is now the mirror's readiness declaration.
+
+- graphql (item 10): delete any synthetic slice that claimed the `*Payload` subscription-envelope types — the engine derives them from the delta union that also lists `LanesPaused`/`LanesResumed`.
+- graphql (item 11): replace hand-rolled `forbidden()` copies (accounts `graphql.rs`, `context.rs`) with `service_engine::graphql::forbidden()`; a query or subscription refusal that needs another code uses `graphql::coded_error(code, message)`.
+
+### Replaced or dropped
+
+- `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper (`SELECT … FOR UPDATE` on the row's `id`).
+- `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields.
+- No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
+- `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
 
 ## 0.2.0 - 2026-09-16
 
