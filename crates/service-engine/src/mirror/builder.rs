@@ -169,6 +169,26 @@ where
                     key: required.key(),
                 });
             }
+            if !self
+                .guards
+                .iter()
+                .any(|guard| guard.prefix() == required.prefix())
+            {
+                return Err(EngineError::Config(format!(
+                    "mirror {} requires key {} under prefix {:?} but consumes no such prefix; \
+                     require_key::<C> needs the matching consume::<C>",
+                    self.name.as_str(),
+                    required.key(),
+                    required.prefix(),
+                )));
+            }
+            if crate::nats::KvKey::new(required.key()).is_err() {
+                return Err(EngineError::Config(format!(
+                    "mirror {} requires a syntactically invalid key {:?}",
+                    self.name.as_str(),
+                    required.key(),
+                )));
+            }
         }
         Ok(())
     }

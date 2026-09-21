@@ -13,7 +13,7 @@ use crate::config::DEFAULT_BEAT;
 use crate::error::EngineError;
 use crate::inbound::DeadLetters;
 use crate::name::MirrorName;
-use crate::nats::{KvBucket, Nats, NatsError};
+use crate::nats::{Nats, NatsError};
 use crate::transport::ImpactTransport;
 
 const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -158,16 +158,11 @@ where
                 read_revision.insert(consumption.bucket.to_string(), snapshot);
             }
         }
-        let manifests = self
-            .nats
-            .published_language::<OfferManifest>()
-            .await
-            .map_err(EngineError::Nats)?;
         let mut shadows = Shadows::new();
         let mut changes = Vec::new();
         let mut rejected = BTreeSet::new();
         for consumption in self.consumptions.iter() {
-            if let Some(reason) = self.manifest_rejection(consumption, &manifests).await? {
+            if let Some(reason) = self.manifest_rejection(consumption).await? {
                 self.dead_letter(consumption.prefix, &reason).await;
                 rejected.insert(consumption.prefix);
                 continue;
@@ -204,8 +199,12 @@ where
     async fn manifest_rejection(
         &self,
         consumption: &Consumption,
-        manifests: &KvBucket<OfferManifest>,
     ) -> Result<Option<String>, EngineError> {
+        let manifests = self
+            .nats
+            .bind_kv::<OfferManifest>(consumption.bucket)
+            .await
+            .map_err(EngineError::Nats)?;
         let Some(found) = manifests
             .get(&consumption.manifest_key)
             .await

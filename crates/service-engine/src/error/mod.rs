@@ -301,7 +301,7 @@ pub enum EngineError {
     )]
     UndeclaredSchemaMember { member: String },
 
-    #[error("a post-save policy refused the write with reason {code}")]
+    #[error("a policy refused the write with reason {code}")]
     PolicyRefused { code: &'static str },
 
     #[error(

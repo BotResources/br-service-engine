@@ -46,11 +46,12 @@ impl<A: Aggregate> Saved<'_, A> {
 
 pub struct PostSave<'a, 'ops> {
     ops: &'a mut Ops<'ops>,
+    origin: RefusalOrigin,
 }
 
 impl<'a, 'ops> PostSave<'a, 'ops> {
-    pub(crate) fn new(ops: &'a mut Ops<'ops>) -> Self {
-        Self { ops }
+    pub(crate) fn new(ops: &'a mut Ops<'ops>, origin: RefusalOrigin) -> Self {
+        Self { ops, origin }
     }
 
     pub fn now(&self) -> Timestamp {
@@ -82,8 +83,7 @@ impl<'a, 'ops> PostSave<'a, 'ops> {
     }
 
     pub fn refuse(&mut self, reason: Reason) -> Refused {
-        self.ops
-            .record_policy_refusal(reason, RefusalOrigin::PostSavePolicy);
+        self.ops.record_policy_refusal(reason, self.origin);
         Refused(reason)
     }
 }

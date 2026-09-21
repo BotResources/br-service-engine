@@ -182,21 +182,31 @@ impl<'a> Ops<'a> {
             .get(&reconcile_key)
             .and_then(|held| held.downcast_ref::<A>())
             .cloned();
-        self.dispatch_policy::<A>(policy, prior.as_ref(), aggregate)
+        self.dispatch_policy::<A>(
+            policy,
+            prior.as_ref(),
+            aggregate,
+            RefusalOrigin::PostSavePolicy,
+        )
     }
 
     fn run_create_policy<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
         let Some(policy) = self.policies.save.get::<A>() else {
             return Ok(());
         };
-        self.dispatch_policy::<A>(policy, None, aggregate)
+        self.dispatch_policy::<A>(policy, None, aggregate, RefusalOrigin::PostSavePolicy)
     }
 
     fn run_delete_policy<A: Aggregate>(&mut self, aggregate: &A) -> Result<(), EngineError> {
         let Some(policy) = self.policies.delete.get::<A>() else {
             return Ok(());
         };
-        self.dispatch_policy::<A>(policy, Some(aggregate), aggregate)
+        self.dispatch_policy::<A>(
+            policy,
+            Some(aggregate),
+            aggregate,
+            RefusalOrigin::PostDeletePolicy,
+        )
     }
 
     fn dispatch_policy<A: Aggregate>(
@@ -204,6 +214,7 @@ impl<'a> Ops<'a> {
         policy: Arc<dyn AggregatePolicy<A>>,
         prior: Option<&A>,
         aggregate: &A,
+        origin: RefusalOrigin,
     ) -> Result<(), EngineError> {
         let saved = Saved {
             prior,
@@ -211,13 +222,13 @@ impl<'a> Ops<'a> {
             events: aggregate.pending_events(),
         };
         let outcome = {
-            let mut post_save = PostSave::new(self);
+            let mut post_save = PostSave::new(self, origin);
             policy.run(saved, &mut post_save)
         };
         match outcome {
             Ok(()) => Ok(()),
             Err(Refused(reason)) => {
-                self.record_policy_refusal(reason, RefusalOrigin::PostSavePolicy);
+                self.record_policy_refusal(reason, origin);
                 Err(EngineError::PolicyRefused {
                     code: reason.code(),
                 })
