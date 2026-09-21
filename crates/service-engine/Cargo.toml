@@ -30,7 +30,7 @@ futures-channel = { workspace = true }
 futures-util = { workspace = true }
 hmac = { workspace = true }
 metrics = { workspace = true }
-paste = { workspace = true }
+pastey = { workspace = true }
 reqwest = { workspace = true }
 rusty-s3 = { workspace = true }
 serde = { workspace = true }

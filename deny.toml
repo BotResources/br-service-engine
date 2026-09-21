@@ -4,9 +4,7 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = [
-    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but feature-complete and carries no vulnerability; it is re-exported as service_engine::paste for the library-slice macros the 0.3 plan mandates" },
-]
+ignore = []
 
 [licenses]
 version = 2

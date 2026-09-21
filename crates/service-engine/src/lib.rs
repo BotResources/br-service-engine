@@ -139,7 +139,7 @@ pub use nats::{
 pub use offer::{Offer, OfferTrigger};
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
-pub use paste;
+pub use pastey;
 pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
