@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     run_service(BootPlan {
         component: "example-service",
-        libraries: vec![],
+        libraries: roster_libraries(),
         service_migrator: example_service::db::migrator(),
         config,
         query: QueryRoot::default(),
@@ -33,4 +33,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .await?;
     Ok(())
+}
+
+fn roster_libraries() -> Vec<service_engine::LibraryMigrations> {
+    #[cfg(feature = "roster")]
+    {
+        vec![example_lib_roster::migrations()]
+    }
+    #[cfg(not(feature = "roster"))]
+    {
+        Vec::new()
+    }
 }

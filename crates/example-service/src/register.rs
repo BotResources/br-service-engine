@@ -13,5 +13,7 @@ pub fn all(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     )?;
     engine.register_rls(crate::kernel::AppRls)?;
     crate::slices::register(engine)?;
+    #[cfg(feature = "roster")]
+    crate::directory::register(engine)?;
     Ok(())
 }

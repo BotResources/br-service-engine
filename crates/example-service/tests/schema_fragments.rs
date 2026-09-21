@@ -76,7 +76,7 @@ fn reply_slice_sdl_matches_its_committed_fragment() {
 #[cfg(feature = "roster")]
 #[test]
 fn roster_slice_sdl_matches_its_committed_fragment() {
-    use example_service::slices::roster::graphql::{RosterQuery, RosterSubscription};
+    use example_service::slices::roster::{RosterQuery, RosterSubscription};
     check(
         "roster",
         Schema::build(RosterQuery, EmptyMutation, RosterSubscription)

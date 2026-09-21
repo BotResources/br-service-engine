@@ -1026,6 +1026,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-lib-roster"
+version = "0.3.0"
+dependencies = [
+ "async-graphql",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "service-engine",
+ "sqlx",
+ "uuid",
+]
+
+[[package]]
 name = "example-service"
 version = "0.3.0"
 dependencies = [
@@ -1036,6 +1049,7 @@ dependencies = [
  "br-core-integration",
  "chrono",
  "example-contract",
+ "example-lib-roster",
  "example-twin",
  "futures-util",
  "reqwest",

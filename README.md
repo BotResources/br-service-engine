@@ -914,6 +914,44 @@ PostgreSQL, NATS and MinIO over the four observation channels: the mutation
 integration events, and the `Reset`/`Upsert`/`Remove` subscription deltas driven
 over a real `graphql-transport-ws` WebSocket with their typed cause.
 
+### Library slices
+
+`crates/example-lib-roster` is the worked library slice: the roster read-slice
+packaged as a standalone crate and embedded by `example-service`, proving the
+whole library path — root fields prefixed by the host, value types unchanged,
+migrations chained, grants and cross-schema access. The library exports one
+`#[macro_export] macro_rules! roster_slice` with the arm
+`(prefix = $prefix:ident ; principal = $p:ty)`; `example-service` embeds it with
+`slice roster ["roster"] from example_lib_roster::roster_slice { query =
+roster::RosterQuery, subscription = roster::RosterSubscription }` and the
+`roster = ["dep:example-lib-roster"]` feature. Invoked at the host's prefix and
+principal, the macro emits the root objects, their root methods
+(`<prefix>_person` → `examplePerson`, `<prefix>_roster_deltas` →
+`exampleRosterDeltas`) and the slice's `register`, reaching `pastey` through
+`::service_engine::pastey` without its own dependency. The projector
+`RosterUsers<P>` is generic over a `RosterPrincipal` bound the host implements in
+one line (`impl RosterPrincipal for AppPrincipal {}`), and the delta union is
+declared **once**, outside the callback macro, with the generic
+`subscription_union! { generics [P: RosterPrincipal] ; … }` arm, so the callback's
+subscription resolver only calls `RosterDelta::from_delta::<P>(&delta)`.
+
+The library declares its store through `example_lib_roster::migrations() ->
+LibraryMigrations` (schema `roster`, band `9_120_000_001..=9_120_999_999`), which
+the host passes in `BootPlan.libraries`; its first migration creates the schema
+and the `roster.known_persons` table (`ALTER TABLE IF EXISTS public.known_persons
+SET SCHEMA roster` for a store migrated under the old numbering, `CREATE TABLE IF
+NOT EXISTS` otherwise), and `migrate` grants the app role the `roster` schema. The
+split is a seam: the library owns the read-slice (table, projector, GraphQL,
+migrations), and the host wires the **directory mirror** that feeds
+`roster.known_persons` and implements `RosterPrincipal`, because which producer
+and contract feed the roster is project-specific. Value types stay plain library
+types and keep their name in every embed (`RosterView`, `RosterDelta`): the gateway
+composer merges identical library types across two subgraphs with no federation
+directive, so only root fields are prefixed and there is no type-name prefixing.
+The cost of that merge is that two embeds of one library drift silently when
+additive and loudly when a field type changes, so a project pins one library
+version across all its services and rolls them together.
+
 ## Conformance battery
 
 The battery needs real infra: a PostgreSQL admin URL in `E2E_PG_ADMIN_URL`

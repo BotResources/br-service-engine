@@ -1,0 +1,18 @@
+[package]
+name = "example-lib-roster"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-graphql = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+service-engine = { workspace = true }
+sqlx = { workspace = true, features = ["chrono", "json", "macros", "migrate", "uuid"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
