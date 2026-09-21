@@ -53,7 +53,11 @@ fn assignment_slice() -> SliceFragment {
 }
 
 fn rls_assignment_slice() -> SliceFragment {
-    claims("rls_assignment", &["sampleRlsAssignment"], &["AssignmentView"])
+    claims(
+        "rls_assignment",
+        &["sampleRlsAssignment"],
+        &["AssignmentView"],
+    )
 }
 
 pub fn root_field_collision() -> SliceFragment {

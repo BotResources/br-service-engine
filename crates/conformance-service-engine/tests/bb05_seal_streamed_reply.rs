@@ -56,7 +56,10 @@ async fn bb05_a_streamed_reply_seals_against_its_hash_in_the_running_binary() {
             )
             .await;
         if ok(&view)["exampleReply"]["status"] == "complete" {
-            break ok(&view)["exampleReply"]["text"].as_str().unwrap().to_string();
+            break ok(&view)["exampleReply"]["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
         }
         assert!(
             Instant::now() < deadline,

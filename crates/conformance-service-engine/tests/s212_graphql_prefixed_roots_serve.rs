@@ -2,6 +2,7 @@ mod graphql_support;
 
 use async_graphql::Schema;
 use async_graphql::parser::parse_schema;
+use br_core_auth::PassportHeader;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{
@@ -44,7 +45,10 @@ async fn s212_a_prefixed_service_boots_serves_and_exposes_only_prefixed_roots() 
         .finish()
         .sdl();
     let fields = root_fields(&sdl);
-    assert!(!fields.is_empty(), "the composed schema exposes root fields");
+    assert!(
+        !fields.is_empty(),
+        "the composed schema exposes root fields"
+    );
     for field in &fields {
         assert!(
             prefix.owns(field),

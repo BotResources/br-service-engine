@@ -94,7 +94,9 @@ async fn total(world: &World, pass: &str, id: Uuid) -> i64 {
             serde_json::json!({ "id": id }),
         )
         .await;
-    ok(&view)["exampleLedger"]["total"].as_i64().expect("a total")
+    ok(&view)["exampleLedger"]["total"]
+        .as_i64()
+        .expect("a total")
 }
 
 #[tokio::test]

@@ -243,10 +243,7 @@ fn a_generic_aggregate_blocks_when_its_principal_lacks_the_scope() {
     };
     let unscoped = TestCloser { scoped: false };
     assert_eq!(
-        widget
-            .widget_close(&unscoped)
-            .reason()
-            .map(|r| r.code()),
+        widget.widget_close(&unscoped).reason().map(|r| r.code()),
         Some("MISSING_SCOPE")
     );
 }

@@ -107,7 +107,11 @@ async fn an_rls_projector_hides_a_foreign_org_row_on_both_the_fetch_and_the_subs
         .await);
 
     let fetched: Vec<String> = ok(&world
-        .gql(&principal, "query{exampleOrgBoards{id}}", serde_json::json!({}))
+        .gql(
+            &principal,
+            "query{exampleOrgBoards{id}}",
+            serde_json::json!({}),
+        )
         .await)["exampleOrgBoards"]
         .as_array()
         .unwrap()
@@ -133,7 +137,10 @@ async fn an_rls_projector_hides_a_foreign_org_row_on_both_the_fetch_and_the_subs
         ... on OrgBoardReset{views{... on BoardView{id}}}}}";
     let mut sub = Subscription::open(&world.subscription_url(), &principal, query).await;
     let reset = sub.next_payload(RECV).await;
-    assert_eq!(reset["exampleOrgBoardDeltas"]["__typename"], "OrgBoardReset");
+    assert_eq!(
+        reset["exampleOrgBoardDeltas"]["__typename"],
+        "OrgBoardReset"
+    );
     let streamed: Vec<String> = reset["exampleOrgBoardDeltas"]["views"]
         .as_array()
         .unwrap()

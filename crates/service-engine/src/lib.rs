@@ -107,7 +107,6 @@ pub use graphql::{
     page, serve, typed_presence_view, typed_view,
 };
 
-pub use paste;
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
 pub use housekeeping::gc::{Gc, GcRound, SessionGc};
@@ -140,6 +139,7 @@ pub use nats::{
 pub use offer::{Offer, OfferTrigger};
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
+pub use paste;
 pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,

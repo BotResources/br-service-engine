@@ -21,7 +21,11 @@ pub struct WidgetQueries;
 
 #[Object]
 impl WidgetQueries {
-    async fn sample_widget(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<Json<serde_json::Value>>> {
+    async fn sample_widget(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> Result<Option<Json<serde_json::Value>>> {
         let view = Query::<SamplePrincipal>::new(ctx)?
             .fetch::<WidgetProjector>(&id)
             .await?;
@@ -39,7 +43,11 @@ pub struct AssignmentQueries;
 
 #[Object]
 impl AssignmentQueries {
-    async fn sample_assignment(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<AssignmentView>> {
+    async fn sample_assignment(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> Result<Option<AssignmentView>> {
         Query::<SamplePrincipal>::new(ctx)?
             .fetch::<AssignmentProjector>(&id)
             .await
@@ -79,7 +87,10 @@ pub struct SubscriptionRoot;
 
 #[Subscription]
 impl SubscriptionRoot {
-    async fn sample_widgets(&self, ctx: &Context<'_>) -> Result<impl Stream<Item = Result<EngineDelta>>> {
+    async fn sample_widgets(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<impl Stream<Item = Result<EngineDelta>>> {
         let stream = service_engine::attach::<SamplePrincipal>(
             ctx,
             vec![WindowSpec::new(

@@ -56,8 +56,12 @@ async fn chunks_streamed_over_nats_by_a_separate_process_reach_viewers_on_two_po
                     serde_json::json!({ "id": reply }),
                 )
                 .await;
-            (view["data"]["exampleReply"]["status"] == "complete")
-                .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
+            (view["data"]["exampleReply"]["status"] == "complete").then(|| {
+                view["data"]["exampleReply"]["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
         });
         assert_eq!(
             text, "Hello NATS",

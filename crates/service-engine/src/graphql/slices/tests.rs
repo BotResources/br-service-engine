@@ -72,11 +72,7 @@ fn two_distinct_aggregates_claiming_one_type_fail_loud() {
 fn capabilities_of_one_aggregate_may_share_an_owned_type() {
     SchemaSlices::assemble(
         &[
-            fragment(
-                "card",
-                &["sampleCard", "sampleAdvanceCard"],
-                &["CardView"],
-            ),
+            fragment("card", &["sampleCard", "sampleAdvanceCard"], &["CardView"]),
             fragment(
                 "card",
                 &["sampleCards", "samplePageCards"],
@@ -90,9 +86,11 @@ fn capabilities_of_one_aggregate_may_share_an_owned_type() {
 
 #[test]
 fn fragments_registered_with_no_prefix_declared_is_rejected() {
-    let err =
-        SchemaSlices::assemble(&[fragment("widget", &["sampleWidget"], &["WidgetView"])], None)
-            .unwrap_err();
+    let err = SchemaSlices::assemble(
+        &[fragment("widget", &["sampleWidget"], &["WidgetView"])],
+        None,
+    )
+    .unwrap_err();
     assert!(matches!(err, EngineError::RootPrefixUndeclared));
 }
 

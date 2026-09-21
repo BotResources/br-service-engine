@@ -122,7 +122,11 @@ pub struct RlsQueryRoot;
 
 #[Object]
 impl RlsQueryRoot {
-    async fn sample_rls_assignment(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<AssignmentView>> {
+    async fn sample_rls_assignment(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> Result<Option<AssignmentView>> {
         Query::<SamplePrincipal>::new(ctx)?
             .fetch::<RlsAssignmentProjector>(&id)
             .await

@@ -8,7 +8,8 @@ use graphql_support::post_json;
 use uuid::Uuid;
 
 async fn rls_assignment(base_url: &str, passport: &str, id: Uuid) -> serde_json::Value {
-    let query = format!("query {{ sampleRlsAssignment(id: \"{id}\") {{ id title closed canClose }} }}");
+    let query =
+        format!("query {{ sampleRlsAssignment(id: \"{id}\") {{ id title closed canClose }} }}");
     let (status, body) = post_json(base_url, Some(passport), &query, serde_json::json!({})).await;
     assert_eq!(status, 200, "the rls query answers over HTTP: {body}");
     body

@@ -27,10 +27,7 @@ impl RootPrefix {
 
     pub fn owns(&self, root_field: &str) -> bool {
         match root_field.strip_prefix(self.lower_camel.as_str()) {
-            Some(tail) => tail
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_uppercase()),
+            Some(tail) => tail.chars().next().is_some_and(|c| c.is_ascii_uppercase()),
             None => false,
         }
     }

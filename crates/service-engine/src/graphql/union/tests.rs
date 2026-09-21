@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
@@ -19,7 +21,7 @@ use crate::test_support::TestPrincipal;
 use crate::wire::{KeyBytes, ViewBytes};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, SimpleObject)]
-struct WidgetView {
+pub struct WidgetView {
     id: i32,
 }
 
@@ -85,8 +87,12 @@ crate::subscription_union! {
 
 fn encoded_widget() -> (Uuid, ErasedView) {
     let key = Uuid::now_v7();
-    let erased = ErasedView::encode(&Widgets::<TestPrincipal>::default(), &key, &WidgetView { id: 7 })
-        .expect("encode a widget view");
+    let erased = ErasedView::encode(
+        &Widgets::<TestPrincipal>::default(),
+        &key,
+        &WidgetView { id: 7 },
+    )
+    .expect("encode a widget view");
     (key, erased)
 }
 

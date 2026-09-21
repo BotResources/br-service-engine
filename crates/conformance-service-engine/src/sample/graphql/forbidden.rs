@@ -38,7 +38,10 @@ impl ForbiddenSubscriptionRoot {
 fn forbidden_slice() -> SliceFragment {
     SliceFragment::from_claims(
         "forbidden",
-        vec!["sampleForbiddenPeek".to_string(), "sampleForbiddenStream".to_string()],
+        vec![
+            "sampleForbiddenPeek".to_string(),
+            "sampleForbiddenStream".to_string(),
+        ],
         Vec::new(),
     )
 }

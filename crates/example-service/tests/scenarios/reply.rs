@@ -70,8 +70,12 @@ async fn accumulated_lane_seals_the_streamed_reply_with_a_verified_hash() {
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        (view["data"]["exampleReply"]["status"] == "complete")
-            .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
+        (view["data"]["exampleReply"]["status"] == "complete").then(|| {
+            view["data"]["exampleReply"]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
     });
     assert_eq!(text, "Hello world");
 
@@ -131,8 +135,12 @@ async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        (view["data"]["exampleReply"]["status"] == "cancelled")
-            .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
+        (view["data"]["exampleReply"]["status"] == "cancelled").then(|| {
+            view["data"]["exampleReply"]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
     });
     assert_eq!(
         text, "Once upon a ",
@@ -200,8 +208,12 @@ async fn a_lost_producer_is_caught_by_the_scheduled_cancel_deadline() {
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        (view["data"]["exampleReply"]["status"] == "cancelled")
-            .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
+        (view["data"]["exampleReply"]["status"] == "cancelled").then(|| {
+            view["data"]["exampleReply"]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
     });
     assert_eq!(
         text, "Half a thought",
