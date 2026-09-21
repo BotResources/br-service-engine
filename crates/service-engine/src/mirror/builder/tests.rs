@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::mirror::projection::Projection;
 use serde::{Deserialize, Serialize};

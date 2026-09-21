@@ -79,14 +79,6 @@ pub trait Projector: Send + Sync + 'static {
         scope: LoadScope<'a, Self::Key, Self::Principal>,
     ) -> BoxFuture<'a, Result<Self::Facts, EngineError>>;
 
-    /// Render one key's view from the facts loaded for it.
-    ///
-    /// `Ok(Some(view))` delivers the view, `Ok(None)` withholds it (the key is
-    /// absent from the facts or invisible to the principal, so the session sees
-    /// a `Remove`). `Err` reports that the stored document could not be
-    /// projected at all — a poison the pod cannot render around; the render pass
-    /// dead-letters it with this projector as the source and repairs, then ends,
-    /// the sessions it faulted, rather than panicking the whole pod.
     fn project(
         &self,
         facts: &Self::Facts,
@@ -106,10 +98,6 @@ pub trait Projector: Send + Sync + 'static {
         Emission::Coalesced
     }
 
-    /// The explicit reason this projector needs no cohort gate, when its
-    /// visibility opts out of one; `None` for a projector that carries no
-    /// open-access declaration. Surfaced so that **every** registration path
-    /// enforces the reason non-empty, not only the `register_view` sugar.
     fn open_access_reason(&self) -> Option<&'static str> {
         None
     }

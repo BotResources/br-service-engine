@@ -1,8 +1,3 @@
-//! The declarative `KnownRow` kit projects a typed two-offer join into two
-//! `known_*` tables from an empty start, with no hand-written SQL in the
-//! projector. It also retires a row the offer no longer carries — proving the
-//! generated `DELETE` and the generated `INSERT … ON CONFLICT` both land.
-
 use std::sync::Arc;
 
 use conformance_service_engine::TestDb;
@@ -21,8 +16,6 @@ async fn s194_the_declarative_kit_joins_two_offers_into_two_known_tables_from_em
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    // A row a wider earlier run left behind, to prove the generated DELETE
-    // retires what the offers no longer carry.
     let stale_user = Uuid::now_v7();
     sqlx::query("INSERT INTO known_users (user_id, email) VALUES ($1, $2)")
         .bind(stale_user)

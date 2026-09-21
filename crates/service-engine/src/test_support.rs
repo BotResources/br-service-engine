@@ -119,8 +119,6 @@ macro_rules! stub_projector {
 stub_projector!(AssignmentKeyProjector, "assignments", Uuid);
 stub_projector!(TwinProjector, "assignment_titles", Uuid);
 stub_projector!(MiskeyedProjector, "miskeyed", String);
-// A projector that opts out of the cohort gate but leaves the reason blank
-// (whitespace-only trims to empty): the enforcement path must refuse it.
 stub_projector!(
     BlankReasonProjector,
     "blank_reason",

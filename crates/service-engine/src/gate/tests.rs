@@ -147,8 +147,6 @@ fn an_affordance_set_serializes_as_a_map_from_action_name_to_verdict() {
 #[test]
 #[should_panic(expected = "SCREAMING_SNAKE_CASE")]
 fn constructing_a_reason_from_a_non_screaming_code_panics() {
-    // `Reason::new` is `const`, so at a `const` site this panic is a compile
-    // error; called at runtime with a bad code it panics, which this asserts.
     let _ = Reason::new("already_closed");
 }
 
@@ -156,13 +154,9 @@ fn constructing_a_reason_from_a_non_screaming_code_panics() {
 fn parse_accepts_screaming_snake_and_refuses_every_other_shape() {
     assert!(Reason::parse("ALREADY_CLOSED").is_ok());
     assert!(Reason::parse("A1_B2").is_ok());
-    // one leading capital then one-or-more capitals/digits/underscores
     assert!(Reason::parse("AB").is_ok());
-    // rejects lower-case, the pre-0.2 convention
     assert!(Reason::parse("already_closed").is_err());
-    // rejects a single character (the `+` demands at least two)
     assert!(Reason::parse("A").is_err());
-    // rejects a leading digit, a leading underscore, punctuation and spaces
     assert!(Reason::parse("1_BAD").is_err());
     assert!(Reason::parse("_BAD").is_err());
     assert!(Reason::parse("NOT-CLOSED").is_err());
@@ -172,8 +166,6 @@ fn parse_accepts_screaming_snake_and_refuses_every_other_shape() {
 
 #[test]
 fn a_reason_decoded_from_the_wire_is_rejected_unless_it_is_screaming_snake() {
-    // the shape a blocked gate carries; a lower-case code from an older peer is
-    // refused at the deserialization boundary rather than trusted.
     let ok: Result<Gate, _> =
         serde_json::from_value(serde_json::json!({ "allowed": false, "reason": "ALREADY_CLOSED" }));
     assert!(ok.is_ok());

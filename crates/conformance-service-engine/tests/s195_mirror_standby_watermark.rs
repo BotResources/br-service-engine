@@ -1,8 +1,3 @@
-//! A standby reads the leader's watermark to know whether it has converged, and
-//! what it finds there is never a failure: a row from a release before the
-//! identity column is read under that release's semantics, and an identity this
-//! pod never read is a replacement — a first adoption the standby waits for and
-//! then performs when it holds the lease.
 mod mirror_support;
 
 use std::sync::Arc;
@@ -17,19 +12,11 @@ use service_engine::name::PodId;
 use service_engine::nats::Nats;
 use uuid::Uuid;
 
-/// Long enough that a standby cannot reach convergence by taking the lease.
 const HELD_LEASE: Duration = Duration::from_secs(60);
 const SHORT_LEASE: Duration = Duration::from_secs(1);
 const BEAT: Duration = Duration::from_millis(200);
-/// Long enough for many beats of the standby's wait to have gone by.
 const WAITED_OUT: Duration = Duration::from_secs(2);
 
-/// The rolling upgrade: the pod holding the lease runs a release from before the
-/// identity column, so the row the standby reads carries a boundary and no
-/// identity, and no leader will ever write one while the old pod holds the
-/// lease. The standby reads that row under the semantics it was written with —
-/// the sequence alone — or the upgrade stalls: the new pod never converges, so
-/// Kubernetes never terminates the old one.
 #[tokio::test]
 async fn s195_a_standby_converges_against_a_leader_watermark_that_carries_no_identity() {
     let db = TestDb::fresh().await;
@@ -85,11 +72,6 @@ async fn s195_a_standby_converges_against_a_leader_watermark_that_carries_no_ide
     db.cleanup().await;
 }
 
-/// A leader holding an identity this pod never read is a replacement, and a
-/// replacement is a first adoption: the standby re-reads and waits, and takes
-/// the lease when it expires. It is never an error, so it never reaches the
-/// supervisor as a restart, a backoff, a `Restarting` on `/readyz`, or a dead
-/// letter.
 #[tokio::test]
 async fn s195_a_standby_whose_leader_holds_another_identity_adopts_rather_than_failing() {
     let db = TestDb::fresh().await;
@@ -161,7 +143,6 @@ async fn s195_a_standby_whose_leader_holds_another_identity_adopts_rather_than_f
     db.cleanup().await;
 }
 
-/// The identity of the stream the standby itself read.
 async fn last_created(fabric: &Nats) -> String {
     fabric
         .bind_stream(&format!("KV_{PUBLISHED_LANGUAGE}"))

@@ -1,6 +1,3 @@
-//! The boundary is captured before the scan and the watch resumes at S + 1, so
-//! a write that lands while the scan runs is either scanned or replayed — never
-//! lost, and never mistaken for an orphan by the reconcile that follows.
 mod mirror_support;
 
 use std::sync::Arc;
@@ -34,7 +31,6 @@ async fn s192_the_watch_resumes_at_the_boundary_the_read_reached_and_replays_no_
     let fabric = nats.nats().await;
     let pool = db.app_pool().clone();
 
-    // History the bucket still carries: a put and its retract, both before boot.
     let gone = Uuid::now_v7();
     publish(&fabric, "catalog/old", gone, "old").await;
     retract(&fabric, "catalog/old").await;
@@ -71,8 +67,6 @@ async fn s192_the_watch_resumes_at_the_boundary_the_read_reached_and_replays_no_
     db.cleanup().await;
 }
 
-/// The real JetStream consumer's delivery policy is the observable; a projector
-/// call count would only say that something arrived, not from where.
 async fn await_deliver_policy(fabric: &service_engine::nats::Nats, start_sequence: u64) {
     let want = async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence { start_sequence };
     let deadline = tokio::time::Instant::now() + OBSERVED_WITHIN;
@@ -98,8 +92,6 @@ async fn await_deliver_policy(fabric: &service_engine::nats::Nats, start_sequenc
     }
 }
 
-// A slow consumer *decoder* holds the real scan open at a real read. There is
-// no engine test hook, no fake broker, and no projector-call-count contract.
 #[derive(Clone, Serialize)]
 struct ScannedEntry {
     id: Uuid,

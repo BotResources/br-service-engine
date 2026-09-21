@@ -1,7 +1,3 @@
-//! A bucket that was replaced, or restored below the sequence the mirror holds,
-//! is the first-adoption case: read it in full, reconcile, adopt its identity
-//! and its boundary. It is never a reason to hold the pod out of rotation, and
-//! never an operator SQL in `/readyz`.
 mod mirror_support;
 
 use std::sync::Arc;
@@ -50,8 +46,6 @@ async fn s193_a_replaced_bucket_is_adopted_rather_than_refused() {
         .await
         .expect("and recreates it");
     let second = Uuid::now_v7();
-    // The new stream's sequence overtakes the old boundary, so only the identity
-    // tells the two apart.
     for round in 0..4 {
         publish(&fabric, "catalog/two", second, &format!("new-{round}")).await;
     }
@@ -101,8 +95,6 @@ async fn s193_a_sequence_below_the_held_boundary_is_adopted_rather_than_called_a
         .await
         .expect("the first boot converges");
 
-    // Restoring older broker state with its creation identity intact leaves the
-    // mirror holding a boundary the broker is behind.
     sqlx::query(
         "UPDATE service_engine.mirror_watermark SET revision = revision + 100 \
          WHERE mirror = 'restored_catalog'",

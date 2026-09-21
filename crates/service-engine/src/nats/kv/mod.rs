@@ -169,8 +169,6 @@ where
         ))
     }
 
-    /// Every entry under the prefix with the revision it was read at, so a
-    /// consumer that also watches the bucket can tell which of the two is newer.
     pub async fn entries_with_revisions(
         &self,
         prefix: &KvPrefix,

@@ -100,8 +100,6 @@ impl SpyAssignments {
         self
     }
 
-    /// When flipped on, `project` itself returns an error, standing in for a
-    /// stored document that cannot be rendered (a poison the pod dead-letters).
     pub fn with_poison_switch(mut self, switch: Arc<AtomicBool>) -> Self {
         self.poison_switch = Some(switch);
         self

@@ -1,9 +1,3 @@
-//! Multi-pod reconcile relay (issue #126 §F). Two engine instances of the example
-//! service share one Postgres and one NATS. A mutation committed on pod A stages an
-//! impact that rides the shared notify channel; pod B's listener hears it and renders
-//! the delta to a session that never touched pod A. This is the cross-pod half of the
-//! reconcile relay: a session sees changes made anywhere in the fleet, not only on the
-//! pod it is attached to.
 mod blackbox_support;
 
 use std::time::Duration;
@@ -28,7 +22,6 @@ async fn bb08_a_mutation_on_one_pod_reaches_a_session_attached_to_another_pod() 
     let pass = passport(user, org, &[BOARD_ARCHIVE], false);
     let board = Uuid::now_v7();
 
-    // A board created against pod A.
     ok(&world
         .gql(
             &pass,
@@ -37,8 +30,6 @@ async fn bb08_a_mutation_on_one_pod_reaches_a_session_attached_to_another_pod() 
         )
         .await);
 
-    // A subscriber attached to pod B opens from committed state, so it already carries
-    // the board created on pod A.
     let mut ws = GraphqlWs::connect(pod_b.base_url(), &pass).await;
     ws.subscribe("1", SUB).await;
     let reset = ws
@@ -56,7 +47,6 @@ async fn bb08_a_mutation_on_one_pod_reaches_a_session_attached_to_another_pod() 
         "pod B's Reset is rendered from committed state, so it shows the board created on pod A: {reset}"
     );
 
-    // A mutation committed on pod A ...
     ok(&world
         .gql(
             &pass,
@@ -65,7 +55,6 @@ async fn bb08_a_mutation_on_one_pod_reaches_a_session_attached_to_another_pod() 
         )
         .await);
 
-    // ... produces the delta on pod B's session, carrying the committed state.
     let upsert = loop {
         let delta = ws
             .next_data(RECV)

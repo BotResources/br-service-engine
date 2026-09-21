@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::persistence::{Persistence, PersistenceStyle};
 use futures_util::future::BoxFuture;
