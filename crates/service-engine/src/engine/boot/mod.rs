@@ -20,8 +20,7 @@ pub const MIGRATE_SUBCOMMAND: &str = "migrate";
 pub const SERVE_SUBCOMMAND: &str = "serve";
 pub const SCHEMA_SUBCOMMAND: &str = "schema";
 
-pub const REASON_MIGRATIONS_PENDING: &str =
-    "the store is not fully migrated; migrate must apply the engine, library and service migration \
+pub const REASON_MIGRATIONS_PENDING: &str = "the store is not fully migrated; migrate must apply the engine, library and service migration \
      sets before serve runs";
 
 pub struct BootPlan<Q, M, S, R> {

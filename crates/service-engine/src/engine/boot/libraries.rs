@@ -39,17 +39,15 @@ pub(crate) fn validate(
         }
     }
 
-    let mut bands: Vec<(&'static str, RangeInclusive<i64>)> = vec![("service_engine", engine_band())];
+    let mut bands: Vec<(&'static str, RangeInclusive<i64>)> =
+        vec![("service_engine", engine_band())];
     for library in libraries {
         bands.push((library.name, library.band.clone()));
     }
     for (i, (first, first_band)) in bands.iter().enumerate() {
         for (second, second_band) in &bands[i + 1..] {
             if first_band.start() <= second_band.end() && second_band.start() <= first_band.end() {
-                return Err(EngineError::MigrationBandOverlap {
-                    first,
-                    second,
-                });
+                return Err(EngineError::MigrationBandOverlap { first, second });
             }
         }
     }
@@ -108,7 +106,11 @@ mod tests {
         }
     }
 
-    fn library(name: &'static str, schema: &'static str, band: RangeInclusive<i64>) -> LibraryMigrations {
+    fn library(
+        name: &'static str,
+        schema: &'static str,
+        band: RangeInclusive<i64>,
+    ) -> LibraryMigrations {
         let versions: Vec<i64> = vec![*band.start()];
         LibraryMigrations {
             name,
@@ -127,7 +129,11 @@ mod tests {
 
     #[test]
     fn a_band_that_touches_the_engine_reserved_range_is_refused() {
-        let libs = vec![library("drive", "drive", RESERVED_VERSION_MIN..=RESERVED_VERSION_MAX)];
+        let libs = vec![library(
+            "drive",
+            "drive",
+            RESERVED_VERSION_MIN..=RESERVED_VERSION_MAX,
+        )];
         let service = migrator(&[20_260_909_000_500]);
         assert!(matches!(
             validate(&libs, &service),
