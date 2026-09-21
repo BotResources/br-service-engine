@@ -40,6 +40,7 @@ pub enum ReplyCause {
     Started,
     Completed { chars: usize },
     Attached,
+    AttachmentUploaded,
     CancelRequested,
     Cancelled { chars: usize },
 }

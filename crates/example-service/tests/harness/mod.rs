@@ -72,6 +72,18 @@ impl World {
         World::start_tweaked(pod, options, |config| config).await
     }
 
+    pub async fn start_blobs_swept(pod: &str, reaper_interval: Duration) -> World {
+        World::start_tweaked(
+            pod,
+            WorldOptions {
+                blobs: true,
+                declare_scopes: false,
+            },
+            move |config| config.with_blob_reaper_interval(reaper_interval),
+        )
+        .await
+    }
+
     async fn start_tweaked(
         pod: &str,
         options: WorldOptions,
