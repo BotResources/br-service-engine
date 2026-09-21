@@ -12,12 +12,12 @@ use service_engine::wire::Noun;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use super::mirror::PERSON_NAMESPACE;
-use crate::kernel::AppPrincipal;
+use crate::KNOWN_PERSON_NAMESPACE;
+use crate::principal::RosterPrincipal;
 
 pub struct KnownPerson;
 
-impl service_engine::wire::Noun for KnownPerson {
+impl Noun for KnownPerson {
     type Key = Uuid;
     const NAME: NounName = NounName::from_static("known_person");
 }
@@ -29,15 +29,30 @@ pub struct RosterView {
     pub display_name: String,
 }
 
-#[derive(Default)]
-pub struct RosterUsers;
+pub struct RosterUsers<P>(std::marker::PhantomData<fn() -> P>);
 
-impl RosterUsers {
+impl<P> Default for RosterUsers<P> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<P> RosterUsers<P> {
     pub const NAME: ProjectorName = ProjectorName::from_static("roster_users");
 }
 
-impl Projector for RosterUsers {
-    type Principal = AppPrincipal;
+fn invalidated(foreign: &ForeignKey) -> Inverse<Uuid> {
+    if foreign.namespace().as_str() != KNOWN_PERSON_NAMESPACE {
+        return Inverse::None;
+    }
+    match Uuid::parse_str(foreign.key().as_str()) {
+        Ok(id) => Inverse::Keys(BTreeSet::from([id])),
+        Err(_) => Inverse::None,
+    }
+}
+
+impl<P: RosterPrincipal> Projector for RosterUsers<P> {
+    type Principal = P;
     type Key = Uuid;
     type Facts = BTreeMap<Uuid, (String, String)>;
     type View = RosterView;
@@ -55,10 +70,10 @@ impl Projector for RosterUsers {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _principal: &'a AppPrincipal,
+        _principal: &'a P,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT user_id FROM known_persons")
+            let rows = sqlx::query("SELECT user_id FROM roster.known_persons")
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(
@@ -70,23 +85,17 @@ impl Projector for RosterUsers {
     }
 
     fn inverse(&self, foreign: &ForeignKey) -> Inverse<Uuid> {
-        if foreign.namespace().as_str() != PERSON_NAMESPACE {
-            return Inverse::None;
-        }
-        match Uuid::parse_str(foreign.key().as_str()) {
-            Ok(id) => Inverse::Keys(BTreeSet::from([id])),
-            Err(_) => Inverse::None,
-        }
+        invalidated(foreign)
     }
 
     fn load<'a>(
         &'a self,
-        scope: LoadScope<'a, Uuid, AppPrincipal>,
+        scope: LoadScope<'a, Uuid, P>,
     ) -> BoxFuture<'a, Result<BTreeMap<Uuid, (String, String)>, EngineError>> {
         Box::pin(async move {
             let keys = scope.keys().to_vec();
-            let sql =
-                "SELECT user_id, email, display_name FROM known_persons WHERE user_id = ANY($1)";
+            let sql = "SELECT user_id, email, display_name FROM roster.known_persons \
+                       WHERE user_id = ANY($1)";
             let rows = match scope {
                 LoadScope::Bulk { pg, .. } => sqlx::query(sql).bind(&keys).fetch_all(pg).await?,
                 LoadScope::PerPrincipal { conn, .. } => {
@@ -112,12 +121,51 @@ impl Projector for RosterUsers {
         &self,
         facts: &BTreeMap<Uuid, (String, String)>,
         key: &Uuid,
-        _principal: &AppPrincipal,
+        _principal: &P,
     ) -> Result<Option<RosterView>, EngineError> {
         Ok(facts.get(key).map(|(email, display_name)| RosterView {
             user_id: *key,
             email: email.clone(),
             display_name: display_name.clone(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_foreign_key_in_the_roster_namespace_invalidates_its_uuid() {
+        let id = Uuid::now_v7();
+        let foreign = ForeignKey::new(KNOWN_PERSON_NAMESPACE, &id.to_string()).unwrap();
+        match invalidated(&foreign) {
+            Inverse::Keys(keys) => assert_eq!(keys, BTreeSet::from([id])),
+            _ => panic!("a roster-namespace key must invalidate its own uuid"),
+        }
+    }
+
+    #[test]
+    fn a_foreign_key_in_another_namespace_invalidates_nothing() {
+        let foreign = ForeignKey::new("other.person", &Uuid::now_v7().to_string()).unwrap();
+        assert!(matches!(invalidated(&foreign), Inverse::None));
+    }
+
+    #[test]
+    fn a_roster_key_that_is_not_a_uuid_invalidates_nothing() {
+        let foreign = ForeignKey::new(KNOWN_PERSON_NAMESPACE, "not-a-uuid").unwrap();
+        assert!(matches!(invalidated(&foreign), Inverse::None));
+    }
+
+    #[test]
+    fn a_view_survives_a_json_round_trip() {
+        let view = RosterView {
+            user_id: Uuid::now_v7(),
+            email: "a@example.test".to_string(),
+            display_name: "A".to_string(),
+        };
+        let json = serde_json::to_string(&view).unwrap();
+        let back: RosterView = serde_json::from_str(&json).unwrap();
+        assert_eq!(view, back);
     }
 }

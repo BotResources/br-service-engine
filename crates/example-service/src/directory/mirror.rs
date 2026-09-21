@@ -1,4 +1,5 @@
 use example_contract::PERSON_PREFIX;
+use example_lib_roster::{KNOWN_PERSON_NAMESPACE, KNOWN_PERSONS_TABLE};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
@@ -10,7 +11,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 pub const DIRECTORY_MIRROR: MirrorName = MirrorName::from_static("directory");
-pub const PERSON_NAMESPACE: &str = "exampletwin.person";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConsumedPerson {
@@ -40,8 +40,8 @@ struct KnownPersonRow {
 }
 
 impl KnownRow for KnownPersonRow {
-    const TABLE: &'static str = "known_persons";
-    const NAMESPACE: &'static str = PERSON_NAMESPACE;
+    const TABLE: &'static str = KNOWN_PERSONS_TABLE;
+    const NAMESPACE: &'static str = KNOWN_PERSON_NAMESPACE;
 
     fn key(&self) -> Vec<Column> {
         vec![col("user_id", self.id)]
@@ -92,9 +92,10 @@ pub fn directory_mirror() -> MirrorReady<Uuid, impl Project<Uuid>> {
         .project(DirectoryProjection)
         .reconcile_keys(|pool: PgPool| {
             Box::pin(async move {
-                let ids: Vec<Uuid> = sqlx::query_scalar("SELECT user_id FROM known_persons")
-                    .fetch_all(&pool)
-                    .await?;
+                let ids: Vec<Uuid> =
+                    sqlx::query_scalar("SELECT user_id FROM roster.known_persons")
+                        .fetch_all(&pool)
+                        .await?;
                 Ok(ids)
             }) as BoxFuture<'static, Result<Vec<Uuid>, EngineError>>
         })

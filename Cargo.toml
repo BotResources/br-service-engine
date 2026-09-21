@@ -4,6 +4,7 @@ members = [
     "crates/service-engine",
     "crates/conformance-service-engine",
     "crates/example-contract",
+    "crates/example-lib-roster",
     "crates/example-service",
     "crates/example-twin",
 ]
@@ -27,6 +28,7 @@ br-util-postgres = { git = "https://github.com/BotResources/br-rust-common", pac
 
 service-engine = { path = "crates/service-engine", version = "0.3.0" }
 example-contract = { path = "crates/example-contract", version = "0.3.0" }
+example-lib-roster = { path = "crates/example-lib-roster", version = "0.3.0" }
 example-service = { path = "crates/example-service", version = "0.3.0" }
 example-twin = { path = "crates/example-twin", version = "0.3.0" }
 

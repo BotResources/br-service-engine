@@ -72,7 +72,7 @@ fn fragments() -> Vec<SliceFragment> {
     #[cfg(feature = "roster")]
     {
         use async_graphql::EmptyMutation;
-        use example_service::slices::roster::graphql::{RosterQuery, RosterSubscription};
+        use example_service::slices::roster::{RosterQuery, RosterSubscription};
         fragments.push(SliceFragment::derive::<
             RosterQuery,
             EmptyMutation,
