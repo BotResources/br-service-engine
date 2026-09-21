@@ -50,9 +50,6 @@ pub(crate) struct Staged {
     pub outbox: Vec<OutboxRecord>,
     pub scheduled_messages: Vec<ScheduledMessage>,
     pub terminal_violation: Option<String>,
-    /// The refusal staged by a create precondition or by a post-save policy. The
-    /// pipeline rolls the transaction back and answers this code rather than
-    /// committing, whatever the handler went on to return.
     pub policy_refusal: Option<StagedRefusal>,
     pub offer_dirty: Vec<OfferDirty>,
     pub blob_ops: Vec<BlobRowOp>,

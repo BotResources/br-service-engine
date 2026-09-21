@@ -24,7 +24,7 @@ pub async fn adopt_legacy_outbox(conn: &mut PgConnection) -> Result<(), EngineEr
     .execute(&mut *conn)
     .await
     .map_err(EngineError::Db)?;
-    sqlx::query("DROP TABLE public.integration_outbox")
+    sqlx::query("DROP TABLE IF EXISTS public.integration_outbox")
         .execute(&mut *conn)
         .await
         .map_err(EngineError::Db)?;
