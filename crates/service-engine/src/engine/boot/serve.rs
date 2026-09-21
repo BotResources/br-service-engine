@@ -80,6 +80,7 @@ pub async fn ensure_migrated(
     libraries: &[LibraryMigrations],
     service_migrator: &Migrator,
 ) -> Result<(), EngineError> {
+    crate::engine::boot::libraries::validate(libraries, service_migrator)?;
     let engine_pending = !migrations_status(pool, &crate::schema::migrator())
         .await
         .map_err(pg_error)?
