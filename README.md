@@ -786,7 +786,15 @@ migration ledger through `br-util-postgres`.
 
 The example **is** the documentation. `crates/example-service` is a complete,
 bootable reference service built only on this crate's public authoring surface —
-no `test-support`, no `pub(crate)` reach-around. Read it as the how-to: a thin
+no `test-support`, no `pub(crate)` reach-around. A handful of 0.3 authoring
+gestures the example does not yet exercise — a hard `cx.delete` guarded by
+`register_post_delete_policy`, an `OfferTrigger`, `Mirror::require_key`, an
+`Inverse::Lookup` join, a `coded_error`/`forbidden` refusal, and branching on the
+`Written` mirror verdict — are demonstrated in the conformance sample
+(`crates/conformance-service-engine/src/sample/`, e.g. `pipeline.rs`,
+`widget_tag.rs`, `linked.rs`, `mirror.rs`, `graphql/forbidden.rs`); copy those for
+those idioms until the reference service grows them. Read the example as the
+how-to: a thin
 `kernel/` (the principal and its generic fact bag, the error base — and no scope
 registry, since scopes belong to the slices), one folder per slice under `slices/`
 (each owning its aggregate, store, view, handlers, offer/mirror and its GraphQL

@@ -343,4 +343,13 @@ jobs:
             --test bb03_subscription_reset_and_reconnect \
             --test bb04_cross_service_cycle_twin_binary \
             --test bb05_seal_streamed_reply \
-            --test bb06_session_max_age_closes_the_socket
+            --test bb06_session_max_age_closes_the_socket \
+            --test bb07_boot_kit \
+            --test bb08_reconcile_relay_cross_pod \
+            --test bb09_rolling_roll_reconnect \
+            --test bb10_outbox_published_once_across_pods \
+            --test bb11_mirror_leader_standby_failover \
+            --test bb12_serve_refuses_an_unmigrated_store \
+            --test bb13_migrate_waits_for_the_app_role \
+            --test bb14_migrate_needs_only_the_owner_env \
+            --test s202_serve_derives_message_retention
