@@ -205,8 +205,12 @@ where
             .bind_kv::<OfferManifest>(consumption.bucket)
             .await
             .map_err(EngineError::Nats)?;
+        let manifest_key = consumption
+            .manifest_key
+            .as_ref()
+            .map_err(|error| EngineError::Config(error.to_string()))?;
         let Some(found) = manifests
-            .get(&consumption.manifest_key)
+            .get(manifest_key)
             .await
             .map_err(EngineError::Nats)?
         else {

@@ -54,7 +54,7 @@ type SnapshotFn = Arc<dyn Fn(&Shadows) -> Vec<Change> + Send + Sync>;
 pub(super) struct Consumption {
     pub(super) prefix: &'static str,
     pub(super) bucket: &'static str,
-    pub(super) manifest_key: KvKey,
+    pub(super) manifest_key: Result<KvKey, EngineError>,
     pub(super) expected_manifest: ConsumedManifest,
     pub(super) load: LoadFn,
     pub(super) open_watch: OpenWatchFn,
@@ -136,7 +136,7 @@ impl Consumption {
         Self {
             prefix: C::PREFIX,
             bucket: C::bucket(),
-            manifest_key: manifest_key(C::PREFIX).expect("a consumed prefix yields a manifest key"),
+            manifest_key: manifest_key(C::PREFIX),
             expected_manifest: C::manifest(),
             load,
             open_watch,
@@ -189,5 +189,29 @@ fn into_update<C: Consumed>(watched: Watched<C>) -> Update {
                 revision,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone, Serialize, Deserialize)]
+    struct BadPrefix {
+        #[allow(dead_code)]
+        v: u32,
+    }
+    impl Consumed for BadPrefix {
+        const PREFIX: &'static str = "identity/users";
+    }
+
+    #[test]
+    fn a_consumption_with_a_non_slash_prefix_defers_the_error_instead_of_panicking() {
+        let consumption = Consumption::of::<BadPrefix>();
+        assert!(matches!(
+            consumption.manifest_key,
+            Err(EngineError::Config(_))
+        ));
     }
 }
