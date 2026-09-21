@@ -125,7 +125,7 @@ impl BlobReaper {
         reason: String,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
-        sqlx::query(&format!(
+        let done = sqlx::query(&format!(
             "UPDATE {TABLE_BLOB} \
              SET state = 'failed', failed_reason = $2, failed_at = now() \
              WHERE id = $1 AND state = 'pending'"
@@ -135,7 +135,7 @@ impl BlobReaper {
         .execute(pg)
         .await?;
         store.object().delete_object(object_key).await?;
-        round.failed += 1;
+        round.failed += done.rows_affected();
         Ok(())
     }
 
