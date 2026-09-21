@@ -13,8 +13,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("S3_SECRET_KEY"),
     ) {
         let region = std::env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
-        config =
-            config.with_blob_storage(BlobConfig::new(endpoint, region, bucket, access, secret));
+        let mut blob = BlobConfig::new(endpoint, region, bucket, access, secret);
+        if let Ok(public) = std::env::var("S3_PUBLIC_ENDPOINT") {
+            blob = blob.with_public_endpoint(public);
+        }
+        config = config.with_blob_storage(blob);
     }
 
     run_service(BootPlan {
