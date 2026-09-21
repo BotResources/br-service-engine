@@ -11,6 +11,7 @@ use conformance_service_engine::sample::blob::AttachDoc;
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
+use service_engine::blobs::Disposition;
 use service_engine::{BlobPolicy, BlobRef, OneShot, UploadUrl};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -20,16 +21,31 @@ async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
         .bind(doc)
         .fetch_one(pool)
         .await
-        .expect("read the doc's blob reference")
+        .expect("read the blob reference")
+}
+
+async fn wait_until<F>(mut check: F)
+where
+    F: AsyncFnMut() -> bool,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        if check().await {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "did not converge");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 #[tokio::test]
-async fn s119_a_pending_blob_whose_object_never_landed_has_no_download_url() {
+async fn s224_upload_and_download_urls_carry_the_public_host_while_the_reaper_uses_the_internal_one()
+ {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let minio = TestMinio::spawn().await;
-    let bucket = format!("se-s61-{}", Uuid::now_v7().simple());
+    let bucket = format!("se-s224-{}", Uuid::now_v7().simple());
     minio.create_bucket(&bucket).await;
     let pool = db.app_pool().clone();
 
@@ -42,18 +58,17 @@ async fn s119_a_pending_blob_whose_object_never_landed_has_no_download_url() {
     let engine = boot_blob_engine(
         &db,
         nats.nats().await,
-        "se_s61",
-        "pod-s61",
-        minio.config(&bucket),
+        "se_s224",
+        "pod-s224",
+        minio.config_with_public(&bucket),
         policy,
-        Duration::from_secs(3600),
+        Duration::from_millis(150),
     )
     .await;
     let readiness = engine.readiness();
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let reader = engine.blob_reader();
-    let http = reqwest::Client::new();
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
@@ -64,35 +79,49 @@ async fn s119_a_pending_blob_whose_object_never_landed_has_no_download_url() {
             AttachDoc {
                 id: doc,
                 tenant,
-                name: "unposted.bin".to_string(),
+                name: "public.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
                 fail: false,
             },
         )
         .await
-        .expect("attach commits the pending reference");
-    let reference = BlobRef(reference_of(&pool, doc).await);
-
-    let before = reader
-        .download_url(reference, service_engine::blobs::Disposition::Attachment)
-        .await
-        .expect("resolving a download URL does not error");
+        .expect("the attach commits");
+    let reference = reference_of(&pool, doc).await;
+    let upload = upload.into_inner();
     assert!(
-        before.is_none(),
-        "a pending reference whose object never landed resolves to no download URL",
+        upload.url().contains("localhost"),
+        "the upload POST URL carries the public host: {}",
+        upload.url(),
     );
 
-    let status = post_upload(&http, upload.into_inner(), b"now-it-exists".to_vec()).await;
-    assert!(status.is_success(), "the object lands");
-
-    let after = reader
-        .download_url(reference, service_engine::blobs::Disposition::Attachment)
-        .await
-        .expect("resolving a download URL does not error");
+    let http = reqwest::Client::new();
+    let status = post_upload(&http, upload, b"public-bytes".to_vec()).await;
     assert!(
-        after.is_some(),
-        "once the object has landed the same reference resolves to a download URL",
+        status.is_success(),
+        "the upload through the public host succeeds"
     );
+
+    let download = reader
+        .download_url(BlobRef(reference), Disposition::Attachment)
+        .await
+        .expect("presign download")
+        .expect("the reference resolves")
+        .into_string();
+    assert!(
+        download.contains("localhost"),
+        "the download URL carries the public host: {download}",
+    );
+
+    wait_until(async || {
+        let state: Option<String> =
+            sqlx::query_scalar("SELECT state FROM service_engine.blob WHERE id = $1")
+                .bind(reference)
+                .fetch_one(&pool)
+                .await
+                .expect("read state");
+        state.as_deref() == Some("uploaded")
+    })
+    .await;
 
     shutdown.notify_one();
     running.await.expect("join").expect("run returns Ok");

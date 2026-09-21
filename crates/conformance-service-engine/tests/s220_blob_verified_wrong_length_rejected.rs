@@ -7,20 +7,32 @@ use std::time::Duration;
 
 use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
-use conformance_service_engine::sample::blob::AttachDoc;
+use conformance_service_engine::sample::AttachVerifiedDoc;
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
 use service_engine::{BlobPolicy, BlobRef, OneShot, UploadUrl};
+use sqlx::PgPool;
 use uuid::Uuid;
 
+const PAYLOAD: &[u8] = b"verified-bytes";
+const SHA256_HEX: &str = "35b1135247e25b36525c4f5bb88038cf310f05ab54aa450e406e9ef5c5fde911";
+
+async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT blob_ref FROM sample_doc WHERE id = $1")
+        .bind(doc)
+        .fetch_one(pool)
+        .await
+        .expect("read the blob reference")
+}
+
 #[tokio::test]
-async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_real_minio() {
+async fn s220_a_correct_checksum_of_a_different_length_is_refused_by_the_content_length_range() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let minio = TestMinio::spawn().await;
-    let bucket = format!("se-s105-{}", Uuid::now_v7().simple());
+    let bucket = format!("se-s220-{}", Uuid::now_v7().simple());
     minio.create_bucket(&bucket).await;
     let pool = db.app_pool().clone();
 
@@ -33,8 +45,8 @@ async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_rea
     let engine = boot_blob_engine(
         &db,
         nats.nats().await,
-        "se_s105",
-        "pod-s105",
+        "se_s220",
+        "pod-s220",
         minio.config(&bucket),
         policy,
         Duration::from_secs(3600),
@@ -49,49 +61,42 @@ async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_rea
 
     let doc = Uuid::now_v7();
     let upload: OneShot<UploadUrl> = executor
-        .run::<AttachDoc>(
+        .run::<AttachVerifiedDoc>(
             principal,
-            AttachDoc {
+            AttachVerifiedDoc {
                 id: doc,
                 tenant,
-                name: "photo.bin".to_string(),
+                name: "short.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
-                fail: false,
+                size: (PAYLOAD.len() as u64) + 6,
+                sha256_hex: SHA256_HEX.to_string(),
             },
         )
         .await
-        .expect("the attach commits and returns the upload URL on the sync channel");
+        .expect("the verified attach commits");
+    let reference = reference_of(&pool, doc).await;
 
     let http = reqwest::Client::new();
-    let payload = b"the-bytes-never-cross-the-pipeline".to_vec();
-    let status = post_upload(&http, upload.into_inner(), payload.clone()).await;
+    let status = post_upload(&http, upload.into_inner(), PAYLOAD.to_vec()).await;
     assert!(
-        status.is_success(),
-        "MinIO accepted the presigned POST upload"
+        !status.is_success(),
+        "the content-length-range refuses a body of the wrong length: {status}",
     );
 
-    let reference: Uuid = sqlx::query_scalar("SELECT blob_ref FROM sample_doc WHERE id = $1")
-        .bind(doc)
+    let head = reader
+        .head(BlobRef(reference))
+        .await
+        .expect("head does not error");
+    assert!(head.is_none(), "the rejected upload never landed");
+    let state: String = sqlx::query_scalar("SELECT state FROM service_engine.blob WHERE id = $1")
+        .bind(reference)
         .fetch_one(&pool)
         .await
-        .expect("read the blob reference");
-    let download = reader
-        .download_url(
-            BlobRef(reference),
-            service_engine::blobs::Disposition::Attachment,
-        )
-        .await
-        .expect("presign a download")
-        .expect("the reference resolves to an object");
-    let got = http
-        .get(download.into_string())
-        .send()
-        .await
-        .expect("GET the presigned download URL")
-        .bytes()
-        .await
-        .expect("read the downloaded bytes");
-    assert_eq!(got.as_ref(), payload.as_slice(), "the bytes round-trip");
+        .expect("read state");
+    assert_eq!(
+        state, "pending",
+        "the row stays pending, no object to promote"
+    );
 
     shutdown.notify_one();
     running.await.expect("join").expect("run returns Ok");

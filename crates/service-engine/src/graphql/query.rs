@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_graphql::{Context, Error, Json};
 use serde::de::DeserializeOwned;
 
-use crate::blobs::{BlobRef, DownloadUrl};
+use crate::blobs::{BlobRef, Disposition, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
 use crate::graphql::state::GraphqlState;
@@ -75,6 +75,7 @@ impl<'a, P: Principal> Query<'a, P> {
         &self,
         key: &crate::view::ViewKey<V>,
         reference: BlobRef,
+        disposition: Disposition,
     ) -> Result<Option<DownloadUrl>, Error>
     where
         V: crate::view::Projector<Principal = P>,
@@ -94,7 +95,9 @@ impl<'a, P: Principal> Query<'a, P> {
             return Ok(None);
         }
         match self.state.blob_store() {
-            Some(store) => Ok(store.download_url(self.state.pg(), reference).await?),
+            Some(store) => Ok(store
+                .download_url(self.state.pg(), reference, disposition)
+                .await?),
             None => Ok(None),
         }
     }

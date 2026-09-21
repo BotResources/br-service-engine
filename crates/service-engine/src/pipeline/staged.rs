@@ -19,6 +19,7 @@ pub(crate) enum RefusalOrigin {
     CreatePrecondition,
     PostSavePolicy,
     PostDeletePolicy,
+    Upload,
 }
 
 impl RefusalOrigin {
@@ -27,6 +28,7 @@ impl RefusalOrigin {
             Self::CreatePrecondition => "a create precondition refused the write",
             Self::PostSavePolicy => "a post-save policy refused the write",
             Self::PostDeletePolicy => "a post-delete policy refused the delete",
+            Self::Upload => "a post-upload policy refused the promotion",
         }
     }
 }

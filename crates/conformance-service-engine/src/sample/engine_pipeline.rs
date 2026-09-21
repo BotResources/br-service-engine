@@ -9,6 +9,7 @@ use crate::sample::blob::{
     AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, RepointDoc, attach_doc,
     attach_owned_doc, delete_doc, detach_doc, repoint_doc,
 };
+use crate::sample::blob_verified::{AttachVerifiedDoc, attach_verified_doc};
 use crate::sample::blob_view::DocProjector;
 use crate::sample::engine::engine_config;
 use crate::sample::offer::{MintThenReject, WidgetOffer, mint_then_reject};
@@ -68,8 +69,12 @@ pub async fn boot_blob_engine(
         .register_mutation::<DeleteDoc, _>(delete_doc)
         .expect("register the delete mutation");
     engine
+        .register_mutation::<AttachVerifiedDoc, _>(attach_verified_doc)
+        .expect("register the verified attach mutation");
+    engine
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn boot_pipeline_engine(
     db: &TestDb,
     nats: Nats,

@@ -8,6 +8,7 @@ use serde_json::json;
 use sha2::Sha256;
 
 use crate::blobs::UploadUrl;
+use crate::blobs::expect::Sha256Digest;
 use crate::error::EngineError;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -21,6 +22,7 @@ pub(crate) struct PostPolicyInput<'a> {
     pub object_key: &'a str,
     pub content_type: &'a str,
     pub max_bytes: u64,
+    pub expect: Option<(u64, &'a Sha256Digest)>,
     pub ttl: Duration,
     pub now: DateTime<Utc>,
 }
@@ -41,17 +43,28 @@ pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, Engi
     );
     let max_bytes = i64::try_from(input.max_bytes).unwrap_or(i64::MAX);
 
+    let mut conditions = vec![
+        json!({ "bucket": input.bucket }),
+        json!({ "key": input.object_key }),
+        json!({ "Content-Type": input.content_type }),
+        json!({ "x-amz-algorithm": "AWS4-HMAC-SHA256" }),
+        json!({ "x-amz-credential": credential }),
+        json!({ "x-amz-date": amz_date }),
+    ];
+    let checksum_b64 = input.expect.map(|(_, digest)| digest.to_base64());
+    match (&input.expect, &checksum_b64) {
+        (Some((size, _)), Some(checksum)) => {
+            let size = i64::try_from(*size).unwrap_or(i64::MAX);
+            conditions.push(json!({ "x-amz-checksum-algorithm": "SHA256" }));
+            conditions.push(json!({ "x-amz-checksum-sha256": checksum }));
+            conditions.push(json!(["content-length-range", size, size]));
+        }
+        _ => conditions.push(json!(["content-length-range", 0, max_bytes])),
+    }
+
     let policy = json!({
         "expiration": expiration,
-        "conditions": [
-            { "bucket": input.bucket },
-            { "key": input.object_key },
-            { "Content-Type": input.content_type },
-            { "x-amz-algorithm": "AWS4-HMAC-SHA256" },
-            { "x-amz-credential": credential },
-            { "x-amz-date": amz_date },
-            [ "content-length-range", 0, max_bytes ],
-        ],
+        "conditions": conditions,
     });
     let policy = serde_json::to_vec(&policy).map_err(|source| EngineError::Encode {
         what: "blob upload post policy",
@@ -66,7 +79,7 @@ pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, Engi
     )?;
 
     let url = format!("{}/{}", input.endpoint.trim_end_matches('/'), input.bucket);
-    let fields = vec![
+    let mut fields = vec![
         ("key".to_string(), input.object_key.to_string()),
         ("Content-Type".to_string(), input.content_type.to_string()),
         (
@@ -75,9 +88,13 @@ pub(crate) fn presign_post(input: PostPolicyInput<'_>) -> Result<UploadUrl, Engi
         ),
         ("x-amz-credential".to_string(), credential),
         ("x-amz-date".to_string(), amz_date),
-        ("policy".to_string(), policy_b64),
-        ("x-amz-signature".to_string(), signature),
     ];
+    if let Some(checksum) = checksum_b64 {
+        fields.push(("x-amz-checksum-algorithm".to_string(), "SHA256".to_string()));
+        fields.push(("x-amz-checksum-sha256".to_string(), checksum));
+    }
+    fields.push(("policy".to_string(), policy_b64));
+    fields.push(("x-amz-signature".to_string(), signature));
     Ok(UploadUrl::new(url, fields))
 }
 
@@ -119,9 +136,21 @@ mod tests {
             object_key: "svc/card/abc",
             content_type: "image/png",
             max_bytes: 1024,
+            expect: None,
             ttl,
             now: Utc::now(),
         }
+    }
+
+    fn conditions(url: &UploadUrl) -> Vec<serde_json::Value> {
+        decoded_policy(url)["conditions"]
+            .as_array()
+            .expect("conditions array")
+            .clone()
+    }
+
+    fn has_field(url: &UploadUrl, name: &str) -> bool {
+        url.fields().iter().any(|(field, _)| field == name)
     }
 
     fn decoded_policy(url: &UploadUrl) -> serde_json::Value {
@@ -159,6 +188,47 @@ mod tests {
         let error = presign_post(input(Duration::from_secs(u64::MAX)))
             .expect_err("a TTL that does not fit a signed expiry must fail loud");
         assert!(matches!(error, EngineError::Config(_)));
+    }
+
+    #[test]
+    fn an_unverified_policy_carries_the_open_content_length_range_and_no_checksum() {
+        let url = input(Duration::from_secs(900)).pipe_presign();
+        let conds = conditions(&url);
+        assert!(conds.iter().any(|c| c.as_array().is_some_and(
+            |a| a.first().and_then(|v| v.as_str()) == Some("content-length-range")
+                && a.get(1).and_then(|v| v.as_i64()) == Some(0)
+        )));
+        assert!(!has_field(&url, "x-amz-checksum-sha256"));
+    }
+
+    #[test]
+    fn a_verified_policy_pins_the_exact_size_and_both_checksum_conditions() {
+        let digest = Sha256Digest::from_bytes([0x11; 32]);
+        let mut input = input(Duration::from_secs(900));
+        input.expect = Some((4096, &digest));
+        let url = presign_post(input).expect("a verified policy signs");
+        let conds = conditions(&url);
+        assert!(
+            conds.iter().any(|c| c.as_array().is_some_and(|a| {
+                a.first().and_then(|v| v.as_str()) == Some("content-length-range")
+                    && a.get(1).and_then(|v| v.as_i64()) == Some(4096)
+                    && a.get(2).and_then(|v| v.as_i64()) == Some(4096)
+            })),
+            "the range must pin the exact expected byte count on both bounds"
+        );
+        assert!(
+            conds.iter().any(
+                |c| c.get("x-amz-checksum-algorithm").and_then(|v| v.as_str()) == Some("SHA256")
+            )
+        );
+        assert!(
+            conds
+                .iter()
+                .any(|c| c.get("x-amz-checksum-sha256").and_then(|v| v.as_str())
+                    == Some(digest.to_base64().as_str()))
+        );
+        assert!(has_field(&url, "x-amz-checksum-algorithm"));
+        assert!(has_field(&url, "x-amz-checksum-sha256"));
     }
 
     impl PostPolicyInput<'_> {

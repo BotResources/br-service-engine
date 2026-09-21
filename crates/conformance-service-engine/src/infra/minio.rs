@@ -75,6 +75,15 @@ impl TestMinio {
             .with_download_ttl(Duration::from_secs(600))
     }
 
+    pub fn alias_endpoint(&self) -> String {
+        format!("http://localhost:{}", self.port)
+    }
+
+    pub fn config_with_public(&self, bucket: &str) -> BlobConfig {
+        self.config(bucket)
+            .with_public_endpoint(self.alias_endpoint())
+    }
+
     fn s3_bucket(&self, bucket: &str) -> Bucket {
         Bucket::new(
             self.endpoint().parse().expect("a valid endpoint url"),

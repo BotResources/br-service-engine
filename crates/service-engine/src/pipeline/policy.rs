@@ -151,12 +151,14 @@ impl AggregatePolicies {
 pub(crate) struct Policies {
     pub(crate) save: AggregatePolicies,
     pub(crate) delete: AggregatePolicies,
+    pub(crate) upload: crate::blobs::policy::UploadPolicies,
 }
 
 #[derive(Default)]
 pub(crate) struct PolicySeams {
     save: Vec<(TypeId, &'static str)>,
     delete: Vec<(TypeId, &'static str)>,
+    upload: Vec<(&'static str, &'static str)>,
 }
 
 impl PolicySeams {
@@ -168,13 +170,26 @@ impl PolicySeams {
         require::<A>(&mut self.delete);
     }
 
+    pub(crate) fn require_upload<B: crate::blobs::Blobs>(&mut self) {
+        if !self.upload.iter().any(|(kind, _)| *kind == B::KIND) {
+            self.upload.push((B::KIND, std::any::type_name::<B>()));
+        }
+    }
+
     pub(crate) fn verify(
         &self,
         save: &AggregatePolicies,
         delete: &AggregatePolicies,
+        upload: &crate::blobs::policy::UploadPolicies,
     ) -> Result<(), EngineError> {
         verify_against(&self.save, save)?;
-        verify_against(&self.delete, delete)
+        verify_against(&self.delete, delete)?;
+        for (kind, aggregate) in &self.upload {
+            if !upload.contains(kind) {
+                return Err(EngineError::UnhonouredSeam { aggregate });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -273,7 +288,9 @@ mod tests {
         let mut seams = PolicySeams::default();
         seams.require_save::<Alpha>();
         let policies = Policies::default();
-        let error = seams.verify(&policies.save, &policies.delete).unwrap_err();
+        let error = seams
+            .verify(&policies.save, &policies.delete, &policies.upload)
+            .unwrap_err();
         assert!(
             matches!(error, EngineError::UnhonouredSeam { aggregate } if aggregate.contains("Alpha"))
         );
@@ -285,7 +302,9 @@ mod tests {
         seams.require_delete::<Beta>();
         let mut policies = Policies::default();
         policies.save.register::<Beta, _>(|_s, _ps| Ok(())).unwrap();
-        let error = seams.verify(&policies.save, &policies.delete).unwrap_err();
+        let error = seams
+            .verify(&policies.save, &policies.delete, &policies.upload)
+            .unwrap_err();
         assert!(
             matches!(error, EngineError::UnhonouredSeam { aggregate } if aggregate.contains("Beta")),
             "a save policy does not honour a delete subjection"
@@ -307,6 +326,10 @@ mod tests {
             .delete
             .register::<Alpha, _>(|_s, _ps| Ok(()))
             .unwrap();
-        assert!(seams.verify(&policies.save, &policies.delete).is_ok());
+        assert!(
+            seams
+                .verify(&policies.save, &policies.delete, &policies.upload)
+                .is_ok()
+        );
     }
 }

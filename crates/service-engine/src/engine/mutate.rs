@@ -40,6 +40,7 @@ impl<P: Principal> Engine<P> {
             std::sync::Arc::new(Policies {
                 save: self.post_save.clone(),
                 delete: self.post_delete.clone(),
+                upload: self.post_upload.clone(),
             }),
             self.presence.handle(),
             self.blobs.maybe_handle(),

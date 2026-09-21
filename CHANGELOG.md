@@ -312,6 +312,85 @@ the black-box battery greps — is the wording the engine now emits.
 - No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
 - `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
 
+### lane: blobs
+
+#### C1. Verified upload — checksum and exact size pinned in the presign
+
+`cx.blob_verified::<Kind>(name, content_type, UploadExpectation { size, sha256 })`
+and `blob_owned_verified` stage a blob with a per-call `UploadExpectation`
+(`Sha256Digest` — hex/base64, serialized as hex). The POST policy then carries
+`{"x-amz-checksum-algorithm":"SHA256"}`, `{"x-amz-checksum-sha256": <base64>}` and
+`["content-length-range", size, size]`, and the form carries both `x-amz-checksum-*`
+fields, so object storage refuses a mismatching upload (`XAmzContentChecksumMismatch`,
+`EntityTooSmall`/`EntityTooLarge`) and the object never lands. `expect.size >
+max_bytes` is refused at stage as `EngineError::BlobOverPolicy` before any presign.
+Single-part only (≤ 5 GB); no composite/multipart checksum. `BlobPolicy` is
+unchanged — the expectation is per call. The unverified `cx.blob` /
+`cx.blob_owned` path is byte-for-byte unchanged (open `[0, max_bytes]` range, no
+checksum).
+
+#### C2. `BlobReader::head` — a live storage HEAD from a mutation
+
+`engine.blob_reader().head(reference) -> Option<BlobHead>`. `BlobHead { state,
+expected, size, etag, sha256 }` fixes its provenance: `state` and `expected` come
+from the blob row; `size`, `etag` and `sha256` come **always** from a live
+`ObjectStore::head` (never the row's recorded columns), so a mutation running in
+the pending window (before the reaper sweeps) reads the storage checksum
+immediately, with `state: Pending` and `verified() == Some(true)`. `verified()` is
+`Some(size == expected.size && sha256 == Some(expected.sha256))` when an
+expectation exists, `None` otherwise. `None` = no row, or no object yet, or the
+store unbound. `head` never mutates. `ObjectStore::head` sends
+`x-amz-checksum-mode: ENABLED` and reads `x-amz-checksum-sha256`.
+
+#### C3. Post-upload policy — run inside the promotion transaction
+
+`register_post_upload_policy::<Kind>(|Uploaded, &mut PostSave| -> Result<(),
+Refused>)` / `require_post_upload_policy::<Kind>` (boot-checked like save/delete,
+`EngineError::UnhonouredSeam`). One policy per kind (a second is
+`EngineError::Config`). The reaper runs it on the promotion connection through a
+`PolicyRunner` that builds the same `PostSave` context a reaction gets; the blob
+row carries no aggregate key, so the policy finds its referencing key
+(`ps.connection()`) and impacts its own view (`ps.impact_caused`), reaching
+subscribers as any post-save impact. **Outbound identity of the reaper:** the
+reaper holds no principal, so `emit`/`command` from a policy go out as
+`service_actor(service)`, correlation = the blob row id, no causation, producer =
+service. A refusal (`ps.refuse`) is terminal: the row goes `failed` with
+`failed_reason = policy:<code>`, the object is deleted, no impact and no outbox row
+commit.
+
+#### C4. Inline vs attachment disposition on the download
+
+`Query::download::<View>(key, reference, Disposition)` and
+`BlobReader::download_url(reference, Disposition)` take a
+`blobs::Disposition { Inline, Attachment }` (a GraphQL enum), rendering
+`response-content-disposition` as `inline; filename="…"` /
+`attachment; filename="…"`. (Named `blobs::Disposition` at the module path — the
+crate root `Disposition` is the inbound message-budget one.)
+
+#### C5. Reaper under a leader slot, transactional promotion
+
+The reaper runs under a `reaper:blob` leader slot (`SlotName::Reaper`,
+`SlotKind::Reaper`) claimed per interval with the cron idiom
+(`claim_current_slot` on a pooled connection, `complete_slot` after), so exactly
+one pod sweeps per interval; `ReaperRound` gains `skipped` and `failed`. There is
+**no advisory xact lock** — the slot row claim is the whole guard. Promotion runs
+the HEAD **outside** the transaction, then a short transaction holds only the
+`state='pending'`-guarded `UPDATE … RETURNING` plus the post-upload policy; no
+`FOR UPDATE`. The new state model of `service_engine.blob` (`9113000025`) adds
+`expected_size`, `expected_sha256`, `etag`, `sha256`, `failed_reason`,
+`failed_at`; states are `pending | uploaded | orphaned | failed`. A `failed` row
+resolves to no download URL. Failed and orphaned rows are reaped transactionally
+after `orphan_after` (`reap_detached` generalized), so a crash between a fast-path
+`failed` commit and its object delete leaks nothing past the orphan window.
+
+#### C6. `BlobConfig.public_endpoint` — browser-facing URLs
+
+`BlobConfig::with_public_endpoint(url)` (validated at boot). `ObjectStore` holds a
+second bucket on the public host; the upload POST URL and the download presign use
+the public bucket (SigV4 signs `Host`, so a browser needs the public host), while
+`ensure_bucket`, `head` and `delete` stay on the internal in-cluster host. The
+engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the config.
+
 ## 0.2.0 - 2026-09-16
 
 The `services`-rewrite experiment and the Runners adoption proved the engine

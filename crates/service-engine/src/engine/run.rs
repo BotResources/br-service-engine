@@ -26,7 +26,7 @@ impl<P: Principal> Engine<P> {
             slices.verify(sdl)?;
         }
         self.policy_seams
-            .verify(&self.post_save, &self.post_delete)?;
+            .verify(&self.post_save, &self.post_delete, &self.post_upload)?;
         let render = self.render_runtime();
         let erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>> =
             if self.erasables.is_empty() {
@@ -47,6 +47,7 @@ impl<P: Principal> Engine<P> {
             offers,
             post_save,
             post_delete,
+            post_upload,
             presence,
             blobs,
             shutdown,
@@ -58,6 +59,7 @@ impl<P: Principal> Engine<P> {
         let policies = Arc::new(Policies {
             save: post_save,
             delete: post_delete,
+            upload: post_upload,
         });
         let readiness_guard = readiness.clone();
         let (mut beat, dead_letters, inbound_health) = crate::engine::wiring::wire_beat(
@@ -125,7 +127,18 @@ impl<P: Principal> Engine<P> {
 
         let blob_handle = match crate::blobs::bind(&blobs, &config).await {
             Ok(BoundBlobs { handle, reaper }) => {
-                if let Some(reaper) = reaper {
+                if let Some(mut reaper) = reaper {
+                    if let Some(blob_handle) = handle.clone() {
+                        reaper = reaper.with_runner(crate::pipeline::PolicyRunner::new(
+                            transport.clone() as Arc<dyn ImpactTransport>,
+                            accumulators.clone(),
+                            offers.clone(),
+                            policies.clone(),
+                            blob_handle,
+                            config.service.clone(),
+                            config.impacts_per_commit,
+                        ));
+                    }
                     beat = beat.with_blob_reaper(reaper);
                 }
                 handle

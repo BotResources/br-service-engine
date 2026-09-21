@@ -45,7 +45,11 @@ impl ReplyQuery {
         reference: Uuid,
     ) -> Result<Option<String>> {
         Ok(Query::<AppPrincipal>::new(ctx)?
-            .download::<RepliesView>(&reply_id, service_engine::BlobRef(reference))
+            .download::<RepliesView>(
+                &reply_id,
+                service_engine::BlobRef(reference),
+                service_engine::blobs::Disposition::Attachment,
+            )
             .await?
             .map(|url| url.into_string()))
     }

@@ -11,16 +11,26 @@ use conformance_service_engine::sample::blob::AttachDoc;
 use conformance_service_engine::sample::boot_blob_engine;
 use conformance_service_engine::sample::render::member;
 use engine_twin::await_ready;
+use service_engine::blobs::Disposition;
 use service_engine::{BlobPolicy, BlobRef, OneShot, UploadUrl};
+use sqlx::PgPool;
 use uuid::Uuid;
 
+async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT blob_ref FROM sample_doc WHERE id = $1")
+        .bind(doc)
+        .fetch_one(pool)
+        .await
+        .expect("read the blob reference")
+}
+
 #[tokio::test]
-async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_real_minio() {
+async fn s223_the_download_disposition_switches_between_inline_and_attachment() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let minio = TestMinio::spawn().await;
-    let bucket = format!("se-s105-{}", Uuid::now_v7().simple());
+    let bucket = format!("se-s223-{}", Uuid::now_v7().simple());
     minio.create_bucket(&bucket).await;
     let pool = db.app_pool().clone();
 
@@ -33,8 +43,8 @@ async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_rea
     let engine = boot_blob_engine(
         &db,
         nats.nats().await,
-        "se_s105",
-        "pod-s105",
+        "se_s223",
+        "pod-s223",
         minio.config(&bucket),
         policy,
         Duration::from_secs(3600),
@@ -54,44 +64,43 @@ async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_rea
             AttachDoc {
                 id: doc,
                 tenant,
-                name: "photo.bin".to_string(),
+                name: "picture.bin".to_string(),
                 content_type: "application/octet-stream".to_string(),
                 fail: false,
             },
         )
         .await
-        .expect("the attach commits and returns the upload URL on the sync channel");
-
+        .expect("the attach commits");
+    let reference = reference_of(&pool, doc).await;
     let http = reqwest::Client::new();
-    let payload = b"the-bytes-never-cross-the-pipeline".to_vec();
-    let status = post_upload(&http, upload.into_inner(), payload.clone()).await;
-    assert!(
-        status.is_success(),
-        "MinIO accepted the presigned POST upload"
-    );
+    let status = post_upload(&http, upload.into_inner(), b"bytes".to_vec()).await;
+    assert!(status.is_success());
 
-    let reference: Uuid = sqlx::query_scalar("SELECT blob_ref FROM sample_doc WHERE id = $1")
-        .bind(doc)
-        .fetch_one(&pool)
+    let inline = reader
+        .download_url(BlobRef(reference), Disposition::Inline)
         .await
-        .expect("read the blob reference");
-    let download = reader
-        .download_url(
-            BlobRef(reference),
-            service_engine::blobs::Disposition::Attachment,
-        )
+        .expect("presign inline")
+        .expect("the reference resolves")
+        .into_string();
+    let attachment = reader
+        .download_url(BlobRef(reference), Disposition::Attachment)
         .await
-        .expect("presign a download")
-        .expect("the reference resolves to an object");
-    let got = http
-        .get(download.into_string())
-        .send()
-        .await
-        .expect("GET the presigned download URL")
-        .bytes()
-        .await
-        .expect("read the downloaded bytes");
-    assert_eq!(got.as_ref(), payload.as_slice(), "the bytes round-trip");
+        .expect("presign attachment")
+        .expect("the reference resolves")
+        .into_string();
+
+    assert!(
+        inline.contains("response-content-disposition=inline"),
+        "the inline presign carries an inline content-disposition: {inline}",
+    );
+    assert!(
+        attachment.contains("response-content-disposition=attachment"),
+        "the attachment presign carries an attachment content-disposition: {attachment}",
+    );
+    assert_ne!(
+        inline, attachment,
+        "the two dispositions mint different response-content-disposition URLs",
+    );
 
     shutdown.notify_one();
     running.await.expect("join").expect("run returns Ok");
