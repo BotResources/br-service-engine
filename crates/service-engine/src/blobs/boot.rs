@@ -26,8 +26,13 @@ pub(crate) async fn bind(
         return Err((error, REASON_BLOB_BUCKET));
     }
     let _ = registry.store_slot().set(store);
-    let reaper = BlobReaper::new(registry.store_slot(), registry.policies())
-        .with_interval(config.blob_reaper_interval);
+    let reaper = BlobReaper::new(
+        registry.store_slot(),
+        registry.policies(),
+        config.pod_id.clone(),
+        config.lease,
+    )
+    .with_interval(config.blob_reaper_interval);
     Ok(BoundBlobs {
         handle: registry.maybe_handle(),
         reaper: Some(reaper),

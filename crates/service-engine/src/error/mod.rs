@@ -278,6 +278,16 @@ pub enum EngineError {
     #[error("blob kind {kind} is used but was never registered with register_blobs")]
     BlobKindUnregistered { kind: &'static str },
 
+    #[error(
+        "a verified upload of blob kind {kind} expects {size} bytes, over the {max_bytes}-byte \
+         policy ceiling; the expectation is refused before any presign is minted"
+    )]
+    BlobOverPolicy {
+        kind: &'static str,
+        size: u64,
+        max_bytes: u64,
+    },
+
     #[error("presence type `{presence}` is used but was never registered with register_presence")]
     PresenceNotRegistered { presence: String },
 

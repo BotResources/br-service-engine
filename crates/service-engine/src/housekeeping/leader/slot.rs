@@ -6,6 +6,7 @@ use crate::time::Timestamp;
 pub enum SlotKind {
     Relay,
     Cron,
+    Reaper,
 }
 
 impl SlotKind {
@@ -13,6 +14,7 @@ impl SlotKind {
         match self {
             Self::Relay => "relay",
             Self::Cron => "cron",
+            Self::Reaper => "reaper",
         }
     }
 }
@@ -21,6 +23,7 @@ impl SlotKind {
 pub enum SlotName {
     Relay(RelayName),
     Cron(JobName),
+    Reaper,
 }
 
 impl SlotName {
@@ -28,6 +31,7 @@ impl SlotName {
         match self {
             Self::Relay(_) => SlotKind::Relay,
             Self::Cron(_) => SlotKind::Cron,
+            Self::Reaper => SlotKind::Reaper,
         }
     }
 
@@ -35,6 +39,7 @@ impl SlotName {
         match self {
             Self::Relay(name) => name.as_str(),
             Self::Cron(name) => name.as_str(),
+            Self::Reaper => "blob",
         }
     }
 
@@ -94,6 +99,13 @@ mod tests {
 
     fn cron(name: &'static str) -> SlotName {
         SlotName::Cron(JobName::from_static(name))
+    }
+
+    #[test]
+    fn the_reaper_slot_is_the_single_qualified_name_reaper_blob() {
+        assert_eq!(SlotName::Reaper.qualified(), "reaper:blob");
+        assert_eq!(SlotName::Reaper.as_str(), "blob");
+        assert_eq!(SlotName::Reaper.kind(), SlotKind::Reaper);
     }
 
     #[test]

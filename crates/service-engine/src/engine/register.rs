@@ -203,6 +203,28 @@ impl<P: Principal> Engine<P> {
         Ok(())
     }
 
+    pub fn register_post_upload_policy<B, F>(&mut self, policy: F) -> Result<(), EngineError>
+    where
+        B: crate::blobs::Blobs,
+        F: Fn(
+                crate::blobs::Uploaded<'_>,
+                &mut crate::pipeline::PostSave<'_, '_>,
+            ) -> Result<(), crate::pipeline::Refused>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.post_upload.register::<B, F>(policy)
+    }
+
+    pub fn require_post_upload_policy<B>(&mut self) -> Result<(), EngineError>
+    where
+        B: crate::blobs::Blobs,
+    {
+        self.policy_seams.require_upload::<B>();
+        Ok(())
+    }
+
     pub fn register_offer<O: crate::offer::Offer>(&mut self) -> Result<(), EngineError> {
         if !O::PREFIX.ends_with('/') {
             return Err(EngineError::Config(format!(

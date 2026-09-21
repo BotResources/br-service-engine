@@ -5,7 +5,7 @@ use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 use crate::blobs::store::{BlobRowOp, BlobStore, ReferenceRow};
-use crate::blobs::{BlobPolicy, BlobRef, Blobs, UploadUrl};
+use crate::blobs::{BlobPolicy, BlobRef, Blobs, UploadExpectation, UploadUrl};
 use crate::erase::PersonId;
 use crate::error::EngineError;
 use crate::time::Timestamp;
@@ -60,13 +60,25 @@ impl BlobHandle {
         file_name: String,
         content_type: String,
         owner: Option<PersonId>,
+        expect: Option<UploadExpectation>,
     ) -> Result<Blob, EngineError> {
         let policy = self.policy_of::<B>()?;
+        if let Some(expect) = &expect
+            && expect.size > policy.max_bytes
+        {
+            return Err(EngineError::BlobOverPolicy {
+                kind: B::KIND,
+                size: expect.size,
+                max_bytes: policy.max_bytes,
+            });
+        }
         let kind = B::KIND;
         let store = self.store()?;
         let id = Uuid::now_v7();
         let object_key = format!("{}/{}/{}", store.service(), kind, id);
-        let upload_url = store.presign_upload(&object_key, policy.max_bytes, &content_type)?;
+        let expect_ref = expect.as_ref().map(|expect| (expect.size, &expect.sha256));
+        let upload_url =
+            store.presign_upload(&object_key, policy.max_bytes, &content_type, expect_ref)?;
         ops.push(BlobRowOp::Insert(ReferenceRow {
             id,
             object_key,
@@ -75,6 +87,8 @@ impl BlobHandle {
             content_type,
             file_name,
             owner: owner.map(|person| person.as_uuid()),
+            expected_size: expect.map(|expect| expect.size as i64),
+            expected_sha256: expect.map(|expect| *expect.sha256.as_bytes()),
         }));
         Ok(Blob {
             reference: BlobRef(id),

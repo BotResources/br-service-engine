@@ -1,7 +1,10 @@
 mod boot;
 mod config;
+mod expect;
 mod handle;
+mod head;
 mod object;
+pub(crate) mod policy;
 mod post_policy;
 mod reaper;
 mod registry;
@@ -14,13 +17,32 @@ use uuid::Uuid;
 
 pub(crate) use boot::{BoundBlobs, bind};
 pub use config::BlobConfig;
+pub use expect::{Sha256Digest, UploadExpectation};
 pub use handle::Blob;
 pub(crate) use handle::BlobHandle;
+pub use head::{BlobHead, BlobState};
+pub(crate) use object::ObjectHead;
+pub use policy::Uploaded;
 pub(crate) use reaper::BlobReaper;
 pub use reaper::ReaperRound;
 pub(crate) use registry::BlobRegistry;
 pub(crate) use store::{BlobRowOp, BlobStore, insert_reference, orphan_reference};
 pub use store::{REASON_BLOB_BUCKET, REASON_BLOB_UNCONFIGURED};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
+pub enum Disposition {
+    Inline,
+    Attachment,
+}
+
+impl Disposition {
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::Attachment => "attachment",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlobPolicy {

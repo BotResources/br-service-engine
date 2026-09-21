@@ -9,6 +9,7 @@ mod ops_blob;
 mod ops_seal;
 mod outbound;
 mod policy;
+mod runner;
 mod staged;
 mod tx;
 
@@ -20,6 +21,7 @@ pub use outbound::{OutboundCommand, OutboundEvent, ProducerSequence};
 pub(crate) use outbound::{OutboundContext, event_record};
 pub(crate) use policy::{AggregatePolicies, Policies, PolicySeams};
 pub use policy::{PostSave, Refused, Saved};
+pub(crate) use runner::{PolicyRunner, PromotionOutcome};
 pub(crate) use staged::Staged;
 pub(crate) use tx::{begin_scoped, flush_and_commit};
 
