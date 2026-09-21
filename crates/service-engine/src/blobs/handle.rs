@@ -100,3 +100,57 @@ impl BlobHandle {
         ops.push(BlobRowOp::Orphan(reference, at));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::blobs::Sha256Digest;
+
+    struct TinyKind;
+
+    impl Blobs for TinyKind {
+        const KIND: &'static str = "tiny";
+    }
+
+    fn handle(max_bytes: u64) -> BlobHandle {
+        let kinds: Kinds = Arc::new(vec![(
+            TypeId::of::<TinyKind>(),
+            TinyKind::KIND,
+            BlobPolicy {
+                max_bytes,
+                orphan_after: Duration::from_secs(60),
+            },
+        )]);
+        BlobHandle::new(kinds, Arc::new(OnceCell::new()))
+    }
+
+    #[test]
+    fn an_expectation_over_the_policy_ceiling_is_refused_at_stage_before_any_presign() {
+        let handle = handle(16);
+        let mut ops = Vec::new();
+        let expect = UploadExpectation::new(64, Sha256Digest::from_bytes([0u8; 32]));
+        let error = handle
+            .stage::<TinyKind>(
+                &mut ops,
+                "big.bin".into(),
+                "application/octet-stream".into(),
+                None,
+                Some(expect),
+            )
+            .expect_err("an over-ceiling expectation is refused");
+        assert!(
+            matches!(
+                error,
+                EngineError::BlobOverPolicy { kind, size, max_bytes }
+                    if kind == "tiny" && size == 64 && max_bytes == 16
+            ),
+            "the stage refuses with BlobOverPolicy carrying the kind, size and ceiling: {error:?}",
+        );
+        assert!(
+            ops.is_empty(),
+            "no reference row is staged and no upload URL is minted when the ceiling refuses",
+        );
+    }
+}

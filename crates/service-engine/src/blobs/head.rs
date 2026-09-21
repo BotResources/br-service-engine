@@ -11,10 +11,10 @@ pub enum BlobState {
 impl BlobState {
     pub(crate) fn from_row(state: &str) -> Self {
         match state {
+            "pending" => Self::Pending,
             "uploaded" => Self::Uploaded,
             "orphaned" => Self::Orphaned,
-            "failed" => Self::Failed,
-            _ => Self::Pending,
+            _ => Self::Failed,
         }
     }
 }
@@ -87,11 +87,11 @@ mod tests {
     }
 
     #[test]
-    fn the_row_state_maps_from_its_stored_text() {
+    fn the_row_state_maps_from_its_stored_text_and_an_unknown_text_fails_closed() {
         assert_eq!(BlobState::from_row("pending"), BlobState::Pending);
         assert_eq!(BlobState::from_row("uploaded"), BlobState::Uploaded);
         assert_eq!(BlobState::from_row("orphaned"), BlobState::Orphaned);
         assert_eq!(BlobState::from_row("failed"), BlobState::Failed);
-        assert_eq!(BlobState::from_row("weird"), BlobState::Pending);
+        assert_eq!(BlobState::from_row("weird"), BlobState::Failed);
     }
 }
