@@ -131,15 +131,16 @@ mod tests {
         let handle = handle(16);
         let mut ops = Vec::new();
         let expect = UploadExpectation::new(64, Sha256Digest::from_bytes([0u8; 32]));
-        let error = handle
-            .stage::<TinyKind>(
-                &mut ops,
-                "big.bin".into(),
-                "application/octet-stream".into(),
-                None,
-                Some(expect),
-            )
-            .expect_err("an over-ceiling expectation is refused");
+        let error = match handle.stage::<TinyKind>(
+            &mut ops,
+            "big.bin".into(),
+            "application/octet-stream".into(),
+            None,
+            Some(expect),
+        ) {
+            Ok(_) => panic!("an over-ceiling expectation must be refused, not staged"),
+            Err(error) => error,
+        };
         assert!(
             matches!(
                 error,
