@@ -9,7 +9,7 @@
 
 use async_graphql::{EmptySubscription, Schema};
 use example_service::slices::{MutationRoot, QueryRoot, SubscriptionRoot};
-use service_engine::graphql::{SchemaSlices, SliceFragment};
+use service_engine::graphql::{RootPrefix, SchemaSlices, SliceFragment};
 
 fn fragments() -> Vec<SliceFragment> {
     let mut fragments = Vec::new();
@@ -93,7 +93,8 @@ fn the_composed_example_schema_is_fully_claimed_by_its_slice_fragments() {
     .finish()
     .sdl();
 
-    SchemaSlices::assemble(&fragments())
+    let prefix = RootPrefix::from_snake("example").expect("`example` is a valid root prefix");
+    SchemaSlices::assemble(&fragments(), Some(&prefix))
         .expect("the example slices assemble without a collision")
         .verify(&sdl)
         .expect("every root field and object type the composed schema exposes is claimed");

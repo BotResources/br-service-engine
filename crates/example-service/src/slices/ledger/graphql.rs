@@ -19,7 +19,7 @@ pub struct LedgerQuery;
 
 #[Object]
 impl LedgerQuery {
-    async fn ledger(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<LedgerView>> {
+    async fn example_ledger(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<LedgerView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view::<LedgersView>(&id)
             .await
@@ -31,7 +31,7 @@ pub struct LedgerMutation;
 
 #[Object]
 impl LedgerMutation {
-    async fn record_entry(&self, ctx: &Context<'_>, id: Uuid, amount: i64) -> Result<MutationAck> {
+    async fn example_record_entry(&self, ctx: &Context<'_>, id: Uuid, amount: i64) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, RecordEntry>(ctx, RecordEntry { id, amount }).await
     }
 }
@@ -41,7 +41,7 @@ pub struct LedgerSubscription;
 
 #[Subscription]
 impl LedgerSubscription {
-    async fn ledger_deltas(
+    async fn example_ledger_deltas(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<LedgerDelta>>> {

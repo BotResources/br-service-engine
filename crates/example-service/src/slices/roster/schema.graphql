@@ -19,7 +19,7 @@ type LanesResumed {
 union RosterDelta = RosterReset | RosterUpsert | RosterRemove | LanesPaused | LanesResumed
 
 type RosterQuery {
-	person(id: UUID!): RosterView
+	examplePerson(id: UUID!): RosterView
 }
 
 type RosterRemove {
@@ -35,7 +35,7 @@ type RosterReset {
 }
 
 type RosterSubscription {
-	rosterDeltas: RosterDelta!
+	exampleRosterDeltas: RosterDelta!
 }
 
 type RosterUpsert {

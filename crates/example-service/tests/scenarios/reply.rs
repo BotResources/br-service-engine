@@ -14,7 +14,7 @@ async fn start_and_stream(world: &World, pass: &str, board: Uuid, chunks: &[&str
     ok(&world
         .gql(
             pass,
-            "mutation($id:UUID!,$b:UUID!){startReply(id:$id,boardId:$b){success}}",
+            "mutation($id:UUID!,$b:UUID!){exampleStartReply(id:$id,boardId:$b){success}}",
             serde_json::json!({ "id": reply, "b": board }),
         )
         .await);
@@ -66,12 +66,12 @@ async fn accumulated_lane_seals_the_streamed_reply_with_a_verified_hash() {
         let view = world
             .gql(
                 &pass,
-                "query($id:UUID!){reply(id:$id){text status}}",
+                "query($id:UUID!){exampleReply(id:$id){text status}}",
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        (view["data"]["reply"]["status"] == "complete")
-            .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
+        (view["data"]["exampleReply"]["status"] == "complete")
+            .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
     });
     assert_eq!(text, "Hello world");
 
@@ -92,13 +92,13 @@ async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
     let streaming = world
         .gql(
             &pass,
-            "query($id:UUID!){reply(id:$id){status affordances}}",
+            "query($id:UUID!){exampleReply(id:$id){status affordances}}",
             serde_json::json!({ "id": reply }),
         )
         .await;
-    assert_eq!(ok(&streaming)["reply"]["status"], "streaming");
+    assert_eq!(ok(&streaming)["exampleReply"]["status"], "streaming");
     assert_eq!(
-        ok(&streaming)["reply"]["affordances"]["cancel"]["allowed"],
+        ok(&streaming)["exampleReply"]["affordances"]["cancel"]["allowed"],
         true,
         "the cancel affordance and the cancel gate are one function: allowed while streaming"
     );
@@ -106,7 +106,7 @@ async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!){cancelReply(id:$id){success}}",
+            "mutation($id:UUID!){exampleCancelReply(id:$id){success}}",
             serde_json::json!({ "id": reply }),
         )
         .await);
@@ -127,12 +127,12 @@ async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
         let view = world
             .gql(
                 &pass,
-                "query($id:UUID!){reply(id:$id){text status}}",
+                "query($id:UUID!){exampleReply(id:$id){text status}}",
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        (view["data"]["reply"]["status"] == "cancelled")
-            .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
+        (view["data"]["exampleReply"]["status"] == "cancelled")
+            .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
     });
     assert_eq!(
         text, "Once upon a ",
@@ -142,12 +142,12 @@ async fn cancelling_a_reply_seals_the_partial_stream_as_cancelled() {
     let cancelled = world
         .gql(
             &pass,
-            "query($id:UUID!){reply(id:$id){affordances}}",
+            "query($id:UUID!){exampleReply(id:$id){affordances}}",
             serde_json::json!({ "id": reply }),
         )
         .await;
     assert_eq!(
-        ok(&cancelled)["reply"]["affordances"]["cancel"]["allowed"],
+        ok(&cancelled)["exampleReply"]["affordances"]["cancel"]["allowed"],
         false,
         "a cancelled reply can no longer be cancelled — the gate blocks it and the affordance says so"
     );
@@ -169,7 +169,7 @@ async fn a_lost_producer_is_caught_by_the_scheduled_cancel_deadline() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!){cancelReply(id:$id){success}}",
+            "mutation($id:UUID!){exampleCancelReply(id:$id){success}}",
             serde_json::json!({ "id": reply }),
         )
         .await);
@@ -177,12 +177,12 @@ async fn a_lost_producer_is_caught_by_the_scheduled_cancel_deadline() {
     let cancelling = world
         .gql(
             &pass,
-            "query($id:UUID!){reply(id:$id){status}}",
+            "query($id:UUID!){exampleReply(id:$id){status}}",
             serde_json::json!({ "id": reply }),
         )
         .await;
     assert_eq!(
-        ok(&cancelling)["reply"]["status"],
+        ok(&cancelling)["exampleReply"]["status"],
         "cancelling",
         "the decision is written on the direct lane while the producer is still expected to answer"
     );
@@ -196,12 +196,12 @@ async fn a_lost_producer_is_caught_by_the_scheduled_cancel_deadline() {
         let view = world
             .gql(
                 &pass,
-                "query($id:UUID!){reply(id:$id){text status}}",
+                "query($id:UUID!){exampleReply(id:$id){text status}}",
                 serde_json::json!({ "id": reply }),
             )
             .await;
-        (view["data"]["reply"]["status"] == "cancelled")
-            .then(|| view["data"]["reply"]["text"].as_str().unwrap().to_string())
+        (view["data"]["exampleReply"]["status"] == "cancelled")
+            .then(|| view["data"]["exampleReply"]["text"].as_str().unwrap().to_string())
     });
     assert_eq!(
         text, "Half a thought",

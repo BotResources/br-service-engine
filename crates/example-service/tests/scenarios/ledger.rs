@@ -14,7 +14,7 @@ async fn full_eda_ledger_gate_and_totals() {
         ok(&world
             .gql(
                 &pass,
-                "mutation($id:UUID!,$a:Int!){recordEntry(id:$id,amount:$a){success}}",
+                "mutation($id:UUID!,$a:Int!){exampleRecordEntry(id:$id,amount:$a){success}}",
                 serde_json::json!({ "id": l, "a": amount }),
             )
             .await);
@@ -22,16 +22,16 @@ async fn full_eda_ledger_gate_and_totals() {
     let view = world
         .gql(
             &pass,
-            "query($id:UUID!){ledger(id:$id){total}}",
+            "query($id:UUID!){exampleLedger(id:$id){total}}",
             serde_json::json!({ "id": l }),
         )
         .await;
-    assert_eq!(ok(&view)["ledger"]["total"], 8);
+    assert_eq!(ok(&view)["exampleLedger"]["total"], 8);
 
     let refused = world
         .gql(
             &pass,
-            "mutation($id:UUID!,$a:Int!){recordEntry(id:$id,amount:$a){success}}",
+            "mutation($id:UUID!,$a:Int!){exampleRecordEntry(id:$id,amount:$a){success}}",
             serde_json::json!({ "id": l, "a": -100 }),
         )
         .await;
@@ -80,7 +80,7 @@ async fn record(world: &World, pass: &str, id: Uuid, amount: i64) {
     ok(&world
         .gql(
             pass,
-            "mutation($id:UUID!,$a:Int!){recordEntry(id:$id,amount:$a){success}}",
+            "mutation($id:UUID!,$a:Int!){exampleRecordEntry(id:$id,amount:$a){success}}",
             serde_json::json!({ "id": id, "a": amount }),
         )
         .await);
@@ -90,11 +90,11 @@ async fn total(world: &World, pass: &str, id: Uuid) -> i64 {
     let view = world
         .gql(
             pass,
-            "query($id:UUID!){ledger(id:$id){total}}",
+            "query($id:UUID!){exampleLedger(id:$id){total}}",
             serde_json::json!({ "id": id }),
         )
         .await;
-    ok(&view)["ledger"]["total"].as_i64().expect("a total")
+    ok(&view)["exampleLedger"]["total"].as_i64().expect("a total")
 }
 
 #[tokio::test]
@@ -270,11 +270,11 @@ async fn full_eda_erasure_scrubs_a_crossed_snapshot_boundary() {
     let view = world
         .gql(
             &other_pass,
-            "query($id:UUID!){ledger(id:$id){total lastAuthor}}",
+            "query($id:UUID!){exampleLedger(id:$id){total lastAuthor}}",
             serde_json::json!({ "id": l }),
         )
         .await;
-    let ledger = &ok(&view)["ledger"];
+    let ledger = &ok(&view)["exampleLedger"];
     assert_eq!(
         ledger["total"], 8,
         "the rewritten log still hydrates and totals correctly"

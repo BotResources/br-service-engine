@@ -20,49 +20,49 @@ async fn board_direct_lane_gate_affordance_offer_visibility_oneshot() {
     let created = world
         .gql(
             &owner,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": b1, "n": "First" }),
         )
         .await;
-    assert_eq!(ok(&created)["createBoard"]["success"], true);
+    assert_eq!(ok(&created)["exampleCreateBoard"]["success"], true);
 
     let view = world
         .gql(
             &owner,
-            "query($id:UUID!){board(id:$id){id archived affordances}}",
+            "query($id:UUID!){exampleBoard(id:$id){id archived affordances}}",
             serde_json::json!({ "id": b1 }),
         )
         .await;
-    let board = &ok(&view)["board"];
+    let board = &ok(&view)["exampleBoard"];
     assert_eq!(board["archived"], false);
     assert_eq!(board["affordances"]["archive"]["allowed"], true);
 
     let archived = world
         .gql(
             &owner,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": b1 }),
         )
         .await;
-    assert_eq!(ok(&archived)["archiveBoard"]["success"], true);
+    assert_eq!(ok(&archived)["exampleArchiveBoard"]["success"], true);
 
     let after = world
         .gql(
             &owner,
-            "query($id:UUID!){board(id:$id){archived affordances}}",
+            "query($id:UUID!){exampleBoard(id:$id){archived affordances}}",
             serde_json::json!({ "id": b1 }),
         )
         .await;
-    assert_eq!(ok(&after)["board"]["archived"], true);
+    assert_eq!(ok(&after)["exampleBoard"]["archived"], true);
     assert_eq!(
-        ok(&after)["board"]["affordances"]["archive"]["allowed"],
+        ok(&after)["exampleBoard"]["affordances"]["archive"]["allowed"],
         false
     );
 
     let refused = world
         .gql(
             &owner,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": b1 }),
         )
         .await;
@@ -72,7 +72,7 @@ async fn board_direct_lane_gate_affordance_offer_visibility_oneshot() {
     ok(&world
         .gql(
             &owner,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": b2, "n": "Second" }),
         )
         .await);
@@ -80,12 +80,12 @@ async fn board_direct_lane_gate_affordance_offer_visibility_oneshot() {
     let invite = world
         .gql(
             &owner,
-            "mutation($id:UUID!){mintBoardInvite(id:$id)}",
+            "mutation($id:UUID!){exampleMintBoardInvite(id:$id)}",
             serde_json::json!({ "id": b2 }),
         )
         .await;
     assert!(
-        ok(&invite)["mintBoardInvite"]
+        ok(&invite)["exampleMintBoardInvite"]
             .as_str()
             .unwrap()
             .starts_with("invite-")
@@ -104,16 +104,16 @@ async fn board_direct_lane_gate_affordance_offer_visibility_oneshot() {
     ok(&world
         .gql(
             &owner,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:true){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:true){success}}",
             serde_json::json!({ "id": b3, "n": "Public" }),
         )
         .await);
 
     let outsider = passport(Uuid::now_v7(), Uuid::now_v7(), &[], false);
     let visible = world
-        .gql(&outsider, "query{boards{id}}", serde_json::json!({}))
+        .gql(&outsider, "query{exampleBoards{id}}", serde_json::json!({}))
         .await;
-    let ids: Vec<String> = ok(&visible)["boards"]
+    let ids: Vec<String> = ok(&visible)["exampleBoards"]
         .as_array()
         .unwrap()
         .iter()

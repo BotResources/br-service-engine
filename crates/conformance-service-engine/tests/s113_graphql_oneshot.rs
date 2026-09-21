@@ -9,7 +9,7 @@ use conformance_service_engine::sample::render::member;
 use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
 
-const SUBSCRIPTION: &str = "subscription { widgets { __typename \
+const SUBSCRIPTION: &str = "subscription { sampleWidgets { __typename \
     ... on ResetPayload { revision views { __typename ... on WidgetView { id label } } } \
     ... on UpsertPayload { revision view { __typename ... on WidgetView { id label } } } } }";
 
@@ -29,7 +29,7 @@ async fn s113_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_s
     let passport = passport_for(user, tenant).to_header();
 
     let mutation = format!(
-        "mutation {{ mintSecret(id: \"{widget}\", label: \"vault\", tenant: \"{tenant}\") }}"
+        "mutation {{ sampleMintSecret(id: \"{widget}\", label: \"vault\", tenant: \"{tenant}\") }}"
     );
     let (status, body) = post_json(
         &service.base_url,
@@ -39,7 +39,7 @@ async fn s113_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_s
     )
     .await;
     assert_eq!(status, 200);
-    let secret = body["data"]["mintSecret"]
+    let secret = body["data"]["sampleMintSecret"]
         .as_str()
         .expect("the one-shot secret is returned on the synchronous channel")
         .to_string();
@@ -55,7 +55,7 @@ async fn s113_a_one_shot_secret_rides_only_the_mutation_response_and_never_the_s
         !reset.to_string().contains(&secret),
         "no subscription frame carries the one-shot secret: {reset}"
     );
-    let view = reset["widgets"]["views"]
+    let view = reset["sampleWidgets"]["views"]
         .as_array()
         .and_then(|views| {
             views

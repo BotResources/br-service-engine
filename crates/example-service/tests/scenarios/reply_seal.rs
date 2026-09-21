@@ -14,7 +14,7 @@ async fn start_and_stream(world: &World, pass: &str, board: Uuid, chunks: &[&str
     ok(&world
         .gql(
             pass,
-            "mutation($id:UUID!,$b:UUID!){startReply(id:$id,boardId:$b){success}}",
+            "mutation($id:UUID!,$b:UUID!){exampleStartReply(id:$id,boardId:$b){success}}",
             serde_json::json!({ "id": reply, "b": board }),
         )
         .await);
@@ -79,12 +79,12 @@ async fn a_finish_below_a_durable_chunk_is_answered_with_seal_failed_not_retried
     let view = world
         .gql(
             &pass,
-            "query($id:UUID!){reply(id:$id){status text}}",
+            "query($id:UUID!){exampleReply(id:$id){status text}}",
             serde_json::json!({ "id": reply }),
         )
         .await;
     assert_eq!(
-        view["data"]["reply"]["status"], "streaming",
+        view["data"]["exampleReply"]["status"], "streaming",
         "a stream the finish declared too short is never silently saved; the reply stays open"
     );
 
@@ -131,12 +131,12 @@ async fn a_permanently_truncated_stream_is_answered_with_seal_failed_after_the_r
     let view = world
         .gql(
             &pass,
-            "query($id:UUID!){reply(id:$id){status text}}",
+            "query($id:UUID!){exampleReply(id:$id){status text}}",
             serde_json::json!({ "id": reply }),
         )
         .await;
     assert_eq!(
-        view["data"]["reply"]["status"], "streaming",
+        view["data"]["exampleReply"]["status"], "streaming",
         "a permanently truncated stream is never silently saved; the reply stays open for the resend"
     );
 
@@ -182,16 +182,16 @@ async fn a_reply_whose_finish_declares_the_wrong_hash_is_answered_with_seal_fail
     let tampered_view = world
         .gql(
             &pass,
-            "query($id:UUID!){reply(id:$id){status text}}",
+            "query($id:UUID!){exampleReply(id:$id){status text}}",
             serde_json::json!({ "id": tampered }),
         )
         .await;
     assert_eq!(
-        ok(&tampered_view)["reply"]["status"],
+        ok(&tampered_view)["exampleReply"]["status"],
         "streaming",
         "an altered stream is refused by the hash and never sealed silently; the reply stays open"
     );
-    assert_eq!(ok(&tampered_view)["reply"]["text"], "");
+    assert_eq!(ok(&tampered_view)["exampleReply"]["text"], "");
 
     world.cleanup().await;
 }

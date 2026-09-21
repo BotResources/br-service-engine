@@ -25,15 +25,15 @@ type MutationAck {
 union ReplyDelta = ReplyReset | ReplyUpsert | ReplyRemove | LanesPaused | LanesResumed
 
 type ReplyMutation {
-	startReply(id: UUID!, boardId: UUID!): MutationAck!
-	setTyping(board: UUID!, label: String!): MutationAck!
-	cancelReply(id: UUID!): MutationAck!
-	attachReply(replyId: UUID!, name: String!, contentType: String!): JSON!
+	exampleStartReply(id: UUID!, boardId: UUID!): MutationAck!
+	exampleSetTyping(board: UUID!, label: String!): MutationAck!
+	exampleCancelReply(id: UUID!): MutationAck!
+	exampleAttachReply(replyId: UUID!, name: String!, contentType: String!): JSON!
 }
 
 type ReplyQuery {
-	reply(id: UUID!): ReplyView
-	replyDownload(replyId: UUID!, reference: UUID!): String
+	exampleReply(id: UUID!): ReplyView
+	exampleReplyDownload(replyId: UUID!, reference: UUID!): String
 }
 
 type ReplyRemove {
@@ -49,8 +49,8 @@ type ReplyReset {
 }
 
 type ReplySubscription {
-	replyDeltas: ReplyDelta!
-	typingDeltas(board: UUID!): TypingDelta!
+	exampleReplyDeltas: ReplyDelta!
+	exampleTypingDeltas(board: UUID!): TypingDelta!
 }
 
 type ReplyUpsert {

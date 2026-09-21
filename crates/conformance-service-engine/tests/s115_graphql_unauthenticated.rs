@@ -18,7 +18,7 @@ async fn s115_a_request_without_a_trusted_passport_is_rejected_before_the_pipeli
     let service = boot_graphql_service(&db, nats.nats().await, "se_s115", "pod-s115").await;
 
     let widget = Uuid::now_v7();
-    let mutation = format!("mutation {{ closeWidget(id: \"{widget}\") {{ success }} }}");
+    let mutation = format!("mutation {{ sampleCloseWidget(id: \"{widget}\") {{ success }} }}");
     let (status, _body) =
         post_json(&service.base_url, None, &mutation, serde_json::json!({})).await;
     assert_eq!(
@@ -57,7 +57,7 @@ async fn s115_a_resolver_refusal_is_a_coded_graphql_error_never_a_transport_erro
     let (status, body) = post_json(
         &service.base_url,
         Some(&passport),
-        "query { forbiddenPeek }",
+        "query { sampleForbiddenPeek }",
         serde_json::json!({}),
     )
     .await;
@@ -66,7 +66,7 @@ async fn s115_a_resolver_refusal_is_a_coded_graphql_error_never_a_transport_erro
         "an authenticated resolver refusal answers 200 with a graphql error, never a transport code: {body}"
     );
     assert!(
-        body["data"].is_null() || body["data"]["forbiddenPeek"].is_null(),
+        body["data"].is_null() || body["data"]["sampleForbiddenPeek"].is_null(),
         "a refused query carries no datum: {body}"
     );
     assert_eq!(
@@ -76,7 +76,7 @@ async fn s115_a_resolver_refusal_is_a_coded_graphql_error_never_a_transport_erro
     );
 
     let mut ws = GraphqlWs::connect(&service.base_url, &passport).await;
-    ws.subscribe("s115f", "subscription { forbiddenStream }")
+    ws.subscribe("s115f", "subscription { sampleForbiddenStream }")
         .await;
     let payload = ws.next_payload(Duration::from_secs(5)).await.expect(
         "a refused subscription open frames the error as a next payload, not a transport error",

@@ -23,7 +23,7 @@ async fn s111_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allo
     let service = boot_graphql_service(&db, nats.nats().await, "se_s111", "pod-s111").await;
     let passport = passport_for(user, tenant).to_header();
 
-    let query = format!("mutation {{ closeWidget(id: \"{widget}\") {{ success }} }}");
+    let query = format!("mutation {{ sampleCloseWidget(id: \"{widget}\") {{ success }} }}");
     let (status, body) = post_json(
         &service.base_url,
         Some(&passport),
@@ -33,7 +33,7 @@ async fn s111_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allo
     .await;
     assert_eq!(status, 200, "an allowed mutation answers over HTTP: {body}");
     assert_eq!(
-        body["data"]["closeWidget"]["success"],
+        body["data"]["sampleCloseWidget"]["success"],
         serde_json::json!(true),
         "the pipeline commits and the synchronous channel answers success: {body}"
     );
@@ -55,7 +55,7 @@ async fn s111_a_graphql_mutation_denies_with_the_affordance_reason_code_and_allo
         "the same gate that blocks the affordance refuses the mutation with its own reason code: {body}"
     );
     assert!(
-        body["data"]["closeWidget"].is_null(),
+        body["data"]["sampleCloseWidget"].is_null(),
         "a refused mutation carries no success payload: {body}"
     );
 

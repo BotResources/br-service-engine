@@ -18,12 +18,12 @@ async fn a_subscriber_receives_reset_then_an_upsert_with_its_cause_over_the_wire
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "WS Board" }),
         )
         .await);
 
-    let query = "subscription{boardDeltas{\
+    let query = "subscription{exampleBoardDeltas{\
         __typename \
         ... on BoardReset{revision views{... on BoardView{id name archived}}} \
         ... on BoardUpsert{revision cause view{... on BoardView{id name archived}}} \
@@ -32,10 +32,10 @@ async fn a_subscriber_receives_reset_then_an_upsert_with_its_cause_over_the_wire
 
     let reset = sub.next_payload(RECV).await;
     assert_eq!(
-        reset["boardDeltas"]["__typename"], "BoardReset",
+        reset["exampleBoardDeltas"]["__typename"], "BoardReset",
         "the first delta on attach is a Reset"
     );
-    let seen = reset["boardDeltas"]["views"]
+    let seen = reset["exampleBoardDeltas"]["views"]
         .as_array()
         .unwrap()
         .iter()
@@ -45,21 +45,21 @@ async fn a_subscriber_receives_reset_then_an_upsert_with_its_cause_over_the_wire
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": board }),
         )
         .await);
 
     let flip = loop {
         let delta = sub.next_payload(RECV).await;
-        if delta["boardDeltas"]["__typename"] == "BoardUpsert"
-            && delta["boardDeltas"]["view"]["archived"] == true
+        if delta["exampleBoardDeltas"]["__typename"] == "BoardUpsert"
+            && delta["exampleBoardDeltas"]["view"]["archived"] == true
         {
             break delta;
         }
     };
     assert_eq!(
-        flip["boardDeltas"]["view"]["name"], "WS Board",
+        flip["exampleBoardDeltas"]["view"]["name"], "WS Board",
         "the Upsert carries the changed view over the wire"
     );
 
@@ -80,12 +80,12 @@ async fn a_membership_change_grants_then_revokes_a_board_on_a_live_session_both_
     ok(&world
         .gql(
             &owner,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Private A" }),
         )
         .await);
 
-    let query = "subscription{boardDeltas{\
+    let query = "subscription{exampleBoardDeltas{\
         __typename \
         ... on BoardReset{revision views{... on BoardView{id name}}} \
         ... on BoardUpsert{revision view{... on BoardView{id name}}} \
@@ -93,8 +93,8 @@ async fn a_membership_change_grants_then_revokes_a_board_on_a_live_session_both_
     let mut sub = Subscription::open(&world.subscription_url(), &subscriber, query).await;
 
     let reset = sub.next_payload(RECV).await;
-    assert_eq!(reset["boardDeltas"]["__typename"], "BoardReset");
-    let sees_board = reset["boardDeltas"]["views"]
+    assert_eq!(reset["exampleBoardDeltas"]["__typename"], "BoardReset");
+    let sees_board = reset["exampleBoardDeltas"]["views"]
         .as_array()
         .unwrap()
         .iter()
@@ -107,42 +107,42 @@ async fn a_membership_change_grants_then_revokes_a_board_on_a_live_session_both_
     ok(&world
         .gql(
             &owner,
-            "mutation($b:UUID!,$u:UUID!){setBoardMembership(boardId:$b,userId:$u,member:true){success}}",
+            "mutation($b:UUID!,$u:UUID!){exampleSetBoardMembership(boardId:$b,userId:$u,member:true){success}}",
             serde_json::json!({ "b": board, "u": subscriber_id }),
         )
         .await);
 
     let granted = loop {
         let delta = sub.next_payload(RECV).await;
-        if delta["boardDeltas"]["__typename"] == "BoardUpsert"
-            && delta["boardDeltas"]["view"]["id"] == board.to_string()
+        if delta["exampleBoardDeltas"]["__typename"] == "BoardUpsert"
+            && delta["exampleBoardDeltas"]["view"]["id"] == board.to_string()
         {
             break delta;
         }
     };
     assert_eq!(
-        granted["boardDeltas"]["view"]["name"], "Private A",
+        granted["exampleBoardDeltas"]["view"]["name"], "Private A",
         "granting the membership repopulates the window and the board arrives as an Upsert"
     );
 
     ok(&world
         .gql(
             &owner,
-            "mutation($b:UUID!,$u:UUID!){setBoardMembership(boardId:$b,userId:$u,member:false){success}}",
+            "mutation($b:UUID!,$u:UUID!){exampleSetBoardMembership(boardId:$b,userId:$u,member:false){success}}",
             serde_json::json!({ "b": board, "u": subscriber_id }),
         )
         .await);
 
     let revoked = loop {
         let delta = sub.next_payload(RECV).await;
-        if delta["boardDeltas"]["__typename"] == "BoardRemove"
-            && delta["boardDeltas"]["key"] == board.to_string()
+        if delta["exampleBoardDeltas"]["__typename"] == "BoardRemove"
+            && delta["exampleBoardDeltas"]["key"] == board.to_string()
         {
             break delta;
         }
     };
     assert_eq!(
-        revoked["boardDeltas"]["projector"], "boards",
+        revoked["exampleBoardDeltas"]["projector"], "boards",
         "revoking the membership removes the board that is no longer visible, on the live session"
     );
 
@@ -165,19 +165,19 @@ async fn a_reply_upsert_carries_the_seal_cause_over_the_wire() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$b:UUID!){startReply(id:$id,boardId:$b){success}}",
+            "mutation($id:UUID!,$b:UUID!){exampleStartReply(id:$id,boardId:$b){success}}",
             serde_json::json!({ "id": reply, "b": board }),
         )
         .await);
 
-    let query = "subscription{replyDeltas{\
+    let query = "subscription{exampleReplyDeltas{\
         __typename \
         ... on ReplyReset{revision views{... on ReplyView{id status}}} \
         ... on ReplyUpsert{revision cause view{... on ReplyView{id status text}}} \
         ... on ReplyRemove{revision projector}}}";
     let mut sub = Subscription::open(&world.subscription_url(), &pass, query).await;
     let reset = sub.next_payload(RECV).await;
-    assert_eq!(reset["replyDeltas"]["__typename"], "ReplyReset");
+    assert_eq!(reset["exampleReplyDeltas"]["__typename"], "ReplyReset");
 
     let chunks = ["Hel", "lo ", "world"];
     for (seq, chunk) in chunks.iter().enumerate() {
@@ -210,15 +210,15 @@ async fn a_reply_upsert_carries_the_seal_cause_over_the_wire() {
 
     let sealed = loop {
         let delta = sub.next_payload(RECV).await;
-        if delta["replyDeltas"]["__typename"] == "ReplyUpsert"
-            && delta["replyDeltas"]["view"]["status"] == "complete"
+        if delta["exampleReplyDeltas"]["__typename"] == "ReplyUpsert"
+            && delta["exampleReplyDeltas"]["view"]["status"] == "complete"
         {
             break delta;
         }
     };
-    assert_eq!(sealed["replyDeltas"]["view"]["text"], "Hello world");
+    assert_eq!(sealed["exampleReplyDeltas"]["view"]["text"], "Hello world");
     assert_eq!(
-        sealed["replyDeltas"]["cause"]["kind"], "Completed",
+        sealed["exampleReplyDeltas"]["cause"]["kind"], "Completed",
         "the seal's domain cause rides along with the delta over the wire"
     );
 
@@ -236,36 +236,36 @@ async fn the_typed_presence_union_delivers_typing_over_the_wire() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "drafts" }),
         )
         .await);
 
     let query = format!(
-        "subscription{{typingDeltas(board:\"{board}\"){{\
+        "subscription{{exampleTypingDeltas(board:\"{board}\"){{\
             __typename \
             ... on TypingReset{{revision}} \
             ... on TypingUpsert{{view{{... on TypingView{{label}}}}}}}}}}"
     );
     let mut sub = Subscription::open(&world.subscription_url(), &pass, &query).await;
     let reset = sub.next_payload(RECV).await;
-    assert_eq!(reset["typingDeltas"]["__typename"], "TypingReset");
+    assert_eq!(reset["exampleTypingDeltas"]["__typename"], "TypingReset");
 
     ok(&world
         .gql(
             &pass,
-            "mutation($b:UUID!,$l:String!){setTyping(board:$b,label:$l){success}}",
+            "mutation($b:UUID!,$l:String!){exampleSetTyping(board:$b,label:$l){success}}",
             serde_json::json!({ "b": board, "l": "composing" }),
         )
         .await);
 
     let upsert = loop {
         let delta = sub.next_payload(RECV).await;
-        if delta["typingDeltas"]["__typename"] == "TypingUpsert" {
+        if delta["exampleTypingDeltas"]["__typename"] == "TypingUpsert" {
             break delta;
         }
     };
-    assert_eq!(upsert["typingDeltas"]["view"]["label"], "composing");
+    assert_eq!(upsert["exampleTypingDeltas"]["view"]["label"], "composing");
 
     world.cleanup().await;
 }

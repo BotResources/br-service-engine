@@ -13,7 +13,7 @@ pub struct CardItemQuery;
 
 #[Object]
 impl CardItemQuery {
-    async fn card(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<CardView>> {
+    async fn example_card(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<CardView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view::<CardsView>(&id)
             .await
@@ -25,11 +25,11 @@ pub struct CardItemMutation;
 
 #[Object]
 impl CardItemMutation {
-    async fn advance_card(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
+    async fn example_advance_card(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, AdvanceCard>(ctx, AdvanceCard { id }).await
     }
 
-    async fn schedule_card_deadline(
+    async fn example_schedule_card_deadline(
         &self,
         ctx: &Context<'_>,
         id: Uuid,

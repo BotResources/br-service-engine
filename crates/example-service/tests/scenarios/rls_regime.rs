@@ -22,14 +22,14 @@ async fn a_non_rls_projector_returns_the_same_view_on_fetch_and_subscription_und
     ok(&world
         .gql(
             &owner,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Cross-org Private" }),
         )
         .await);
     ok(&world
         .gql(
             &owner,
-            "mutation($b:UUID!,$u:UUID!){setBoardMembership(boardId:$b,userId:$u,member:true){success}}",
+            "mutation($b:UUID!,$u:UUID!){exampleSetBoardMembership(boardId:$b,userId:$u,member:true){success}}",
             serde_json::json!({ "b": board, "u": reader_id }),
         )
         .await);
@@ -37,10 +37,10 @@ async fn a_non_rls_projector_returns_the_same_view_on_fetch_and_subscription_und
     let fetched = ok(&world
         .gql(
             &reader,
-            "query($id:UUID!){board(id:$id){id name isPublic archived affordances}}",
+            "query($id:UUID!){exampleBoard(id:$id){id name isPublic archived affordances}}",
             serde_json::json!({ "id": board }),
         )
-        .await)["board"]
+        .await)["exampleBoard"]
         .clone();
     assert_eq!(
         fetched["id"],
@@ -50,13 +50,13 @@ async fn a_non_rls_projector_returns_the_same_view_on_fetch_and_subscription_und
          returned null here"
     );
 
-    let query = "subscription{boardDeltas{\
+    let query = "subscription{exampleBoardDeltas{\
         __typename \
         ... on BoardReset{views{... on BoardView{id name isPublic archived affordances}}}}}";
     let mut sub = Subscription::open(&world.subscription_url(), &reader, query).await;
     let reset = sub.next_payload(RECV).await;
-    assert_eq!(reset["boardDeltas"]["__typename"], "BoardReset");
-    let from_stream = reset["boardDeltas"]["views"]
+    assert_eq!(reset["exampleBoardDeltas"]["__typename"], "BoardReset");
+    let from_stream = reset["exampleBoardDeltas"]["views"]
         .as_array()
         .unwrap()
         .iter()
@@ -87,28 +87,28 @@ async fn an_rls_projector_hides_a_foreign_org_row_on_both_the_fetch_and_the_subs
     ok(&world
         .gql(
             &principal,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": mine, "n": "Mine A" }),
         )
         .await);
     ok(&world
         .gql(
             &intruder,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": foreign, "n": "Theirs B" }),
         )
         .await);
     ok(&world
         .gql(
             &principal,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:true){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:true){success}}",
             serde_json::json!({ "id": public, "n": "Public" }),
         )
         .await);
 
     let fetched: Vec<String> = ok(&world
-        .gql(&principal, "query{orgBoards{id}}", serde_json::json!({}))
-        .await)["orgBoards"]
+        .gql(&principal, "query{exampleOrgBoards{id}}", serde_json::json!({}))
+        .await)["exampleOrgBoards"]
         .as_array()
         .unwrap()
         .iter()
@@ -128,13 +128,13 @@ async fn an_rls_projector_hides_a_foreign_org_row_on_both_the_fetch_and_the_subs
          absent from the fetch: {fetched:?}"
     );
 
-    let query = "subscription{orgBoardDeltas{\
+    let query = "subscription{exampleOrgBoardDeltas{\
         __typename \
         ... on OrgBoardReset{views{... on BoardView{id}}}}}";
     let mut sub = Subscription::open(&world.subscription_url(), &principal, query).await;
     let reset = sub.next_payload(RECV).await;
-    assert_eq!(reset["orgBoardDeltas"]["__typename"], "OrgBoardReset");
-    let streamed: Vec<String> = reset["orgBoardDeltas"]["views"]
+    assert_eq!(reset["exampleOrgBoardDeltas"]["__typename"], "OrgBoardReset");
+    let streamed: Vec<String> = reset["exampleOrgBoardDeltas"]["views"]
         .as_array()
         .unwrap()
         .iter()
@@ -172,21 +172,21 @@ async fn the_rls_projector_populates_its_window_under_the_org_context_not_on_a_b
     ok(&world
         .gql(
             &principal,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": mine, "n": "Mine A" }),
         )
         .await);
     ok(&world
         .gql(
             &intruder,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": foreign, "n": "Theirs B" }),
         )
         .await);
     ok(&world
         .gql(
             &intruder,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:true){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:true){success}}",
             serde_json::json!({ "id": public, "n": "Public B" }),
         )
         .await);

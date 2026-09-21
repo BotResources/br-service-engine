@@ -17,7 +17,7 @@ pub struct ForbiddenQueryRoot;
 
 #[Object]
 impl ForbiddenQueryRoot {
-    async fn forbidden_peek(&self, _ctx: &Context<'_>) -> Result<bool> {
+    async fn sample_forbidden_peek(&self, _ctx: &Context<'_>) -> Result<bool> {
         Err(forbidden())
     }
 }
@@ -27,7 +27,7 @@ pub struct ForbiddenSubscriptionRoot;
 
 #[Subscription]
 impl ForbiddenSubscriptionRoot {
-    async fn forbidden_stream(
+    async fn sample_forbidden_stream(
         &self,
         _ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<bool>>> {
@@ -38,7 +38,7 @@ impl ForbiddenSubscriptionRoot {
 fn forbidden_slice() -> SliceFragment {
     SliceFragment::from_claims(
         "forbidden",
-        vec!["forbiddenPeek".to_string(), "forbiddenStream".to_string()],
+        vec!["sampleForbiddenPeek".to_string(), "sampleForbiddenStream".to_string()],
         Vec::new(),
     )
 }
@@ -63,6 +63,12 @@ pub async fn boot_forbidden_service(
     engine
         .register_principal_resolver(SamplePrincipalResolver)
         .expect("register the principal resolver");
+    engine
+        .declare_root_prefix(
+            service_engine::graphql::RootPrefix::from_snake("sample")
+                .expect("`sample` is a valid root prefix"),
+        )
+        .expect("declare the sample root prefix");
     engine
         .register_schema_slice(forbidden_slice())
         .expect("the forbidden slice owns its refusing root fields");

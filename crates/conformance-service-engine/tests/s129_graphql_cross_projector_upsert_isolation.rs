@@ -10,10 +10,10 @@ use conformance_service_engine::sample::render::{assignment, member};
 use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
 
-const WIDGETS: &str = "subscription { widgets { __typename \
+const WIDGETS: &str = "subscription { sampleWidgets { __typename \
     ... on ResetPayload { revision } \
     ... on UpsertPayload { revision view { __typename ... on WidgetView { closed } } } } }";
-const ASSIGNMENTS: &str = "subscription { assignments { __typename \
+const ASSIGNMENTS: &str = "subscription { sampleAssignments { __typename \
     ... on ResetPayload { revision } \
     ... on UpsertPayload { view { __typename } } } }";
 
@@ -41,7 +41,7 @@ async fn s129_a_live_upsert_reaches_only_its_own_projector_subscription() {
         .await
         .expect("the widget subscription opens with a Reset");
     assert_eq!(
-        reset["widgets"]["__typename"],
+        reset["sampleWidgets"]["__typename"],
         serde_json::json!("ResetPayload")
     );
 
@@ -52,11 +52,11 @@ async fn s129_a_live_upsert_reaches_only_its_own_projector_subscription() {
         .await
         .expect("the assignment subscription opens with a Reset");
     assert_eq!(
-        reset["assignments"]["__typename"],
+        reset["sampleAssignments"]["__typename"],
         serde_json::json!("ResetPayload")
     );
 
-    let mutation = format!("mutation {{ closeWidget(id: \"{widget}\") {{ success }} }}");
+    let mutation = format!("mutation {{ sampleCloseWidget(id: \"{widget}\") {{ success }} }}");
     let (status, body) = post_json(
         &service.base_url,
         Some(&passport),
@@ -66,7 +66,7 @@ async fn s129_a_live_upsert_reaches_only_its_own_projector_subscription() {
     .await;
     assert_eq!(status, 200);
     assert_eq!(
-        body["data"]["closeWidget"]["success"],
+        body["data"]["sampleCloseWidget"]["success"],
         serde_json::json!(true)
     );
 
@@ -74,7 +74,7 @@ async fn s129_a_live_upsert_reaches_only_its_own_projector_subscription() {
         .next_data(Duration::from_secs(15))
         .await
         .expect("closing the widget reaches the widget subscription as an Upsert");
-    let delta = &upsert["widgets"];
+    let delta = &upsert["sampleWidgets"];
     assert_eq!(delta["__typename"], serde_json::json!("UpsertPayload"));
     assert_eq!(
         delta["revision"],

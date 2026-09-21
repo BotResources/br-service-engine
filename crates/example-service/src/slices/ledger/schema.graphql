@@ -19,11 +19,11 @@ type LanesResumed {
 union LedgerDelta = LedgerReset | LedgerUpsert | LedgerRemove | LanesPaused | LanesResumed
 
 type LedgerMutation {
-	recordEntry(id: UUID!, amount: Int!): MutationAck!
+	exampleRecordEntry(id: UUID!, amount: Int!): MutationAck!
 }
 
 type LedgerQuery {
-	ledger(id: UUID!): LedgerView
+	exampleLedger(id: UUID!): LedgerView
 }
 
 type LedgerRemove {
@@ -39,7 +39,7 @@ type LedgerReset {
 }
 
 type LedgerSubscription {
-	ledgerDeltas: LedgerDelta!
+	exampleLedgerDeltas: LedgerDelta!
 }
 
 type LedgerUpsert {

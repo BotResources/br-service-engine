@@ -28,11 +28,11 @@ async fn cross_service_cycle_mirror_and_soft_eda() {
         let roster = world
             .gql(
                 &pass,
-                "query($id:UUID!){person(id:$id){email displayName}}",
+                "query($id:UUID!){examplePerson(id:$id){email displayName}}",
                 serde_json::json!({ "id": person.id }),
             )
             .await;
-        roster["data"]["person"]["displayName"]
+        roster["data"]["examplePerson"]["displayName"]
             .as_str()
             .map(str::to_string)
     });
@@ -61,12 +61,12 @@ async fn cross_service_cycle_mirror_and_soft_eda() {
     let card = world
         .gql(
             &pass,
-            "query($id:UUID!){card(id:$id){title status}}",
+            "query($id:UUID!){exampleCard(id:$id){title status}}",
             serde_json::json!({ "id": card_id }),
         )
         .await;
-    assert_eq!(ok(&card)["card"]["title"], "From twin");
-    assert_eq!(ok(&card)["card"]["status"], "todo");
+    assert_eq!(ok(&card)["exampleCard"]["title"], "From twin");
+    assert_eq!(ok(&card)["exampleCard"]["status"], "todo");
 
     let confirmed = poll_until!(Duration::from_secs(5), {
         example_twin::card_ready_from_stream(&world.nats)
@@ -81,19 +81,19 @@ async fn cross_service_cycle_mirror_and_soft_eda() {
     let advanced = world
         .gql(
             &pass,
-            "mutation($id:UUID!){advanceCard(id:$id){success}}",
+            "mutation($id:UUID!){exampleAdvanceCard(id:$id){success}}",
             serde_json::json!({ "id": card_id }),
         )
         .await;
-    assert_eq!(ok(&advanced)["advanceCard"]["success"], true);
+    assert_eq!(ok(&advanced)["exampleAdvanceCard"]["success"], true);
     let card = world
         .gql(
             &pass,
-            "query($id:UUID!){card(id:$id){status}}",
+            "query($id:UUID!){exampleCard(id:$id){status}}",
             serde_json::json!({ "id": card_id }),
         )
         .await;
-    assert_eq!(ok(&card)["card"]["status"], "doing");
+    assert_eq!(ok(&card)["exampleCard"]["status"], "doing");
 
     let facts: i64 = sqlx::query_scalar("SELECT count(*) FROM card_fact WHERE card = $1")
         .bind(card_id)
