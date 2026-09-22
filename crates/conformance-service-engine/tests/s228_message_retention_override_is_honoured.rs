@@ -10,7 +10,8 @@ use service_engine::{Engine, Readiness, ReadinessHandle};
 async fn s228_a_message_retention_override_above_the_stream_max_age_boots_ready() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
-    nats.provision().await;
+    nats.provision_integration(Duration::from_secs(90 * 60))
+        .await;
     let fabric = nats.nats().await;
 
     let override_retention = Duration::from_secs(2 * 60 * 60);
@@ -42,9 +43,9 @@ async fn s228_a_message_retention_override_above_the_stream_max_age_boots_ready(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "a message_retention that is the max of the configured value and the stream's \
-             max_age covers the stream, so boot is not refused; readiness never reached ready. \
-             last reason: {:?}",
+            "the stream max_age (5400s) exceeds DEFAULT_MESSAGE_RETENTION (3600s), so only the \
+             with_message_retention override (7200s) covers it; if the override were a no-op the \
+             default would be refused like s174. readiness never reached ready. last reason: {:?}",
             readiness.snapshot(),
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
