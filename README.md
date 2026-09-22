@@ -441,7 +441,9 @@ the kind's **post-upload policy** (`register_post_upload_policy::<Kind>` /
 `require_post_upload_policy`) — the policy finds its referencing key on the
 promotion connection and impacts its own view; its `emit`/`command` go out as the
 service actor (correlation = the blob row id), and a refusal fails the row
-(`policy:<code>`) and deletes the object. The reaper still deletes an **incomplete
+(`policy:<code>`) and deletes the object. The promotion connection carries no
+principal and no RLS context, so a policy reading a row over an RLS-scoped table
+must query it unscoped. The reaper still deletes an **incomplete
 upload** (a `pending` row past `orphan_after` whose object never landed) and an
 **unreferenced** or **failed** blob (past `orphan_after`; the object is deleted
 first — an idempotent DELETE — then the row, so a crash between the two leaves a

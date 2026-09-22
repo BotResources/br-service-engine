@@ -303,7 +303,10 @@ Refused>)` / `require_post_upload_policy::<Kind>` (boot-checked like save/delete
 `PolicyRunner` that builds the same `PostSave` context a reaction gets; the blob
 row carries no aggregate key, so the policy finds its referencing key
 (`ps.connection()`) and impacts its own view (`ps.impact_caused`), reaching
-subscribers as any post-save impact. **Outbound identity of the reaper:** the
+subscribers as any post-save impact. **The promotion connection carries no
+principal and no RLS session context** — a policy reading its referencing row
+over an RLS-scoped table must query it with an unscoped statement, or it will see
+no row and silently promote with no impact. **Outbound identity of the reaper:** the
 reaper holds no principal, so `emit`/`command` from a policy go out as
 `service_actor(service)`, correlation = the blob row id, no causation, producer =
 service. A refusal (`ps.refuse`) is terminal: the row goes `failed` with
