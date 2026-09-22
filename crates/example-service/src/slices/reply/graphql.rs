@@ -1,11 +1,12 @@
-use async_graphql::{Context, Json, Object, Result, Subscription};
+use async_graphql::{Context, InputObject, Json, Object, Result, Subscription};
 use futures_util::Stream;
 use serde::Serialize;
+use service_engine::blobs::Disposition;
 use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{JsonScalar, MutationAck, Query};
 use uuid::Uuid;
 
-use super::mutations::{AttachReply, CancelReply, SetTyping, StartReply};
+use super::mutations::{AttachReply, CancelReply, ExpectedUpload, SetTyping, StartReply};
 use super::presence::{Typing, TypingView};
 use super::view::{RepliesView, ReplyView};
 use crate::kernel::AppPrincipal;
@@ -27,6 +28,21 @@ struct TypingWindow {
     board: Uuid,
 }
 
+#[derive(InputObject)]
+struct UploadExpectationInput {
+    size: u64,
+    sha256_hex: String,
+}
+
+impl From<UploadExpectationInput> for ExpectedUpload {
+    fn from(input: UploadExpectationInput) -> Self {
+        Self {
+            size: input.size,
+            sha256_hex: input.sha256_hex,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ReplyQuery;
 
@@ -43,13 +59,10 @@ impl ReplyQuery {
         ctx: &Context<'_>,
         reply_id: Uuid,
         reference: Uuid,
+        #[graphql(default_with = "Disposition::Attachment")] disposition: Disposition,
     ) -> Result<Option<String>> {
         Ok(Query::<AppPrincipal>::new(ctx)?
-            .download::<RepliesView>(
-                &reply_id,
-                service_engine::BlobRef(reference),
-                service_engine::blobs::Disposition::Attachment,
-            )
+            .download::<RepliesView>(&reply_id, service_engine::BlobRef(reference), disposition)
             .await?
             .map(|url| url.into_string()))
     }
@@ -88,6 +101,7 @@ impl ReplyMutation {
         reply_id: Uuid,
         name: String,
         content_type: String,
+        expected: Option<UploadExpectationInput>,
     ) -> Result<JsonScalar> {
         let url = service_engine::execute::<AppPrincipal, AttachReply>(
             ctx,
@@ -95,6 +109,7 @@ impl ReplyMutation {
                 reply_id,
                 name,
                 content_type,
+                expected: expected.map(ExpectedUpload::from),
             },
         )
         .await?;

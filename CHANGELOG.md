@@ -416,6 +416,31 @@ engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the co
 - No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
 - `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
 
+### lane: example-blobs
+
+The reference service (`example-service`, reply slice) now exercises the blob
+additions end to end, so a service author has a copyable surface:
+
+- `exampleAttachReply` gains an optional `expected: UploadExpectationInput { size:
+  Int!, sha256Hex: String! }`. Present → the mutation stages a verified upload
+  (`cx.blob_verified`); absent → the unverified `cx.blob` path, unchanged.
+- `exampleReplyDownload` gains a `disposition: Disposition! = ATTACHMENT` argument
+  (`INLINE` | `ATTACHMENT`), passed straight to `Query::download` — the hard-coded
+  `Disposition::Attachment` is gone.
+- The reply slice registers a post-upload policy on its `reply_attachment` kind
+  (`register_post_upload_policy` + `require_post_upload_policy`) that finds the
+  referencing reply on the promotion connection and impacts the reply view with
+  cause `AttachmentUploaded`; the seam is declared, so an unhonoured policy fails
+  boot.
+- `example-service` e2e scenarios (`tests/scenarios/blobs.rs`) cover the verified
+  round trip against real MinIO (a `head` in the pending window reads the storage
+  checksum with `verified() == Some(true)`; a swept run promotes the row to
+  `uploaded`), a wrong-checksum upload refused by the store with no download URL,
+  and the inline-vs-attachment download disposition on the presigned GET.
+- The example `Service` exposes `blob_reader()` and the harness a
+  `start_blobs_swept(pod, reaper_interval)` world so a scenario can observe a HEAD
+  and a reaper sweep.
+
 ## 0.2.0 - 2026-09-16
 
 The `services`-rewrite experiment and the Runners adoption proved the engine

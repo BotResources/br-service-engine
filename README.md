@@ -412,7 +412,11 @@ referencing aggregate still lists the reference in `Aggregate::blob_refs`; a
 non-viewer, or a reference the named aggregate no longer holds, resolves to
 `None`. A resolver therefore mints a download through `Query::download` and never
 through a raw presign; the reference reply slice's `exampleReplyDownload(replyId,
-reference)` field is the reference resolver. The bytes flow
+reference, disposition)` field is the reference resolver, its `disposition`
+argument defaulting to `ATTACHMENT`. That slice's `exampleAttachReply` takes an
+optional `expected: UploadExpectationInput { size, sha256Hex }` to stage a
+verified upload, and registers a post-upload policy on its `reply_attachment`
+kind that impacts the reply view with cause `AttachmentUploaded`. The bytes flow
 client-to-storage directly, so `size` is unknown at commit and is recorded from
 the object's head when the reaper first sees the upload has completed (promoting
 the row to `uploaded` and recording `size`, `etag` and `sha256`), independent of
