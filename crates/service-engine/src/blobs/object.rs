@@ -232,17 +232,7 @@ fn rfc5987_encode(value: &str) -> String {
         let attr_char = byte.is_ascii_alphanumeric()
             || matches!(
                 byte,
-                b'!' | b'#'
-                    | b'$'
-                    | b'&'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'|'
-                    | b'~'
+                b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
             );
         if attr_char {
             out.push(byte as char);
