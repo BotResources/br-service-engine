@@ -391,6 +391,14 @@ engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the co
 - No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
 - `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
 
+### lane: tidy
+
+House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
+
+- Every source file over ~300 lines is split by capability (`pipeline/ops`, `engine/register`, `engine/run`, `config`, `pipeline/policy`, `inbound/deadletter`, `dyn_compat/projector`, `runtime`, `mirror/runtime`, `mirror/builder`); `EngineError` stays one file, being a single `#[non_exhaustive]` enum. Public paths are preserved through the module facades. Every pre-existing comment and rustdoc is removed (`///`, `//!`, `//`), including the migration and CI prose; the operative why the CI notes carried now lives in the step names.
+- New conformance scenarios: `s226` proves the `Persistence::row_lock` helper takes a real `SELECT … FOR UPDATE` (a second connection cannot lock the row under NOWAIT while it is held, and can once the holder commits); `s227` and `s228` prove the two message-retention boot branches at runtime — an unbounded (max_age 0) bound stream is refused with `REASON_MESSAGE_RETENTION`, and a `with_message_retention` override above the stream's max_age boots ready (the override is honoured).
+- Duplicate scenario numbers are renumbered so each names one file: the five `s194` files keep one at `s194` and move to `s229`–`s232`; the two `s195` files keep one and move to `s233`.
+
 ## 0.2.0 - 2026-09-16
 
 The `services`-rewrite experiment and the Runners adoption proved the engine
