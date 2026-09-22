@@ -83,6 +83,7 @@ pub struct Engine<P: Principal> {
     declared_scopes: Option<ScopeDeclaration>,
     contributed_scopes: Vec<&'static str>,
     reaction_principal: Option<Arc<dyn crate::principal::ReactionPrincipalResolver>>,
+    blob_reaper_log: Option<crate::blobs::ReaperRoundLog>,
 }
 
 impl<P: Principal> Engine<P> {
@@ -147,6 +148,7 @@ impl<P: Principal> Engine<P> {
             declared_scopes: None,
             contributed_scopes: Vec::new(),
             reaction_principal: None,
+            blob_reaper_log: None,
         })
     }
 
@@ -284,6 +286,13 @@ impl<P: Principal> Engine<P> {
 
     pub fn render(&self) -> Arc<SessionRuntime<P>> {
         self.render_runtime()
+    }
+
+    pub fn observe_blob_reaper_rounds(&mut self) -> crate::blobs::ReaperRoundLog {
+        let log = self
+            .blob_reaper_log
+            .get_or_insert_with(|| Arc::new(Mutex::new(Vec::new())));
+        log.clone()
     }
 }
 

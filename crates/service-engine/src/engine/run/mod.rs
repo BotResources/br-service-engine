@@ -52,6 +52,7 @@ impl<P: Principal> Engine<P> {
             shutdown,
             declared_scopes,
             reaction_principal,
+            blob_reaper_log,
             ..
         } = self;
         let offers = Arc::new(offers);
@@ -132,6 +133,7 @@ impl<P: Principal> Engine<P> {
             &accumulators,
             &offers,
             &policies,
+            blob_reaper_log,
         )
         .await
         {

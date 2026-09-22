@@ -28,6 +28,8 @@ pub struct ReaperRound {
     pub failures: usize,
 }
 
+pub(crate) type ReaperRoundLog = Arc<std::sync::Mutex<Vec<ReaperRound>>>;
+
 pub(crate) struct BlobReaper {
     store: Arc<OnceCell<BlobStore>>,
     policies: Vec<(&'static str, BlobPolicy)>,
@@ -35,6 +37,7 @@ pub(crate) struct BlobReaper {
     pod: PodId,
     lease: Duration,
     runner: Option<PolicyRunner>,
+    round_log: Option<ReaperRoundLog>,
 }
 
 impl BlobReaper {
@@ -51,6 +54,7 @@ impl BlobReaper {
             pod,
             lease,
             runner: None,
+            round_log: None,
         }
     }
 
@@ -64,7 +68,26 @@ impl BlobReaper {
         self
     }
 
+    pub(crate) fn with_round_log(mut self, log: ReaperRoundLog) -> Self {
+        self.round_log = Some(log);
+        self
+    }
+
+    fn record_round(&self, round: ReaperRound) {
+        if let Some(log) = &self.round_log {
+            log.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(round);
+        }
+    }
+
     pub(crate) async fn sweep(&mut self, pg: &PgPool) -> ReaperRound {
+        let round = self.sweep_inner(pg).await;
+        self.record_round(round);
+        round
+    }
+
+    async fn sweep_inner(&mut self, pg: &PgPool) -> ReaperRound {
         let mut round = ReaperRound::default();
         let Some(store) = self.store.get() else {
             return round;
