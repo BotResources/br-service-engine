@@ -1,11 +1,12 @@
-use async_graphql::{Context, Json, Object, Result, Subscription};
+use async_graphql::{Context, InputObject, Json, Object, Result, Subscription};
 use futures_util::Stream;
 use serde::Serialize;
+use service_engine::blobs::Disposition;
 use service_engine::session::{WindowParams, WindowSpec};
 use service_engine::{JsonScalar, MutationAck, Query};
 use uuid::Uuid;
 
-use super::mutations::{AttachReply, CancelReply, SetTyping, StartReply};
+use super::mutations::{AttachReply, CancelReply, ExpectedUpload, SetTyping, StartReply};
 use super::presence::{Typing, TypingView};
 use super::view::{RepliesView, ReplyView};
 use crate::kernel::AppPrincipal;
@@ -27,25 +28,41 @@ struct TypingWindow {
     board: Uuid,
 }
 
+#[derive(InputObject)]
+struct UploadExpectationInput {
+    size: u64,
+    sha256_hex: String,
+}
+
+impl From<UploadExpectationInput> for ExpectedUpload {
+    fn from(input: UploadExpectationInput) -> Self {
+        Self {
+            size: input.size,
+            sha256_hex: input.sha256_hex,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ReplyQuery;
 
 #[Object]
 impl ReplyQuery {
-    async fn reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<ReplyView>> {
+    async fn example_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<ReplyView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view::<RepliesView>(&id)
             .await
     }
 
-    async fn reply_download(
+    async fn example_reply_download(
         &self,
         ctx: &Context<'_>,
         reply_id: Uuid,
         reference: Uuid,
+        #[graphql(default_with = "Disposition::Attachment")] disposition: Disposition,
     ) -> Result<Option<String>> {
         Ok(Query::<AppPrincipal>::new(ctx)?
-            .download::<RepliesView>(&reply_id, service_engine::BlobRef(reference))
+            .download::<RepliesView>(&reply_id, service_engine::BlobRef(reference), disposition)
             .await?
             .map(|url| url.into_string()))
     }
@@ -56,7 +73,7 @@ pub struct ReplyMutation;
 
 #[Object]
 impl ReplyMutation {
-    async fn start_reply(
+    async fn example_start_reply(
         &self,
         ctx: &Context<'_>,
         id: Uuid,
@@ -65,7 +82,7 @@ impl ReplyMutation {
         service_engine::ack::<AppPrincipal, StartReply>(ctx, StartReply { id, board_id }).await
     }
 
-    async fn set_typing(
+    async fn example_set_typing(
         &self,
         ctx: &Context<'_>,
         board: Uuid,
@@ -74,16 +91,17 @@ impl ReplyMutation {
         service_engine::ack::<AppPrincipal, SetTyping>(ctx, SetTyping { board, label }).await
     }
 
-    async fn cancel_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
+    async fn example_cancel_reply(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, CancelReply>(ctx, CancelReply { id }).await
     }
 
-    async fn attach_reply(
+    async fn example_attach_reply(
         &self,
         ctx: &Context<'_>,
         reply_id: Uuid,
         name: String,
         content_type: String,
+        expected: Option<UploadExpectationInput>,
     ) -> Result<JsonScalar> {
         let url = service_engine::execute::<AppPrincipal, AttachReply>(
             ctx,
@@ -91,6 +109,7 @@ impl ReplyMutation {
                 reply_id,
                 name,
                 content_type,
+                expected: expected.map(ExpectedUpload::from),
             },
         )
         .await?;
@@ -110,7 +129,7 @@ pub struct ReplySubscription;
 
 #[Subscription]
 impl ReplySubscription {
-    async fn reply_deltas(
+    async fn example_reply_deltas(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<ReplyDelta>>> {
@@ -127,7 +146,7 @@ impl ReplySubscription {
         Ok(ReplyDelta::subscribe(stream, notices))
     }
 
-    async fn typing_deltas(
+    async fn example_typing_deltas(
         &self,
         ctx: &Context<'_>,
         board: Uuid,

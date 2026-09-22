@@ -12,7 +12,7 @@ board = []
 card = []
 ledger = []
 reply = []
-roster = []
+roster = ["dep:example-lib-roster"]
 
 [dependencies]
 async-graphql = { workspace = true }
@@ -21,6 +21,7 @@ br-core-auth = { workspace = true }
 br-core-integration = { workspace = true }
 chrono = { workspace = true }
 example-contract = { workspace = true }
+example-lib-roster = { workspace = true, optional = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

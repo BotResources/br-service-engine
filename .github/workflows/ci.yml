@@ -178,6 +178,41 @@ jobs:
           shellcheck --version
           shellcheck --severity=warning .github/scripts/*.sh
 
+  chart:
+    name: helm library chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+      - name: helm lint the library chart
+        run: helm lint charts/br-engine-service
+      - name: helm dependency build the fixture
+        run: helm dependency build charts/br-engine-service/ci/thin-example
+      - name: helm lint the fixture
+        run: helm lint charts/br-engine-service/ci/thin-example
+      - name: helm template the fixture and assert the ops contract
+        run: |
+          set -euo pipefail
+          rendered=$(helm template thin-example charts/br-engine-service/ci/thin-example)
+          echo "$rendered"
+          assert() {
+            if ! grep -qE "$1" <<<"$rendered"; then
+              echo "::error::rendered fixture is missing the ops-contract marker: $1"
+              exit 1
+            fi
+          }
+          assert '^kind: Deployment$'
+          assert '^ *- name: migrate$'
+          assert '^ *args: \["migrate"\]$'
+          assert '^ *- name: serve$'
+          assert '^ *args: \["serve"\]$'
+          assert '^ *type: Recreate$'
+          assert '^ *path: /readyz$'
+          assert '^ *path: /livez$'
+      - name: chart version bump guard
+        run: bash .github/scripts/check-chart-version.sh
+
   trufflehog:
     name: trufflehog (secret scan)
     runs-on: ubuntu-latest
@@ -229,18 +264,15 @@ jobs:
           tar -xzf /tmp/nats-server.tar.gz -C /tmp
           sudo install "/tmp/nats-server-${NATS_SERVER_VERSION}-linux-amd64/nats-server" /usr/local/bin/nats-server
           nats-server --version
-      # The fixture is pinned to one commit, so its module and build caches are
-      # valid until that pin moves: without this every push recompiles MinIO.
-      - name: cache the MinIO fixture build
+      - name: cache the MinIO fixture build (keyed on MINIO_COMMIT, valid until the pin moves)
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
           key: minio-${{ runner.os }}-01ce918d8279a20e4706b96a64396146894adee4
-      - name: build pinned MinIO fixture
+      - name: build pinned MinIO fixture from source (upstream publishes no binary archive)
         env:
-          # Official RELEASE.2025-09-07T16-13-09Z. Binary archive returns HTTP 410.
           MINIO_COMMIT: 01ce918d8279a20e4706b96a64396146894adee4
         run: |
           set -euo pipefail
@@ -308,4 +340,13 @@ jobs:
             --test bb03_subscription_reset_and_reconnect \
             --test bb04_cross_service_cycle_twin_binary \
             --test bb05_seal_streamed_reply \
-            --test bb06_session_max_age_closes_the_socket
+            --test bb06_session_max_age_closes_the_socket \
+            --test bb07_boot_kit \
+            --test bb08_reconcile_relay_cross_pod \
+            --test bb09_rolling_roll_reconnect \
+            --test bb10_outbox_published_once_across_pods \
+            --test bb11_mirror_leader_standby_failover \
+            --test bb12_serve_refuses_an_unmigrated_store \
+            --test bb13_migrate_waits_for_the_app_role \
+            --test bb14_migrate_needs_only_the_owner_env \
+            --test s202_serve_derives_message_retention

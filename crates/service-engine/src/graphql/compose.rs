@@ -2,9 +2,14 @@
 macro_rules! compose_service {
     (
         principal = $p:ty ;
-        $( slice $name:ident [ $feat:literal ] { $($body:tt)* } )+
+        prefix = $prefix:ident ;
+        $( slice $name:ident [ $feat:literal ] $(from $($lib:ident)::+)? { $($body:tt)* } )+
     ) => {
-        $( #[cfg(feature = $feat)] pub mod $name; )+
+        $(
+            $crate::compose_service!(
+                @slice_mod $name [ $feat ] $prefix $p ; $(from $($lib)::+)?
+            );
+        )+
 
         $crate::compose_service!(@roots
             queries { }
@@ -13,12 +18,27 @@ macro_rules! compose_service {
             rest { $( [ $feat ] { $($body)* } )+ }
         );
 
+        pub const ROOT_PREFIX_SNAKE: &str = ::core::stringify!($prefix);
+
         pub fn register(
             engine: &mut $crate::Engine<$p>,
         ) -> ::core::result::Result<(), $crate::error::EngineError> {
+            engine.declare_root_prefix($crate::graphql::RootPrefix::from_snake(ROOT_PREFIX_SNAKE)?)?;
             $( #[cfg(feature = $feat)] { $name::register(engine)?; } )+
             ::core::result::Result::Ok(())
         }
+    };
+
+    (@slice_mod $name:ident [ $feat:literal ] $prefix:ident $p:ty ; from $($lib:ident)::+ ) => {
+        #[cfg(feature = $feat)]
+        pub mod $name {
+            $($lib)::+ ! (prefix = $prefix ; principal = $p);
+        }
+    };
+
+    (@slice_mod $name:ident [ $feat:literal ] $prefix:ident $p:ty ; ) => {
+        #[cfg(feature = $feat)]
+        pub mod $name;
     };
 
     (@roots

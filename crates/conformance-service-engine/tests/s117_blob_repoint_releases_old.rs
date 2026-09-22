@@ -69,7 +69,9 @@ async fn s117_repointing_a_row_releases_the_old_blob_in_the_same_transaction() {
         nats.nats().await,
         "se_s59",
         "pod-s59",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(300)),
         policy,
         Duration::from_millis(100),
     )

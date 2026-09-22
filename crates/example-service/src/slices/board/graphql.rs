@@ -25,19 +25,19 @@ pub struct BoardQuery;
 
 #[Object]
 impl BoardQuery {
-    async fn board(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<BoardView>> {
+    async fn example_board(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view::<BoardsView>(&id)
             .await
     }
 
-    async fn boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
+    async fn example_boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view_window::<BoardsView>(&BoardFilter::default())
             .await
     }
 
-    async fn org_boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
+    async fn example_org_boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view_window::<OrgBoardsRls>(&())
             .await
@@ -49,7 +49,7 @@ pub struct BoardMutation;
 
 #[Object]
 impl BoardMutation {
-    async fn create_board(
+    async fn example_create_board(
         &self,
         ctx: &Context<'_>,
         id: Uuid,
@@ -67,18 +67,18 @@ impl BoardMutation {
         .await
     }
 
-    async fn archive_board(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
+    async fn example_archive_board(&self, ctx: &Context<'_>, id: Uuid) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, ArchiveBoard>(ctx, ArchiveBoard { id }).await
     }
 
-    async fn mint_board_invite(&self, ctx: &Context<'_>, id: Uuid) -> Result<String> {
+    async fn example_mint_board_invite(&self, ctx: &Context<'_>, id: Uuid) -> Result<String> {
         let token =
             service_engine::execute::<AppPrincipal, MintBoardInvite>(ctx, MintBoardInvite { id })
                 .await?;
         Ok(token.into_inner())
     }
 
-    async fn set_board_membership(
+    async fn example_set_board_membership(
         &self,
         ctx: &Context<'_>,
         board_id: Uuid,
@@ -102,7 +102,7 @@ pub struct BoardSubscription;
 
 #[Subscription]
 impl BoardSubscription {
-    async fn board_deltas(
+    async fn example_board_deltas(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<BoardDelta>>> {
@@ -118,7 +118,7 @@ impl BoardSubscription {
         Ok(stream.map(|delta| BoardDelta::from_delta(&delta)))
     }
 
-    async fn org_board_deltas(
+    async fn example_org_board_deltas(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = Result<OrgBoardDelta>>> {

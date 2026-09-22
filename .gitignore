@@ -2,3 +2,5 @@
 **/.DS_Store
 *.swp
 .env
+charts/**/charts/*.tgz
+charts/**/Chart.lock

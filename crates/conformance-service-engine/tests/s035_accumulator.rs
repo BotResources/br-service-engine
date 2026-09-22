@@ -1,6 +1,5 @@
 mod accumulator_support;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use accumulator_support::{rows, state};
@@ -13,8 +12,8 @@ use futures_util::FutureExt;
 use service_engine::accumulator::{ChunkSeq, Durable};
 use service_engine::error::EngineError;
 use service_engine::impact::Impact;
+use service_engine::stop::Stop;
 use sqlx::postgres::PgListener;
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 const RETENTION: Duration = Duration::from_secs(3600);
@@ -239,7 +238,7 @@ async fn s035_accumulator() {
         assignment_id: Uuid::now_v7(),
         seq: 2,
     };
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let worker = tokio::spawn(
         engine_b
             .clone()
@@ -258,7 +257,7 @@ async fn s035_accumulator() {
         state(&engine_b, &streamed).await.state.text,
         text_for(0..=3)
     );
-    shutdown.notify_one();
+    shutdown.stop();
     tokio::time::timeout(Duration::from_secs(5), worker)
         .await
         .expect("the worker stops on shutdown")

@@ -75,6 +75,39 @@ impl TestMinio {
             .with_download_ttl(Duration::from_secs(600))
     }
 
+    pub fn alias_endpoint(&self) -> String {
+        format!("http://localhost:{}", self.port)
+    }
+
+    pub fn config_with_public(&self, bucket: &str) -> BlobConfig {
+        self.config(bucket)
+            .with_public_endpoint(self.alias_endpoint())
+    }
+
+    pub fn config_with_unreachable_public(&self, bucket: &str) -> BlobConfig {
+        self.config(bucket)
+            .with_public_endpoint("http://127.0.0.1:1")
+    }
+
+    pub async fn put_object(&self, bucket: &str, key: &str, bytes: Vec<u8>) {
+        let s3 = self.s3_bucket(bucket);
+        let url = s3
+            .put_object(Some(&self.credentials()), key)
+            .sign(Duration::from_secs(60));
+        let status = self
+            .http
+            .put(url)
+            .body(bytes)
+            .send()
+            .await
+            .expect("the internal PUT reaches minio")
+            .status();
+        assert!(
+            status.is_success(),
+            "the internal-host PUT lands the object: {status}"
+        );
+    }
+
     fn s3_bucket(&self, bucket: &str) -> Bucket {
         Bucket::new(
             self.endpoint().parse().expect("a valid endpoint url"),

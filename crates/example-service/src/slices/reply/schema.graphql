@@ -1,5 +1,10 @@
 scalar Affordances
 
+enum Disposition {
+	INLINE
+	ATTACHMENT
+}
+
 """
 A scalar that can represent any JSON value.
 """
@@ -25,15 +30,15 @@ type MutationAck {
 union ReplyDelta = ReplyReset | ReplyUpsert | ReplyRemove | LanesPaused | LanesResumed
 
 type ReplyMutation {
-	startReply(id: UUID!, boardId: UUID!): MutationAck!
-	setTyping(board: UUID!, label: String!): MutationAck!
-	cancelReply(id: UUID!): MutationAck!
-	attachReply(replyId: UUID!, name: String!, contentType: String!): JSON!
+	exampleStartReply(id: UUID!, boardId: UUID!): MutationAck!
+	exampleSetTyping(board: UUID!, label: String!): MutationAck!
+	exampleCancelReply(id: UUID!): MutationAck!
+	exampleAttachReply(replyId: UUID!, name: String!, contentType: String!, expected: UploadExpectationInput): JSON!
 }
 
 type ReplyQuery {
-	reply(id: UUID!): ReplyView
-	replyDownload(replyId: UUID!, reference: UUID!): String
+	exampleReply(id: UUID!): ReplyView
+	exampleReplyDownload(replyId: UUID!, reference: UUID!, disposition: Disposition! = ATTACHMENT): String
 }
 
 type ReplyRemove {
@@ -49,8 +54,8 @@ type ReplyReset {
 }
 
 type ReplySubscription {
-	replyDeltas: ReplyDelta!
-	typingDeltas(board: UUID!): TypingDelta!
+	exampleReplyDeltas: ReplyDelta!
+	exampleTypingDeltas(board: UUID!): TypingDelta!
 }
 
 type ReplyUpsert {
@@ -108,6 +113,11 @@ entities without requiring a central allocating authority.
 * [RFC4122: A Universally Unique Identifier (UUID) URN Namespace](http://tools.ietf.org/html/rfc4122)
 """
 scalar UUID
+
+input UploadExpectationInput {
+	size: Int!
+	sha256Hex: String!
+}
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.

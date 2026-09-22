@@ -16,7 +16,7 @@ async fn bb02_the_mutation_gate_refuses_exactly_what_the_affordance_forbids() {
     ok(&world
         .gql(
             &owner,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Black-box board" }),
         )
         .await);
@@ -24,13 +24,13 @@ async fn bb02_the_mutation_gate_refuses_exactly_what_the_affordance_forbids() {
     let before = world
         .gql(
             &owner,
-            "query($id:UUID!){board(id:$id){archived affordances}}",
+            "query($id:UUID!){exampleBoard(id:$id){archived affordances}}",
             serde_json::json!({ "id": board }),
         )
         .await;
-    assert_eq!(ok(&before)["board"]["archived"], false);
+    assert_eq!(ok(&before)["exampleBoard"]["archived"], false);
     assert_eq!(
-        ok(&before)["board"]["affordances"]["archive"]["allowed"],
+        ok(&before)["exampleBoard"]["affordances"]["archive"]["allowed"],
         true,
         "before archiving, the archive affordance is allowed"
     );
@@ -38,7 +38,7 @@ async fn bb02_the_mutation_gate_refuses_exactly_what_the_affordance_forbids() {
     ok(&world
         .gql(
             &owner,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": board }),
         )
         .await);
@@ -46,13 +46,13 @@ async fn bb02_the_mutation_gate_refuses_exactly_what_the_affordance_forbids() {
     let after = world
         .gql(
             &owner,
-            "query($id:UUID!){board(id:$id){archived affordances}}",
+            "query($id:UUID!){exampleBoard(id:$id){archived affordances}}",
             serde_json::json!({ "id": board }),
         )
         .await;
-    assert_eq!(ok(&after)["board"]["archived"], true);
+    assert_eq!(ok(&after)["exampleBoard"]["archived"], true);
     assert_eq!(
-        ok(&after)["board"]["affordances"]["archive"]["allowed"],
+        ok(&after)["exampleBoard"]["affordances"]["archive"]["allowed"],
         false,
         "after archiving, the same affordance flips to forbidden"
     );
@@ -60,7 +60,7 @@ async fn bb02_the_mutation_gate_refuses_exactly_what_the_affordance_forbids() {
     let refused = world
         .gql(
             &owner,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": board }),
         )
         .await;

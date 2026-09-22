@@ -16,7 +16,8 @@ const JOB: &str = "s176_beat";
 const POD: &str = "pod-s176";
 const NATS_GRACE: Duration = Duration::from_secs(2);
 const READY_WITHIN: Duration = Duration::from_secs(25);
-const OUTAGE_OBSERVE: Duration = Duration::from_secs(2);
+const PROGRESS_WITHIN: Duration = Duration::from_secs(15);
+const DOWN_WITHIN: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(100);
 
 #[tokio::test]
@@ -56,49 +57,36 @@ async fn s176_a_full_outbox_never_freezes_the_beat_while_nats_is_down() {
     }
     tx.commit().await.expect("commit the backlog");
 
-    nats.stop();
-    tokio::time::sleep(Duration::from_millis(400)).await;
-
     let heartbeat_before = schema_heartbeat(&pool).await;
     let slots_before = completed_slots(&pool, JOB).await;
 
-    tokio::time::sleep(OUTAGE_OBSERVE).await;
+    nats.stop();
 
-    let heartbeat_after = schema_heartbeat(&pool).await;
-    let slots_after = completed_slots(&pool, JOB).await;
+    await_housekeeping_advances(&pool, heartbeat_before, slots_before).await;
 
-    assert!(
-        heartbeat_after > heartbeat_before,
-        "the schema-version heartbeat kept advancing while nats was down with a full outbox: \
-         before {heartbeat_before}, after {heartbeat_after}"
-    );
-    assert!(
-        slots_after > slots_before,
-        "the cron kept completing leader slots while nats was down: before {slots_before}, \
-         after {slots_after} — the outbox relay never froze the beat"
-    );
-
-    let reason = readiness_reason(&readiness);
+    let reason = await_not_ready(&readiness).await;
     assert_eq!(
-        reason.as_deref(),
-        Some(service_engine::housekeeping::ready::REASON_NATS_UNREACHABLE),
+        reason,
+        service_engine::housekeeping::ready::REASON_NATS_UNREACHABLE,
         "readiness reflects the outage even while housekeeping keeps ticking"
     );
 
-    let pending: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'PENDING'")
-            .fetch_one(&pool)
-            .await
-            .expect("count the pending outbox rows");
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'PENDING'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count the pending outbox rows");
     assert_eq!(
         pending, BACKLOG as i64,
         "every committed row still waits: none was abandoned as FAILED during the outage"
     );
-    let failed: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'FAILED'")
-            .fetch_one(&pool)
-            .await
-            .expect("count the failed outbox rows");
+    let failed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'FAILED'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count the failed outbox rows");
     assert_eq!(failed, 0, "no outbox row is FAILED by an outage");
 
     running.abort();
@@ -112,10 +100,38 @@ async fn schema_heartbeat(pool: &PgPool) -> DateTime<Utc> {
         .expect("read the schema-version heartbeat")
 }
 
-fn readiness_reason(readiness: &ReadinessHandle) -> Option<String> {
-    match readiness.snapshot() {
-        Readiness::NotReady { reason } => Some(reason),
-        Readiness::Ready => None,
+async fn await_housekeeping_advances(
+    pool: &PgPool,
+    heartbeat_before: DateTime<Utc>,
+    slots_before: i64,
+) {
+    let deadline = tokio::time::Instant::now() + PROGRESS_WITHIN;
+    loop {
+        let heartbeat_after = schema_heartbeat(pool).await;
+        let slots_after = completed_slots(pool, JOB).await;
+        if heartbeat_after > heartbeat_before && slots_after > slots_before {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the beat froze while nats was down with a full outbox: heartbeat {heartbeat_before} \
+             and leader slots {slots_before} never advanced within {PROGRESS_WITHIN:?}"
+        );
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+async fn await_not_ready(readiness: &ReadinessHandle) -> String {
+    let deadline = tokio::time::Instant::now() + DOWN_WITHIN;
+    loop {
+        if let Readiness::NotReady { reason } = readiness.snapshot() {
+            return reason;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "readiness never fell while nats stayed unreachable past its grace window"
+        );
+        tokio::time::sleep(POLL).await;
     }
 }
 

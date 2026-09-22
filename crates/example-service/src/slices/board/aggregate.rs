@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use service_engine::CohortKey;
+use service_engine::Cohort;
 use service_engine::gate::{Gate, Reason};
 use service_engine::name::NounName;
 use service_engine::visibility::{Cohorts, Visibility};
@@ -76,36 +76,29 @@ impl BoardRow {
     }
 }
 
-#[derive(Hash)]
-enum Cohort {
-    Org(Uuid),
-    Member(Uuid),
-    Public,
-}
-
 impl Visibility for Board {
     type Row = BoardRow;
     type Principal = AppPrincipal;
 
     fn cohorts(row: &BoardRow) -> Cohorts {
         let mut cohorts = vec![
-            CohortKey::of(&[Cohort::Org(row.org_id)]),
-            CohortKey::of(&[Cohort::Member(row.id)]),
+            Cohort::uuid("org", row.org_id),
+            Cohort::uuid("member", row.id),
         ];
         if row.is_public {
-            cohorts.push(CohortKey::of(&[Cohort::Public]));
+            cohorts.push(Cohort::flag("public", true));
         }
         cohorts
     }
 
     fn memberships(principal: &AppPrincipal) -> Cohorts {
         let mut cohorts = vec![
-            CohortKey::of(&[Cohort::Org(principal.org())]),
-            CohortKey::of(&[Cohort::Public]),
+            Cohort::uuid("org", principal.org()),
+            Cohort::flag("public", true),
         ];
         if let Some(BoardMemberships(boards)) = principal.facts().get::<BoardMemberships>() {
             for board in boards {
-                cohorts.push(CohortKey::of(&[Cohort::Member(*board)]));
+                cohorts.push(Cohort::uuid("member", *board));
             }
         }
         cohorts

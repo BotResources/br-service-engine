@@ -1,5 +1,6 @@
 use super::*;
 use crate::mirror::MirrorRun;
+use crate::stop::Stop;
 use std::time::Duration;
 
 #[derive(Default)]
@@ -90,7 +91,7 @@ pub(super) async fn until(deadline: Duration, mut ready: impl FnMut() -> bool) -
 async fn a_service_with_no_mirror_is_converged_before_it_starts_anything() {
     let supervisor = MirrorSupervisor::new();
     assert!(supervisor.names().is_empty());
-    let mut tasks = supervisor.start(Arc::new(Notify::new()));
+    let mut tasks = supervisor.start(Stop::new());
     assert!(tasks.converged().await);
     assert_eq!(tasks.restarts(), 0);
 }
@@ -116,7 +117,7 @@ async fn a_dead_mirror_is_reconciled_again_before_it_is_watched_again() {
     supervisor
         .register(flapping(probe.clone(), false))
         .expect("the mirror registers");
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let tasks = supervisor.start(shutdown.clone());
 
     assert!(
@@ -125,7 +126,7 @@ async fn a_dead_mirror_is_reconciled_again_before_it_is_watched_again() {
         .await,
         "the supervisor never restarted the mirror a second time"
     );
-    shutdown.notify_waiters();
+    shutdown.stop();
     let watches = Probe::count(&probe.watches);
     assert_eq!(
         Probe::count(&probe.reconciles),
@@ -149,7 +150,7 @@ async fn a_mirror_that_died_reports_why_it_is_being_restarted() {
     supervisor
         .register(flapping(probe.clone(), false))
         .expect("the mirror registers");
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let health = supervisor.health();
     let _tasks = supervisor.start(shutdown.clone());
 
@@ -173,7 +174,7 @@ async fn a_mirror_that_died_reports_why_it_is_being_restarted() {
         Some("service: the roster stream ended"),
         "the whole cause chain reaches the board, not only its top word"
     );
-    shutdown.notify_waiters();
+    shutdown.stop();
 }
 
 #[tokio::test]
@@ -188,7 +189,7 @@ async fn a_mirror_that_keeps_making_progress_restarts_without_growing_its_backof
     stalled
         .register(flapping(stuck.clone(), false))
         .expect("the mirror registers");
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let advancing_board = supervisor.health();
     let stalled_board = stalled.health();
     let _one = supervisor.start(shutdown.clone());
@@ -200,7 +201,7 @@ async fn a_mirror_that_keeps_making_progress_restarts_without_growing_its_backof
         .await,
         "the stuck mirror never reached its third restart"
     );
-    shutdown.notify_waiters();
+    shutdown.stop();
 
     let attempts = |health: &MirrorsHealthReceiver| match health
         .borrow()
@@ -250,7 +251,7 @@ async fn a_shutdown_signalled_while_a_mirror_is_reconciling_is_not_lost() {
             },
         ))
         .expect("the mirror registers");
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let tasks = supervisor.start(shutdown.clone());
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -259,7 +260,7 @@ async fn a_shutdown_signalled_while_a_mirror_is_reconciling_is_not_lost() {
         1,
         "the signal lands while the mirror is mid-reconcile, not while it waits"
     );
-    shutdown.notify_waiters();
+    shutdown.stop();
 
     assert!(
         until(Duration::from_secs(5), || tasks.is_finished()).await,

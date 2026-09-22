@@ -1,10 +1,10 @@
 union CardDelta = CardReset | CardUpsert | CardRemove | LanesPaused | LanesResumed
 
 type CardMutation {
-	advanceCard(id: UUID!): MutationAck!
-	scheduleCardDeadline(id: UUID!, inSeconds: Int!): MutationAck!
-	importCards(boardId: UUID!, titles: [String!]!): MutationAck!
-	pageCards(session: UUID!, boardId: UUID!, before: UUID!, size: Int!): CardPage!
+	exampleAdvanceCard(id: UUID!): MutationAck!
+	exampleScheduleCardDeadline(id: UUID!, inSeconds: Int!): MutationAck!
+	exampleImportCards(boardId: UUID!, titles: [String!]!): MutationAck!
+	examplePageCards(session: UUID!, boardId: UUID!, before: UUID!, size: Int!): CardPage!
 }
 
 type CardPage {
@@ -14,8 +14,8 @@ type CardPage {
 }
 
 type CardQuery {
-	card(id: UUID!): CardView
-	cards(boardId: UUID!): [CardView!]!
+	exampleCard(id: UUID!): CardView
+	exampleCards(boardId: UUID!): [CardView!]!
 }
 
 type CardRemove {
@@ -31,8 +31,8 @@ type CardReset {
 }
 
 type CardSubscription {
-	cardDeltas(boardId: UUID!): CardDelta!
-	cardPageDeltas(session: UUID!, boardId: UUID!, size: Int!): CardDelta!
+	exampleCardDeltas(boardId: UUID!): CardDelta!
+	exampleCardPageDeltas(session: UUID!, boardId: UUID!, size: Int!): CardDelta!
 }
 
 type CardUpsert {

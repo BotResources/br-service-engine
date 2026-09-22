@@ -10,9 +10,9 @@ use conformance_service_engine::sample::render::{assignment, member};
 use graphql_support::GraphqlWs;
 use uuid::Uuid;
 
-const WIDGETS: &str = "subscription { widgets { __typename \
+const WIDGETS: &str = "subscription { sampleWidgets { __typename \
     ... on ResetPayload { views { __typename } } } }";
-const ASSIGNMENTS: &str = "subscription { assignments { __typename \
+const ASSIGNMENTS: &str = "subscription { sampleAssignments { __typename \
     ... on ResetPayload { views { __typename } } } }";
 
 fn reset_typenames(reset: &serde_json::Value, field: &str) -> Vec<String> {
@@ -47,7 +47,7 @@ async fn s120_two_projectors_are_two_typed_union_members_and_a_client_sees_only_
         .next_data(Duration::from_secs(15))
         .await
         .expect("the widget subscription resets");
-    let members = reset_typenames(&reset, "widgets");
+    let members = reset_typenames(&reset, "sampleWidgets");
     assert!(
         !members.is_empty() && members.iter().all(|m| m == "WidgetView"),
         "a client subscribing to widgets receives only the WidgetView union member: {reset}"
@@ -59,7 +59,7 @@ async fn s120_two_projectors_are_two_typed_union_members_and_a_client_sees_only_
         .next_data(Duration::from_secs(15))
         .await
         .expect("the assignment subscription resets");
-    let members = reset_typenames(&reset, "assignments");
+    let members = reset_typenames(&reset, "sampleAssignments");
     assert!(
         !members.is_empty() && members.iter().all(|m| m == "AssignmentView"),
         "the second projector delivers only its own AssignmentView member, never the widget's: {reset}"

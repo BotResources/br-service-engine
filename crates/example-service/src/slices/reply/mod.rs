@@ -45,6 +45,8 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
             max_bytes: 50 << 20,
             orphan_after: Duration::from_secs(24 * 60 * 60),
         })?;
+        engine.register_post_upload_policy::<blob::Attachment, _>(blob::impact_reply_on_upload)?;
+        engine.require_post_upload_policy::<blob::Attachment>()?;
     }
     engine.register_schema_slice(
         service_engine::graphql::SliceFragment::derive::<

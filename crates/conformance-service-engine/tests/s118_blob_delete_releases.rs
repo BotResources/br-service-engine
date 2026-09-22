@@ -78,7 +78,9 @@ async fn s118_deleting_the_aggregate_releases_its_blobs() {
         nats.nats().await,
         "se_s60",
         "pod-s60",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(300)),
         policy,
         Duration::from_millis(100),
     )

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
+use crate::graphql::state::GraphqlState;
 use crate::readiness::{ReadinessHandle, readiness_route};
+use crate::stop::Stop;
 use async_graphql::http::ALL_WEBSOCKET_PROTOCOLS;
 use async_graphql::{Data, ObjectType, Schema, SubscriptionType};
 use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse};
@@ -12,10 +15,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
 use br_util_observability::{MetricsHandle, http_metrics_layer, liveness_route, metrics_route};
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
-
-use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
-use crate::graphql::state::GraphqlState;
 
 struct AppState<P: PassportPrincipal, Q, M, S> {
     schema: Schema<Q, M, S>,
@@ -51,16 +50,15 @@ where
 
 const SDL_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
-/// Mount the operational edge — `/livez` (always 200), `/metrics` (Prometheus text),
-/// `/sdl` (the composed schema) — beside a service's [`app`] router, and wrap the whole
-/// router in the HTTP metrics layer. These endpoints ride the trusted internal network
-/// and carry no auth: liveness must answer even when a dependency is down, and the SDL
-/// and metrics are non-secret operational reads.
-pub fn with_edge_observability(app: Router, sdl: String, metrics: MetricsHandle) -> Router {
+pub(crate) fn with_edge_observability(app: Router, sdl: String, metrics: MetricsHandle) -> Router {
     app.route("/livez", liveness_route())
         .route("/metrics", metrics_route(metrics))
         .route("/sdl", sdl_route(sdl))
         .layer(http_metrics_layer())
+}
+
+pub fn with_sdl_route(app: Router, sdl: String) -> Router {
+    app.route("/sdl", sdl_route(sdl))
 }
 
 fn sdl_route<S>(sdl: String) -> MethodRouter<S>
@@ -80,13 +78,9 @@ where
     })
 }
 
-pub async fn serve(
-    listener: TcpListener,
-    app: Router,
-    shutdown: Arc<Notify>,
-) -> std::io::Result<()> {
+pub async fn serve(listener: TcpListener, app: Router, shutdown: Arc<Stop>) -> std::io::Result<()> {
     axum::serve(listener, app)
-        .with_graceful_shutdown(async move { shutdown.notified().await })
+        .with_graceful_shutdown(async move { shutdown.stopped().await })
         .await
 }
 

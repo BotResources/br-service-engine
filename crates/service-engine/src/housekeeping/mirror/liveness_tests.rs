@@ -1,6 +1,7 @@
 use super::*;
 use crate::housekeeping::mirror::tests::{Probe, flapping, until};
 use crate::mirror::MirrorRun;
+use crate::stop::Stop;
 use std::time::Duration;
 
 fn panics_once_then_flaps(probe: Arc<Probe>) -> MirrorHandle {
@@ -39,7 +40,7 @@ async fn a_watch_that_panics_is_restarted_exactly_like_a_watch_that_errored() {
     supervisor
         .register(panics_once_then_flaps(probe.clone()))
         .expect("the mirror registers");
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let tasks = supervisor.start(shutdown.clone());
 
     assert!(
@@ -49,7 +50,7 @@ async fn a_watch_that_panics_is_restarted_exactly_like_a_watch_that_errored() {
         "a mirror whose watch panicked must be reconciled and watched again; before the fix the \
          panic killed the supervisor task and the watch was never retried"
     );
-    shutdown.notify_waiters();
+    shutdown.stop();
     assert!(
         tasks.restarts() >= 1,
         "the panic took the same restart path as an Err, so the mirror self-heals"
@@ -62,7 +63,7 @@ async fn a_watch_that_panics_is_restarted_exactly_like_a_watch_that_errored() {
 
 #[tokio::test]
 async fn any_stopped_resolves_on_a_dead_supervisor_and_pends_while_they_live() {
-    let mut empty = MirrorSupervisor::new().start(Arc::new(Notify::new()));
+    let mut empty = MirrorSupervisor::new().start(Stop::new());
     assert!(
         tokio::time::timeout(Duration::from_millis(200), empty.any_stopped())
             .await
@@ -75,7 +76,7 @@ async fn any_stopped_resolves_on_a_dead_supervisor_and_pends_while_they_live() {
     supervisor
         .register(flapping(probe.clone(), false))
         .expect("the mirror registers");
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = Stop::new();
     let mut tasks = supervisor.start(shutdown.clone());
     assert!(
         until(Duration::from_secs(5), || Probe::count(&probe.reconciles)
@@ -83,7 +84,7 @@ async fn any_stopped_resolves_on_a_dead_supervisor_and_pends_while_they_live() {
         .await,
         "the supervise task must be running before it can be signalled to stop"
     );
-    shutdown.notify_waiters();
+    shutdown.stop();
     assert!(
         tokio::time::timeout(Duration::from_secs(5), tasks.any_stopped())
             .await

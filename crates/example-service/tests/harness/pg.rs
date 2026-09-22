@@ -61,6 +61,15 @@ impl TestDb {
         service_engine::schema::migrate(&owner)
             .await
             .expect("apply the engine migration set");
+        #[cfg(feature = "roster")]
+        {
+            let mut roster = example_lib_roster::migrations().migrator;
+            roster.set_ignore_missing(true);
+            roster
+                .run(&owner)
+                .await
+                .expect("apply the roster library migration set");
+        }
         example_service::db::migrate(&owner)
             .await
             .expect("apply the example service migration set");
@@ -69,6 +78,10 @@ impl TestDb {
         service_engine::schema::grant_engine_access(&owner, &app_role)
             .await
             .expect("grant the engine schema to the app role");
+        #[cfg(feature = "roster")]
+        service_engine::schema::grant_schema_access(&owner, example_lib_roster::SCHEMA, &app_role)
+            .await
+            .expect("grant the roster schema to the app role");
 
         let app = pool(&url_for(&admin_url, &app_role, &database)).await;
         owner.close().await;

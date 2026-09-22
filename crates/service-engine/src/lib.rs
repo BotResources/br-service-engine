@@ -42,6 +42,7 @@ pub mod schema;
 pub mod schema_version;
 pub mod scopes;
 pub mod session;
+pub mod stop;
 pub mod time;
 pub mod view;
 pub mod visibility;
@@ -82,14 +83,14 @@ pub use accumulator::{
     SealHash, SealMarker, Swept,
 };
 pub use blobs::{
-    Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
+    Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, PostUpload, ReaperRound, UploadUrl,
 };
-pub use cohort::CohortKey;
+pub use cohort::{Cohort, CohortKey, CohortValue};
 pub use config::EngineConfig;
 pub use cron::{CronExpr, CronJob, NextFire, Schedule};
 pub use db::{connect_pool, validate_database_tls};
 pub use delta::{Delta, ErasedView, Revision};
-pub use engine::boot::{BootPlan, run_service};
+pub use engine::boot::{BootPlan, LibraryMigrations, REASON_MIGRATIONS_PENDING, run_service};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
 pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
@@ -99,12 +100,13 @@ pub use gate::{
     check_gates_match_affordances, is_reason_code,
 };
 pub use graphql::{
-    AuthReject, CODE_EXTENSION, GraphqlState, JsonScalar, MutationAck, PASSPORT_HEADER,
-    PassportPrincipal, PrincipalRejected, Query, SchemaSlices, SliceFragment, ack, ack_bulk, app,
-    attach, attach_with_session, cause_json, engine_schema, execute, execute_bulk, key_json,
-    lane_notice_stream, mutation_error, page, serve, typed_presence_view, typed_view,
-    with_edge_observability,
+    AuthReject, CODE_EXTENSION, FORBIDDEN_CODE, GraphqlState, JsonScalar, MutationAck,
+    PASSPORT_HEADER, PassportPrincipal, PrincipalRejected, Query, RootPrefix, SchemaSlices,
+    SliceFragment, ack, ack_bulk, app, attach, attach_with_session, cause_json, coded_error,
+    engine_schema, execute, execute_bulk, forbidden, key_json, lane_notice_stream, mutation_error,
+    page, serve, typed_presence_view, typed_view, with_sdl_route,
 };
+
 pub use housekeeping::beat::{Beat, BeatRound};
 pub use housekeeping::cron::{CronReport, CronRound, CronRuntime, JobRecord};
 pub use housekeeping::gc::{Gc, GcRound, SessionGc};
@@ -112,7 +114,7 @@ pub use housekeeping::health::{RelayCondition, RelaysHealth, RelaysHealthReceive
 pub use housekeeping::mirror::{
     MirrorCondition, MirrorSupervisor, MirrorTasks, MirrorsHealth, MirrorsHealthReceiver,
 };
-pub use housekeeping::ready::ReadinessAssembly;
+pub use housekeeping::ready::{REASON_REQUIRED_KEYS, ReadinessAssembly};
 #[cfg(feature = "test-support")]
 pub use housekeeping::relay::{RelayRound, RelayRuntime};
 pub use housekeeping::scheduled::{ScheduledBoundaries, ScheduledRound};
@@ -122,7 +124,8 @@ pub use lanes::{Lane, LaneNotice, LanesPaused, LanesResumed};
 pub use mirror::{
     Bind, Change, ChangeOp, Column, Consumed, ConsumedGuard, ConsumedManifest, Extended, Known,
     KnownRow, KnownScope, ManifestMismatch, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader,
-    MirrorReady, Project, Projection, Shadow, Shadows, col, is_raw_json,
+    MirrorReady, OfferManifest, Project, Projection, Shadow, Shadows, Written, col, is_raw_json,
+    manifest_key,
 };
 pub use name::{
     AccumulatorName, ChannelName, ForeignId, JobName, MirrorName, Namespace, NounName, PodId,
@@ -131,18 +134,19 @@ pub use name::{
 pub use nats::{
     KvBucket, KvEvent, KvKey, KvKeyError, KvPrefix, Nats, NatsCondition, NatsError, NatsHealth,
     NatsHealthChannel, NatsHealthReceiver, PublishFailure, PublishOutcome, REASON_NO_STREAM,
-    RelayHealth, RelayHealthReceiver,
+    RelayHealth, RelayHealthReceiver, Watched,
 };
-pub use offer::Offer;
+pub use offer::{Offer, OfferTrigger};
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
+pub use pastey;
 pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
-    Reaction, Refused,
+    Reaction, Refused, Saved,
 };
-pub use population::{Interest, Inverse, Population, WindowQuery};
+pub use population::{Interest, Inverse, InverseLookup, Population, WindowQuery};
 pub use presence::{Presence, PresenceHandle, PresenceKey, PresenceRegistry};
 pub use principal::{Principal, PrincipalId, PrincipalResolver, RlsApplier};
 pub use projector::{Emission, LoadScope};
@@ -160,6 +164,7 @@ pub use render::{PassReport, SessionFault, Transition};
 pub use runtime::{PageReport, RenderMetrics, SessionRuntime};
 pub use scopes::{ScopeError, ScopeManifest};
 pub use session::{AttachRequest, SessionId, SessionStream, WindowParams, WindowSpec};
+pub use stop::Stop;
 pub use time::Timestamp;
 #[cfg(feature = "test-support")]
 pub use transport::{

@@ -27,7 +27,7 @@ async fn s114_a_query_returns_the_rendered_view_with_affordances_and_hides_what_
     let service = boot_graphql_service(&db, nats.nats().await, "se_s114", "pod-s114").await;
     let passport = passport_for(user, tenant).to_header();
 
-    let query = format!("query {{ widget(id: \"{mine}\") }}");
+    let query = format!("query {{ sampleWidget(id: \"{mine}\") }}");
     let (status, body) = post_json(
         &service.base_url,
         Some(&passport),
@@ -36,7 +36,7 @@ async fn s114_a_query_returns_the_rendered_view_with_affordances_and_hides_what_
     )
     .await;
     assert_eq!(status, 200, "the query answers over HTTP: {body}");
-    let view = &body["data"]["widget"];
+    let view = &body["data"]["sampleWidget"];
     assert_eq!(view["id"], serde_json::json!(mine.to_string()));
     assert_eq!(view["closed"], serde_json::json!(false));
     assert_eq!(
@@ -45,7 +45,7 @@ async fn s114_a_query_returns_the_rendered_view_with_affordances_and_hides_what_
         "the query view carries the same affordances as a subscription frame: {body}"
     );
 
-    let hidden = format!("query {{ widget(id: \"{theirs}\") }}");
+    let hidden = format!("query {{ sampleWidget(id: \"{theirs}\") }}");
     let (status, body) = post_json(
         &service.base_url,
         Some(&passport),
@@ -55,7 +55,7 @@ async fn s114_a_query_returns_the_rendered_view_with_affordances_and_hides_what_
     .await;
     assert_eq!(status, 200);
     assert!(
-        body["data"]["widget"].is_null(),
+        body["data"]["sampleWidget"].is_null(),
         "a key the principal may not see answers as absent, never another tenant's row: {body}"
     );
 

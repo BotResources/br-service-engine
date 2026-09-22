@@ -18,7 +18,7 @@ use crate::pipeline::confirm::{record_confirmations, stored_confirmations};
 use crate::pipeline::context::Reaction;
 use crate::pipeline::ops::Ops;
 use crate::pipeline::outbound::OutboundContext;
-use crate::pipeline::policy::PostSavePolicies;
+use crate::pipeline::policy::Policies;
 use crate::pipeline::staged::Staged;
 use crate::pipeline::tx::{begin_scoped, flush_and_commit};
 use crate::principal::{ErasedPrincipal, ReactionPrincipalResolver};
@@ -30,7 +30,7 @@ pub(crate) struct DirectPipeline {
     transport: Arc<dyn ImpactTransport>,
     accumulators: Arc<AccumulatorRuntime>,
     offers: Arc<OfferStagers>,
-    policies: Arc<PostSavePolicies>,
+    policies: Arc<Policies>,
     reactions: Arc<ReactionRegistry>,
     blobs: Option<BlobHandle>,
     lock_timeout: Duration,
@@ -46,7 +46,7 @@ impl DirectPipeline {
         transport: Arc<dyn ImpactTransport>,
         accumulators: Arc<AccumulatorRuntime>,
         offers: Arc<OfferStagers>,
-        policies: Arc<PostSavePolicies>,
+        policies: Arc<Policies>,
         reactions: Arc<ReactionRegistry>,
         blobs: Option<BlobHandle>,
         lock_timeout: Duration,
@@ -191,11 +191,12 @@ impl DirectPipeline {
             );
             invoke(invoker.as_ref(), &mut cx, &msg.body).await
         };
-        if let Some(reason) = staged.policy_refusal {
+        if let Some(refusal) = staged.policy_refusal {
             let _ = tx.rollback().await;
             return DispatchOutcome::Failed(DispatchError::terminal(format!(
-                "a post-save policy refused this reaction's write with reason {}",
-                reason.code()
+                "{} in this reaction with reason {}",
+                refusal.origin.detail(),
+                refusal.reason.code()
             )));
         }
         if let Err(error) = handler {

@@ -4,9 +4,11 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::accumulator::ChunkReader;
+use crate::chain::describe;
 use crate::cohort::CohortKey;
 use crate::dyn_compat::{ErasedLoadScope, ErasedProjector};
 use crate::error::EngineError;
+use crate::inbound::DeadLetters;
 use crate::principal::{Principal, RlsApplier};
 use crate::wire::{KeyBytes, ViewBytes};
 
@@ -22,6 +24,7 @@ pub(crate) struct Renderer<'a, P: Principal> {
     pub(crate) pg: &'a PgPool,
     pub(crate) chunks: &'a ChunkReader,
     pub(crate) rls: Option<&'a Arc<dyn RlsApplier<P>>>,
+    pub(crate) dead_letters: Option<&'a DeadLetters>,
 }
 
 impl<P: Principal> Renderer<'_, P> {
@@ -65,7 +68,15 @@ impl<P: Principal> Renderer<'_, P> {
         };
         let mut rendered = Rendered::new();
         for key in keys {
-            rendered.insert(key.clone(), projector.project(&facts, key, principal)?);
+            match projector.project(&facts, key, principal) {
+                Ok(view) => {
+                    rendered.insert(key.clone(), view);
+                }
+                Err(error) => {
+                    self.dead_letter(&error).await;
+                    return Err(error);
+                }
+            }
         }
         Ok((
             rendered,
@@ -74,5 +85,25 @@ impl<P: Principal> Renderer<'_, P> {
                 projections: keys.len(),
             },
         ))
+    }
+
+    async fn dead_letter(&self, error: &EngineError) {
+        let EngineError::Projection { projector, key, .. } = error else {
+            return;
+        };
+        let Some(dead_letters) = self.dead_letters else {
+            return;
+        };
+        if let Err(recording) = dead_letters
+            .record_render(projector.as_str(), key, &describe(error))
+            .await
+        {
+            tracing::error!(
+                projector = %projector,
+                key = %key,
+                reason = %recording,
+                "a projection failure could not be recorded to the dead-letter table"
+            );
+        }
     }
 }

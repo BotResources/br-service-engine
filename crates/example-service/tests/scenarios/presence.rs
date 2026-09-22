@@ -10,7 +10,7 @@ async fn create_board(world: &World, pass: &str, board: Uuid) {
     ok(&world
         .gql(
             pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "drafts" }),
         )
         .await);
@@ -29,7 +29,7 @@ async fn presence_lane_writes_a_ttl_value() {
     ok(&world
         .gql(
             &pass,
-            "mutation($b:UUID!,$l:String!){setTyping(board:$b,label:$l){success}}",
+            "mutation($b:UUID!,$l:String!){exampleSetTyping(board:$b,label:$l){success}}",
             serde_json::json!({ "b": board, "l": "drafting" }),
         )
         .await);
@@ -65,7 +65,7 @@ async fn set_typing_by_a_non_member_is_refused() {
     let refused = world
         .gql(
             &passport(outsider, org, &[], false),
-            "mutation($b:UUID!,$l:String!){setTyping(board:$b,label:$l){success}}",
+            "mutation($b:UUID!,$l:String!){exampleSetTyping(board:$b,label:$l){success}}",
             serde_json::json!({ "b": board, "l": "sneaking in" }),
         )
         .await;

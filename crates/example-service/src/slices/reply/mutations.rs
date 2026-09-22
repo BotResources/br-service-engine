@@ -2,6 +2,7 @@ use chrono::TimeDelta;
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use service_engine::UploadUrl;
+use service_engine::blobs::{Sha256Digest, UploadExpectation};
 use service_engine::gate::{Gate, Reason};
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
 use uuid::Uuid;
@@ -121,10 +122,17 @@ pub fn cancel_reply<'m>(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ExpectedUpload {
+    pub size: u64,
+    pub sha256_hex: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct AttachReply {
     pub reply_id: Uuid,
     pub name: String,
     pub content_type: String,
+    pub expected: Option<ExpectedUpload>,
 }
 
 impl MutationInput for AttachReply {
@@ -143,7 +151,17 @@ pub fn attach_reply<'m>(
             .await?
             .ok_or(AppFault::NotFound)?;
         board_member_gate(cx.principal(), reply.board_id).require()?;
-        let blob = cx.blob::<Attachment>(input.name, input.content_type)?;
+        let blob = match input.expected {
+            Some(expected) => {
+                let sha256 = Sha256Digest::from_hex(&expected.sha256_hex)?;
+                cx.blob_verified::<Attachment>(
+                    input.name,
+                    input.content_type,
+                    UploadExpectation::new(expected.size, sha256),
+                )?
+            }
+            None => cx.blob::<Attachment>(input.name, input.content_type)?,
+        };
         let cause = reply.attach(blob.reference().as_uuid());
         cx.save(&reply).await?;
         cx.impact_caused::<Reply, _>(&reply.id, cause)?;

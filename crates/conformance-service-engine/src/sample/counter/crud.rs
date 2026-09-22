@@ -17,7 +17,7 @@ impl Noun for CrudCounterNoun {
     const NAME: NounName = NounName::from_static("counter_crud");
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CrudCounter(pub CounterState);
 
 pub struct CrudCounterStore;
@@ -57,13 +57,7 @@ impl Persistence for CrudCounterStore {
         conn: &'a mut PgConnection,
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query("SELECT id FROM sample_counter_crud WHERE id = $1 FOR UPDATE")
-                .bind(key)
-                .fetch_optional(conn)
-                .await?;
-            Ok(())
-        })
+        Self::row_lock(conn, "sample_counter_crud", key)
     }
 
     fn read_many<'a>(

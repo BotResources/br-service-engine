@@ -72,6 +72,7 @@ impl BlobRegistry {
     pub(crate) fn build_store(
         config: Option<&BlobConfig>,
         service: &str,
+        policy_kinds: Arc<std::collections::BTreeSet<&'static str>>,
     ) -> Result<BlobStore, EngineError> {
         let config = config.ok_or_else(|| {
             EngineError::Blob(
@@ -81,7 +82,7 @@ impl BlobRegistry {
             )
         })?;
         let object = Arc::new(ObjectStore::from_config(config)?);
-        Ok(BlobStore::new(object, service))
+        Ok(BlobStore::new(object, service, policy_kinds))
     }
 }
 

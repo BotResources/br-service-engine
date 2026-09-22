@@ -1,6 +1,3 @@
-//! The board capability: the board-scoped view of cards and the delta
-//! subscriptions over one board's window.
-
 use async_graphql::{Context, Object, Result, SimpleObject, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::session::{SessionId, WindowSpec};
@@ -29,7 +26,7 @@ pub struct CardBoardQuery;
 
 #[Object]
 impl CardBoardQuery {
-    async fn cards(&self, ctx: &Context<'_>, board_id: Uuid) -> Result<Vec<CardView>> {
+    async fn example_cards(&self, ctx: &Context<'_>, board_id: Uuid) -> Result<Vec<CardView>> {
         Query::<AppPrincipal>::new(ctx)?
             .fetch_view_window::<CardsView>(&BoardWindow::of(board_id))
             .await
@@ -41,7 +38,7 @@ pub struct CardBoardMutation;
 
 #[Object]
 impl CardBoardMutation {
-    async fn import_cards(
+    async fn example_import_cards(
         &self,
         ctx: &Context<'_>,
         board_id: Uuid,
@@ -51,7 +48,7 @@ impl CardBoardMutation {
             .await
     }
 
-    async fn page_cards(
+    async fn example_page_cards(
         &self,
         ctx: &Context<'_>,
         session: Uuid,
@@ -78,7 +75,7 @@ pub struct CardBoardSubscription;
 
 #[Subscription]
 impl CardBoardSubscription {
-    async fn card_deltas(
+    async fn example_card_deltas(
         &self,
         ctx: &Context<'_>,
         board_id: Uuid,
@@ -94,7 +91,7 @@ impl CardBoardSubscription {
         Ok(stream.map(|delta| CardDelta::from_delta(&delta)))
     }
 
-    async fn card_page_deltas(
+    async fn example_card_page_deltas(
         &self,
         ctx: &Context<'_>,
         session: Uuid,

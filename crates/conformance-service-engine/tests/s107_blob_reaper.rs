@@ -70,7 +70,9 @@ async fn s107_the_reaper_removes_an_abandoned_upload_and_an_orphan_past_the_boun
         nats.nats().await,
         "se_s107",
         "pod-s107",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(400)),
         policy,
         Duration::from_millis(150),
     )

@@ -5,7 +5,7 @@ use br_core_integration::{EventCoords, IntegrationEvent, OutboxStatus};
 
 pub use crate::nats::event_subject;
 
-use crate::relays::outbox::store::OUTBOX_NOTIFY_CHANNEL;
+use crate::relays::outbox::store::{OUTBOX_NOTIFY_CHANNEL, OUTBOX_TABLE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutboundSequence {
@@ -68,15 +68,15 @@ where
         }
         None => None,
     };
-    sqlx::query(
+    sqlx::query(&format!(
         "WITH inserted AS ( \
-            INSERT INTO integration_outbox (id, subject, payload, status, attempts, producer, seq_key, seq) \
+            INSERT INTO {OUTBOX_TABLE} (id, subject, payload, status, attempts, producer, seq_key, seq) \
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
             ON CONFLICT (id) DO NOTHING \
             RETURNING 1 \
          ) \
-         SELECT pg_notify($9, '')",
-    )
+         SELECT pg_notify($9, '')"
+    ))
     .bind(record.id)
     .bind(&record.subject)
     .bind(&record.payload)

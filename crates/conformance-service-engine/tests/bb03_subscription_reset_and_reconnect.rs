@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 const BOARD_ARCHIVE: &str = "example:board_archive";
 const RECV: Duration = Duration::from_secs(15);
-const SUB: &str = "subscription{boardDeltas{__typename \
+const SUB: &str = "subscription{exampleBoardDeltas{__typename \
     ... on BoardReset{revision views{... on BoardView{id archived}}} \
     ... on BoardUpsert{revision view{... on BoardView{id archived}}} \
     ... on BoardRemove{revision}}}";
@@ -23,7 +23,7 @@ async fn bb03_a_subscriber_resets_then_upserts_and_a_reconnect_resets_from_commi
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Sub board" }),
         )
         .await);
@@ -34,9 +34,9 @@ async fn bb03_a_subscriber_resets_then_upserts_and_a_reconnect_resets_from_commi
         .next_data(RECV)
         .await
         .expect("the attach delivers a Reset");
-    assert_eq!(reset["boardDeltas"]["__typename"], "BoardReset");
+    assert_eq!(reset["exampleBoardDeltas"]["__typename"], "BoardReset");
     assert_eq!(
-        reset["boardDeltas"]["revision"],
+        reset["exampleBoardDeltas"]["revision"],
         serde_json::json!(1),
         "a session's first revision is 1: {reset}"
     );
@@ -44,7 +44,7 @@ async fn bb03_a_subscriber_resets_then_upserts_and_a_reconnect_resets_from_commi
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!){archiveBoard(id:$id){success}}",
+            "mutation($id:UUID!){exampleArchiveBoard(id:$id){success}}",
             serde_json::json!({ "id": board }),
         )
         .await);
@@ -54,17 +54,17 @@ async fn bb03_a_subscriber_resets_then_upserts_and_a_reconnect_resets_from_commi
             .next_data(RECV)
             .await
             .expect("committing the archive reaches the session");
-        if delta["boardDeltas"]["__typename"] == "BoardUpsert" {
+        if delta["exampleBoardDeltas"]["__typename"] == "BoardUpsert" {
             break delta;
         }
     };
     assert_eq!(
-        upsert["boardDeltas"]["revision"],
+        upsert["exampleBoardDeltas"]["revision"],
         serde_json::json!(2),
         "the next delta advances the revision by exactly one: {upsert}"
     );
     assert_eq!(
-        upsert["boardDeltas"]["view"]["archived"],
+        upsert["exampleBoardDeltas"]["view"]["archived"],
         serde_json::json!(true),
         "the committed state, not the mutation response, reaches the session"
     );
@@ -75,13 +75,13 @@ async fn bb03_a_subscriber_resets_then_upserts_and_a_reconnect_resets_from_commi
         .next_data(RECV)
         .await
         .expect("a reconnecting subscriber gets a fresh Reset");
-    assert_eq!(fresh["boardDeltas"]["__typename"], "BoardReset");
+    assert_eq!(fresh["exampleBoardDeltas"]["__typename"], "BoardReset");
     assert_eq!(
-        fresh["boardDeltas"]["revision"],
+        fresh["exampleBoardDeltas"]["revision"],
         serde_json::json!(1),
         "the reconnect opens a new session at revision 1: {fresh}"
     );
-    let carries_committed = fresh["boardDeltas"]["views"]
+    let carries_committed = fresh["exampleBoardDeltas"]["views"]
         .as_array()
         .expect("the Reset carries its views")
         .iter()

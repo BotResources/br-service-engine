@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::PgPool;
-use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
 use crate::accumulator::ChunkSeq;
@@ -10,6 +9,7 @@ use crate::accumulator::commit::commit_batch;
 use crate::accumulator::runtime::AccumulatorRuntime;
 use crate::error::EngineError;
 use crate::name::{AccumulatorName, NounName};
+use crate::stop::Stop;
 use crate::transport::ImpactTransport;
 use crate::wire::KeyBytes;
 
@@ -90,13 +90,13 @@ pub(crate) async fn flush_once(
     }
 }
 
-pub(crate) async fn run(runtime: Arc<AccumulatorRuntime>, window: Duration, shutdown: Arc<Notify>) {
+pub(crate) async fn run(runtime: Arc<AccumulatorRuntime>, window: Duration, shutdown: Arc<Stop>) {
     loop {
         tokio::select! {
             _ = tokio::time::sleep(window) => {
                 flush_and_observe(&runtime).await;
             }
-            _ = shutdown.notified() => {
+            _ = shutdown.stopped() => {
                 flush_and_observe(&runtime).await;
                 return;
             }

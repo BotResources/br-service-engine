@@ -13,9 +13,6 @@ use super::store::{self, BoardStore, OrgBoardStore};
 use crate::kernel::{AppPrincipal, AppRls};
 
 service_engine::open_access!(
-    /// This projector renders under Postgres row-level security: the visible
-    /// set is filtered by the RLS policy on the session role, not by an
-    /// in-engine cohort gate.
     pub OrgBoardsRlsAccess = "org boards are filtered by Postgres RLS, not by an engine cohort"
 );
 

@@ -5,6 +5,7 @@ mod lane_a;
 mod loops;
 mod mutate;
 mod register;
+mod register_policy;
 mod run;
 mod serve;
 mod shutdown;
@@ -30,7 +31,7 @@ use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::ReactionRegistry;
 use crate::offers::OfferStagers;
 use crate::pipeline::MutationRegistry;
-use crate::pipeline::{PostSavePolicies, PostSaveSeams};
+use crate::pipeline::{AggregatePolicies, PolicySeams};
 use crate::presence::PresenceRegistry;
 use crate::principal::Principal;
 use crate::registry::RenderRegistry;
@@ -67,18 +68,22 @@ pub struct Engine<P: Principal> {
     inbound_reactions: Mutex<ReactionRegistry>,
     mutations: MutationRegistry<P>,
     offers: OfferStagers,
-    post_save: PostSavePolicies,
-    post_save_seams: PostSaveSeams,
+    post_save: AggregatePolicies,
+    post_delete: AggregatePolicies,
+    post_upload: crate::blobs::policy::UploadPolicies,
+    policy_seams: PolicySeams,
     presence: PresenceRegistry<P>,
     blobs: BlobRegistry,
     erasables: Vec<Arc<dyn ErasedErasable>>,
     schema_slices: Vec<SliceFragment>,
+    root_prefix: Option<crate::graphql::RootPrefix>,
     schema_sdl: Option<String>,
     shutdown: Arc<tokio::sync::Notify>,
     ws_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     declared_scopes: Option<ScopeDeclaration>,
     contributed_scopes: Vec<&'static str>,
     reaction_principal: Option<Arc<dyn crate::principal::ReactionPrincipalResolver>>,
+    blob_reaper_log: Option<crate::blobs::ReaperRoundLog>,
 }
 
 impl<P: Principal> Engine<P> {
@@ -128,18 +133,22 @@ impl<P: Principal> Engine<P> {
             inbound_reactions: Mutex::new(ReactionRegistry::new()),
             mutations: MutationRegistry::new(),
             offers: OfferStagers::default(),
-            post_save: PostSavePolicies::default(),
-            post_save_seams: PostSaveSeams::default(),
+            post_save: AggregatePolicies::default(),
+            post_delete: AggregatePolicies::default(),
+            post_upload: crate::blobs::policy::UploadPolicies::default(),
+            policy_seams: PolicySeams::default(),
             presence: PresenceRegistry::new(),
             blobs: BlobRegistry::new(),
             erasables: Vec::new(),
             schema_slices: Vec::new(),
+            root_prefix: None,
             schema_sdl: None,
             shutdown: Arc::new(tokio::sync::Notify::new()),
             ws_shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             declared_scopes: None,
             contributed_scopes: Vec::new(),
             reaction_principal: None,
+            blob_reaper_log: None,
         })
     }
 
@@ -277,6 +286,13 @@ impl<P: Principal> Engine<P> {
 
     pub fn render(&self) -> Arc<SessionRuntime<P>> {
         self.render_runtime()
+    }
+
+    pub fn observe_blob_reaper_rounds(&mut self) -> crate::blobs::ReaperRoundLog {
+        let log = self
+            .blob_reaper_log
+            .get_or_insert_with(|| Arc::new(Mutex::new(Vec::new())));
+        log.clone()
     }
 }
 

@@ -5,7 +5,7 @@ use service_engine::config::EngineConfig;
 use service_engine::erase::{EraseOutcome, Eraser, PersonId};
 use service_engine::error::EngineError;
 use service_engine::nats::Nats;
-use service_engine::{AccumulatorRuntime, Engine, Settle};
+use service_engine::{AccumulatorRuntime, BlobReader, Engine, Settle};
 use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
 use tokio::net::TcpListener;
@@ -19,6 +19,7 @@ pub struct Service {
     pub chunks: Arc<AccumulatorRuntime>,
     settle: Settle<AppPrincipal>,
     eraser: Eraser<AppPrincipal>,
+    blob_reader: BlobReader,
     readiness: ReadinessHandle,
     stop: Arc<Notify>,
     handle: JoinHandle<Result<(), EngineError>>,
@@ -27,6 +28,10 @@ pub struct Service {
 impl Service {
     pub fn http(&self, path: &str) -> String {
         format!("{}{path}", self.base_url)
+    }
+
+    pub fn blob_reader(&self) -> BlobReader {
+        self.blob_reader.clone()
     }
 
     pub fn ws(&self, path: &str) -> String {
@@ -103,6 +108,7 @@ pub async fn boot(
     let chunks = engine.accumulator_handle();
     let settle = engine.settle_handle();
     let eraser = engine.eraser();
+    let blob_reader = engine.blob_reader();
 
     let listener = TcpListener::bind(http_addr)
         .await
@@ -135,6 +141,7 @@ pub async fn boot(
         chunks,
         settle,
         eraser,
+        blob_reader,
         readiness,
         stop,
         handle,

@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use sqlx::PgPool;
+
 use crate::dyn_compat::ErasedInverse;
 use crate::error::EngineError;
 use crate::impact::Impact;
@@ -61,9 +63,10 @@ impl Inverses {
     }
 }
 
-pub(crate) fn resolve_inverses<P: Principal>(
+pub(crate) async fn resolve_inverses<P: Principal>(
     impacts: &[Impact],
     registry: &RenderRegistry<P>,
+    pg: &PgPool,
 ) -> Inverses {
     let mut inverses = Inverses::default();
     for (index, impact) in impacts.iter().enumerate() {
@@ -72,6 +75,20 @@ pub(crate) fn resolve_inverses<P: Principal>(
         };
         for (name, projector) in registry.all() {
             match projector.inverse(foreign) {
+                Ok(ErasedInverse::Lookup(lookup)) => {
+                    match resolve_lookup(pg, &lookup, foreign).await {
+                        Ok(keys) => {
+                            inverses
+                                .resolved
+                                .insert((index, name.clone()), ErasedInverse::Keys(keys));
+                        }
+                        Err(error) => {
+                            inverses
+                                .blind
+                                .insert(name.clone(), crate::chain::describe(&error));
+                        }
+                    }
+                }
                 Ok(inverse) => {
                     inverses.resolved.insert((index, name.clone()), inverse);
                 }
@@ -84,6 +101,15 @@ pub(crate) fn resolve_inverses<P: Principal>(
         }
     }
     inverses
+}
+
+async fn resolve_lookup(
+    pg: &PgPool,
+    lookup: &crate::dyn_compat::ErasedLookup,
+    foreign: &crate::impact::ForeignKey,
+) -> Result<BTreeSet<KeyBytes>, EngineError> {
+    let mut conn = pg.acquire().await.map_err(EngineError::from)?;
+    lookup(&mut conn, foreign).await
 }
 
 pub(crate) fn route<P: Principal>(
@@ -198,7 +224,7 @@ fn route_impact<P: Principal>(
                             }
                         }
                     }
-                    ErasedInverse::None => {}
+                    ErasedInverse::Lookup(_) | ErasedInverse::None => {}
                 }
                 if let Some(query) = window.shape.query()
                     && query.interest().intersects(impact)

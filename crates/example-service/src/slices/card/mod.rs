@@ -35,9 +35,6 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
     engine
         .register_reaction::<wire::CardDeadline, _, _>("card-deadline", reactions::card_deadline)?;
     engine.register_cron(cron::PurgeDoneCards)?;
-    // One aggregate, two capability fragments: each derives its own root fields
-    // and owned object types from its `#[Object]` impls, and both name the
-    // "card" aggregate so they share `CardView`.
     engine.register_schema_slice(
         service_engine::graphql::SliceFragment::derive::<
             graphql::CardItemQuery,

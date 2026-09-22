@@ -21,7 +21,7 @@ async fn erase_removes_a_person_across_every_slice() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$n:String!){createBoard(id:$id,name:$n,isPublic:false){success}}",
+            "mutation($id:UUID!,$n:String!){exampleCreateBoard(id:$id,name:$n,isPublic:false){success}}",
             serde_json::json!({ "id": board, "n": "Owned" }),
         )
         .await);
@@ -29,7 +29,7 @@ async fn erase_removes_a_person_across_every_slice() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$a:Int!){recordEntry(id:$id,amount:$a){success}}",
+            "mutation($id:UUID!,$a:Int!){exampleRecordEntry(id:$id,amount:$a){success}}",
             serde_json::json!({ "id": ledger, "a": 5 }),
         )
         .await);
@@ -107,7 +107,7 @@ async fn a_scheduled_reaction_fires_the_card_deadline_across_pods() {
     ok(&world
         .gql(
             &pass,
-            "mutation($id:UUID!,$s:Int!){scheduleCardDeadline(id:$id,inSeconds:$s){success}}",
+            "mutation($id:UUID!,$s:Int!){exampleScheduleCardDeadline(id:$id,inSeconds:$s){success}}",
             serde_json::json!({ "id": card, "s": 1 }),
         )
         .await);
@@ -138,7 +138,7 @@ async fn a_cron_purges_done_cards_on_the_leader() {
         ok(&world
             .gql(
                 &pass,
-                "mutation($id:UUID!){advanceCard(id:$id){success}}",
+                "mutation($id:UUID!){exampleAdvanceCard(id:$id){success}}",
                 serde_json::json!({ "id": card }),
             )
             .await);
@@ -167,7 +167,7 @@ async fn a_bulk_import_creates_every_card_in_one_transaction() {
     ok(&world
         .gql(
             &pass,
-            "mutation($b:UUID!,$t:[String!]!){importCards(boardId:$b,titles:$t){success}}",
+            "mutation($b:UUID!,$t:[String!]!){exampleImportCards(boardId:$b,titles:$t){success}}",
             serde_json::json!({ "b": board, "t": titles }),
         )
         .await);
@@ -175,11 +175,11 @@ async fn a_bulk_import_creates_every_card_in_one_transaction() {
     let cards = world
         .gql(
             &pass,
-            "query($b:UUID!){cards(boardId:$b){id title}}",
+            "query($b:UUID!){exampleCards(boardId:$b){id title}}",
             serde_json::json!({ "b": board }),
         )
         .await;
-    let imported = ok(&cards)["cards"].as_array().unwrap().len();
+    let imported = ok(&cards)["exampleCards"].as_array().unwrap().len();
     assert_eq!(imported, titles.len(), "every bulk row was written");
 
     world.cleanup().await;

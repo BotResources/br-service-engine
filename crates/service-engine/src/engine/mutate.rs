@@ -4,7 +4,7 @@ use futures_util::future::BoxFuture;
 
 use crate::engine::Engine;
 use crate::error::EngineError;
-use crate::pipeline::{Bulk, Mutation, MutationExecutor, MutationInput};
+use crate::pipeline::{Bulk, Mutation, MutationExecutor, MutationInput, Policies};
 use crate::principal::Principal;
 use crate::transport::ImpactTransport;
 
@@ -37,7 +37,11 @@ impl<P: Principal> Engine<P> {
             self.transport.clone() as Arc<dyn ImpactTransport>,
             self.accumulators.clone(),
             std::sync::Arc::new(self.offers.clone()),
-            std::sync::Arc::new(self.post_save.clone()),
+            std::sync::Arc::new(Policies {
+                save: self.post_save.clone(),
+                delete: self.post_delete.clone(),
+                upload: self.post_upload.clone(),
+            }),
             self.presence.handle(),
             self.blobs.maybe_handle(),
             self.config.lock_timeout,

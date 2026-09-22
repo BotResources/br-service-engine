@@ -41,10 +41,12 @@ impl OfferLeader {
         match lease {
             Some(lease) => {
                 tx.commit().await?;
+                crate::observe::record_leader(crate::observe::LEADER_OFFER, name.as_str(), true);
                 Ok(Some(lease))
             }
             None => {
                 let _ = tx.rollback().await;
+                crate::observe::record_leader(crate::observe::LEADER_OFFER, name.as_str(), false);
                 Ok(None)
             }
         }
@@ -55,8 +57,10 @@ impl OfferLeader {
         conn: &mut PgConnection,
         lease: &mut Lease,
     ) -> Result<bool, RelayError> {
-        leader::renew_slot(conn, lease, self.lease)
+        let held = leader::renew_slot(conn, lease, self.lease)
             .await
-            .map_err(engine)
+            .map_err(engine)?;
+        crate::observe::record_leader(crate::observe::LEADER_OFFER, lease.name().as_str(), held);
+        Ok(held)
     }
 }

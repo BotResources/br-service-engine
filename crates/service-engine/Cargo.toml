@@ -1,7 +1,7 @@
 [package]
 name = "service-engine"
 version.workspace = true
-description = "Reactive personalized delivery and process skeleton for BotResources services"
+description = "Reactive personalized delivery and process skeleton for services built on br-service-engine"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -20,8 +20,9 @@ br-core-auth = { workspace = true }
 br-core-integration = { workspace = true }
 br-core-scope = { workspace = true }
 br-scope-declaration-contract = { workspace = true }
+br-util-axum-readiness = { workspace = true }
 br-util-observability = { workspace = true }
-br-util-postgres = { workspace = true }
+br-util-postgres = { workspace = true, features = ["migrate"] }
 bytes = { workspace = true }
 chrono = { workspace = true }
 croner = { workspace = true }
@@ -29,6 +30,7 @@ futures-channel = { workspace = true }
 futures-util = { workspace = true }
 hmac = { workspace = true }
 metrics = { workspace = true }
+pastey = { workspace = true }
 reqwest = { workspace = true }
 rusty-s3 = { workspace = true }
 serde = { workspace = true }

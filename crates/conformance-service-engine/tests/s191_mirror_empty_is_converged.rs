@@ -1,6 +1,3 @@
-//! Converged means bound, fully read once, and watched from the revision that
-//! read reached. Content is not a readiness input: a prefix that reads empty is
-//! a converged prefix with nothing in it, and `known_*` follows it to empty.
 mod mirror_support;
 
 use std::sync::Arc;
@@ -78,8 +75,6 @@ async fn s191_retracting_the_last_key_removes_a_row_keyed_only_by_the_retracted_
     );
     mirror.reconcile().await.expect("an empty boot converges");
 
-    // The projection key is in the value, never in the KV key, so a retract
-    // carries nothing the projector could key off after the value is gone.
     let id = Uuid::now_v7();
     let watching = tokio::spawn(mirror.watch());
     publish(&fabric, "catalog/arbitrary-source-key", id, "current").await;
@@ -161,8 +156,6 @@ async fn s191_a_standby_on_an_empty_bucket_waits_for_the_leaders_committed_bound
     db.cleanup().await;
 }
 
-/// The negative is tied to a condition rather than to a timer: for as long as
-/// no leader has committed a boundary, a standby must not report converged.
 async fn pending_while_uncommitted(
     pool: &PgPool,
     waiting: &tokio::task::JoinHandle<Result<(), EngineError>>,

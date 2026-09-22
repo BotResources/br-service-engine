@@ -120,6 +120,16 @@ pub enum EngineError {
         prefix: &'static str,
     },
 
+    #[error(
+        "mirror {mirror} requires key {key}, which is outside its consumed prefix {prefix}; a \
+         required key must live under a prefix the mirror consumes"
+    )]
+    RequiredKeyOutsidePrefix {
+        mirror: MirrorName,
+        prefix: &'static str,
+        key: &'static str,
+    },
+
     #[error("chunk sequence {seq} is above {max}, the largest a bigint column stores faithfully")]
     ChunkSeqOutOfRange { seq: u64, max: u64 },
 
@@ -238,6 +248,42 @@ pub enum EngineError {
     #[error("invalid role name: {0}")]
     InvalidRoleName(String),
 
+    #[error(
+        "invalid schema name {0}: a library schema must be a lowercase Postgres identifier and \
+         may not be public or service_engine"
+    )]
+    InvalidSchemaName(String),
+
+    #[error("two libraries contribute the same name or schema: {name}")]
+    DuplicateLibrary { name: String },
+
+    #[error(
+        "migration bands overlap between {first} and {second}; every library band and the engine's \
+         reserved range must be pairwise disjoint"
+    )]
+    MigrationBandOverlap {
+        first: &'static str,
+        second: &'static str,
+    },
+
+    #[error("migration {version} of library {owner} falls outside the band the library declares")]
+    MigrationOutsideBand { owner: &'static str, version: i64 },
+
+    #[error(
+        "library {library} created relation {object} outside its declared schema; a library owns \
+         exactly one schema and may not touch public or another library's"
+    )]
+    LibraryMigrationEscapedSchema {
+        library: &'static str,
+        object: String,
+    },
+
+    #[error(
+        "service migration {version} falls inside the reserved band of {owner}; service migrations \
+         must sit outside every reserved band"
+    )]
+    ServiceMigrationInReservedBand { version: i64, owner: &'static str },
+
     #[error(transparent)]
     Transport(#[from] TransportError),
 
@@ -268,6 +314,27 @@ pub enum EngineError {
     #[error("blob kind {kind} is used but was never registered with register_blobs")]
     BlobKindUnregistered { kind: &'static str },
 
+    #[error(
+        "a verified upload of blob kind {kind} expects {size} bytes, over the {max_bytes}-byte \
+         policy ceiling; the expectation is refused before any presign is minted"
+    )]
+    BlobOverPolicy {
+        kind: &'static str,
+        size: u64,
+        max_bytes: u64,
+    },
+
+    #[error(
+        "blob kind {kind} sets orphan_after {orphan_after:?}, shorter than the upload TTL \
+         {upload_ttl:?}; an upload that lands after an incomplete row is reaped would orphan an \
+         object no sweep sees, so the kind is refused at bind"
+    )]
+    BlobOrphanWindowTooShort {
+        kind: &'static str,
+        orphan_after: Duration,
+        upload_ttl: Duration,
+    },
+
     #[error("presence type `{presence}` is used but was never registered with register_presence")]
     PresenceNotRegistered { presence: String },
 
@@ -291,8 +358,20 @@ pub enum EngineError {
     )]
     UndeclaredSchemaMember { member: String },
 
-    #[error("a post-save policy refused the write with reason {code}")]
+    #[error("a policy refused the write with reason {code}")]
     PolicyRefused { code: &'static str },
+
+    #[error(
+        "create refused: an aggregate already exists under key {key} in store {store}; \
+         a creator-generated id is used once and the engine never overwrites through create"
+    )]
+    KeyReused { store: &'static str, key: String },
+
+    #[error(
+        "store {store} does not implement Persistence::delete, so the engine cannot hard-delete \
+         one of its aggregates through cx.delete"
+    )]
+    DeleteUnsupported { store: &'static str },
 
     #[error(
         "a slice declared aggregate `{aggregate}` subject to a post-save policy, but no slice \
@@ -310,6 +389,32 @@ pub enum EngineError {
     #[error("the composed graphql schema could not be parsed for slice verification: {detail}")]
     SchemaParse { detail: String },
 
+    #[error("root prefix {value:?} is invalid: it {reason}")]
+    RootPrefixInvalid { value: String, reason: &'static str },
+
+    #[error(
+        "a schema slice is registered but no root prefix is declared; compose_service! must set \
+         `prefix =`, and a service that hand-registers fragments must call declare_root_prefix \
+         before run"
+    )]
+    RootPrefixUndeclared,
+
+    #[error(
+        "the root prefix is declared as {first:?} and again as {second:?}; a service has one root \
+         prefix"
+    )]
+    RootPrefixRedeclared { first: String, second: String },
+
+    #[error(
+        "slice {slice} exposes the graphql root field `{field}`, which is not under the declared \
+         root prefix `{prefix}`; every root field of a service must be `<prefix><UpperName>`"
+    )]
+    RootFieldOutsidePrefix {
+        slice: &'static str,
+        field: String,
+        prefix: String,
+    },
+
     #[error(
         "no live session {session} on this pod, so its window cannot be paged; a page request \
          must be issued over the session's own connection, which pins it to the pod that holds it"
@@ -320,5 +425,16 @@ pub enum EngineError {
     NoSuchWindow {
         session: SessionId,
         projector: ProjectorName,
+    },
+
+    #[error(
+        "the store is not fully migrated (engine set pending: {engine}, pending libraries: \
+         {libraries:?}, service set pending: {service}); serve refuses to run until migrate has \
+         applied the engine, library and service sets to the shared ledger"
+    )]
+    MigrationsPending {
+        engine: bool,
+        libraries: Vec<&'static str>,
+        service: bool,
     },
 }

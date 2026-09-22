@@ -1,14 +1,3 @@
-//! Multi-pod mirror (issue #126 §F). Two engine instances of the example service share
-//! one Postgres and one NATS. The pod that boots first takes the mirror lease and is the
-//! leader: it projects the consumed roster. A second pod converges as a standby — it
-//! reaches readiness from the KV bucket alone, with no RPC to the leader. When the leader
-//! is rolled out, the standby takes the expired lease and projects a person published
-//! *after* the leader died, resuming its watch from an already-current shadow with no reload.
-//!
-//! That exactly one pod projects while both are alive is proven at the library level by
-//! `s102` with per-pod transports; a shared database cannot tell which pod wrote a row, so
-//! this black-box scenario proves the binary integration — leader projects, standby reaches
-//! readiness, failover resumes the watch — rather than re-proving single-writer exclusivity.
 mod blackbox_support;
 
 use std::time::{Duration, Instant};
@@ -18,8 +7,6 @@ use example_contract::PublishedPerson;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Short enough that the leader's lease expires inside the failover wait once it stops
-/// renewing, rather than after the 30 s production default.
 const LEASE: Duration = Duration::from_secs(1);
 const BEAT: Duration = Duration::from_millis(200);
 const WITHIN: Duration = Duration::from_secs(20);
@@ -29,12 +16,42 @@ async fn await_projected(pool: &PgPool, id: Uuid, note: &str) {
     let deadline = Instant::now() + WITHIN;
     loop {
         let known: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM known_persons WHERE user_id = $1")
+            sqlx::query_scalar("SELECT count(*) FROM roster.known_persons WHERE user_id = $1")
                 .bind(id)
                 .fetch_one(pool)
                 .await
                 .expect("read the known_persons projection");
         if known == 1 {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{note}");
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+async fn mirror_leader_gauge(base_url: &str) -> Option<f64> {
+    let text = reqwest::Client::new()
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    text.lines()
+        .filter(|line| {
+            line.starts_with("service_engine_leader{") && line.contains("kind=\"mirror\"")
+        })
+        .filter_map(|line| line.rsplit(' ').next().and_then(|v| v.parse::<f64>().ok()))
+        .fold(None, |acc, value| {
+            Some(acc.map_or(value, |m: f64| m.max(value)))
+        })
+}
+
+async fn await_mirror_leader(base_url: &str, want: f64, note: &str) {
+    let deadline = Instant::now() + WITHIN;
+    loop {
+        if mirror_leader_gauge(base_url).await == Some(want) {
             return;
         }
         assert!(Instant::now() < deadline, "{note}");
@@ -52,7 +69,6 @@ fn person(id: Uuid, local: &str) -> PublishedPerson {
 
 #[tokio::test]
 async fn bb11_the_leader_projects_the_standby_converges_and_takes_over_on_lease_loss() {
-    // Pod A boots alone, so it takes the mirror lease and leads.
     let mut world = World::start_with_mirror(
         "bb11-leader",
         MirrorBounds {
@@ -62,7 +78,6 @@ async fn bb11_the_leader_projects_the_standby_converges_and_takes_over_on_lease_
     )
     .await;
 
-    // The leader projects a person published to the roster.
     let first = Uuid::now_v7();
     example_twin::publish_person(&world.nats, &person(first, "one"))
         .await
@@ -73,10 +88,13 @@ async fn bb11_the_leader_projects_the_standby_converges_and_takes_over_on_lease_
         "the mirror leader never projected the first person",
     )
     .await;
+    await_mirror_leader(
+        world.base_url(),
+        1.0,
+        "the mirror leader never reported itself as the leader of its loop on /metrics",
+    )
+    .await;
 
-    // A second pod converges as a standby: spawn_pod_with_mirror gates on /readyz 200, and
-    // the mirror is a readiness input, so reaching ready means its shadow is current — it
-    // converged from the KV bucket with no RPC to the leader.
     let standby = world
         .spawn_pod_with_mirror(
             "bb11-standby",
@@ -86,12 +104,15 @@ async fn bb11_the_leader_projects_the_standby_converges_and_takes_over_on_lease_
             },
         )
         .await;
+    await_mirror_leader(
+        standby.base_url(),
+        0.0,
+        "the standby reported itself as leader on /metrics while the leader was still alive",
+    )
+    .await;
 
-    // The leader is rolled out from under the fleet.
     world.shutdown_service();
 
-    // A person published after the leader is gone is projected by the standby: it took the
-    // expired lease and resumed its watch from its already-current shadow, without a reload.
     let second = Uuid::now_v7();
     example_twin::publish_person(&world.nats, &person(second, "two"))
         .await
@@ -101,6 +122,12 @@ async fn bb11_the_leader_projects_the_standby_converges_and_takes_over_on_lease_
         second,
         "the standby never took over the expired lease to project the person published after \
          the leader died",
+    )
+    .await;
+    await_mirror_leader(
+        standby.base_url(),
+        1.0,
+        "the standby never reported taking leadership on /metrics after the leader died",
     )
     .await;
 

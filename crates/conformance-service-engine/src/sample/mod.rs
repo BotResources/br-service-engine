@@ -1,5 +1,7 @@
 pub mod assignment;
 pub mod blob;
+pub mod blob_boot;
+pub mod blob_verified;
 pub mod blob_view;
 pub mod counter;
 pub mod cron;
@@ -11,6 +13,8 @@ pub mod erase;
 pub mod gate;
 pub mod gated;
 pub mod graphql;
+pub mod library;
+pub mod linked;
 pub mod mirror;
 pub mod note;
 pub mod offer;
@@ -30,6 +34,7 @@ pub mod stream;
 pub mod titles;
 pub mod transport;
 pub mod widget;
+pub mod widget_tag;
 
 use sqlx::PgPool;
 use sqlx::migrate::{MigrateError, Migrator};
@@ -47,8 +52,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), MigrateError> {
 pub const TABLES: &[&str] = &[
     "sample_member",
     "sample_assignment",
+    "sample_assignment_link",
     "sample_note",
-    "integration_outbox",
     "sample_relay_row",
     "sample_relay_claim",
     "sample_kv_pending",
@@ -69,11 +74,14 @@ pub const TABLES: &[&str] = &[
     "sample_erase_memo_fact",
     "sample_erase_ledger_event",
     "sample_erase_ledger_snapshot",
+    "sample_widget_tag",
 ];
 
 pub use mirror::{
-    DIRECTORY_MIRROR, SampleDirectory, SamplePublishedUser, backfills, directory_mirror,
-    directory_mirror_handle, known_users, publish_roster, retract_user,
+    DIRECTORY_MIRROR, REQUIRED_USER_KEY, SampleDirectory, SamplePublishedUser, backfills,
+    directory_mirror, directory_mirror_handle, known_users, mirror_dead_letters,
+    publish_offer_manifest, publish_required_user, publish_roster, publish_versioned_user,
+    read_offer_manifest, required_key_mirror, retract_required_user, retract_user, user_prefix,
 };
 
 pub use counter::{
@@ -102,6 +110,13 @@ pub use blob::{
     AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, DocRow, DocStore, RepointDoc,
     attach_doc, attach_owned_doc, delete_doc, detach_doc, repoint_doc,
 };
+pub use blob_boot::{
+    boot_blob_fault_engine, boot_blob_policy_engine, boot_unhonoured_upload_seam_engine,
+};
+pub use blob_verified::{
+    AttachVerifiedDoc, AttachmentUploaded, attach_verified_doc, fault_on_upload,
+    impact_doc_on_upload, refuse_upload,
+};
 pub use blob_view::{Doc, DocProjector, DocView};
 pub use engine::{
     FAST_PRESENCE_TTL, SAMPLE_JOB, SAMPLE_RELAY, SLOW_PRESENCE_TTL, boot_dual_presence_engine,
@@ -109,8 +124,10 @@ pub use engine::{
 };
 pub use engine_persistence::{boot_persistence_engine, boot_serialization_engine};
 pub use engine_pipeline::{
-    boot_blob_engine, boot_offer_engine, boot_offer_engine_leased, boot_offer_engine_reconciling,
-    boot_panic_engine, boot_pipeline_engine, boot_policy_engine, boot_unhonoured_seam_engine,
+    boot_blob_engine, boot_delete_policy_engine, boot_offer_engine, boot_offer_engine_leased,
+    boot_offer_engine_reconciling, boot_offer_trigger_engine, boot_panic_engine,
+    boot_pipeline_engine, boot_policy_engine, boot_transition_policy_engine,
+    boot_unhonoured_seam_engine,
 };
 
 pub use assignment::{
@@ -122,10 +139,11 @@ pub use gated::{
     AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, VisibleAssignments,
     reasons,
 };
+pub use linked::{LINK_NAMESPACE, LinkedAssignments, link_assignment};
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use offer::{
-    MintThenReject, PublishedWidget, WidgetOffer, mint_then_reject, offer_dirty_keys,
-    published_widget, seed_bucket, widget_key,
+    MintThenReject, PublishedWidget, WIDGET_OFFER_PREFIX, WidgetOffer, mint_then_reject,
+    offer_dirty_keys, published_widget, seed_bucket, widget_key,
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use paged::{
@@ -156,3 +174,6 @@ pub use transport::{
     RecordingTransport, SAMPLE_CHANNEL, StagingGate, StagingTransport, staged_impacts,
 };
 pub use widget::{Widget, WidgetFacts, WidgetProjector, WidgetRow, WidgetStore, WidgetView};
+pub use widget_tag::{
+    DeleteWidgetTag, SetWidgetTag, WidgetTag, WidgetTagStore, delete_widget_tag, set_widget_tag,
+};

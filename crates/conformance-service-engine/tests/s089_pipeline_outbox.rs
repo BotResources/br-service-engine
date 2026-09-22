@@ -9,11 +9,13 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 async fn outbox_status(pool: &PgPool, subject_like: &str) -> Option<String> {
-    sqlx::query_scalar("SELECT status FROM integration_outbox WHERE subject LIKE $1 LIMIT 1")
-        .bind(subject_like)
-        .fetch_optional(pool)
-        .await
-        .expect("read the outbox status")
+    sqlx::query_scalar(
+        "SELECT status FROM service_engine.integration_outbox WHERE subject LIKE $1 LIMIT 1",
+    )
+    .bind(subject_like)
+    .fetch_optional(pool)
+    .await
+    .expect("read the outbox status")
 }
 
 #[tokio::test]

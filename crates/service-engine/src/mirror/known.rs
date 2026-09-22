@@ -1,24 +1,12 @@
-//! The declarative half of the mirror kit: a `known_*` row that states its
-//! table, key columns and value columns, and lets the engine generate the
-//! upsert and the delete. A slice that uses it writes no `format!` SQL against a
-//! raw connection; the manual [`Known`](super::projection::Known) /
-//! [`KnownScope`](super::projection::KnownScope) impls remain the escape hatch
-//! for a row whose write is not a plain single-key upsert (a membership set
-//! deleted with `RETURNING`, a column type outside [`Bind`]).
-
-use sqlx::{PgConnection, Postgres, QueryBuilder};
+use sqlx::{PgConnection, Postgres, QueryBuilder, Row};
 
 use crate::error::EngineError;
 
-/// A column name paired with the value bound to it. The name is a code
-/// identifier, never user input, so it is interpolated into the SQL directly;
-/// the value is bound as a parameter.
 pub struct Column {
     pub name: &'static str,
     pub value: Bind,
 }
 
-/// Build a [`Column`] from a name and any value a [`Bind`] accepts.
 pub fn col(name: &'static str, value: impl Into<Bind>) -> Column {
     Column {
         name,
@@ -26,8 +14,6 @@ pub fn col(name: &'static str, value: impl Into<Bind>) -> Column {
     }
 }
 
-/// The column value set a `known_*` fact table draws from. A column outside it
-/// keeps the manual `Known`/`KnownScope` impl.
 #[derive(Clone)]
 pub enum Bind {
     Uuid(uuid::Uuid),
@@ -40,9 +26,20 @@ pub enum Bind {
     Null,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Written {
+    Inserted,
+    Changed,
+    Unchanged,
+}
+
+impl Written {
+    pub fn is_effective(self) -> bool {
+        !matches!(self, Written::Unchanged)
+    }
+}
+
 impl Bind {
-    /// The string the foreign key is built from, so an upsert and a retire of
-    /// the same key produce the same `ForeignKey` a view's `inverse` decodes.
     fn render(&self) -> String {
         match self {
             Bind::Uuid(v) => v.to_string(),
@@ -56,11 +53,6 @@ impl Bind {
         }
     }
 
-    /// Bind this value as one parameter onto the query (or the literal `NULL`),
-    /// with no surrounding punctuation — the caller places the commas or the
-    /// `AND`. The single match from a variant to its `push_bind` lives here,
-    /// shared by the upsert's `VALUES` list and the delete's `WHERE` predicate so
-    /// the two SQL paths cannot drift.
     fn push_bind_to(self, qb: &mut QueryBuilder<'_, Postgres>) {
         match self {
             Bind::Uuid(v) => {
@@ -142,9 +134,6 @@ impl<T: Into<Bind>> From<Option<T>> for Bind {
     }
 }
 
-/// A `known_*` row the engine can write declaratively. `key` and `values`
-/// together are every column of one row; `key` is the conflict target and the
-/// delete predicate, `values` the columns refreshed on conflict.
 pub trait KnownRow: Send + Sync + 'static {
     const TABLE: &'static str;
     const NAMESPACE: &'static str;
@@ -152,15 +141,11 @@ pub trait KnownRow: Send + Sync + 'static {
     fn key(&self) -> Vec<Column>;
     fn values(&self) -> Vec<Column>;
 
-    /// The foreign key the impact carries; the key columns joined by default,
-    /// which matches a retire of the same key.
     fn foreign_key(&self) -> String {
         foreign_key_of(&self.key())
     }
 }
 
-/// The foreign key a set of key columns renders to — shared by an upsert and a
-/// retire so both stage the same `ForeignKey`.
 pub fn foreign_key_of(key: &[Column]) -> String {
     key.iter()
         .map(|c| c.value.render())
@@ -168,12 +153,10 @@ pub fn foreign_key_of(key: &[Column]) -> String {
         .join("/")
 }
 
-/// `INSERT … ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, or
-/// `DO NOTHING` when the row is all key.
 pub(super) async fn upsert<R: KnownRow>(
     conn: &mut PgConnection,
     row: &R,
-) -> Result<(), EngineError> {
+) -> Result<Written, EngineError> {
     let key = row.key();
     let values = row.values();
     let key_names: Vec<&'static str> = key.iter().map(|c| c.name).collect();
@@ -209,16 +192,39 @@ pub(super) async fn upsert<R: KnownRow>(
         qb.push(" DO NOTHING");
     } else {
         qb.push(" DO UPDATE SET ");
-        let mut sets = qb.separated(", ");
+        {
+            let mut sets = qb.separated(", ");
+            for name in &value_names {
+                sets.push(format!("{name} = EXCLUDED.{name}"));
+            }
+        }
+        qb.push(" WHERE ");
+        let mut first = true;
         for name in &value_names {
-            sets.push(format!("{name} = EXCLUDED.{name}"));
+            if !first {
+                qb.push(" OR ");
+            }
+            first = false;
+            qb.push(format!(
+                "{R}.{name} IS DISTINCT FROM EXCLUDED.{name}",
+                R = R::TABLE
+            ));
         }
     }
-    qb.build().execute(conn).await?;
-    Ok(())
+    qb.push(" RETURNING (xmax = 0) AS inserted");
+    let outcome = qb.build().fetch_optional(conn).await?;
+    Ok(match outcome {
+        None => Written::Unchanged,
+        Some(row) => {
+            if row.try_get::<bool, _>("inserted")? {
+                Written::Inserted
+            } else {
+                Written::Changed
+            }
+        }
+    })
 }
 
-/// `DELETE FROM table WHERE key = $…`.
 pub(super) async fn delete_by_key<R: KnownRow>(
     conn: &mut PgConnection,
     key: Vec<Column>,

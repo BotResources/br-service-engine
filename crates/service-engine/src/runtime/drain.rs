@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
-use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 
 use crate::error::TransportError;
 use crate::impact::TransportEvent;
+use crate::stop::Stop;
 
 type Item = Result<TransportEvent, TransportError>;
 
@@ -22,11 +22,10 @@ pub(super) fn receiver_stream(receiver: mpsc::Receiver<Item>) -> BoxStream<'stat
 pub(super) async fn drain_listener(
     mut source: BoxStream<'static, Item>,
     sink: mpsc::Sender<Item>,
-    stop: Arc<Notify>,
+    stop: Arc<Stop>,
 ) {
-    let stopping = stop.notified();
+    let stopping = stop.stopped();
     tokio::pin!(stopping);
-    stopping.as_mut().enable();
     let mut owe_marker = false;
     let mut stopped = false;
     loop {
@@ -98,7 +97,7 @@ mod tests {
     async fn a_burst_larger_than_the_channel_drops_the_overflow_and_signals_one_reconnect() {
         let (sink, mut receiver) = mpsc::channel(2);
         let source = futures_util::stream::iter(burst(50)).boxed();
-        let stop = Arc::new(Notify::new());
+        let stop = Stop::new();
 
         let drained = tokio::spawn(drain_listener(source, sink, stop));
 
@@ -132,7 +131,7 @@ mod tests {
     async fn a_stream_inside_the_channel_is_forwarded_untouched_with_no_loss_signal() {
         let (sink, mut receiver) = mpsc::channel(64);
         let source = futures_util::stream::iter(burst(8)).boxed();
-        let stop = Arc::new(Notify::new());
+        let stop = Stop::new();
 
         let drained = tokio::spawn(drain_listener(source, sink, stop));
 
@@ -159,12 +158,12 @@ mod tests {
         let source = futures_util::stream::iter(burst(2))
             .chain(futures_util::stream::pending())
             .boxed();
-        let stop = Arc::new(Notify::new());
+        let stop = Stop::new();
 
         let drained = tokio::spawn(drain_listener(source, sink, stop.clone()));
 
         tokio::task::yield_now().await;
-        stop.notify_one();
+        stop.stop();
 
         tokio::time::timeout(std::time::Duration::from_secs(5), drained)
             .await
@@ -176,10 +175,10 @@ mod tests {
     async fn the_stop_signal_ends_the_drain_even_while_the_source_is_idle() {
         let (sink, _receiver) = mpsc::channel::<Item>(4);
         let source = futures_util::stream::pending().boxed();
-        let stop = Arc::new(Notify::new());
+        let stop = Stop::new();
 
         let drained = tokio::spawn(drain_listener(source, sink, stop.clone()));
-        stop.notify_one();
+        stop.stop();
 
         tokio::time::timeout(std::time::Duration::from_secs(5), drained)
             .await

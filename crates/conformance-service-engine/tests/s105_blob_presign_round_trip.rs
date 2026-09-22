@@ -76,7 +76,10 @@ async fn s105_a_presigned_upload_then_download_round_trips_the_bytes_through_rea
         .await
         .expect("read the blob reference");
     let download = reader
-        .download_url(BlobRef(reference))
+        .download_url(
+            BlobRef(reference),
+            service_engine::blobs::Disposition::Attachment,
+        )
         .await
         .expect("presign a download")
         .expect("the reference resolves to an object");

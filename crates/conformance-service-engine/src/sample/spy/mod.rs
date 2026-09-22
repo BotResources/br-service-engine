@@ -11,7 +11,7 @@ use service_engine::principal::Principal;
 use service_engine::projector::{Emission, LoadScope, Projector};
 use service_engine::session::WindowParams;
 use service_engine::wire::Noun;
-use service_engine::{CohortKey, KeyBytes};
+use service_engine::{Cohort, CohortKey, KeyBytes};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -245,7 +245,7 @@ impl Projector for SpyAssignments {
     fn cohort(&self, principal: &SamplePrincipal) -> CohortKey {
         match self.cohort {
             CohortMode::PerPrincipal => CohortKey::principal(principal.id()),
-            CohortMode::PerTenant => CohortKey::of(&[principal.tenant()]),
+            CohortMode::PerTenant => Cohort::uuid("tenant", principal.tenant()).key(),
         }
     }
 

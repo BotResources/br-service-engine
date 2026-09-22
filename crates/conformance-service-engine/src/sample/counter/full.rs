@@ -17,7 +17,7 @@ impl Noun for FullCounterNoun {
     const NAME: NounName = NounName::from_static("counter_full");
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FullCounter(pub CounterState);
 
 pub struct FullCounterStore;

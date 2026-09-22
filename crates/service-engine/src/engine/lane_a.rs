@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::accumulator::AccumulatorRuntime;
@@ -8,10 +7,11 @@ use crate::accumulator::lane_a_loop::spawn_lane_a;
 use crate::config::EngineConfig;
 use crate::error::EngineError;
 use crate::nats::Nats;
+use crate::stop::Stop;
 
 pub(crate) struct LaneATasks {
-    pub stop_ingress: Arc<Notify>,
-    pub stop_purge: Arc<Notify>,
+    pub stop_ingress: Arc<Stop>,
+    pub stop_purge: Arc<Stop>,
     pub ingress_task: Option<JoinHandle<()>>,
     pub purge_task: Option<JoinHandle<()>>,
 }
@@ -30,8 +30,8 @@ pub(crate) async fn spawn_if_registered(
     accumulators: &Arc<AccumulatorRuntime>,
     health: crate::inbound::InboundHealth,
 ) -> Result<LaneATasks, EngineError> {
-    let stop_ingress = Arc::new(Notify::new());
-    let stop_purge = Arc::new(Notify::new());
+    let stop_ingress = Stop::new();
+    let stop_purge = Stop::new();
     let (ingress_task, purge_task) = if accumulators.registered() > 0 {
         let Some(service) = config.service.clone() else {
             return Err(EngineError::AccumulatorWithoutService);

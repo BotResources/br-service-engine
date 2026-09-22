@@ -2,7 +2,7 @@ mod create;
 mod ttl;
 mod watch;
 
-pub use watch::{KvEvent, KvWatch};
+pub use watch::{KvEvent, KvWatch, Watched};
 
 use std::marker::PhantomData;
 
@@ -169,8 +169,6 @@ where
         ))
     }
 
-    /// Every entry under the prefix with the revision it was read at, so a
-    /// consumer that also watches the bucket can tell which of the two is newer.
     pub async fn entries_with_revisions(
         &self,
         prefix: &KvPrefix,

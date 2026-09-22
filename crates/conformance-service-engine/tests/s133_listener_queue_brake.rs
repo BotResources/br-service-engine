@@ -12,10 +12,10 @@ use service_engine::delta::Delta;
 use service_engine::housekeeping::beat::Beat;
 use service_engine::housekeeping::mirror::MirrorSupervisor;
 use service_engine::housekeeping::ready::ReadinessAssembly;
+use service_engine::stop::Stop;
 use service_engine::transport::{ImpactTransport, PgListenNotify};
 use service_engine::{Readiness, ReadinessHandle};
 use sqlx::PgPool;
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 const CHANNEL: &str = "se_s133_impact";
@@ -71,7 +71,7 @@ async fn s133_queue_usage_past_the_threshold_takes_the_pod_down_then_up_with_a_r
         .with_transport(transport.clone())
         .with_readiness(assembly);
 
-    let stop_render = Arc::new(Notify::new());
+    let stop_render = Stop::new();
     let running = tokio::spawn(engine.clone().run(transport.listen(), stop_render.clone()));
 
     beat.tick(&pool).await;
@@ -103,7 +103,7 @@ async fn s133_queue_usage_past_the_threshold_takes_the_pod_down_then_up_with_a_r
         "the brake's close and reconnect surfaced as a transport reconnect"
     );
 
-    stop_render.notify_one();
+    stop_render.stop();
     running.await.expect("the render task stops");
     db.cleanup().await;
 }

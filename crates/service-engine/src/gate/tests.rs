@@ -147,8 +147,6 @@ fn an_affordance_set_serializes_as_a_map_from_action_name_to_verdict() {
 #[test]
 #[should_panic(expected = "SCREAMING_SNAKE_CASE")]
 fn constructing_a_reason_from_a_non_screaming_code_panics() {
-    // `Reason::new` is `const`, so at a `const` site this panic is a compile
-    // error; called at runtime with a bad code it panics, which this asserts.
     let _ = Reason::new("already_closed");
 }
 
@@ -156,13 +154,9 @@ fn constructing_a_reason_from_a_non_screaming_code_panics() {
 fn parse_accepts_screaming_snake_and_refuses_every_other_shape() {
     assert!(Reason::parse("ALREADY_CLOSED").is_ok());
     assert!(Reason::parse("A1_B2").is_ok());
-    // one leading capital then one-or-more capitals/digits/underscores
     assert!(Reason::parse("AB").is_ok());
-    // rejects lower-case, the pre-0.2 convention
     assert!(Reason::parse("already_closed").is_err());
-    // rejects a single character (the `+` demands at least two)
     assert!(Reason::parse("A").is_err());
-    // rejects a leading digit, a leading underscore, punctuation and spaces
     assert!(Reason::parse("1_BAD").is_err());
     assert!(Reason::parse("_BAD").is_err());
     assert!(Reason::parse("NOT-CLOSED").is_err());
@@ -172,12 +166,76 @@ fn parse_accepts_screaming_snake_and_refuses_every_other_shape() {
 
 #[test]
 fn a_reason_decoded_from_the_wire_is_rejected_unless_it_is_screaming_snake() {
-    // the shape a blocked gate carries; a lower-case code from an older peer is
-    // refused at the deserialization boundary rather than trusted.
     let ok: Result<Gate, _> =
         serde_json::from_value(serde_json::json!({ "allowed": false, "reason": "ALREADY_CLOSED" }));
     assert!(ok.is_ok());
     let bad: Result<Gate, _> =
         serde_json::from_value(serde_json::json!({ "allowed": false, "reason": "already_closed" }));
     assert!(bad.is_err());
+}
+
+trait CloserPrincipal {
+    fn may_close(&self) -> bool;
+}
+
+struct TestCloser {
+    scoped: bool,
+}
+
+impl CloserPrincipal for TestCloser {
+    fn may_close(&self) -> bool {
+        self.scoped
+    }
+}
+
+struct Widget<P> {
+    closed: bool,
+    _principal: std::marker::PhantomData<P>,
+}
+
+crate::gated! {
+    generics [P: CloserPrincipal] ;
+    Widget<P>, P ;
+    "close" => fn widget_close(this, principal) {
+        if !principal.may_close() {
+            Gate::blocked(reasons::NO_SCOPE)
+        } else if this.closed {
+            Gate::blocked(reasons::ALREADY_CLOSED)
+        } else {
+            Gate::allowed()
+        }
+    }
+}
+
+#[test]
+fn a_generic_aggregate_gated_over_its_principal_matches_actions_and_affordances() {
+    let widget: Widget<TestCloser> = Widget {
+        closed: false,
+        _principal: std::marker::PhantomData,
+    };
+    let scoped = TestCloser { scoped: true };
+    assert_eq!(
+        <Widget<TestCloser>>::ACTIONS,
+        &[ActionName::from_static("close")]
+    );
+    assert_eq!(widget.widget_close(&scoped), Gate::allowed());
+    assert_eq!(
+        widget.gate(ActionName::from_static("close"), &scoped),
+        Some(Gate::allowed())
+    );
+    check_gates_match_affordances(&widget, &scoped)
+        .expect("the generic gated! arm keeps gate and affordance identical");
+}
+
+#[test]
+fn a_generic_aggregate_blocks_when_its_principal_lacks_the_scope() {
+    let widget: Widget<TestCloser> = Widget {
+        closed: false,
+        _principal: std::marker::PhantomData,
+    };
+    let unscoped = TestCloser { scoped: false };
+    assert_eq!(
+        widget.widget_close(&unscoped).reason().map(|r| r.code()),
+        Some("MISSING_SCOPE")
+    );
 }

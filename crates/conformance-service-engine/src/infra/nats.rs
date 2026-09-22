@@ -106,6 +106,10 @@ impl TestNats {
     }
 
     pub async fn provision(&self) {
+        self.provision_integration(INTEGRATION_MAX_AGE).await;
+    }
+
+    pub async fn provision_integration(&self, max_age: Duration) {
         let js = self.jetstream().await;
         for (name, subject) in [
             (INTEGRATION_CMD, "integration.cmd.>"),
@@ -115,7 +119,7 @@ impl TestNats {
                 name: name.to_string(),
                 subjects: vec![subject.to_string()],
                 duplicate_window: DUPLICATE_WINDOW,
-                max_age: INTEGRATION_MAX_AGE,
+                max_age,
                 ..Default::default()
             })
             .await

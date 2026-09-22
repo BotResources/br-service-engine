@@ -1,0 +1,45 @@
+serviceKey: ""
+
+image:
+  repository: ""
+  tag: ""
+
+port: 8080
+
+replicaCount: 1
+
+topologySpreadEnabled: false
+
+postgres:
+  appRole: ""
+  appSecret:
+    name: ""
+    key: DATABASE_URL
+  ownerSecret:
+    name: ""
+    key: DATABASE_URL_OWNER
+  trustedNetworkHosts: []
+
+nats:
+  url: ""
+
+engine:
+  channel: ""
+
+objectStore:
+  enabled: false
+  endpoint: ""
+  bucket: ""
+  region: ""
+  secret:
+    name: ""
+    accessKeyKey: S3_ACCESS_KEY
+    secretKeyKey: S3_SECRET_KEY
+
+env: []
+
+resources: {}
+
+networkPolicy:
+  enabled: false
+  ingress: []

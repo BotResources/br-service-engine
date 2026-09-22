@@ -13,22 +13,24 @@ use uuid::Uuid;
 const CONFIRMATION_SUBJECT: &str = "integration.evt.sample.widget.created.v1";
 
 async fn outbox_rows(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM integration_outbox")
+    sqlx::query_scalar("SELECT count(*) FROM service_engine.integration_outbox")
         .fetch_one(pool)
         .await
         .expect("count the outbox rows")
 }
 
 async fn published_rows(pool: &PgPool) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM integration_outbox WHERE status = 'PUBLISHED'")
-        .fetch_one(pool)
-        .await
-        .expect("count the published outbox rows")
+    sqlx::query_scalar(
+        "SELECT count(*) FROM service_engine.integration_outbox WHERE status = 'PUBLISHED'",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("count the published outbox rows")
 }
 
 async fn distinct_payload_ids(pool: &PgPool) -> i64 {
     sqlx::query_scalar(
-        "SELECT count(DISTINCT payload->>'event_id') FROM integration_outbox \
+        "SELECT count(DISTINCT payload->>'event_id') FROM service_engine.integration_outbox \
          WHERE subject = $1",
     )
     .bind(CONFIRMATION_SUBJECT)

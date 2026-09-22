@@ -22,6 +22,12 @@ pub enum KvEvent<V> {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Watched<V> {
+    Event(KvEvent<V>),
+    Boundary(u64),
+}
+
 impl KvWatch {
     pub async fn next<V: DeserializeOwned>(&mut self) -> Option<Result<KvEvent<V>, NatsError>> {
         use futures_util::StreamExt;
@@ -40,20 +46,21 @@ impl KvWatch {
     pub async fn next_under<V: DeserializeOwned>(
         &mut self,
         prefix: &KvPrefix,
-    ) -> Option<Result<KvEvent<V>, NatsError>> {
+    ) -> Option<Result<Watched<V>, NatsError>> {
         use futures_util::StreamExt;
-        loop {
-            let entry = match self.inner.next().await {
-                Some(Ok(entry)) => entry,
-                Some(Err(error)) => return Some(Err(watch_error(&error))),
-                None => return None,
-            };
-            if !prefix.matches(&entry.key) {
-                continue;
-            }
-            if let Some(event) = entry_to_event::<V>(entry) {
-                return Some(event);
-            }
+        let entry = match self.inner.next().await {
+            Some(Ok(entry)) => entry,
+            Some(Err(error)) => return Some(Err(watch_error(&error))),
+            None => return None,
+        };
+        let revision = entry.revision;
+        if !prefix.matches(&entry.key) {
+            return Some(Ok(Watched::Boundary(revision)));
+        }
+        match entry_to_event::<V>(entry) {
+            Some(Ok(event)) => Some(Ok(Watched::Event(event))),
+            Some(Err(error)) => Some(Err(error)),
+            None => Some(Ok(Watched::Boundary(revision))),
         }
     }
 }
@@ -89,10 +96,6 @@ impl<V> KvBucket<V> {
         Ok(KvWatch { inner })
     }
 
-    /// Resumes at `revision`. Revision zero has no history to resume from, so it
-    /// degrades to a future-only `watch_all()`: a caller that resumes from zero
-    /// owns the window between its boundary read and this subscription, and must
-    /// re-read the bucket's metadata once the watch exists (the mirror does).
     pub async fn watch_all_from(&self, revision: u64) -> Result<KvWatch, NatsError> {
         if revision == 0 {
             return self.watch_all().await;

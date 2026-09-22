@@ -11,9 +11,6 @@ use super::store::{self, CardAggregate, CardStore};
 use crate::kernel::AppPrincipal;
 
 service_engine::open_access!(
-    /// Cards are scoped to a board through the `BoardWindow` query; access to
-    /// the board is gated by the board surface, so the card list carries no
-    /// cohort gate of its own.
     pub CardsOpenAccess = "cards are scoped by their parent board's window, not by a cohort"
 );
 

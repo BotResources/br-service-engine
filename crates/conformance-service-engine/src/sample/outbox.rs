@@ -50,7 +50,7 @@ pub async fn stage_outbox_row(conn: &mut PgConnection, label: &str) -> Uuid {
 
 pub async fn rewind_to_pending(pool: &PgPool, id: Uuid) {
     sqlx::query(
-        "UPDATE integration_outbox \
+        "UPDATE service_engine.integration_outbox \
          SET status = 'PENDING', attempts = 0, last_error = NULL, published_at = NULL \
          WHERE id = $1",
     )
@@ -61,7 +61,7 @@ pub async fn rewind_to_pending(pool: &PgPool, id: Uuid) {
 }
 
 pub async fn row_status(pool: &PgPool, id: Uuid) -> String {
-    sqlx::query_scalar("SELECT status FROM integration_outbox WHERE id = $1")
+    sqlx::query_scalar("SELECT status FROM service_engine.integration_outbox WHERE id = $1")
         .bind(id)
         .fetch_one(pool)
         .await

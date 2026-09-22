@@ -104,8 +104,6 @@ async fn s144_a_standby_is_not_ready_until_the_watermark_reaches_the_bucket_revi
         "a standby projects nothing; only the leader writes known_users"
     );
 
-    // A real leader, not a hand-written row: the standby waits for the identity
-    // and the sequence its own boot read captured, which only a leader commits.
     directory_mirror()
         .build_led(
             fabric.clone(),

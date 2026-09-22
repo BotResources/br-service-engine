@@ -14,6 +14,33 @@ pub(crate) fn inbound_start_reason(error: &EngineError) -> &'static str {
     }
 }
 
+pub(crate) async fn derive_message_retention(
+    nats: &Nats,
+    subscriptions: &[Subscription],
+    configured: Duration,
+) -> Result<Duration, EngineError> {
+    let streams: BTreeSet<&'static str> = subscriptions
+        .iter()
+        .map(|subscription| subscription.coordinates.stream())
+        .collect();
+    let mut derived = configured;
+    for stream in streams {
+        let max_age = nats.stream_max_age(stream).await?;
+        if max_age.is_zero() {
+            return Err(EngineError::Config(format!(
+                "the {stream} stream has an unlimited max_age, which a message_retention can \
+                 never cover; a durable replays from the start of the stream, so a claim swept \
+                 before its message can still be redelivered would re-run the effect. Bound the \
+                 stream's max_age in gitops"
+            )));
+        }
+        if max_age > derived {
+            derived = max_age;
+        }
+    }
+    Ok(derived)
+}
+
 pub(crate) async fn validate_message_retention(
     nats: &Nats,
     subscriptions: &[Subscription],

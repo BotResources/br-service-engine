@@ -6,7 +6,7 @@ use service_engine::name::NounName;
 use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
 use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
-use service_engine::{BlobRef, CohortKey};
+use service_engine::{BlobRef, Cohort};
 use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
@@ -21,21 +21,16 @@ impl Noun for Reply {
     const NAME: NounName = NounName::from_static("reply");
 }
 
-#[derive(Hash)]
-enum ReplyCohort {
-    Org(Uuid),
-}
-
 impl Visibility for Reply {
     type Row = ReplyRow;
     type Principal = AppPrincipal;
 
     fn cohorts(row: &ReplyRow) -> Cohorts {
-        vec![CohortKey::of(&[ReplyCohort::Org(row.org_id)])]
+        vec![Cohort::uuid("org", row.org_id)]
     }
 
     fn memberships(principal: &AppPrincipal) -> Cohorts {
-        vec![CohortKey::of(&[ReplyCohort::Org(principal.org())])]
+        vec![Cohort::uuid("org", principal.org())]
     }
 }
 
@@ -45,6 +40,7 @@ pub enum ReplyCause {
     Started,
     Completed { chars: usize },
     Attached,
+    AttachmentUploaded,
     CancelRequested,
     Cancelled { chars: usize },
 }
@@ -151,13 +147,7 @@ impl Persistence for ReplyStore {
         conn: &'a mut PgConnection,
         key: &'a Uuid,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query("SELECT id FROM reply WHERE id = $1 FOR UPDATE")
-                .bind(key)
-                .fetch_optional(conn)
-                .await?;
-            Ok(())
-        })
+        Self::row_lock(conn, "reply", key)
     }
 
     fn read_many<'a>(

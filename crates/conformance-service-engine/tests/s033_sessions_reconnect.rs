@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use conformance_service_engine::TestDb;
@@ -7,9 +6,9 @@ use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments, WindowMode};
 use service_engine::delta::Delta;
 use service_engine::impact::{Dims, Impact};
+use service_engine::stop::Stop;
 use service_engine::transport::{ImpactTransport, PgListenNotify};
 use sqlx::PgPool;
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 const CHANNEL: &str = "se_s033_sessions_impact";
@@ -81,7 +80,7 @@ async fn s033_a_transport_reconnect_resets_every_session_and_resumes() {
         .expect("a session opens with its Reset");
     assert_eq!(opening.revision().get(), 1);
 
-    let stop = Arc::new(Notify::new());
+    let stop = Stop::new();
     let running = tokio::spawn(engine.clone().run(transport.listen(), stop.clone()));
 
     stage(&pool, &transport, first, "before the reconnect").await;
@@ -131,7 +130,7 @@ async fn s033_a_transport_reconnect_resets_every_session_and_resumes() {
     );
     assert!(matches!(resumed, Delta::Upsert { .. }));
 
-    stop.notify_one();
+    stop.stop();
     running.await.expect("the render task stops");
     assert!(
         next_delta(&mut stream, SOON).await.is_none(),
@@ -179,7 +178,7 @@ async fn s033_a_query_window_keeps_what_it_discovered_across_a_reconnect() {
         "a Query window has nothing to enumerate until an impact discovers it"
     );
 
-    let stop = Arc::new(Notify::new());
+    let stop = Stop::new();
     let running = tokio::spawn(engine.clone().run(transport.listen(), stop.clone()));
 
     stage(&pool, &transport, watched, "discovered").await;
@@ -198,7 +197,7 @@ async fn s033_a_query_window_keeps_what_it_discovered_across_a_reconnect() {
         "a re-snapshot re-renders what the Query window discovered instead of emptying it"
     );
 
-    stop.notify_one();
+    stop.stop();
     running.await.expect("the render task stops");
     db.cleanup().await;
 }

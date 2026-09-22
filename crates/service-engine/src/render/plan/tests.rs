@@ -37,8 +37,6 @@ fn a_coalesced_delta_carries_the_cause_of_the_last_impact_it_folds() {
 
 #[test]
 fn the_last_impact_that_carries_a_cause_wins_even_when_a_later_one_is_causeless() {
-    // create (cause) -> touch (no cause): the create's cause still surfaces,
-    // because the causeless later impact contributes nothing to attribute.
     let impacts = vec![caused("created"), uncaused()];
     let indices = vec![0, 1];
     let cause = coalesced_cause(Some(&indices), &impacts).expect("the earlier cause survives");
@@ -55,8 +53,6 @@ fn a_causeless_impact_between_two_caused_ones_does_not_shadow_the_last_cause() {
 
 #[test]
 fn last_is_defined_by_frame_arrival_order_not_the_order_indices_were_accumulated() {
-    // The touching indices for one key can be gathered across windows out of
-    // frame order; the cause is still the highest index that carries one.
     let impacts = vec![caused("created"), caused("renamed")];
     let indices = vec![1, 0];
     let cause = coalesced_cause(Some(&indices), &impacts).expect("a cause survives the fold");

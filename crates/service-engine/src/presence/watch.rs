@@ -3,7 +3,6 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use serde_json::Value;
-use tokio::sync::Notify;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::error::{EngineError, TransportError};
@@ -11,6 +10,7 @@ use crate::impact::{Impact, TransportEvent};
 use crate::nats::{KvBucket, KvEvent, Nats};
 use crate::presence::lane::PresenceLane;
 use crate::principal::Principal;
+use crate::stop::Stop;
 
 pub(crate) type PresenceImpacts = UnboundedSender<Result<TransportEvent, TransportError>>;
 
@@ -85,11 +85,10 @@ pub(crate) async fn run_watch<P: Principal>(
     bucket: KvBucket<Value>,
     lanes: Vec<Arc<dyn PresenceLane<P>>>,
     impacts: PresenceImpacts,
-    shutdown: Arc<Notify>,
+    shutdown: Arc<Stop>,
 ) {
-    let stopping = shutdown.notified();
+    let stopping = shutdown.stopped();
     tokio::pin!(stopping);
-    stopping.as_mut().enable();
     let mut was_down = false;
     let mut reseed_pending = false;
     loop {

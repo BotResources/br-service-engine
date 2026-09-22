@@ -1,9 +1,3 @@
-//! A mirror written entirely with the declarative `KnownRow` kit: it consumes
-//! two offers and projects two single-key `known_*` tables (`known_users`,
-//! `known_groups`) with no hand-written SQL in the projector. It proves the
-//! documented path of the mirror kit end to end — a typed multi-offer join into
-//! two tables from an empty start.
-
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
 use service_engine::mirror::{
@@ -96,13 +90,13 @@ impl Project<DeclKey> for DeclarativeProjection {
                         .get(&user_key(id))
                         .cloned()
                     {
-                        Some(user) => {
-                            cx.upsert(KnownUserRow {
+                        Some(user) => cx
+                            .upsert(KnownUserRow {
                                 id,
                                 email: user.email,
                             })
                             .await
-                        }
+                            .map(|_| ()),
                         None => cx.retire::<KnownUserRow>(vec![col("user_id", id)]).await,
                     }
                 }
@@ -112,13 +106,13 @@ impl Project<DeclKey> for DeclarativeProjection {
                         .get(&group_key(id))
                         .cloned()
                     {
-                        Some(group) => {
-                            cx.upsert(KnownGroupRow {
+                        Some(group) => cx
+                            .upsert(KnownGroupRow {
                                 id,
                                 name: group.name,
                             })
                             .await
-                        }
+                            .map(|_| ()),
                         None => cx.retire::<KnownGroupRow>(vec![col("group_id", id)]).await,
                     }
                 }

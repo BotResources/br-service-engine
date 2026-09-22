@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use serde::Serialize;
-use service_engine::CohortKey;
+use service_engine::Cohort;
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gate, Gated, Reason};
 use service_engine::impact::{Deps, Dims, ForeignKey, Impact};
@@ -69,17 +69,14 @@ impl Visibility for AssignmentVisibility {
     type Row = AssignmentRow;
     type Principal = SamplePrincipal;
 
-    // `memberships` reads the caller's tenant, which is the DEP_MEMBERSHIP
-    // principal fact; a live cohort window declares it so a membership change
-    // repopulates the window.
     const DEPS: Deps = Deps::from_bits(1 << DEP_MEMBERSHIP);
 
     fn cohorts(row: &AssignmentRow) -> Cohorts {
-        vec![CohortKey::of(&[row.tenant_id])]
+        vec![Cohort::uuid("tenant", row.tenant_id)]
     }
 
     fn memberships(principal: &SamplePrincipal) -> Cohorts {
-        vec![CohortKey::of(&[principal.tenant()])]
+        vec![Cohort::uuid("tenant", principal.tenant())]
     }
 }
 

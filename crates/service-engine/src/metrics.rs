@@ -27,6 +27,7 @@ pub const DEAD_LETTERS_TOTAL: &str = "service_engine_dead_letters_total";
 pub const OUTBOX_PENDING: &str = "service_engine_outbox_pending";
 pub const OUTBOX_OLDEST_AGE_SECONDS: &str = "service_engine_outbox_oldest_age_seconds";
 pub const DEPENDENCY_UP: &str = "service_engine_dependency_up";
+pub const LEADER: &str = "service_engine_leader";
 
 pub const ALL: &[&str] = &[
     PASS_DURATION_SECONDS,
@@ -56,6 +57,7 @@ pub const ALL: &[&str] = &[
     OUTBOX_PENDING,
     OUTBOX_OLDEST_AGE_SECONDS,
     DEPENDENCY_UP,
+    LEADER,
 ];
 
 pub const LABEL_SERVICE: &str = "service";
@@ -66,6 +68,8 @@ pub const LABEL_OUTCOME: &str = "outcome";
 pub const LABEL_REASON: &str = "reason";
 pub const LABEL_DEPENDENCY: &str = "dependency";
 pub const LABEL_SOURCE: &str = "source";
+pub const LABEL_KIND: &str = "kind";
+pub const LABEL_NAME: &str = "name";
 
 #[cfg(test)]
 mod tests {
@@ -86,5 +90,10 @@ mod tests {
     fn no_engine_metric_name_is_declared_twice() {
         let unique: BTreeSet<_> = ALL.iter().collect();
         assert_eq!(unique.len(), ALL.len());
+    }
+
+    #[test]
+    fn the_leader_gauge_carries_the_engines_prefix() {
+        assert!(LEADER.starts_with(PREFIX));
     }
 }

@@ -14,6 +14,31 @@ use crate::time::Timestamp;
 use crate::transport::ImpactTransport;
 use crate::wire::KeyBytes;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RefusalOrigin {
+    CreatePrecondition,
+    PostSavePolicy,
+    PostDeletePolicy,
+    Upload,
+}
+
+impl RefusalOrigin {
+    pub(crate) fn detail(self) -> &'static str {
+        match self {
+            Self::CreatePrecondition => "a create precondition refused the write",
+            Self::PostSavePolicy => "a post-save policy refused the write",
+            Self::PostDeletePolicy => "a post-delete policy refused the delete",
+            Self::Upload => "a post-upload policy refused the promotion",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct StagedRefusal {
+    pub reason: Reason,
+    pub origin: RefusalOrigin,
+}
+
 pub(crate) struct ScheduledMessage {
     pub at: Timestamp,
     pub source: Source,
@@ -29,10 +54,7 @@ pub(crate) struct Staged {
     pub outbox: Vec<OutboxRecord>,
     pub scheduled_messages: Vec<ScheduledMessage>,
     pub terminal_violation: Option<String>,
-    /// A reason set by a post-save policy that refused the write. The pipeline
-    /// rolls the transaction back and answers this code rather than committing,
-    /// whatever the handler went on to return.
-    pub policy_refusal: Option<Reason>,
+    pub policy_refusal: Option<StagedRefusal>,
     pub offer_dirty: Vec<OfferDirty>,
     pub blob_ops: Vec<BlobRowOp>,
     pub sealed_keys: Vec<(AccumulatorName, KeyBytes)>,
