@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use sqlx::{PgConnection, PgPool, Row};
@@ -14,6 +15,7 @@ use crate::time::Timestamp;
 
 pub const REASON_BLOB_BUCKET: &str = "blobs.bucket";
 pub const REASON_BLOB_UNCONFIGURED: &str = "blobs.unconfigured";
+pub const REASON_BLOB_POLICY: &str = "blobs.policy";
 
 type HeadRow = (String, String, Option<i64>, Option<Vec<u8>>);
 
@@ -75,17 +77,27 @@ pub(crate) async fn orphan_reference(
     Ok(())
 }
 
+pub(crate) fn pending_is_downloadable(has_policy: bool, has_expectation: bool) -> bool {
+    !has_policy && !has_expectation
+}
+
 #[derive(Clone)]
 pub(crate) struct BlobStore {
     object: Arc<ObjectStore>,
     service: Arc<str>,
+    policy_kinds: Arc<BTreeSet<&'static str>>,
 }
 
 impl BlobStore {
-    pub(crate) fn new(object: Arc<ObjectStore>, service: &str) -> Self {
+    pub(crate) fn new(
+        object: Arc<ObjectStore>,
+        service: &str,
+        policy_kinds: Arc<BTreeSet<&'static str>>,
+    ) -> Self {
         Self {
             object,
             service: Arc::from(service),
+            policy_kinds,
         }
     }
 
@@ -114,13 +126,15 @@ impl BlobStore {
         reference: BlobRef,
         disposition: Disposition,
     ) -> Result<Option<DownloadUrl>, EngineError> {
-        let row: Option<(String, String, String, String)> = sqlx::query_as(&format!(
-            "SELECT object_key, state, content_type, file_name FROM {TABLE_BLOB} WHERE id = $1"
-        ))
-        .bind(reference.as_uuid())
-        .fetch_optional(pool)
-        .await?;
-        let Some((object_key, state, content_type, file_name)) = row else {
+        let row: Option<(String, String, String, String, String, Option<i64>)> =
+            sqlx::query_as(&format!(
+                "SELECT object_key, state, content_type, file_name, kind, expected_size \
+                 FROM {TABLE_BLOB} WHERE id = $1"
+            ))
+            .bind(reference.as_uuid())
+            .fetch_optional(pool)
+            .await?;
+        let Some((object_key, state, content_type, file_name, kind, expected_size)) = row else {
             return Ok(None);
         };
         let presign = || {
@@ -129,10 +143,17 @@ impl BlobStore {
         };
         match state.as_str() {
             "uploaded" => Ok(Some(presign())),
-            "pending" => match self.object.head(&object_key).await? {
-                Some(_) => Ok(Some(presign())),
-                None => Ok(None),
-            },
+            "pending" => {
+                let has_policy = self.policy_kinds.contains(kind.as_str());
+                let has_expectation = expected_size.is_some();
+                if !pending_is_downloadable(has_policy, has_expectation) {
+                    return Ok(None);
+                }
+                match self.object.head(&object_key).await? {
+                    Some(_) => Ok(Some(presign())),
+                    None => Ok(None),
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -236,5 +257,26 @@ impl std::fmt::Debug for BlobStore {
         f.debug_struct("BlobStore")
             .field("service", &self.service)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pending_is_downloadable;
+
+    #[test]
+    fn a_pending_row_with_no_policy_and_no_expectation_is_downloadable() {
+        assert!(pending_is_downloadable(false, false));
+    }
+
+    #[test]
+    fn a_post_upload_policy_holds_the_pending_download_until_promotion() {
+        assert!(!pending_is_downloadable(true, false));
+    }
+
+    #[test]
+    fn an_expectation_holds_the_pending_download_until_promotion() {
+        assert!(!pending_is_downloadable(false, true));
+        assert!(!pending_is_downloadable(true, true));
     }
 }

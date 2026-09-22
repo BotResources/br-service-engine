@@ -9,6 +9,7 @@ use crate::offers::OfferStagers;
 use crate::pipeline::{Policies, PolicyRunner};
 use crate::transport::{ImpactTransport, PgListenNotify};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn bind_blobs(
     registry: &BlobRegistry,
     config: &EngineConfig,
@@ -17,9 +18,11 @@ pub(super) async fn bind_blobs(
     accumulators: &Arc<AccumulatorRuntime>,
     offers: &Arc<OfferStagers>,
     policies: &Arc<Policies>,
+    round_log: Option<crate::blobs::ReaperRoundLog>,
 ) -> Result<(Option<BlobHandle>, Beat), (EngineError, &'static str)> {
     let mut beat = beat;
-    let BoundBlobs { handle, reaper } = crate::blobs::bind(registry, config).await?;
+    let policy_kinds = policies.upload.kinds();
+    let BoundBlobs { handle, reaper } = crate::blobs::bind(registry, config, policy_kinds).await?;
     if let Some(mut reaper) = reaper {
         if let Some(blob_handle) = handle.clone() {
             reaper = reaper.with_runner(PolicyRunner::new(
@@ -31,6 +34,9 @@ pub(super) async fn bind_blobs(
                 config.service.clone(),
                 config.impacts_per_commit,
             ));
+        }
+        if let Some(log) = round_log {
+            reaper = reaper.with_round_log(log);
         }
         beat = beat.with_blob_reaper(reaper);
     }
