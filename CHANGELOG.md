@@ -5,7 +5,7 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
-## 0.3.0 - 2026-09-18
+## 0.3.0 - 2026-09-22
 
 ### lane: reset
 
@@ -308,12 +308,18 @@ reaper holds no principal, so `emit`/`command` from a policy go out as
 `service_actor(service)`, correlation = the blob row id, no causation, producer =
 service. A refusal (`ps.refuse`) is terminal: the row goes `failed` with
 `failed_reason = policy:<code>`, the object is deleted, no impact and no outbox row
-commit.
+commit. A refusal is the only terminal outcome: a policy that **panics** (an infra
+read that the policy `.expect()`s, say) is caught at the reaper boundary — the
+promotion transaction rolls back, the row stays `pending`, the sweep counts a
+failure and retries it next interval, and the beat is never taken down. A
+persistent fault therefore retries indefinitely (logged each sweep) rather than
+resolving to `failed`; a finite delivery budget is a follow-up.
 
 #### C4. Inline vs attachment disposition on the download
 
 `Query::download::<View>(key, reference, Disposition)` and
-`BlobReader::download_url(reference, Disposition)` take a
+`BlobReader::download_url(reference, Disposition)` (test-support only; the
+production mint is `Query::download`) take a
 `blobs::Disposition { Inline, Attachment }` (a GraphQL enum), rendering
 `response-content-disposition` as `inline; filename="…"` /
 `attachment; filename="…"`. (Named `blobs::Disposition` at the module path — the
@@ -331,9 +337,11 @@ the HEAD **outside** the transaction, then a short transaction holds only the
 `FOR UPDATE`. The new state model of `service_engine.blob` (`9113000025`) adds
 `expected_size`, `expected_sha256`, `etag`, `sha256`, `failed_reason`,
 `failed_at`; states are `pending | uploaded | orphaned | failed`. A `failed` row
-resolves to no download URL. Failed and orphaned rows are reaped transactionally
-after `orphan_after` (`reap_detached` generalized), so a crash between a fast-path
-`failed` commit and its object delete leaks nothing past the orphan window.
+resolves to no download URL. Failed and orphaned rows are reaped after
+`orphan_after` (`reap_detached` generalized): the object is deleted first (an
+idempotent DELETE, a no-op on a missing key), the row second, so a crash between
+the two leaves a `failed`/`orphaned` row the next sweep finishes — nothing leaks
+past the orphan window. The two steps are not one transaction.
 
 #### C6. `BlobConfig.public_endpoint` — browser-facing URLs
 
@@ -367,6 +375,39 @@ engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the co
   the directory mirror that feeds `roster.known_persons` and implements
   `RosterPrincipal` — the project-specific seam.
 - No engine public-API change; value types keep their names in every embed (R4).
+
+### lane: example-blobs
+
+The reference service (`example-service`, reply slice) now exercises the blob
+additions end to end, so a service author has a copyable surface:
+
+- `exampleAttachReply` gains an optional `expected: UploadExpectationInput { size:
+  Int!, sha256Hex: String! }`. Present → the mutation stages a verified upload
+  (`cx.blob_verified`); absent → the unverified `cx.blob` path, unchanged.
+- `exampleReplyDownload` gains a `disposition: Disposition! = ATTACHMENT` argument
+  (`INLINE` | `ATTACHMENT`), passed straight to `Query::download` — the hard-coded
+  `Disposition::Attachment` is gone.
+- The reply slice registers a post-upload policy on its `reply_attachment` kind
+  (`register_post_upload_policy` + `require_post_upload_policy`) that finds the
+  referencing reply on the promotion connection and impacts the reply view with
+  cause `AttachmentUploaded`; the seam is declared, so an unhonoured policy fails
+  boot.
+- `example-service` e2e scenarios (`tests/scenarios/blobs/{unverified,verified,disposition}.rs`) cover the verified
+  round trip against real MinIO (a `head` in the pending window reads the storage
+  checksum with `verified() == Some(true)`; a swept run promotes the row to
+  `uploaded`), a wrong-checksum upload refused by the store with no download URL,
+  and the inline-vs-attachment download disposition on the presigned GET.
+- The example `Service` exposes `blob_reader()` and the harness a
+  `start_blobs_swept(pod, reaper_interval)` world so a scenario can observe a HEAD
+  and a reaper sweep.
+
+### lane: tidy
+
+House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
+
+- Every source file over ~300 lines across the workspace is split by capability — in `service-engine` (`pipeline/ops`, `engine/register`, `engine/run`, `config`, `pipeline/policy`, `inbound/deadletter`, `dyn_compat/projector`, `runtime`, `mirror/runtime`, `mirror/builder`) and in the `conformance-service-engine` sample library (`sample/engine_pipeline` into per-flavour boot helpers, `sample/mirror` into shared types + publish + projection); `EngineError` stays one file, being a single `#[non_exhaustive]` enum. Public paths are preserved through the module facades. Every pre-existing comment and rustdoc is removed (`///`, `//!`, `//`), including the migration and CI prose; the operative why the CI notes carried now lives in the step names.
+- New conformance scenarios: `s226` proves the `Persistence::row_lock` helper takes a real `SELECT … FOR UPDATE` (a second connection cannot lock the row under NOWAIT while it is held, and can once the holder commits); `s227` and `s228` prove the two message-retention boot branches at runtime — an unbounded (max_age 0) bound stream is refused with `REASON_MESSAGE_RETENTION`, and, over a stream whose max_age (5400s) exceeds the default retention (3600s), only the `with_message_retention` override (7200s) makes boot reach ready, so the override is load-bearing (the default would be refused, the mirror of `s174`).
+- Duplicate scenario numbers are renumbered so each names one file: the five `s194` files keep one at `s194` and move to `s229`–`s232`; the two `s195` files keep one and move to `s233`.
 
 ### Fixed
 
@@ -409,45 +450,18 @@ engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the co
 - graphql (item 10): delete any synthetic slice that claimed the `*Payload` subscription-envelope types — the engine derives them from the delta union that also lists `LanesPaused`/`LanesResumed`.
 - graphql (item 11): replace hand-rolled `forbidden()` copies (accounts `graphql.rs`, `context.rs`) with `service_engine::graphql::forbidden()`; a query or subscription refusal that needs another code uses `graphql::coded_error(code, message)`.
 
+- blobs (break): `Query::download` and `BlobReader::download_url` take a third `blobs::Disposition` argument — pass `Disposition::Attachment` to keep 0.2 behaviour.
+- blobs (break): `ReaperRound` gains `skipped` and `failed` — a downstream exhaustive struct pattern or literal adds `..` / the fields.
+- blobs (break): `BlobConfig` gains the public field `public_endpoint` — construct through `BlobConfig::new(..)` (then `.with_public_endpoint(..)` for a browser-facing host), not a struct literal.
+- blobs (additive): `BlobReader::head` reports `size`/`etag`/`sha256` always from a live storage HEAD, `state`/`expected` from the row.
+- blobs (behaviour): a post-upload policy emits/commands as the **service** actor (correlation = the blob id, no causation); a message that must carry a human actor stays on the referencing mutation, not the policy.
+
 ### Replaced or dropped
 
 - `Persistence::lock` keeps its no-op default: the engine's advisory lock serializes every pipeline load. Stores that need a row lock use the new `row_lock` helper (`SELECT … FOR UPDATE` on the row's `id`).
 - `Extended` is unchanged; unknown extensions stay denied. A flattened producer is read through a typed struct with `#[serde(default)]` fields.
 - No write-set check: the mirror kit stages nothing for an unchanged write — `upsert` diffs the row, `replace` diffs the key set (keys-only link rows).
 - `serve` is the one boot door; `with_edge_observability` is crate-private and no observability helper is re-exported.
-
-### lane: example-blobs
-
-The reference service (`example-service`, reply slice) now exercises the blob
-additions end to end, so a service author has a copyable surface:
-
-- `exampleAttachReply` gains an optional `expected: UploadExpectationInput { size:
-  Int!, sha256Hex: String! }`. Present → the mutation stages a verified upload
-  (`cx.blob_verified`); absent → the unverified `cx.blob` path, unchanged.
-- `exampleReplyDownload` gains a `disposition: Disposition! = ATTACHMENT` argument
-  (`INLINE` | `ATTACHMENT`), passed straight to `Query::download` — the hard-coded
-  `Disposition::Attachment` is gone.
-- The reply slice registers a post-upload policy on its `reply_attachment` kind
-  (`register_post_upload_policy` + `require_post_upload_policy`) that finds the
-  referencing reply on the promotion connection and impacts the reply view with
-  cause `AttachmentUploaded`; the seam is declared, so an unhonoured policy fails
-  boot.
-- `example-service` e2e scenarios (`tests/scenarios/blobs.rs`) cover the verified
-  round trip against real MinIO (a `head` in the pending window reads the storage
-  checksum with `verified() == Some(true)`; a swept run promotes the row to
-  `uploaded`), a wrong-checksum upload refused by the store with no download URL,
-  and the inline-vs-attachment download disposition on the presigned GET.
-- The example `Service` exposes `blob_reader()` and the harness a
-  `start_blobs_swept(pod, reaper_interval)` world so a scenario can observe a HEAD
-  and a reaper sweep.
-
-### lane: tidy
-
-House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
-
-- Every source file over ~300 lines across the workspace is split by capability — in `service-engine` (`pipeline/ops`, `engine/register`, `engine/run`, `config`, `pipeline/policy`, `inbound/deadletter`, `dyn_compat/projector`, `runtime`, `mirror/runtime`, `mirror/builder`) and in the `conformance-service-engine` sample library (`sample/engine_pipeline` into per-flavour boot helpers, `sample/mirror` into shared types + publish + projection); `EngineError` stays one file, being a single `#[non_exhaustive]` enum. Public paths are preserved through the module facades. Every pre-existing comment and rustdoc is removed (`///`, `//!`, `//`), including the migration and CI prose; the operative why the CI notes carried now lives in the step names.
-- New conformance scenarios: `s226` proves the `Persistence::row_lock` helper takes a real `SELECT … FOR UPDATE` (a second connection cannot lock the row under NOWAIT while it is held, and can once the holder commits); `s227` and `s228` prove the two message-retention boot branches at runtime — an unbounded (max_age 0) bound stream is refused with `REASON_MESSAGE_RETENTION`, and, over a stream whose max_age (5400s) exceeds the default retention (3600s), only the `with_message_retention` override (7200s) makes boot reach ready, so the override is load-bearing (the default would be refused, the mirror of `s174`).
-- Duplicate scenario numbers are renumbered so each names one file: the five `s194` files keep one at `s194` and move to `s229`–`s232`; the two `s195` files keep one and move to `s233`.
 
 ## 0.2.0 - 2026-09-16
 

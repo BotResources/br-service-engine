@@ -443,9 +443,10 @@ promotion connection and impacts its own view; its `emit`/`command` go out as th
 service actor (correlation = the blob row id), and a refusal fails the row
 (`policy:<code>`) and deletes the object. The reaper still deletes an **incomplete
 upload** (a `pending` row past `orphan_after` whose object never landed) and an
-**unreferenced** or **failed** blob (past `orphan_after`, object and row both
-removed transactionally, so a crash between a fast-path delete and its commit
-leaks nothing); it does not police size, because the POST policy already did, at
+**unreferenced** or **failed** blob (past `orphan_after`; the object is deleted
+first — an idempotent DELETE — then the row, so a crash between the two leaves a
+row the next sweep finishes and nothing leaks, though the two steps are not one
+transaction); it does not police size, because the POST policy already did, at
 upload. Orphan detection happens at
 the **aggregate boundary**: `Aggregate::blob_refs` exposes a row's live
 references (default empty), and the pipeline diffs them between `load` and `save`
@@ -1121,7 +1122,7 @@ GitOps and the NATS fabric.
 | Entry points | `<binary> migrate` (owner role; exits 0 when the engine, library and service sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
 | Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
 | App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
-| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` reads all five or falls through to no blob storage); the library chart emits them only under `objectStore.enabled` |
+| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled` — a thin chart wanting browser-facing presigns passes `S3_PUBLIC_ENDPOINT` through its own `env: []` until a chart minor adds `objectStore.publicEndpoint` |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
