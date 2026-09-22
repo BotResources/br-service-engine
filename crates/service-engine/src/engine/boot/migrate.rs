@@ -46,9 +46,22 @@ pub async fn apply_migration_chain(
 
     let schemas: Vec<&'static str> = libraries.iter().map(|library| library.schema).collect();
     for library in libraries {
+        let name = library.name;
+        let schema = library.schema;
+        let before = relation_snapshot(owner).await?;
         let mut migrator = library.migrator;
         migrator.set_ignore_missing(true);
         migrator.run(owner).await?;
+        let after = relation_snapshot(owner).await?;
+        if let Some((nsp, rel)) = after
+            .difference(&before)
+            .find(|(nsp, _)| nsp.as_str() != schema)
+        {
+            return Err(EngineError::LibraryMigrationEscapedSchema {
+                library: name,
+                object: format!("{nsp}.{rel}"),
+            });
+        }
     }
 
     let mut service_migrator = service_migrator;
@@ -66,6 +79,22 @@ pub async fn apply_migration_chain(
     }
     grant_app_access(owner, app_role).await.map_err(pg_error)?;
     Ok(())
+}
+
+async fn relation_snapshot(
+    pool: &PgPool,
+) -> Result<std::collections::BTreeSet<(String, String)>, EngineError> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT n.nspname, c.relname \
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') \
+           AND n.nspname NOT LIKE 'pg\\_%' \
+           AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f', 'c')",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(EngineError::Db)?;
+    Ok(rows.into_iter().collect())
 }
 
 async fn connect_owner(url: &str, timeout: Duration) -> Result<PgPool, EngineError> {
