@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::{
     PAYLOAD, PAYLOAD_SHA256_HEX, WRONG_SHA256_HEX, attachment_reference, post_form, seed_reply,
 };
-use crate::harness::{World, WorldOptions, ok, passport};
+use crate::harness::{Subscription, World, WorldOptions, ok, passport};
 
 #[tokio::test]
 async fn a_verified_upload_in_the_pending_window_heads_the_storage_checksum() {
@@ -211,6 +211,85 @@ async fn bytes_whose_checksum_does_not_match_the_expectation_are_refused_by_the_
     assert!(
         ok(&download)["exampleReplyDownload"].is_null(),
         "a pending row with no object mints no download URL"
+    );
+
+    world.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_post_upload_impact_reaches_a_subscriber_as_an_upsert_with_cause_attachment_uploaded() {
+    let world = World::start_blobs_swept("pod-blob-upsert-cause", Duration::from_millis(150)).await;
+    let org = Uuid::now_v7();
+    let pass = passport(Uuid::now_v7(), org, &[], false);
+    let board = Uuid::now_v7();
+    let reply = Uuid::now_v7();
+    seed_reply(&world, &pass, board, reply).await;
+
+    let query = "subscription{exampleReplyDeltas{\
+        __typename \
+        ... on ReplyReset{revision} \
+        ... on ReplyUpsert{cause view{... on ReplyView{id hasAttachment attachment}}} \
+        ... on ReplyRemove{revision}}}";
+    let mut sub = Subscription::open(&world.subscription_url(), &pass, query).await;
+    let reset = sub.next_payload(Duration::from_secs(10)).await;
+    assert_eq!(
+        reset["exampleReplyDeltas"]["__typename"], "ReplyReset",
+        "the subscriber receives a Reset on attach: {reset}"
+    );
+
+    let response = world
+        .gql(
+            &pass,
+            "mutation($id:UUID!,$n:String!,$c:String!,$e:UploadExpectationInput){exampleAttachReply(replyId:$id,name:$n,contentType:$c,expected:$e)}",
+            serde_json::json!({
+                "id": reply,
+                "n": "verified.bin",
+                "c": "application/octet-stream",
+                "e": { "size": PAYLOAD.len(), "sha256Hex": PAYLOAD_SHA256_HEX },
+            }),
+        )
+        .await;
+    let post = &ok(&response)["exampleAttachReply"];
+    let endpoint = post["endpoint"].as_str().expect("a presigned endpoint");
+    let fields = post["fields"].as_object().expect("presigned post fields");
+    let status = post_form(
+        &world.http,
+        endpoint,
+        fields,
+        PAYLOAD.to_vec(),
+        "verified.bin",
+    )
+    .await;
+    assert!(status.is_success(), "the exact bytes land: {status}");
+
+    let reference = attachment_reference(&world, &pass, reply).await;
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let upsert = loop {
+        let delta = sub.next_payload(Duration::from_secs(15)).await;
+        let node = &delta["exampleReplyDeltas"];
+        if node["__typename"] == "ReplyUpsert" && node["cause"]["kind"] == "AttachmentUploaded" {
+            break delta;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no Upsert with cause AttachmentUploaded arrived through the reaper path",
+        );
+    };
+    let node = &upsert["exampleReplyDeltas"];
+    assert_eq!(
+        node["view"]["id"],
+        reply.to_string(),
+        "the caused Upsert carries the reply view: {upsert}"
+    );
+    assert_eq!(
+        node["view"]["hasAttachment"], true,
+        "the swept promotion's Upsert shows the attachment uploaded: {upsert}"
+    );
+    assert_eq!(
+        node["view"]["attachment"],
+        reference.to_string(),
+        "the view carries the committed attachment reference: {upsert}"
     );
 
     world.cleanup().await;

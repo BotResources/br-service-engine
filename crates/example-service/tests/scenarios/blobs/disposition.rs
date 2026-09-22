@@ -1,18 +1,13 @@
+use std::time::{Duration, Instant};
+
 use uuid::Uuid;
 
 use super::{attachment_reference, post_form, seed_reply};
-use crate::harness::{World, WorldOptions, ok, passport};
+use crate::harness::{World, ok, passport};
 
 #[tokio::test]
 async fn the_download_disposition_is_reflected_in_the_presigned_get() {
-    let world = World::start_with(
-        "pod-blob-disposition",
-        WorldOptions {
-            blobs: true,
-            declare_scopes: false,
-        },
-    )
-    .await;
+    let world = World::start_blobs_swept("pod-blob-disposition", Duration::from_millis(150)).await;
     let org = Uuid::now_v7();
     let pass = passport(Uuid::now_v7(), org, &[], false);
     let board = Uuid::now_v7();
@@ -36,17 +31,24 @@ async fn the_download_disposition_is_reflected_in_the_presigned_get() {
 
     let reference = attachment_reference(&world, &pass, reply).await;
 
-    let inline = world
-        .gql(
-            &pass,
-            "query($id:UUID!,$r:UUID!,$d:Disposition!){exampleReplyDownload(replyId:$id,reference:$r,disposition:$d)}",
-            serde_json::json!({ "id": reply, "r": reference, "d": "INLINE" }),
-        )
-        .await;
-    let inline_url = ok(&inline)["exampleReplyDownload"]
-        .as_str()
-        .expect("an inline presigned download URL")
-        .to_string();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let inline_url = loop {
+        let inline = world
+            .gql(
+                &pass,
+                "query($id:UUID!,$r:UUID!,$d:Disposition!){exampleReplyDownload(replyId:$id,reference:$r,disposition:$d)}",
+                serde_json::json!({ "id": reply, "r": reference, "d": "INLINE" }),
+            )
+            .await;
+        if let Some(url) = ok(&inline)["exampleReplyDownload"].as_str() {
+            break url.to_string();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a policy-bearing kind becomes downloadable only once promoted; it never promoted",
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     assert!(
         inline_url.contains("response-content-disposition=inline"),
         "the inline presign carries an inline content-disposition: {inline_url}"
