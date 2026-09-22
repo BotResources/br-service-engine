@@ -297,7 +297,7 @@ store unbound. `head` never mutates. `ObjectStore::head` sends
 #### C3. Post-upload policy — run inside the promotion transaction
 
 `register_post_upload_policy::<Kind>(|Uploaded, &mut PostSave| -> Result<(),
-Refused>)` / `require_post_upload_policy::<Kind>` (boot-checked like save/delete,
+PostUpload>)` / `require_post_upload_policy::<Kind>` (boot-checked like save/delete,
 `EngineError::UnhonouredSeam`). One policy per kind (a second is
 `EngineError::Config`). The reaper runs it on the promotion connection through a
 `PolicyRunner` that builds the same `PostSave` context a reaction gets; the blob
@@ -309,14 +309,22 @@ over an RLS-scoped table must query it with an unscoped statement, or it will se
 no row and silently promote with no impact. **Outbound identity of the reaper:** the
 reaper holds no principal, so `emit`/`command` from a policy go out as
 `service_actor(service)`, correlation = the blob row id, no causation, producer =
-service. A refusal (`ps.refuse`) is terminal: the row goes `failed` with
-`failed_reason = policy:<code>`, the object is deleted, no impact and no outbox row
-commit. A refusal is the only terminal outcome: a policy that **panics** (an infra
-read that the policy `.expect()`s, say) is caught at the reaper boundary — the
-promotion transaction rolls back, the row stays `pending`, the sweep counts a
-failure and retries it next interval, and the beat is never taken down. A
-persistent fault therefore retries indefinitely (logged each sweep) rather than
-resolving to `failed`; a finite delivery budget is a follow-up.
+service.
+
+**The policy result is now `Result<(), PostUpload>` with two error variants — a
+terminal refusal and a retryable fault:**
+- `PostUpload::Refused` (via `ps.refuse(reason).into()`) is **terminal**: the
+  promotion transaction rolls back, the row goes `failed` with `failed_reason =
+  policy:<code>`, the object is deleted, and no impact or outbox row commits.
+- `PostUpload::Fault(EngineError)` is a **transient infra fault**: any DB or
+  connection call inside the policy propagates with `?` into `Fault` (there is no
+  honest reason to `.expect()` an infra read any more). The promotion transaction
+  rolls back, the row **stays `pending`**, the sweep counts it in
+  `ReaperRound.failures` (logged with the blob id), and the next sweep retries it.
+  A panic is folded into the same retry path by `catch_unwind` so the beat is never
+  taken down. **There is no attempt budget in 0.3.0**: a deterministic fault
+  retries every sweep indefinitely rather than resolving to `failed`; a finite
+  delivery budget is a follow-up.
 
 #### C4. Inline vs attachment disposition on the download
 
@@ -353,6 +361,32 @@ second bucket on the public host; the upload POST URL and the download presign u
 the public bucket (SigV4 signs `Host`, so a browser needs the public host), while
 `ensure_bucket`, `head` and `delete` stay on the internal in-cluster host. The
 engine reads no env — the service binary maps `S3_PUBLIC_ENDPOINT` into the config.
+For an **unverified** kind the presigned POST stays valid for its full `upload_ttl`
+even after the reaper promotes the row, so the object it points at can be replaced
+after promotion (a plain property of an S3 presigned POST). This is not defended in
+0.3.0: pin anything approval-sensitive with a verified expectation (the checksum is
+frozen in the presign, so a replacement cannot match), or keep `upload_ttl` short.
+The verified path is immune; nothing in these docs claims an unverified object is
+immutable.
+
+#### C7. A pending row is downloadable only once nothing is left to judge
+
+`download_url` (and the gated `Query::download`) mints a URL for a `pending` row
+**only** when the row's kind has **no** post-upload policy **and** the row carries
+**no** upload expectation; otherwise it returns `None` until the row is `uploaded`.
+A verified row (expectation) or a policy-bearing kind therefore hands out no
+download in the pending window — before the reaper has verified the checksum or the
+policy has judged the upload — and resolves normally once promoted. A plain
+unverified kind with no policy stays downloadable the moment its object lands, as
+before.
+
+#### C8. `orphan_after` must cover the upload window
+
+At bind, a blob kind whose `BlobPolicy::orphan_after` is shorter than the store's
+`BlobConfig::upload_ttl` is refused with `EngineError::BlobOrphanWindowTooShort`
+(readiness reason `blobs.policy`). A shorter orphan window would let the reaper
+delete an incomplete pending row while its presigned POST is still valid, so a late
+upload would land an object no sweep ever sees. Set `orphan_after >= upload_ttl`.
 
 ### lane: example-lib
 
@@ -458,6 +492,11 @@ House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
 - blobs (break): `BlobConfig` gains the public field `public_endpoint` — construct through `BlobConfig::new(..)` (then `.with_public_endpoint(..)` for a browser-facing host), not a struct literal.
 - blobs (additive): `BlobReader::head` reports `size`/`etag`/`sha256` always from a live storage HEAD, `state`/`expected` from the row.
 - blobs (behaviour): a post-upload policy emits/commands as the **service** actor (correlation = the blob id, no causation); a message that must carry a human actor stays on the referencing mutation, not the policy.
+- blobs (break): a post-upload policy now returns `Result<(), PostUpload>` (was `Result<(), Refused>`). A refusal becomes `Err(ps.refuse(reason).into())`; an infra read propagates with `?` into `PostUpload::Fault` — remove every `.expect()` on a policy's DB call. A `Fault` (or a panic) rolls the promotion back, leaves the row `pending` and retries on the next sweep (no attempt budget in 0.3.0); only a `Refused` fails the row.
+- blobs (break): a `pending` row of a kind that has a post-upload policy, or a row that carries an upload expectation, mints **no** download URL until it is promoted — a viewer must wait for the reaper. Plain unverified, policy-less kinds are unchanged.
+- blobs (break): a blob kind whose `orphan_after` is shorter than the store's `upload_ttl` is refused at bind (`EngineError::BlobOrphanWindowTooShort`, readiness `blobs.policy`); set `orphan_after >= upload_ttl`.
+- migrate (break): a library migration that creates a relation outside its declared schema now fails migrate with `EngineError::LibraryMigrationEscapedSchema` (naming the library and the object); a library owns exactly one schema and may not touch `public` or another library's.
+- graphql (additive): `with_sdl_route(app, sdl)` is public — a hand-wired `main` that serves through `app` (not `serve`) can mount the `/sdl` edge route itself.
 
 ### Replaced or dropped
 

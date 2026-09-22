@@ -378,7 +378,12 @@ the boot scope-declaration handshake that gates readiness until Identity confirm
 (`declare_scopes` remains for a service that assembles the manifest itself).
 `register_blobs` records a `BlobPolicy` per blob kind and, at
 boot, binds the service's S3-compatible object-storage bucket (bind-only,
-fail-loud, never created — configured with `EngineConfig::with_blob_storage`).
+fail-loud, never created — configured with `EngineConfig::with_blob_storage`). A
+kind whose `BlobPolicy::orphan_after` is shorter than the store's
+`BlobConfig::upload_ttl` is refused at bind (`EngineError::BlobOrphanWindowTooShort`,
+readiness `blobs.policy`): a shorter orphan window would let the reaper delete an
+incomplete pending row while its presigned POST is still valid, so a late upload
+would orphan an object no sweep ever sees — set `orphan_after >= upload_ttl`.
 `cx.blob::<Kind>(name, content_type)` stages a blob **reference row**
 (`service_engine.blob`: reference, object key, kind, content type, file name,
 owner, size and state) inside the pipeline transaction, so it commits with the
@@ -397,7 +402,13 @@ refused at stage (`EngineError::BlobOverPolicy`) before any presign. Single-part
 only (≤ 5 GB); there is no composite/multipart checksum. `BlobConfig` may carry a
 `public_endpoint`: the upload POST URL and the download presign are then signed
 for that browser-facing host (SigV4 signs `Host`), while the engine's own bucket
-HEAD/DELETE stay on the internal in-cluster host. A download `DownloadUrl` — an
+HEAD/DELETE stay on the internal in-cluster host. For an **unverified** kind the
+presigned POST stays valid for its whole `upload_ttl` even after the reaper
+promotes the row, so the object can be **replaced after approval** — a plain
+property of an S3 presigned POST, undefended in 0.3.0. For anything
+approval-sensitive use a **verified** expectation (the checksum is pinned in the
+presign, so no replacement can match) or keep `upload_ttl` short; the verified
+path is immune, and nothing here claims an unverified object is immutable. A download `DownloadUrl` — an
 S3 SigV4 presigned GET, short-lived, carrying `response-content-disposition` (the
 stored file name, `inline` or `attachment` per the requested `Disposition`) and
 `response-content-type` (the recorded content type) so the object is served under
@@ -427,7 +438,12 @@ window (before the reaper sweeps) sees the storage checksum immediately, with
 `state: Pending` and `verified() == Some(true)`. A reference whose object has not
 landed yet (`pending`) resolves to **no** download URL; a `failed` row (a verified
 upload whose landed object did not match, or one a post-upload policy refused)
-resolves to none either. `UploadUrl`
+resolves to none either. A `pending` row whose object **has** landed is
+downloadable **only** when its kind has no post-upload policy **and** the row
+carries no upload expectation; a verified row, or a policy-bearing kind, resolves
+to **no** download until the reaper has verified the checksum and run the policy
+(i.e. until the row is `uploaded`), so a client never gets a URL to bytes the
+engine has not yet judged. `UploadUrl`
 carries the POST endpoint and its signed form fields (no raw URL string) and
 `DownloadUrl` is not `Serialize`, so — like `OneShot` — neither can enter a view,
 an impact, an offer, an outbox row or a chunk; only the opaque reference travels.
@@ -440,8 +456,14 @@ promotes the row in one short `state='pending'`-guarded transaction that also ru
 the kind's **post-upload policy** (`register_post_upload_policy::<Kind>` /
 `require_post_upload_policy`) — the policy finds its referencing key on the
 promotion connection and impacts its own view; its `emit`/`command` go out as the
-service actor (correlation = the blob row id), and a refusal fails the row
-(`policy:<code>`) and deletes the object. The promotion connection carries no
+service actor (correlation = the blob row id). The policy returns `Result<(),
+PostUpload>`: a `Refused` (`ps.refuse(reason).into()`) is terminal — it fails the
+row (`policy:<code>`) and deletes the object — while a `Fault(EngineError)` (any
+infra read propagated with `?`, or a panic) rolls the promotion back, leaves the
+row `pending`, counts it in `ReaperRound.failures` (logged with the blob id) and
+retries it on the next sweep. There is no attempt budget in 0.3.0: a persistent
+fault retries every sweep rather than resolving to `failed`. The promotion
+connection carries no
 principal and no RLS context, so a policy reading a row over an RLS-scoped table
 must query it unscoped. The reaper still deletes an **incomplete
 upload** (a `pending` row past `orphan_after` whose object never landed) and an
@@ -866,7 +888,11 @@ nothing to renumber. `libraries::validate` refuses — before any SQL — a sche
 shadows `public` or `service_engine`, a duplicate library, an overlapping band, a
 library migration outside its band, or a service migration inside a reserved band;
 `serve` re-runs the same validation and refuses a store where any declared set is
-still pending, naming the pending library.
+still pending, naming the pending library. A library owns **exactly one** schema:
+`migrate` snapshots the store's relations around each library's set and fails with
+`EngineError::LibraryMigrationEscapedSchema` (naming the library and the object) if
+that set created any relation outside its declared schema — a library may not reach
+into `public` or another library's schema.
 `compose_service!` takes each slice's module, cargo feature and root objects on
 **one line** and generates, for the whole set, the `pub mod` declarations, the
 `QueryRoot`/`MutationRoot`/`SubscriptionRoot` merged objects and the `register`
