@@ -11,8 +11,6 @@ use super::store::{self, LedgerAggregate, LedgerStore};
 use crate::kernel::AppPrincipal;
 
 service_engine::open_access!(
-    /// The ledger is a per-service running total with no per-viewer scoping:
-    /// every authenticated viewer sees the same aggregate.
     pub LedgersOpenAccess = "the ledger total is a service-wide aggregate open to every viewer"
 );
 

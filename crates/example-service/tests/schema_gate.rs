@@ -1,12 +1,3 @@
-//! The boot-time schema gate, exercised without infrastructure.
-//!
-//! `Engine::run` assembles every registered [`SliceFragment`] and verifies the
-//! composed SDL against them before serving. This test reproduces that gate
-//! purely — compose the same schema, derive the same fragments the slices'
-//! `register` functions do, and assert the composed schema is fully claimed —
-//! so a regression that leaves a root field or object type unowned is caught
-//! here, not only in the infra-backed e2e boot.
-
 use async_graphql::{EmptySubscription, Schema};
 use example_service::slices::{MutationRoot, QueryRoot, SubscriptionRoot};
 use service_engine::graphql::{RootPrefix, SchemaSlices, SliceFragment};
@@ -32,7 +23,7 @@ fn fragments() -> Vec<SliceFragment> {
             CardBoardMutation, CardBoardQuery, CardBoardSubscription, CardItemMutation,
             CardItemQuery,
         };
-        // One aggregate, two capability fragments.
+
         fragments.push(SliceFragment::derive::<
             CardItemQuery,
             CardItemMutation,

@@ -1,6 +1,3 @@
-//! The board capability: the board-scoped view of cards and the delta
-//! subscriptions over one board's window.
-
 use async_graphql::{Context, Object, Result, SimpleObject, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::session::{SessionId, WindowSpec};

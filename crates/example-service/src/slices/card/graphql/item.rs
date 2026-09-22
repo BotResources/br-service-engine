@@ -1,5 +1,3 @@
-//! The item capability: reading and driving a single card.
-
 use async_graphql::{Context, Object, Result};
 use service_engine::{MutationAck, Query};
 use uuid::Uuid;
