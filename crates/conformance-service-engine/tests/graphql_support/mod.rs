@@ -9,6 +9,17 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+pub async fn get_text(url: &str) -> (u16, String) {
+    let response = reqwest::Client::new()
+        .get(url)
+        .send()
+        .await
+        .expect("the GET reaches the server");
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap_or_default();
+    (status, body)
+}
+
 pub async fn post_json(
     base_url: &str,
     passport: Option<&str>,

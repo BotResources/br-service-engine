@@ -23,6 +23,21 @@ pub fn dependent_service_migrator() -> Migrator {
     sqlx::migrate!("./migrations-sample-lib-service")
 }
 
+pub fn escaping_migrations() -> LibraryMigrations {
+    LibraryMigrations {
+        name: NAME,
+        schema: SCHEMA,
+        band: BAND,
+        migrator: in_memory(vec![Migration::new(
+            ITEM_VERSION,
+            Cow::Borrowed("sample_lib_escape"),
+            MigrationType::Simple,
+            Cow::Borrowed("CREATE TABLE public.sample_lib_escapee (id uuid PRIMARY KEY)"),
+            false,
+        )]),
+    }
+}
+
 pub fn base_service_migrator() -> Migrator {
     in_memory(vec![Migration::new(
         BASE_SERVICE_VERSION,

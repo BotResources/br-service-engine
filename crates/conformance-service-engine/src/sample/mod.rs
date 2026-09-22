@@ -110,9 +110,12 @@ pub use blob::{
     AttachDoc, AttachOwnedDoc, Attachment, DeleteDoc, DetachDoc, DocRow, DocStore, RepointDoc,
     attach_doc, attach_owned_doc, delete_doc, detach_doc, repoint_doc,
 };
-pub use blob_boot::{boot_blob_policy_engine, boot_unhonoured_upload_seam_engine};
+pub use blob_boot::{
+    boot_blob_fault_engine, boot_blob_policy_engine, boot_unhonoured_upload_seam_engine,
+};
 pub use blob_verified::{
-    AttachVerifiedDoc, AttachmentUploaded, attach_verified_doc, impact_doc_on_upload, refuse_upload,
+    AttachVerifiedDoc, AttachmentUploaded, attach_verified_doc, fault_on_upload,
+    impact_doc_on_upload, refuse_upload,
 };
 pub use blob_view::{Doc, DocProjector, DocView};
 pub use engine::{

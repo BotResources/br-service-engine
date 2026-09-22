@@ -1,12 +1,11 @@
 use br_core_integration::{Aggregate, Bc, EventCoords, PastFact};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use service_engine::UploadUrl;
 use service_engine::blobs::{Sha256Digest, UploadExpectation, Uploaded};
+use service_engine::error::EngineError;
 use service_engine::gate::Reason;
-use service_engine::pipeline::{
-    Mutation, MutationInput, OneShot, OutboundEvent, PostSave, Refused,
-};
+use service_engine::pipeline::{Mutation, MutationInput, OneShot, OutboundEvent, PostSave};
+use service_engine::{PostUpload, UploadUrl};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -60,20 +59,17 @@ pub fn attach_verified_doc<'m>(
 pub fn impact_doc_on_upload<'a>(
     uploaded: Uploaded<'a>,
     ps: &'a mut PostSave<'_, '_>,
-) -> BoxFuture<'a, Result<(), Refused>> {
+) -> BoxFuture<'a, Result<(), PostUpload>> {
     Box::pin(async move {
         let reference = uploaded.reference.as_uuid();
         let row = sqlx::query("SELECT id FROM sample_doc WHERE blob_ref = $1")
             .bind(reference)
             .fetch_optional(ps.connection())
-            .await
-            .expect("the post-upload policy reads its referencing doc");
+            .await?;
         if let Some(row) = row {
             let id: Uuid = row.get("id");
-            ps.impact_caused::<Doc, _>(&id, "attachment_uploaded")
-                .expect("the post-upload policy impacts the doc view");
-            ps.emit(AttachmentUploaded { reference })
-                .expect("the post-upload policy emits its integration event");
+            ps.impact_caused::<Doc, _>(&id, "attachment_uploaded")?;
+            ps.emit(AttachmentUploaded { reference })?;
         }
         Ok(())
     })
@@ -82,8 +78,19 @@ pub fn impact_doc_on_upload<'a>(
 pub fn refuse_upload<'a>(
     _uploaded: Uploaded<'a>,
     ps: &'a mut PostSave<'_, '_>,
-) -> BoxFuture<'a, Result<(), Refused>> {
-    Box::pin(async move { Err(ps.refuse(UPLOAD_REFUSED)) })
+) -> BoxFuture<'a, Result<(), PostUpload>> {
+    Box::pin(async move { Err(ps.refuse(UPLOAD_REFUSED).into()) })
+}
+
+pub fn fault_on_upload<'a>(
+    _uploaded: Uploaded<'a>,
+    _ps: &'a mut PostSave<'_, '_>,
+) -> BoxFuture<'a, Result<(), PostUpload>> {
+    Box::pin(async move {
+        Err(PostUpload::Fault(EngineError::Blob(
+            "simulated transient infra fault in the post-upload policy".into(),
+        )))
+    })
 }
 
 #[derive(Debug, Serialize)]

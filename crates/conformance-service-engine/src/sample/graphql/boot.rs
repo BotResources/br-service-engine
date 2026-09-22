@@ -162,8 +162,10 @@ pub async fn boot_graphql_service(
         SubscriptionRoot,
         state.clone(),
     );
-    engine.set_schema_sdl(schema.sdl());
-    let app = service_engine::app(schema, state, readiness.clone());
+    let sdl = schema.sdl();
+    engine.set_schema_sdl(sdl.clone());
+    let app =
+        service_engine::with_sdl_route(service_engine::app(schema, state, readiness.clone()), sdl);
 
     let handle = tokio::spawn(engine.run_with(app));
 
