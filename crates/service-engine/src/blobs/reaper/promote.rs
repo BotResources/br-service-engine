@@ -137,7 +137,12 @@ impl BlobReaper {
         if done.rows_affected() == 0 {
             return Ok(());
         }
-        store.object().delete_object(object_key).await?;
+        if let Err(error) = store.object().delete_object(object_key).await {
+            tracing::warn!(
+                reason = %crate::chain::describe(&error),
+                "a failed blob object could not be deleted; reap_detached finishes it later"
+            );
+        }
         round.failed += done.rows_affected();
         Ok(())
     }

@@ -208,12 +208,50 @@ fn decode_checksum(value: &str) -> Option<Sha256Digest> {
 }
 
 fn content_disposition(file_name: &str, disposition: Disposition) -> String {
-    let sanitized: String = file_name
+    let clean: String = file_name.chars().filter(|c| !c.is_control()).collect();
+    let ascii: String = clean
         .chars()
-        .filter(|c| !c.is_control())
-        .map(|c| if c == '"' || c == '\\' { '_' } else { c })
+        .map(|c| {
+            if !c.is_ascii() || c == '"' || c == '\\' {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
-    format!("{}; filename=\"{sanitized}\"", disposition.keyword())
+    let encoded = rfc5987_encode(&clean);
+    format!(
+        "{}; filename=\"{ascii}\"; filename*=UTF-8''{encoded}",
+        disposition.keyword()
+    )
+}
+
+fn rfc5987_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for &byte in value.as_bytes() {
+        let attr_char = byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'&'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+            );
+        if attr_char {
+            out.push(byte as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{byte:02X}"));
+        }
+    }
+    out
 }
 
 impl std::fmt::Debug for ObjectStore {
@@ -232,18 +270,32 @@ mod tests {
     fn the_disposition_renders_the_requested_keyword() {
         assert_eq!(
             content_disposition("report.pdf", Disposition::Attachment),
-            "attachment; filename=\"report.pdf\""
+            "attachment; filename=\"report.pdf\"; filename*=UTF-8''report.pdf"
         );
         assert_eq!(
             content_disposition("report.pdf", Disposition::Inline),
-            "inline; filename=\"report.pdf\""
+            "inline; filename=\"report.pdf\"; filename*=UTF-8''report.pdf"
         );
     }
 
     #[test]
     fn a_quote_newline_or_backslash_cannot_break_out_of_the_header() {
         let out = content_disposition("a\"b\\c\nd\re", Disposition::Attachment);
-        assert_eq!(out, "attachment; filename=\"a_b_cde\"");
+        assert_eq!(
+            out,
+            "attachment; filename=\"a_b_cde\"; filename*=UTF-8''a%22b%5Ccde"
+        );
         assert!(!out.contains('\n') && !out.contains('\r'));
+    }
+
+    #[test]
+    fn a_non_ascii_name_falls_back_to_ascii_and_is_percent_encoded() {
+        let out = content_disposition("rapport été.pdf", Disposition::Attachment);
+        assert_eq!(
+            out,
+            "attachment; filename=\"rapport _t_.pdf\"; \
+             filename*=UTF-8''rapport%20%C3%A9t%C3%A9.pdf"
+        );
+        assert!(out.is_ascii());
     }
 }
