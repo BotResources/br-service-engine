@@ -69,7 +69,9 @@ async fn s110_a_within_cap_upload_is_promoted_with_its_size_and_an_oversize_post
         nats.nats().await,
         "se_s110",
         "pod-s110",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(300)),
         policy,
         Duration::from_millis(100),
     )

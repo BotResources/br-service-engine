@@ -5,7 +5,6 @@ mod engine_twin;
 
 use std::time::Duration;
 
-use blob_support::post_upload;
 use conformance_service_engine::infra::{TestDb, TestMinio, TestNats};
 use conformance_service_engine::sample::blob::AttachDoc;
 use conformance_service_engine::sample::boot_blob_engine;
@@ -16,12 +15,22 @@ use service_engine::{BlobPolicy, BlobRef, OneShot, UploadUrl};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+const UNREACHABLE_HOST: &str = "127.0.0.1:1";
+
 async fn reference_of(pool: &PgPool, doc: Uuid) -> Uuid {
     sqlx::query_scalar("SELECT blob_ref FROM sample_doc WHERE id = $1")
         .bind(doc)
         .fetch_one(pool)
         .await
         .expect("read the blob reference")
+}
+
+async fn object_key_of(pool: &PgPool, reference: Uuid) -> String {
+    sqlx::query_scalar("SELECT object_key FROM service_engine.blob WHERE id = $1")
+        .bind(reference)
+        .fetch_one(pool)
+        .await
+        .expect("read the object key")
 }
 
 async fn wait_until<F>(mut check: F)
@@ -39,8 +48,7 @@ where
 }
 
 #[tokio::test]
-async fn s224_upload_and_download_urls_carry_the_public_host_while_the_reaper_uses_the_internal_one()
- {
+async fn s224_presigned_urls_carry_the_public_host_while_head_and_promotion_use_the_internal_one() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -60,7 +68,7 @@ async fn s224_upload_and_download_urls_carry_the_public_host_while_the_reaper_us
         nats.nats().await,
         "se_s224",
         "pod-s224",
-        minio.config_with_public(&bucket),
+        minio.config_with_unreachable_public(&bucket),
         policy,
         Duration::from_millis(150),
     )
@@ -89,27 +97,25 @@ async fn s224_upload_and_download_urls_carry_the_public_host_while_the_reaper_us
     let reference = reference_of(&pool, doc).await;
     let upload = upload.into_inner();
     assert!(
-        upload.url().contains("localhost"),
-        "the upload POST URL carries the public host: {}",
+        upload.url().contains(UNREACHABLE_HOST),
+        "the upload POST URL is signed for the browser-facing public host: {}",
         upload.url(),
     );
 
-    let http = reqwest::Client::new();
-    let status = post_upload(&http, upload, b"public-bytes".to_vec()).await;
-    assert!(
-        status.is_success(),
-        "the upload through the public host succeeds"
-    );
+    let object_key = object_key_of(&pool, reference).await;
+    minio
+        .put_object(&bucket, &object_key, b"internal-bytes".to_vec())
+        .await;
 
     let download = reader
         .download_url(BlobRef(reference), Disposition::Attachment)
         .await
         .expect("presign download")
-        .expect("the reference resolves")
+        .expect("the pending unverified reference with a landed object resolves")
         .into_string();
     assert!(
-        download.contains("localhost"),
-        "the download URL carries the public host: {download}",
+        download.contains(UNREACHABLE_HOST),
+        "the download URL is signed for the public host: {download}",
     );
 
     wait_until(async || {

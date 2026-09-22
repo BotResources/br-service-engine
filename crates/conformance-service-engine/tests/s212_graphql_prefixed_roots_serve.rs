@@ -2,16 +2,13 @@ mod graphql_support;
 
 use std::collections::BTreeSet;
 
-use async_graphql::Schema;
 use async_graphql::parser::parse_schema;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
 use br_core_auth::PassportHeader;
 use conformance_service_engine::infra::{TestDb, TestNats};
-use conformance_service_engine::sample::graphql::{
-    MutationRoot, QueryRoot, SubscriptionRoot, boot_graphql_service, passport_for,
-};
+use conformance_service_engine::sample::graphql::{boot_graphql_service, passport_for};
 use conformance_service_engine::sample::pipeline::insert_widget;
-use graphql_support::post_json;
+use graphql_support::{get_text, post_json};
 use service_engine::RootPrefix;
 use uuid::Uuid;
 
@@ -65,27 +62,6 @@ fn root_fields(sdl: &str) -> Vec<String> {
 async fn s212_a_prefixed_service_boots_serves_and_exposes_only_prefixed_roots() {
     let prefix = RootPrefix::from_snake("sample").expect("`sample` is a valid root prefix");
 
-    let sdl = Schema::build(QueryRoot::default(), MutationRoot, SubscriptionRoot)
-        .finish()
-        .sdl();
-    let fields = root_fields(&sdl);
-    assert!(
-        !fields.is_empty(),
-        "the composed schema exposes root fields"
-    );
-    for field in &fields {
-        assert!(
-            prefix.owns(field),
-            "every composed root field is under the `sample` prefix, `{field}` is not:\n{sdl}"
-        );
-    }
-    for expected in ["sampleWidget", "sampleCloseWidget", "sampleWidgets"] {
-        assert!(
-            fields.iter().any(|f| f == expected),
-            "the composed schema exposes `{expected}`:\n{sdl}"
-        );
-    }
-
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -97,8 +73,31 @@ async fn s212_a_prefixed_service_boots_serves_and_exposes_only_prefixed_roots() 
     insert_widget(&pool, mine, tenant, "alpha").await;
 
     let service = boot_graphql_service(&db, nats.nats().await, "se_s212", "pod-s212").await;
-    let passport = passport_for(user, tenant).to_header();
 
+    let (status, sdl) = get_text(&service.http("/sdl")).await;
+    assert_eq!(
+        status, 200,
+        "the booted service serves its SDL over the edge"
+    );
+    let fields = root_fields(&sdl);
+    assert!(
+        !fields.is_empty(),
+        "the served schema exposes root fields:\n{sdl}"
+    );
+    for field in &fields {
+        assert!(
+            prefix.owns(field),
+            "every served root field is under the `sample` prefix, `{field}` is not:\n{sdl}"
+        );
+    }
+    for expected in ["sampleWidget", "sampleCloseWidget", "sampleWidgets"] {
+        assert!(
+            fields.iter().any(|f| f == expected),
+            "the served schema exposes `{expected}`:\n{sdl}"
+        );
+    }
+
+    let passport = passport_for(user, tenant).to_header();
     let query = format!("query {{ sampleWidget(id: \"{mine}\") }}");
     let (status, body) = post_json(
         &service.base_url,

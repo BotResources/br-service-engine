@@ -123,7 +123,9 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
         nats.nats().await,
         "se_s221u",
         "pod-s221u",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(400)),
         policy,
     )
     .await;
@@ -142,7 +144,9 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
         nats.nats().await,
         "se_s221",
         "pod-s221",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(400)),
         policy,
         Duration::from_millis(150),
         false,
@@ -186,7 +190,9 @@ async fn s221_a_post_upload_policy_runs_in_the_promotion_transaction_or_fails_th
         nats.nats().await,
         "se_s221",
         "pod-s221r",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(400)),
         policy,
         Duration::from_millis(150),
         true,

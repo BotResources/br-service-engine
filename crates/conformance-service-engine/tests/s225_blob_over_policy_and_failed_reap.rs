@@ -57,7 +57,9 @@ async fn s225_an_over_policy_verified_stage_is_refused_and_a_failed_row_is_reape
         nats.nats().await,
         "se_s225",
         "pod-s225",
-        minio.config(&bucket),
+        minio
+            .config(&bucket)
+            .with_upload_ttl(Duration::from_millis(400)),
         policy,
         Duration::from_millis(150),
     )
