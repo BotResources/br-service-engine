@@ -106,11 +106,19 @@ impl BlobReaper {
             content_type: &content_type,
             owner: owner.map(PersonId),
         };
-        match runner.run_after_promotion(tx, uploaded).await? {
-            PromotionOutcome::Committed => round.promoted += 1,
-            PromotionOutcome::Refused(code) => {
+        match runner.run_after_promotion(tx, uploaded).await {
+            Ok(PromotionOutcome::Committed) => round.promoted += 1,
+            Ok(PromotionOutcome::Refused(code)) => {
                 self.fail_and_delete(pg, store, id, object_key, format!("policy:{code}"), round)
                     .await?;
+            }
+            Err(error) => {
+                round.failures += 1;
+                tracing::warn!(
+                    blob = %id,
+                    reason = %crate::chain::describe(&error),
+                    "a post-upload policy faulted; the row stays pending for the next sweep",
+                );
             }
         }
         Ok(())

@@ -6,7 +6,7 @@ use sqlx::{Postgres, Transaction};
 
 use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::policy::Uploaded;
-use crate::blobs::{BlobHandle, BlobRef};
+use crate::blobs::{BlobHandle, BlobRef, PostUpload};
 use crate::error::EngineError;
 use crate::offers::OfferStagers;
 use crate::pipeline::ops::Ops;
@@ -20,6 +20,30 @@ use crate::transport::ImpactTransport;
 pub(crate) enum PromotionOutcome {
     Committed,
     Refused(&'static str),
+}
+
+pub(crate) enum PromotionStep {
+    Commit,
+    Refused(&'static str),
+    Fault(EngineError),
+}
+
+pub(crate) fn classify_post_upload(outcome: Result<(), PostUpload>) -> PromotionStep {
+    match outcome {
+        Ok(()) => PromotionStep::Commit,
+        Err(PostUpload::Refused(Refused(reason))) => PromotionStep::Refused(reason.code()),
+        Err(PostUpload::Fault(error)) => PromotionStep::Fault(error),
+    }
+}
+
+impl std::fmt::Debug for PromotionStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Commit => f.write_str("Commit"),
+            Self::Refused(code) => write!(f, "Refused({code})"),
+            Self::Fault(error) => write!(f, "Fault({error})"),
+        }
+    }
 }
 
 pub(crate) struct PolicyRunner {
@@ -103,9 +127,16 @@ impl PolicyRunner {
                 )));
             }
         };
-        if let Err(Refused(reason)) = outcome {
-            let _ = tx.rollback().await;
-            return Ok(PromotionOutcome::Refused(reason.code()));
+        match classify_post_upload(outcome) {
+            PromotionStep::Commit => {}
+            PromotionStep::Refused(code) => {
+                let _ = tx.rollback().await;
+                return Ok(PromotionOutcome::Refused(code));
+            }
+            PromotionStep::Fault(error) => {
+                let _ = tx.rollback().await;
+                return Err(error);
+            }
         }
         if !staged.is_within(self.impacts_per_commit) {
             let _ = tx.rollback().await;
@@ -120,5 +151,36 @@ impl PolicyRunner {
             .purge_committed_seals(&staged.sealed_keys)
             .await;
         Ok(PromotionOutcome::Committed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gate::Reason;
+
+    #[test]
+    fn an_ok_policy_outcome_commits() {
+        assert!(matches!(
+            classify_post_upload(Ok(())),
+            PromotionStep::Commit
+        ));
+    }
+
+    #[test]
+    fn a_refusal_is_terminal_and_carries_its_code() {
+        let step = classify_post_upload(Err(PostUpload::Refused(Refused(Reason::new("NOPE")))));
+        assert!(matches!(step, PromotionStep::Refused("NOPE")));
+    }
+
+    #[test]
+    fn a_deterministic_fault_carries_the_engine_error_for_a_retry_not_a_refusal() {
+        let step = classify_post_upload(Err(PostUpload::Fault(EngineError::Blob(
+            "transient".into(),
+        ))));
+        match step {
+            PromotionStep::Fault(EngineError::Blob(detail)) => assert_eq!(detail, "transient"),
+            other => panic!("a fault must classify as Fault, not commit or refuse: {other:?}"),
+        }
     }
 }

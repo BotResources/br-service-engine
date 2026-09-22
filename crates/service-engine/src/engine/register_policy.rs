@@ -59,7 +59,7 @@ impl<P: Principal> Engine<P> {
         F: for<'a> Fn(
                 crate::blobs::Uploaded<'a>,
                 &'a mut crate::pipeline::PostSave<'_, '_>,
-            ) -> BoxFuture<'a, Result<(), crate::pipeline::Refused>>
+            ) -> BoxFuture<'a, Result<(), crate::blobs::PostUpload>>
             + Send
             + Sync
             + 'static,

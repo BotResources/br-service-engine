@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -18,8 +18,31 @@ pub struct Uploaded<'a> {
     pub owner: Option<PersonId>,
 }
 
+pub enum PostUpload {
+    Refused(Refused),
+    Fault(EngineError),
+}
+
+impl From<Refused> for PostUpload {
+    fn from(refused: Refused) -> Self {
+        Self::Refused(refused)
+    }
+}
+
+impl From<EngineError> for PostUpload {
+    fn from(error: EngineError) -> Self {
+        Self::Fault(error)
+    }
+}
+
+impl From<sqlx::Error> for PostUpload {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Fault(EngineError::from(error))
+    }
+}
+
 pub(crate) type UploadPolicy = Arc<
-    dyn for<'a> Fn(Uploaded<'a>, &'a mut PostSave<'_, '_>) -> BoxFuture<'a, Result<(), Refused>>
+    dyn for<'a> Fn(Uploaded<'a>, &'a mut PostSave<'_, '_>) -> BoxFuture<'a, Result<(), PostUpload>>
         + Send
         + Sync,
 >;
@@ -33,7 +56,10 @@ impl UploadPolicies {
     pub(crate) fn register<B, F>(&mut self, policy: F) -> Result<(), EngineError>
     where
         B: Blobs,
-        F: for<'a> Fn(Uploaded<'a>, &'a mut PostSave<'_, '_>) -> BoxFuture<'a, Result<(), Refused>>
+        F: for<'a> Fn(
+                Uploaded<'a>,
+                &'a mut PostSave<'_, '_>,
+            ) -> BoxFuture<'a, Result<(), PostUpload>>
             + Send
             + Sync
             + 'static,
@@ -54,6 +80,10 @@ impl UploadPolicies {
 
     pub(crate) fn contains(&self, kind: &str) -> bool {
         self.by_kind.contains_key(kind)
+    }
+
+    pub(crate) fn kinds(&self) -> BTreeSet<&'static str> {
+        self.by_kind.keys().copied().collect()
     }
 }
 
@@ -87,5 +117,7 @@ mod tests {
         assert!(policies.get("attachment").is_some());
         assert!(policies.contains("attachment"));
         assert!(policies.get("avatar").is_none());
+        assert!(policies.kinds().contains("attachment"));
+        assert!(!policies.kinds().contains("avatar"));
     }
 }
