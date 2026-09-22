@@ -1,5 +1,7 @@
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use futures_util::future::FutureExt as _;
 use sqlx::{Postgres, Transaction};
 
 use crate::accumulator::AccumulatorRuntime;
@@ -72,6 +74,7 @@ impl PolicyRunner {
             return Ok(PromotionOutcome::Committed);
         };
         let reference = uploaded.reference;
+        let kind = uploaded.kind;
         let outbound = self.outbound(reference);
         let mut staged = Staged::default();
         let outcome = {
@@ -86,7 +89,19 @@ impl PolicyRunner {
             )
             .with_outbound(outbound);
             let mut post_save = PostSave::new(&mut ops, RefusalOrigin::Upload);
-            policy(uploaded, &mut post_save).await
+            AssertUnwindSafe(policy(uploaded, &mut post_save))
+                .catch_unwind()
+                .await
+        };
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                let _ = tx.rollback().await;
+                return Err(EngineError::Blob(format!(
+                    "a post-upload policy for blob kind {kind} panicked; the row stays pending \
+                     for the next sweep rather than taking the beat down"
+                )));
+            }
         };
         if let Err(Refused(reason)) = outcome {
             let _ = tx.rollback().await;

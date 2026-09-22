@@ -134,6 +134,9 @@ impl BlobReaper {
         .bind(&reason)
         .execute(pg)
         .await?;
+        if done.rows_affected() == 0 {
+            return Ok(());
+        }
         store.object().delete_object(object_key).await?;
         round.failed += done.rows_affected();
         Ok(())
