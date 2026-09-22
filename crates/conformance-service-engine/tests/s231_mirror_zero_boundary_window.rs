@@ -1,9 +1,3 @@
-//! A bucket whose read boundary is zero has no history to resume from, so the
-//! watch it opens is future-only and the window between the boundary and the
-//! subscription belongs to nobody. Zero is every consumer's first boot, so that
-//! window is the common case: fresh metadata read *after* the subscription
-//! exists is what closes it, and the key reaches `known_*` without waiting out
-//! the periodic reconcile.
 mod mirror_support;
 
 use std::sync::Arc;
@@ -26,13 +20,8 @@ use service_engine::nats::KvKey;
 use service_engine::{Consumed, Mirror};
 use uuid::Uuid;
 
-/// Far past the observation window: if the key lands, it is the post-
-/// subscription metadata check that brought it, never the periodic scan.
 const NO_RECONCILE: Duration = Duration::from_secs(600);
 
-/// The barrier is the engine's own call into the consumed type, taken while the
-/// watch is being opened: the boundary has been read, the subscription does not
-/// exist yet. There is no engine test hook and no fake broker.
 type OpenGate = (
     tokio::sync::Notify,
     std::sync::Mutex<bool>,
@@ -107,7 +96,7 @@ impl Project<Uuid> for GatedProjection {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn s194_a_put_inside_the_zero_boundary_window_reaches_known_without_the_reconcile() {
+async fn s231_a_put_inside_the_zero_boundary_window_reaches_known_without_the_reconcile() {
     OPENING
         .set((
             tokio::sync::Notify::new(),
@@ -155,8 +144,6 @@ async fn s194_a_put_inside_the_zero_boundary_window_reaches_known_without_the_re
         .await
         .expect("the watch open reaches the barrier, past the boundary it just read");
 
-    // Inside the window: the boundary said zero, and the subscription this put
-    // would have been delivered on does not exist yet.
     let id = Uuid::now_v7();
     fabric
         .published_language::<GatedEntry>()

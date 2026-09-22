@@ -9,7 +9,7 @@ use service_engine::error::EngineError;
 use uuid::Uuid;
 
 #[tokio::test]
-async fn s195_a_post_save_policy_refuses_the_write_with_its_reason_and_commits_nothing() {
+async fn s233_a_post_save_policy_refuses_the_write_with_its_reason_and_commits_nothing() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -20,7 +20,7 @@ async fn s195_a_post_save_policy_refuses_the_write_with_its_reason_and_commits_n
     let widget = Uuid::now_v7();
     insert_widget(&pool, widget, tenant, "clean").await;
 
-    let engine = boot_policy_engine(&db, nats.nats().await, "se_s195", "pod-s195").await;
+    let engine = boot_policy_engine(&db, nats.nats().await, "se_s233", "pod-s233").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let running = tokio::spawn(engine.run());
@@ -68,7 +68,7 @@ async fn s195_a_post_save_policy_refuses_the_write_with_its_reason_and_commits_n
 }
 
 #[tokio::test]
-async fn s195_a_transition_aware_policy_reads_the_prior_image_and_refuses_a_no_op_save() {
+async fn s233_a_transition_aware_policy_reads_the_prior_image_and_refuses_a_no_op_save() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -80,7 +80,7 @@ async fn s195_a_transition_aware_policy_reads_the_prior_image_and_refuses_a_no_o
     insert_widget(&pool, widget, tenant, "a").await;
 
     let engine =
-        boot_transition_policy_engine(&db, nats.nats().await, "se_s195t", "pod-s195t").await;
+        boot_transition_policy_engine(&db, nats.nats().await, "se_s233t", "pod-s233t").await;
     let shutdown = engine.shutdown_handle();
     let executor = engine.mutation_executor();
     let running = tokio::spawn(engine.run());
@@ -125,12 +125,12 @@ async fn s195_a_transition_aware_policy_reads_the_prior_image_and_refuses_a_no_o
 }
 
 #[tokio::test]
-async fn s195_a_declared_subjection_with_no_registered_policy_fails_the_boot_seam_check() {
+async fn s233_a_declared_subjection_with_no_registered_policy_fails_the_boot_seam_check() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
 
-    let engine = boot_unhonoured_seam_engine(&db, nats.nats().await, "se_s195c", "pod-s195c").await;
+    let engine = boot_unhonoured_seam_engine(&db, nats.nats().await, "se_s233c", "pod-s233c").await;
     let error = engine
         .run()
         .await

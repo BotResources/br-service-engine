@@ -1,7 +1,3 @@
-//! Multi-pod outbox (issue #126 §F). Two engine instances of the example service share
-//! one Postgres and one NATS, and both run the outbox relay. A single command stages one
-//! CardReady row in the outbox; the relay's `FOR UPDATE SKIP LOCKED` row claim lets exactly
-//! one pod drain it, so the event is published once on the wire — not once per relaying pod.
 mod blackbox_support;
 
 use std::time::{Duration, Instant};
@@ -18,9 +14,6 @@ use uuid::Uuid;
 const WITHIN: Duration = Duration::from_secs(25);
 const POLL: Duration = Duration::from_millis(150);
 
-/// Drain every CardReady currently on the integration event stream and count the ones
-/// naming `board`. A fresh ephemeral consumer reads the subject from the start, so this
-/// is the true count published, not a running tally.
 async fn card_ready_on_the_wire(nats: &Nats, board: Uuid) -> usize {
     let subject = event_subject(&card_ready_coords());
     let stream = nats
@@ -71,8 +64,6 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
     let board = Uuid::now_v7();
     let card = Uuid::now_v7();
 
-    // One command. Whichever pod's shared durable consumer takes it stages exactly one
-    // CardReady row in the outbox.
     example_twin::send_create_card(
         &world.nats,
         &CreateCard {
@@ -84,7 +75,6 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
     .await
     .expect("send the CreateCard command");
 
-    // The command was handled by exactly one pod: one card row.
     let deadline = Instant::now() + WITHIN;
     loop {
         let cards: i64 = sqlx::query_scalar("SELECT count(*) FROM card WHERE id = $1")
@@ -102,8 +92,6 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
         tokio::time::sleep(POLL).await;
     }
 
-    // Both pods run the outbox relay; the row claim lets exactly one drain the row to
-    // PUBLISHED. Awaiting that persisted status is also the signal the relay published.
     let subject = event_subject(&card_ready_coords());
     let deadline = Instant::now() + WITHIN;
     loop {
@@ -123,7 +111,6 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
         tokio::time::sleep(POLL).await;
     }
 
-    // One command staged one row, and it was published exactly once.
     assert_eq!(
         scalar_by_subject(
             &world.db.app,
@@ -145,7 +132,6 @@ async fn bb10_an_outbox_row_staged_on_one_pod_is_published_once_though_both_pods
         "the row reached PUBLISHED once, not once per relaying pod"
     );
 
-    // And exactly one CardReady is on the wire, though both pods were relaying.
     assert_eq!(
         card_ready_on_the_wire(&world.nats, board).await,
         1,

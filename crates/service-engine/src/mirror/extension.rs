@@ -1,23 +1,5 @@
-//! The project-specific extension pattern for a consumed value: a shared `core`
-//! published by the producer, and a project-owned `extension` given as the
-//! second type parameter. Both are typed, so a value carrying an extension this
-//! project does not model fails to deserialize — an unknown extension is
-//! **denied**, never mirrored as opaque JSON. A different project reading the
-//! same offer names a different extension type; each sees only the extensions it
-//! declares.
-//!
-//! The core is flattened onto the value, so the producer may add a core field
-//! without breaking a consumer (the additive rule). The extension is a named
-//! object typed by the project — model it as an externally-tagged enum and an
-//! unknown tag is the deny.
-
 use serde::{Deserialize, Serialize};
 
-/// A consumed value split into a producer's shared `core` and a project-owned
-/// `extension`. A consumer makes it a [`Consumed`](super::consumed::Consumed) by
-/// implementing that trait on the concrete `Extended<Core, Ext>` it reads (the
-/// prefix and version live there), so two projects extending the same core with
-/// different `Ext` types are two distinct, independently-typed consumptions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Extended<Core, Ext> {
     #[serde(flatten)]

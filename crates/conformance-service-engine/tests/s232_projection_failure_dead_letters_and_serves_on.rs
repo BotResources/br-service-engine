@@ -13,11 +13,8 @@ use uuid::Uuid;
 const SOON: Duration = Duration::from_secs(2);
 const QUIET: Duration = Duration::from_millis(300);
 
-// H2: a projector whose `project` returns Err is a poison stored document. The
-// render pass must dead-letter it with the projector as source and take the
-// existing repair-then-end path for the faulted sessions — never panic the pod.
 #[tokio::test]
-async fn s194_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
+async fn s232_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -45,8 +42,6 @@ async fn s194_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
         "the session opens on a healthy projection before the document turns poison",
     );
 
-    // The stored document turns poison. Every render frame that touches its key
-    // now fails to project; the pass must run to completion regardless.
     poison.store(true, Ordering::Relaxed);
     let mut ended = false;
     for _ in 0..12 {
@@ -72,8 +67,6 @@ async fn s194_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
         "the ended session's stream ends explicitly rather than going silent",
     );
 
-    // The failure landed in the dead-letter table with the projector as source,
-    // folded into one row across every failing frame (keyed on projector + key).
     let dead = DeadLetters::new(pool.clone())
         .list(Some(DeadLetterSource::Render), 16)
         .await
@@ -97,8 +90,6 @@ async fn s194_a_projection_failure_dead_letters_and_the_pod_keeps_serving() {
         "the key that could not be projected is the dead-letter's subject",
     );
 
-    // The pod is alive: clear the poison and a fresh session is still served,
-    // proving the render loop survived the failure rather than crashing.
     poison.store(false, Ordering::Relaxed);
     let mut healthy = engine
         .attach(attach_request(

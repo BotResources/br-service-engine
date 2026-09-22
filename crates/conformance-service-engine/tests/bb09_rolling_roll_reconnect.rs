@@ -1,8 +1,3 @@
-//! Rolling roll (issue #126 §F). A client is mid-session against one pod when that pod
-//! is taken down under it — the shape of a rolling deployment or a node loss. The client
-//! reconnects to another pod of the same service, sharing one Postgres and one NATS, and
-//! gets a fresh Reset rendered from committed state: the work it saw on the rolled pod is
-//! all there. No session state is pinned to a pod.
 mod blackbox_support;
 
 use std::time::Duration;
@@ -19,7 +14,6 @@ const SUB: &str = "subscription{exampleBoardDeltas{__typename \
 
 #[tokio::test]
 async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another() {
-    // World's own pod is the survivor the client rolls onto; the spawned pod is rolled out.
     let world = World::start("bb09-survivor").await;
     let doomed = world.spawn_pod("bb09-doomed").await;
 
@@ -28,7 +22,6 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
     let pass = passport(user, org, &[BOARD_ARCHIVE], false);
     let board = Uuid::now_v7();
 
-    // The client works against the doomed pod.
     ok(&world
         .gql_at(
             doomed.base_url(),
@@ -46,7 +39,6 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
         .expect("the doomed pod opens the session with a Reset");
     assert_eq!(reset["exampleBoardDeltas"]["__typename"], "BoardReset");
 
-    // A live delta proves the client is genuinely mid-session on the doomed pod.
     ok(&world
         .gql_at(
             doomed.base_url(),
@@ -70,11 +62,9 @@ async fn bb09_a_client_survives_its_pod_being_rolled_by_reconnecting_to_another(
         "the client saw the archive land on the doomed pod: {upsert}"
     );
 
-    // The pod is rolled out under the client. Its socket is left to drop with it.
     doomed.shutdown().await;
     drop(ws);
 
-    // The client reconnects to the surviving pod and gets a fresh Reset from committed state.
     let mut reconnected = GraphqlWs::connect(world.base_url(), &pass).await;
     reconnected.subscribe("1", SUB).await;
     let fresh = reconnected

@@ -41,8 +41,6 @@ impl<'a> Reaction<'a> {
         }
     }
 
-    /// Stable inbound identity, for domain deduplication that must outlive the
-    /// engine's bounded delivery-claim retention (for example human-cleared flags).
     pub fn message_id(&self) -> Uuid {
         self.message_id
     }

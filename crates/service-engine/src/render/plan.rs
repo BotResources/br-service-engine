@@ -163,15 +163,6 @@ pub(crate) fn outgoing_for<P: Principal>(
     Ok(outgoing)
 }
 
-/// The cause a single coalesced delta carries.
-///
-/// A coalesced projector emits at most one delta per key per frame, folding
-/// every impact that touched the key into it. Only one cause can survive that
-/// fold, and the rule is **last write wins**: the delta carries the cause of the
-/// last impact it folds — the one latest in the frame's arrival order (the
-/// highest index into `impacts`) that carries a cause. Impacts with no cause are
-/// skipped, so a rename that follows a create delivers the rename's cause, never
-/// the stale create's; a fold whose impacts all lack a cause carries `None`.
 fn coalesced_cause(indices: Option<&Vec<usize>>, impacts: &[Impact]) -> Option<Cause> {
     indices
         .into_iter()

@@ -4,16 +4,12 @@ use crate::error::EngineError;
 use crate::nats::Nats;
 use crate::schema::TABLE_MIRROR_WATERMARK;
 
-/// What a bucket looked like at the instant a full read started: the stream's
-/// creation identity, and the last sequence `S` the read is a snapshot of.
 #[derive(Clone, Debug)]
 pub(super) struct Snapshot {
     pub created: String,
     pub revision: u64,
 }
 
-/// What the mirror has committed for a bucket. `stream_created_at` is NULL on
-/// rows written before the identity column existed.
 #[derive(sqlx::FromRow)]
 pub(super) struct Watermark {
     pub stream_created_at: Option<String>,
@@ -26,18 +22,12 @@ impl Watermark {
     }
 }
 
-/// How a snapshot is written. A full read *adopts* what it just read, so a
-/// replaced or restored bucket takes the sequence it actually has. A watch
-/// event only *advances*, since it observes one revision of the stream a read
-/// already adopted.
 #[derive(Clone, Copy)]
 pub(super) enum Mark {
     Adopt,
     Advance,
 }
 
-/// Fresh stream metadata, never `cached_info()`: the snapshot boundary is only
-/// sound when it is read at the instant the scan starts.
 pub(super) async fn snapshot(
     nats: &Nats,
     mirror: &str,
@@ -77,9 +67,6 @@ pub(super) async fn write(
     snapshot: &Snapshot,
     mark: Mark,
 ) -> Result<(), EngineError> {
-    // Adoption takes the read sequence as it is — a replaced or restored bucket
-    // is a new cursor, not a regression. An advance stays monotonic inside one
-    // identity, and adopts when the identity under it changed.
     let revision = match mark {
         Mark::Adopt => "EXCLUDED.revision".to_string(),
         Mark::Advance => format!(

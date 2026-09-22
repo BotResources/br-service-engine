@@ -1,7 +1,4 @@
 #![allow(dead_code)]
-//! A consumed catalog whose projection key lives only in the payload, so a
-//! retract cannot derive it from the KV key. The engine's own sample directory
-//! mirror keys off the KV key and cannot exercise that path.
 
 use std::time::Duration;
 
@@ -30,8 +27,6 @@ impl Consumed for CatalogEntry {
     const PREFIX: &'static str = CATALOG_PREFIX;
 }
 
-/// The same shape in a second bucket, to prove identities and boundaries are
-/// per bucket even when two consumptions share a prefix.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct OtherEntry {
     pub id: Uuid,
@@ -96,8 +91,6 @@ fn value_of(cx: &Projection<'_>, id: Uuid) -> Option<String> {
         })
 }
 
-/// A projector that writes, then fails, to prove a failed reconcile commits
-/// neither the projection nor the watermark.
 pub struct FailingProjection;
 
 impl Project<Uuid> for FailingProjection {
@@ -132,7 +125,6 @@ pub fn catalog(name: &'static str) -> MirrorReady<Uuid, CatalogProjection> {
         .reconcile_keys(persisted_keys)
 }
 
-/// The same catalog joined with a second bucket that carries the same prefix.
 pub fn joined(name: &'static str) -> MirrorReady<Uuid, CatalogProjection> {
     Mirror::new(MirrorName::from_static(name))
         .consume::<CatalogEntry>()

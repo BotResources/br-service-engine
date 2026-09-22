@@ -1,17 +1,16 @@
 use std::sync::Arc;
 
-use crate::blobs::BoundBlobs;
 use crate::engine::Engine;
 use crate::engine::loops::{join_presence, run_scheduled_messages};
 use crate::error::EngineError;
 use crate::housekeeping::ready::REASON_WORKER_STOPPED;
-use crate::inbound::InboundLoop;
-use crate::pipeline::{DirectPipeline, Policies};
+use crate::pipeline::Policies;
 use crate::presence::REASON_PRESENCE_BUCKET;
 use crate::principal::Principal;
 use crate::stop::Stop;
-use crate::transport::ImpactTransport;
 
+mod blobs;
+mod inbound;
 enum Boot {
     Converged,
     ShuttingDown,
@@ -125,22 +124,19 @@ impl<P: Principal> Engine<P> {
             }
         };
 
-        let blob_handle = match crate::blobs::bind(&blobs, &config).await {
-            Ok(BoundBlobs { handle, reaper }) => {
-                if let Some(mut reaper) = reaper {
-                    if let Some(blob_handle) = handle.clone() {
-                        reaper = reaper.with_runner(crate::pipeline::PolicyRunner::new(
-                            transport.clone() as Arc<dyn ImpactTransport>,
-                            accumulators.clone(),
-                            offers.clone(),
-                            policies.clone(),
-                            blob_handle,
-                            config.service.clone(),
-                            config.impacts_per_commit,
-                        ));
-                    }
-                    beat = beat.with_blob_reaper(reaper);
-                }
+        let blob_handle = match blobs::bind_blobs(
+            &blobs,
+            &config,
+            beat,
+            &transport,
+            &accumulators,
+            &offers,
+            &policies,
+        )
+        .await
+        {
+            Ok((handle, bound_beat)) => {
+                beat = bound_beat;
                 handle
             }
             Err((error, reason)) => {
@@ -188,50 +184,31 @@ impl<P: Principal> Engine<P> {
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
         );
         let subscriptions = reactions.subscriptions();
-        let mut inbound = if subscriptions.is_empty() {
-            None
-        } else {
-            let pipeline = Arc::new(DirectPipeline::new(
-                pg.clone(),
-                transport.clone() as Arc<dyn ImpactTransport>,
-                accumulators.clone(),
-                offers.clone(),
-                policies.clone(),
-                reactions.clone(),
-                blob_handle.clone(),
-                config.lock_timeout,
-                config.impacts_per_commit,
-                config.service.clone(),
-                reaction_principal.clone(),
-            ));
-            let started = async {
-                crate::inbound::validate_message_retention(
-                    &nats,
-                    &subscriptions,
-                    config.message_retention,
-                )
-                .await?;
-                InboundLoop::start(
-                    nats.clone(),
-                    subscriptions,
-                    pipeline,
-                    dead_letters.clone(),
-                    config.inbound_config(),
-                    inbound_health.clone(),
-                )
-                .await
-            }
-            .await;
-            match started {
-                Ok(loop_handle) => Some(loop_handle),
-                Err(error) => {
-                    readiness_guard.set_not_ready(crate::inbound::inbound_start_reason(&error));
-                    stop_mirrors.stop();
-                    stop_presence.stop();
-                    join_presence(presence_task.take()).await;
-                    render.shutdown().await;
-                    return Err(error);
-                }
+        let mut inbound = match inbound::build_inbound(
+            &pg,
+            &nats,
+            &transport,
+            &accumulators,
+            &offers,
+            &policies,
+            reactions,
+            subscriptions,
+            blob_handle.clone(),
+            &config,
+            &dead_letters,
+            &inbound_health,
+            reaction_principal,
+        )
+        .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                readiness_guard.set_not_ready(crate::inbound::inbound_start_reason(&error));
+                stop_mirrors.stop();
+                stop_presence.stop();
+                join_presence(presence_task.take()).await;
+                render.shutdown().await;
+                return Err(error);
             }
         };
 
