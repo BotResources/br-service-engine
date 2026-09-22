@@ -27,13 +27,6 @@ async fn reaper_slots(pool: &PgPool) -> i64 {
         .expect("count reaper slots")
 }
 
-// The leader gate is real, not a PK tautology: over N intervals with two pods up, exactly one
-// pod claims the `reaper:blob` slot per interval and the other's sweep reports `skipped`. The
-// load-bearing assertion is `ran_a + ran_b == distinct slot rows` — a pod that swept WITHOUT
-// claiming a slot (Victor's bug) would record a `ran` round with no matching slot row, so the
-// sum would exceed the row count. Removing the `claim_current_slot` guard from the engine (so
-// every beat sweeps) would break this test two ways: no slot rows are inserted (slots == 0) and
-// no round is ever `skipped`. Verified by reasoning; the mutation is not committed.
 #[tokio::test]
 async fn s222_two_pods_run_at_most_one_reaper_sweep_per_interval() {
     let db = TestDb::fresh().await;
