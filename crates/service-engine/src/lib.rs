@@ -83,7 +83,7 @@ pub use accumulator::{
     SealHash, SealMarker, Swept,
 };
 pub use blobs::{
-    Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, ReaperRound, UploadUrl,
+    Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, PostUpload, ReaperRound, UploadUrl,
 };
 pub use cohort::{Cohort, CohortKey, CohortValue};
 pub use config::EngineConfig;
@@ -104,7 +104,7 @@ pub use graphql::{
     PASSPORT_HEADER, PassportPrincipal, PrincipalRejected, Query, RootPrefix, SchemaSlices,
     SliceFragment, ack, ack_bulk, app, attach, attach_with_session, cause_json, coded_error,
     engine_schema, execute, execute_bulk, forbidden, key_json, lane_notice_stream, mutation_error,
-    page, serve, typed_presence_view, typed_view,
+    page, serve, typed_presence_view, typed_view, with_sdl_route,
 };
 
 pub use housekeeping::beat::{Beat, BeatRound};

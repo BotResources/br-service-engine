@@ -22,12 +22,12 @@ pub use handle::Blob;
 pub(crate) use handle::BlobHandle;
 pub use head::{BlobHead, BlobState};
 pub(crate) use object::ObjectHead;
-pub use policy::Uploaded;
-pub(crate) use reaper::BlobReaper;
+pub use policy::{PostUpload, Uploaded};
 pub use reaper::ReaperRound;
+pub(crate) use reaper::{BlobReaper, ReaperRoundLog};
 pub(crate) use registry::BlobRegistry;
 pub(crate) use store::{BlobRowOp, BlobStore, insert_reference, orphan_reference};
-pub use store::{REASON_BLOB_BUCKET, REASON_BLOB_UNCONFIGURED};
+pub use store::{REASON_BLOB_BUCKET, REASON_BLOB_POLICY, REASON_BLOB_UNCONFIGURED};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, async_graphql::Enum)]
 pub enum Disposition {

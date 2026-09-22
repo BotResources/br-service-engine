@@ -270,6 +270,15 @@ pub enum EngineError {
     MigrationOutsideBand { owner: &'static str, version: i64 },
 
     #[error(
+        "library {library} created relation {object} outside its declared schema; a library owns \
+         exactly one schema and may not touch public or another library's"
+    )]
+    LibraryMigrationEscapedSchema {
+        library: &'static str,
+        object: String,
+    },
+
+    #[error(
         "service migration {version} falls inside the reserved band of {owner}; service migrations \
          must sit outside every reserved band"
     )]
@@ -313,6 +322,17 @@ pub enum EngineError {
         kind: &'static str,
         size: u64,
         max_bytes: u64,
+    },
+
+    #[error(
+        "blob kind {kind} sets orphan_after {orphan_after:?}, shorter than the upload TTL \
+         {upload_ttl:?}; an upload that lands after an incomplete row is reaped would orphan an \
+         object no sweep sees, so the kind is refused at bind"
+    )]
+    BlobOrphanWindowTooShort {
+        kind: &'static str,
+        orphan_after: Duration,
+        upload_ttl: Duration,
     },
 
     #[error("presence type `{presence}` is used but was never registered with register_presence")]

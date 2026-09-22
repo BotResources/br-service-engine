@@ -57,6 +57,10 @@ pub(crate) fn with_edge_observability(app: Router, sdl: String, metrics: Metrics
         .layer(http_metrics_layer())
 }
 
+pub fn with_sdl_route(app: Router, sdl: String) -> Router {
+    app.route("/sdl", sdl_route(sdl))
+}
+
 fn sdl_route<S>(sdl: String) -> MethodRouter<S>
 where
     S: Clone + Send + Sync + 'static,

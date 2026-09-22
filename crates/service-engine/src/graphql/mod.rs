@@ -21,7 +21,7 @@ pub use prefix::RootPrefix;
 pub use principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, PrincipalRejected};
 pub use query::Query;
 pub(crate) use router::with_edge_observability;
-pub use router::{app, serve};
+pub use router::{app, serve, with_sdl_route};
 pub use schema::engine_schema;
 pub use slices::{SchemaSlices, SliceFragment};
 pub use state::GraphqlState;
