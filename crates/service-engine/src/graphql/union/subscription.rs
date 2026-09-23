@@ -22,7 +22,7 @@ macro_rules! subscription_union {
                         return ::core::result::Result::Ok(Self::$variant(view));
                     }
                 )+
-                ::core::result::Result::Err(::async_graphql::Error::new(::std::format!(
+                ::core::result::Result::Err($crate::graphql::internal_fault(::std::format_args!(
                     "the delta names projector `{}`, which this subscription union does not map",
                     erased.projector
                 )))
@@ -151,7 +151,7 @@ macro_rules! subscription_union {
                         return ::core::result::Result::Ok(Self::$variant(view));
                     }
                 )+
-                ::core::result::Result::Err(::async_graphql::Error::new(::std::format!(
+                ::core::result::Result::Err($crate::graphql::internal_fault(::std::format_args!(
                     "the delta names projector `{}`, which this subscription union does not map",
                     erased.projector
                 )))

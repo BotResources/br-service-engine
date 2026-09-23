@@ -67,7 +67,7 @@ impl<V> KvBucket<V> {
             .map(|status| status.max_age())
             .map_err(|error| NatsError::Kv {
                 key: "status".to_string(),
-                detail: error.to_string(),
+                detail: crate::chain::describe(&error),
             })
     }
 

@@ -171,8 +171,8 @@ async fn a_mirror_that_died_reports_why_it_is_being_restarted() {
         .expect("the mirror is on the board");
     assert_eq!(
         condition.reason(),
-        Some("service: the roster stream ended"),
-        "the whole cause chain reaches the board, not only its top word"
+        Some("the roster stream ended"),
+        "the cause reaches the board, not only the wrapper's label"
     );
     shutdown.stop();
 }

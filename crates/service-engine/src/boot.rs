@@ -37,7 +37,7 @@ pub async fn establish_transport_with_probe(
 ) -> Result<PgListenNotify, EngineError> {
     readiness.set_not_ready(REASON_POSTURE);
     if let Err(e) = assert_posture(&pool).await {
-        tracing::error!(error = %e, "the PostgreSQL boot posture was refused");
+        tracing::error!(error = %crate::chain::describe(&e), "the PostgreSQL boot posture was refused");
         readiness.set_not_ready(REASON_POSTURE_REFUSED);
         return Err(e);
     }
@@ -63,7 +63,7 @@ pub async fn establish_transport_with_probe(
             tracing::error!(reason = %reason, "refusing to go UP: a different schema version is live");
             readiness.set_not_ready(reason);
         } else {
-            tracing::error!(error = %e, "the schema version singleton could not be claimed");
+            tracing::error!(error = %crate::chain::describe(&e), "the schema version singleton could not be claimed");
             readiness.set_not_ready(REASON_SCHEMA_VERSION);
         }
         return Err(e);
@@ -75,7 +75,7 @@ pub async fn establish_transport_with_probe(
             Ok(transport)
         }
         Err(e) => {
-            tracing::error!(error = %e, "the impact listener could not be established");
+            tracing::error!(error = %crate::chain::describe(&e), "the impact listener could not be established");
             readiness.set_not_ready(listener_reason(&e));
             Err(e)
         }

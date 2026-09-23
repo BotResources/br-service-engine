@@ -95,13 +95,13 @@ mod tests {
     use crate::chain::describe;
 
     #[test]
-    fn a_failure_reason_names_the_whole_cause_chain_not_only_its_top_word() {
+    fn a_failure_reason_names_the_cause_not_the_wrappers_label() {
         let error = RelayError::Relay(Box::new(EngineError::Service(
             "permission denied for table sample_relay_row".into(),
         )));
         assert_eq!(
             describe(&error),
-            "relay: service: permission denied for table sample_relay_row"
+            "permission denied for table sample_relay_row"
         );
         assert_eq!(
             describe(&RelayError::Publish("no such stream".to_string())),

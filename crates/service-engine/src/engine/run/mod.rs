@@ -168,7 +168,7 @@ impl<P: Principal> Engine<P> {
             if let Err(error) = outcome {
                 readiness_guard.set_not_ready(error.readiness_reason());
                 tracing::error!(
-                    %error,
+                    error = %crate::chain::describe(&error),
                     "scope declaration did not complete; the pod stays out of rotation rather \
                      than serving with unconfirmed scopes"
                 );

@@ -24,7 +24,7 @@ impl<P: Principal> Engine<P> {
         let _ = ws_shutdown.send(true);
         server_stop.stop();
         if let Ok(Err(error)) = server.await {
-            tracing::error!(%error, "the engine's http server ended with an error");
+            tracing::error!(error = %crate::chain::describe(&error), "the engine's http server ended with an error");
         }
         outcome
     }

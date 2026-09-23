@@ -31,7 +31,7 @@ pub(crate) async fn migrate<Q, M, S, R>(plan: BootPlan<Q, M, S, R>) -> Result<()
     .await;
     owner.close().await;
     if let Err(error) = &applied {
-        tracing::error!(%error, "migrate failed");
+        tracing::error!(error = %crate::chain::describe(&error), "migrate failed");
     }
     applied
 }
@@ -112,7 +112,7 @@ async fn connect_owner(url: &str, timeout: Duration) -> Result<PgPool, EngineErr
                 if Instant::now() >= deadline {
                     return Err(EngineError::Db(error));
                 }
-                tracing::warn!(%error, "migrate: owner connection not ready, retrying");
+                tracing::warn!(error = %crate::chain::describe(&error), "migrate: owner connection not ready, retrying");
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(RETRY_CEILING);
             }

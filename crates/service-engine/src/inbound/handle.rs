@@ -35,7 +35,7 @@ impl InboundConsumer {
                         message.payload.clone(),
                         delivered,
                     ),
-                    &error.to_string(),
+                    &crate::chain::describe(&error),
                 )
                 .await;
                 return;
@@ -106,7 +106,7 @@ impl InboundConsumer {
             Err(error) => {
                 tracing::error!(
                     reaction = %incoming.reaction,
-                    %error,
+                    error = %crate::chain::describe(&error),
                     "the dead-letter write failed; the frame is nak'ed, not terminated, so the \
                      broker keeps redelivering it until the table can record it"
                 );
@@ -130,7 +130,7 @@ impl InboundConsumer {
         if let Err(error) = message.double_ack().await {
             tracing::warn!(
                 reaction = %self.subscription.reaction,
-                %error,
+                error = %crate::chain::describe(&*error),
                 "the ack after a durable effect failed; a redelivery will find the claim and ack again"
             );
         }
@@ -140,7 +140,7 @@ impl InboundConsumer {
         if let Err(error) = message.ack_with(AckKind::Term).await {
             tracing::warn!(
                 reaction = %self.subscription.reaction,
-                %error,
+                error = %crate::chain::describe(&*error),
                 "terminating a dead-lettered delivery failed; it will redeliver and dead-letter again"
             );
         }

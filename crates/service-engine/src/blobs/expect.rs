@@ -31,12 +31,7 @@ impl Sha256Digest {
     }
 
     pub fn to_hex(&self) -> String {
-        let mut out = String::with_capacity(64);
-        for byte in &self.0 {
-            out.push(HEX[(byte >> 4) as usize] as char);
-            out.push(HEX[(byte & 0x0f) as usize] as char);
-        }
-        out
+        crate::hex::lower(&self.0)
     }
 
     pub fn to_base64(&self) -> String {
@@ -49,8 +44,6 @@ impl Serialize for Sha256Digest {
         serializer.serialize_str(&self.to_hex())
     }
 }
-
-const HEX: &[u8; 16] = b"0123456789abcdef";
 
 fn nibble(c: u8) -> Option<u8> {
     match c {

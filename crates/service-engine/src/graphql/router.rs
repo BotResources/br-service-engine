@@ -106,7 +106,7 @@ where
         .load_facts(state.engine.pg(), &mut principal)
         .await
     {
-        return unauthorized(AuthReject::Rejected(error.to_string()));
+        return facts_unavailable(&error);
     }
     let request = request.into_inner().data(principal);
     GraphQLResponse::from(state.schema.execute(request).await).into_response()
@@ -135,7 +135,7 @@ where
         .load_facts(state.engine.pg(), &mut principal)
         .await
     {
-        return unauthorized(AuthReject::Rejected(error.to_string()));
+        return facts_unavailable(&error);
     }
     let schema = state.schema.clone();
     let max_age = state.engine.runtime().config().session_max_age;
@@ -154,6 +154,23 @@ fn passport_header(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(PASSPORT_HEADER)
         .and_then(|value| value.to_str().ok())
+}
+
+/// The principal's facts could not be loaded: an infrastructure fault, not a
+/// rejected passport. The cause is logged with its chain; the client receives
+/// `INTERNAL` in the GraphQL error shape and no detail.
+fn facts_unavailable(error: &crate::error::EngineError) -> Response {
+    tracing::error!(
+        cause = %crate::chain::describe(error),
+        "loading the principal's facts failed; the client receives INTERNAL"
+    );
+    let body = serde_json::json!({
+        "errors": [{
+            "message": crate::graphql::INTERNAL_MESSAGE,
+            "extensions": { crate::graphql::CODE_EXTENSION: crate::graphql::INTERNAL_CODE },
+        }],
+    });
+    (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(body)).into_response()
 }
 
 fn unauthorized(reject: AuthReject) -> Response {

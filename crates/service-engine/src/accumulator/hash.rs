@@ -32,11 +32,7 @@ impl SealHash {
     }
 
     pub fn to_hex(self) -> String {
-        let mut out = String::with_capacity(64);
-        for byte in self.0 {
-            out.push_str(&format!("{byte:02x}"));
-        }
-        out
+        crate::hex::lower(&self.0)
     }
 
     pub fn from_hex(raw: &str) -> Result<Self, EngineError> {

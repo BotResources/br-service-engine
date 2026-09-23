@@ -131,7 +131,7 @@ async fn publish_declaration(
     let bytes = match serde_json::to_vec(command) {
         Ok(bytes) => bytes,
         Err(error) => {
-            tracing::error!(service = %service, %error, "encoding the scope declaration failed");
+            tracing::error!(service = %service, error = %crate::chain::describe(&error), "encoding the scope declaration failed");
             return;
         }
     };
@@ -146,7 +146,7 @@ async fn publish_declaration(
         tracing::warn!(
             service = %service,
             correlation_id = %correlation_id,
-            %error,
+            error = %crate::chain::describe(&error),
             "scope-declaration publish failed; will retry after the next wait"
         );
     }
@@ -170,7 +170,7 @@ fn decode_rejection(
             tracing::error!(
                 service = %service,
                 subject = %subject,
-                %error,
+                error = %crate::chain::describe(&error),
                 "a scope-declaration rejection failed to decode; awaiting a well-formed \
                  confirmation, readiness stays DOWN"
             );

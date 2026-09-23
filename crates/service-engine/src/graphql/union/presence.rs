@@ -21,7 +21,7 @@ macro_rules! presence_subscription_union {
                         return ::core::result::Result::Ok(Self::$variant(view));
                     }
                 )+
-                ::core::result::Result::Err(::async_graphql::Error::new(::std::format!(
+                ::core::result::Result::Err($crate::graphql::internal_fault(::std::format_args!(
                     "the delta names presence projector `{}`, which this union does not map",
                     erased.projector
                 )))

@@ -135,7 +135,7 @@ impl StreamingIngress {
         let frame: StreamFrame = match serde_json::from_slice(&message.payload) {
             Ok(frame) => frame,
             Err(error) => {
-                tracing::warn!(%error, subject = %message.subject, "a lane-A chunk is undecodable");
+                tracing::warn!(error = %crate::chain::describe(&error), subject = %message.subject, "a lane-A chunk is undecodable");
                 return self.terminate(message).await;
             }
         };
@@ -168,19 +168,19 @@ impl StreamingIngress {
 
     async fn confirm(&self, message: &async_nats::jetstream::Message) {
         if let Err(error) = message.ack().await {
-            tracing::warn!(%error, "acking a folded lane-A chunk failed; the stream still holds it for replay");
+            tracing::warn!(error = %crate::chain::describe(&*error), "acking a folded lane-A chunk failed; the stream still holds it for replay");
         }
     }
 
     async fn retry(&self, message: &async_nats::jetstream::Message) {
         if let Err(error) = message.ack_with(AckKind::Nak(Some(self.nak_backoff))).await {
-            tracing::warn!(%error, "naking a lane-A chunk under back-pressure failed");
+            tracing::warn!(error = %crate::chain::describe(&*error), "naking a lane-A chunk under back-pressure failed");
         }
     }
 
     async fn terminate(&self, message: &async_nats::jetstream::Message) {
         if let Err(error) = message.ack_with(AckKind::Term).await {
-            tracing::warn!(%error, "terminating a malformed lane-A chunk failed");
+            tracing::warn!(error = %crate::chain::describe(&*error), "terminating a malformed lane-A chunk failed");
         }
     }
 }

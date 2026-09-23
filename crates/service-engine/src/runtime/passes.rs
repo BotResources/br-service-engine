@@ -131,7 +131,7 @@ impl<P: Principal> SessionRuntime<P> {
                 self.counters
                     .transport_incidents
                     .fetch_add(1, Ordering::Relaxed);
-                tracing::warn!(%error, "the impact transport reported an incident");
+                tracing::warn!(error = %crate::chain::describe(&error), "the impact transport reported an incident");
                 None
             }
             Ok(TransportEvent::Reconnected) => {
@@ -140,7 +140,7 @@ impl<P: Principal> SessionRuntime<P> {
                     .fetch_add(1, Ordering::Relaxed);
                 crate::observe::record_reconnect();
                 if let Err(error) = self.resnapshot_all().await {
-                    tracing::error!(%error, "resetting every session after a reconnect failed");
+                    tracing::error!(error = %crate::chain::describe(&error), "resetting every session after a reconnect failed");
                 }
                 None
             }
@@ -154,7 +154,7 @@ impl<P: Principal> SessionRuntime<P> {
         events: &mut BoxStream<'static, Result<TransportEvent, TransportError>>,
     ) {
         if let Err(error) = self.render(leading).await {
-            tracing::error!(%error, "a render pass failed");
+            tracing::error!(error = %crate::chain::describe(&error), "a render pass failed");
         }
         self.signal_after_pass();
         let deadline = Instant::now() + self.config.window;
@@ -176,7 +176,7 @@ impl<P: Principal> SessionRuntime<P> {
         }
         if !coalesced.is_empty() {
             if let Err(error) = self.render(coalesced).await {
-                tracing::error!(%error, "a coalesced render pass failed");
+                tracing::error!(error = %crate::chain::describe(&error), "a coalesced render pass failed");
             }
             self.signal_after_pass();
         }

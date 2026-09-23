@@ -42,6 +42,14 @@ impl<T> OneShot<T> {
 
 pub trait MutationFault: Send + 'static {
     fn reason(&self) -> Option<Reason>;
+
+    /// This fault as an error, so the engine logs its whole `source()` chain
+    /// when the fault carries no reason and the client receives `INTERNAL`.
+    /// The default logs the fault's `Display` alone; a fault that implements
+    /// `std::error::Error` returns `Some(self)`.
+    fn as_error(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
 }
 
 impl MutationFault for Reason {
@@ -73,6 +81,16 @@ impl MutationError {
 
     pub fn code(&self) -> Option<&'static str> {
         self.reason.map(|reason| reason.code())
+    }
+
+    /// An internal fault the engine raised itself, logged where it is raised:
+    /// the client receives `INTERNAL`, never this detail.
+    pub(crate) fn fault(detail: String) -> Self {
+        tracing::error!(
+            %detail,
+            "the mutation pipeline failed on an internal fault; the client receives INTERNAL"
+        );
+        Self::internal(detail)
     }
 }
 
