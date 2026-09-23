@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.0", version = "0.3.0" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.1", version = "0.3.1" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,6 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.3.1 | `v1.3.0` |
 | 0.3.0 | `v1.3.0` |
 | 0.2.0 | `v1.3.0` |
 | 0.1.0 | `v1.3.0` |
@@ -328,8 +329,32 @@ the consumer declares `Consumed::wire_version(&value)`; the engine compares it t
 `Consumed::VERSION` at scan and at watch and dead-letters a single mismatched
 value (keyed `(mirror, key)`), leaving its shadow row absent while the rest of
 the prefix projects. Neither verdict ever touches readiness — content is never a
-readiness input. `Mirror::require_key::<C>(key)` names one key under `C::PREFIX`
-as **configuration**: the mirror is not ready (`REASON_REQUIRED_KEYS`, `/readyz`
+readiness input.
+
+What `Consumed::PREFIX` names follows the published language's key grammar,
+where `/` and `.` both separate segments, and it takes one of two forms. A string
+ending in a separator (`catalog/items/`, `catalog.item.`) is a **prefix**: the
+mirror reads every key that starts with it, and its manifest key is the prefix
+with the trailing separator replaced by `_manifest` (`catalog/items_manifest`,
+`catalog.item_manifest`) — a sibling of the data, never under it, so a manifest
+is never read as data and no data key is ever taken for a manifest. Any other
+string is **one exact key** (`catalog.settings`, `catalog/_meta`), matched by
+equality: a key beneath it (`catalog.settings.extra`) or sharing its characters
+(`catalog.settingsx`) is not read. An engine offer always publishes a family
+under a prefix, so a single key has no manifest and is judged against none;
+a single key from a non-engine producer is versioned through `wire_version`.
+Registration (`Mirror::validate`) refuses, as `EngineError::Config` naming the
+mirror and the string, every form that is ambiguous or malformed: a string
+ending in `_` or `-` (a prefix cut mid-segment, which would otherwise read as a
+key nobody publishes), a single key ending in `_manifest` (it would read an
+offer manifest as data), a leading separator or two separators in a row (an
+empty segment), and a character outside `[A-Za-z0-9_./-]`. An offer takes the
+same prefix forms — `/` or `.`, never a single key — and an engine refuses two
+offers whose prefixes share one manifest key (`x/` and `x.`); across services
+the manifest names its prefix, so such a collision reads as an offer mismatch
+and dead-letters rather than passing silently. `Mirror::require_key::<C>(key)`
+names one key under `C::PREFIX` (or `C::PREFIX` itself, for a single-key
+consumption) as **configuration**: the mirror is not ready (`REASON_REQUIRED_KEYS`, `/readyz`
 naming the key) until that key is present in the shadow, but nothing is
 dead-lettered and no restart budget burns; the mirror stays converged and keeps
 projecting. The projection is leader-gated: only the pod holding the mirror lease projects,
@@ -1026,8 +1051,10 @@ whichever mode it lives:
   it open must reconnect with a fresh passport (`bb06`); and `main`'s one call to
   the boot kit runs `migrate` then `serve`, installs logging, and answers the
   `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`); `serve` refuses an
-  unmigrated store by name (`bb12`) and `migrate` waits for the app role before it
-  grants it (`bb13`). A **multi-pod set**
+  unmigrated store by name (`bb12`), `migrate` waits for the app role before it
+  grants it (`bb13`), and `migrate` refuses an owner role that is neither a
+  superuser nor `BYPASSRLS`, exiting non-zero before the first migration (`bb15`).
+  A **multi-pod set**
   boots two instances of the binary against one Postgres and one NATS and proves the
   fleet behaviour §F called untested: a mutation committed on pod A produces the
   delta on a session attached to pod B (`bb08`), a client mid-session survives its
@@ -1155,8 +1182,8 @@ GitOps and the NATS fabric.
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
-| Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS`, `migrate` only) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
-| NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing `/` stripped (`typed/v1/` → `typed/v1_manifest`), a sibling outside the data prefix |
+| Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
+| NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing separator stripped (`typed/v1/` → `typed/v1_manifest`, `typed.v1.` → `typed.v1_manifest`), a sibling outside the data prefix; a single consumed key has no manifest |
 | Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
 | Metrics | `service_engine_*` (`metrics::ALL`) + `service_engine_leader{kind,name}`; common labels `service`, `pod`, `component` |
 
@@ -1259,7 +1286,13 @@ build step can extract the schema from the binary alone. The database follows th
 engine's posture rule (the runtime role must not own its schema), and the two
 entry points split along it: `migrate` runs the engine, library and service migration
 sets on one shared ledger, waits for the app role to exist, and grants it every schema,
-all under the **owner** role named by `DATABASE_URL_OWNER` (strict — no fallback to `DATABASE_URL`);
+all under the **owner** role named by `DATABASE_URL_OWNER` (strict — no fallback to `DATABASE_URL`).
+Before its first migration, `migrate` asserts the owner posture
+(`engine::boot::assert_owner_posture`): the owner must be a superuser or carry
+`BYPASSRLS`, because a data migration run by a role subject to row-level security
+touches no row of a `FORCE ROW LEVEL SECURITY` table and still reports success.
+An owner without it is refused with `EngineError::OwnerSubjectToRls` naming the
+role, logged, and `migrate` exits non-zero with nothing applied;
 `serve` connects only the RLS-subject **app** pool named by `DATABASE_URL`, refuses
 to run — it logs `REASON_MIGRATIONS_PENDING` and exits non-zero before it binds any
 port — while either set is unapplied, and derives `message_retention`
