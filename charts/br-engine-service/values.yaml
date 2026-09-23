@@ -31,6 +31,9 @@ objectStore:
   endpoint: ""
   bucket: ""
   region: ""
+  # Optional (1.1): browser-facing endpoint for presigned URLs, emitted as
+  # S3_PUBLIC_ENDPOINT only when set.
+  publicEndpoint: ""
   secret:
     name: ""
     accessKeyKey: S3_ACCESS_KEY
@@ -43,3 +46,75 @@ resources: {}
 networkPolicy:
   enabled: false
   ingress: []
+
+# ── Neutral fields (chart 1.1) ──────────────────────────────────────────────
+# This file documents the interface; it is not where the defaults live. A
+# library chart's values.yaml lands under `.Values.br-engine-service` of the
+# thin chart, never at the top level the named templates read, so each default
+# below is coded in the templates: leave a key out and the default applies.
+# None of these fields is part of ops contract v1, and the library gives no
+# value a platform meaning — the thin chart decides what a label, an
+# annotation or a pull secret is for.
+
+# Pod security, hardened by default. The engine binary runs as any non-root UID
+# and writes nothing to its filesystem (`migrate` and `serve` verified under a
+# deny-all-writes sandbox), so the image needs no USER and no writable path.
+# A key set here overrides the default key of the same name; a key set to null
+# is removed; the other defaults stay.
+#   podSecurityContext (default):
+#     runAsNonRoot: true
+#     runAsUser: 65532
+#     runAsGroup: 65532
+#     fsGroup: 65532
+#     seccompProfile: {type: RuntimeDefault}
+#   containerSecurityContext (default, on `migrate` and on `serve`):
+#     allowPrivilegeEscalation: false
+#     readOnlyRootFilesystem: true
+#     capabilities: {drop: [ALL]}
+# podSecurityContext: {}
+# containerSecurityContext: {}
+
+# The engine never calls the Kubernetes API. Set true only if the service's own
+# code does.
+automountServiceAccountToken: false
+
+# Probe TIMING only (initialDelaySeconds, periodSeconds, timeoutSeconds,
+# successThreshold, failureThreshold); the paths and the port are ops contract
+# v1 and any other key fails the render. startupProbe GET /livez defaults to
+# periodSeconds 5 × failureThreshold 30 = a 150 s boot budget: `serve` binds
+# its listener last, so /livez answering is the end of boot. Readiness and
+# liveness keep the kubelet defaults unless set.
+probes:
+  startup: {}
+  readiness: {}
+  liveness: {}
+
+# Resources of the `migrate` init container (`resources` above is `serve`'s).
+migrate:
+  resources: {}
+
+deploymentAnnotations: {}
+
+# Added to the pod template. The four library labels (app.kubernetes.io/name,
+# /instance, /managed-by, /part-of) cannot be replaced: setting one fails.
+podLabels: {}
+podAnnotations: {}
+
+# Added to the library Service; same label rule as podLabels. A thin chart that
+# needs a second Service ships it as its own template beside the includes.
+service:
+  labels: {}
+  annotations: {}
+
+# Kubernetes shape: a list of {name: <secret>}.
+imagePullSecrets: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Volumes for the service's own code. `extraVolumeMounts` goes on `serve` only;
+# the engine itself needs none — use them rather than turning
+# readOnlyRootFilesystem off when the service's code writes a path.
+extraVolumes: []
+extraVolumeMounts: []

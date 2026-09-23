@@ -1,0 +1,87 @@
+# Layered over values.yaml in CI: sets every neutral field of the library (1.1)
+# so the render proves each one reaches the manifest. Keys and values are
+# placeholders — the library gives none of them a platform meaning.
+
+objectStore:
+  enabled: true
+  endpoint: http://object-store.example:9000
+  bucket: catalog
+  region: us-east-1
+  publicEndpoint: https://files.example.com
+  secret:
+    name: catalog-object-store
+    accessKeyKey: S3_ACCESS_KEY
+    secretKeyKey: S3_SECRET_KEY
+
+deploymentAnnotations:
+  example.com/reload: catalog-postgres
+
+podAnnotations:
+  example.com/scrape: "true"
+
+podLabels:
+  example.com/team: catalog
+
+service:
+  labels:
+    example.com/role: api
+  annotations:
+    example.com/owner: catalog
+
+imagePullSecrets:
+  - name: registry-credentials
+
+automountServiceAccountToken: true
+
+podSecurityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  readOnlyRootFilesystem: false
+
+probes:
+  startup:
+    periodSeconds: 10
+    failureThreshold: 60
+  readiness:
+    periodSeconds: 5
+    timeoutSeconds: 2
+  liveness:
+    initialDelaySeconds: 0
+    timeoutSeconds: 3
+
+migrate:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+nodeSelector:
+  kubernetes.io/arch: arm64
+
+tolerations:
+  - key: example.com/dedicated
+    operator: Equal
+    value: engine
+    effect: NoSchedule
+
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+            - key: example.com/pool
+              operator: In
+              values: [engine]
+
+extraVolumes:
+  - name: scratch
+    emptyDir:
+      sizeLimit: 64Mi
+
+extraVolumeMounts:
+  - name: scratch
+    mountPath: /scratch
