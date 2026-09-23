@@ -601,7 +601,8 @@ longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
 the request is answered `500` with the same `INTERNAL` error body, not `401`. A
 refusal that carries a reason is unchanged: its code and its `mutation refused:`
 message. `graphql::internal_error(context, &cause)` gives a service's own
-resolver the same shape.
+resolver the same shape; the codes, the message and both helpers are
+re-exported at `service_engine::` like `coded_error`.
 
 `register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
