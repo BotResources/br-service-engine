@@ -1,8 +1,7 @@
-use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-use crate::graphql::CODE_EXTENSION;
+use crate::graphql::refusal::coded_refusal;
 
 /// The multipart body exceeds `max_body_bytes` (declared or streamed). HTTP 413.
 pub const MULTIPART_TOO_LARGE_CODE: &str = "MULTIPART_TOO_LARGE";
@@ -87,11 +86,6 @@ impl IntoResponse for MultipartRefusal {
             ),
             _ => tracing::debug!(code, "a multipart request was refused"),
         }
-        let mut extensions = serde_json::Map::new();
-        extensions.insert(CODE_EXTENSION.to_string(), code.into());
-        let body = serde_json::json!({
-            "errors": [{ "message": self.message(), "extensions": extensions }],
-        });
-        (self.status(), Json(body)).into_response()
+        coded_refusal(self.status(), code, &self.message())
     }
 }

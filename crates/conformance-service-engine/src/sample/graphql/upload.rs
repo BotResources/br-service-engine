@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_graphql::{Context, EmptySubscription, Object, Result, Upload};
 use service_engine::graphql::{MultipartConfig, RootPrefix, SliceFragment, coded_error};
 use service_engine::nats::Nats;
-use service_engine::{Engine, Readiness, ReadinessHandle, engine_schema};
+use service_engine::{Engine, EngineConfig, Readiness, ReadinessHandle, engine_schema};
 use tokio::io::AsyncReadExt;
 
 use crate::infra::TestDb;
@@ -84,10 +84,23 @@ pub async fn boot_upload_service(
     pod: &str,
     multipart: MultipartConfig,
 ) -> GraphqlService {
+    boot_upload_service_with(db, nats, channel, pod, |config| {
+        config.with_multipart(multipart)
+    })
+    .await
+}
+
+/// [`boot_upload_service`] with the whole engine config shaped by `configure`: the body
+/// bounds, the body read timeout, …
+pub async fn boot_upload_service_with(
+    db: &TestDb,
+    nats: Nats,
+    channel: &str,
+    pod: &str,
+    configure: impl FnOnce(EngineConfig) -> EngineConfig,
+) -> GraphqlService {
     let addr = free_loopback_addr().await;
-    let config = base_config(channel, pod)
-        .with_http_addr(addr)
-        .with_multipart(multipart);
+    let config = configure(base_config(channel, pod).with_http_addr(addr));
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,

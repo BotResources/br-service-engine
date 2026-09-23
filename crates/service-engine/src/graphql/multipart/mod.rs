@@ -32,11 +32,18 @@ pub use refusal::{
 /// The bounds of an authenticated multipart request, and where its file parts spool.
 ///
 /// `max_body_bytes` caps the whole body (a declared `Content-Length` above it is refused
-/// before the body is read; a chunked body is cut when it crosses it). `max_file_bytes` caps
-/// any single part — a file, and the `operations` and `map` parts too. `max_files` caps the
-/// uploads a request binds: every path in `map` counts, so one file bound to two variables
-/// counts twice (each binding holds its own file handle). A schema that declares no `Upload`
-/// scalar accepts no file whatever `max_files` says.
+/// before the body is read; a chunked body is cut when it crosses it). It caps every
+/// authenticated `POST /graphql` body, not only a multipart one: a JSON body over it is
+/// refused `413` `BODY_TOO_LARGE` the same way, so no body is held in memory past it.
+/// `max_file_bytes` caps any single part — a file, and the `operations` and `map` parts too.
+/// `max_files` caps the uploads a request binds: every path in `map` counts, so one file
+/// bound to two variables counts twice (each binding holds its own file handle). A schema
+/// that declares no `Upload` scalar accepts no file whatever `max_files` says. How long the
+/// body may take to arrive is `EngineConfig::body_read_timeout`, for every content type.
+///
+/// The bounds are per request. How many uploads may spool at once is not bounded by the
+/// engine yet: no engine service declares `Upload` today, and the first one that does adds
+/// a concurrent-upload limit (a spool semaphore) sized with its `emptyDir`.
 ///
 /// File parts spool to anonymous temporary files in `spool_dir`, or in
 /// [`std::env::temp_dir`] (`$TMPDIR`, else `/tmp`) when it is `None`; the space is freed when

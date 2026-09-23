@@ -72,21 +72,49 @@ pub async fn post_multipart(
     (status, json, text)
 }
 
+pub const JSON: &str = "application/json";
+
+pub fn multipart_type() -> String {
+    format!("multipart/form-data; boundary={BOUNDARY}")
+}
+
 /// Sends a multipart request whose body stops inside its `operations` part, with a
 /// `Content-Length` promising one more MiB — under every body limit — that never comes, and
 /// waits five seconds for the status line. A pod that reads the body before judging the
 /// request cannot answer: it is still waiting for `operations` (`None`).
 pub async fn stalled_body(service: &GraphqlService, passport: Option<&str>) -> Option<String> {
-    let addr = service.base_url.trim_start_matches("http://").to_string();
     let head_of_body = format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n\
          {{\"query\":\"{fill}",
         fill = "x".repeat(4096),
     );
-    let declared = head_of_body.len() + 1024 * 1024;
+    stalled_request(
+        service,
+        passport,
+        &multipart_type(),
+        head_of_body.as_bytes(),
+        1024 * 1024,
+        Duration::from_secs(5),
+    )
+    .await
+}
+
+/// Sends a `content_type` request whose body stops after `head_of_body`, with a
+/// `Content-Length` promising `missing` more bytes that never come, and waits `wait` for the
+/// status line (`None` if the pod is still waiting for the body by then).
+pub async fn stalled_request(
+    service: &GraphqlService,
+    passport: Option<&str>,
+    content_type: &str,
+    head_of_body: &[u8],
+    missing: usize,
+    wait: Duration,
+) -> Option<String> {
+    let addr = service.base_url.trim_start_matches("http://").to_string();
+    let declared = head_of_body.len() + missing;
     let mut head = format!(
         "POST /graphql HTTP/1.1\r\nHost: {addr}\r\n\
-         Content-Type: multipart/form-data; boundary={BOUNDARY}\r\nContent-Length: {declared}\r\n"
+         Content-Type: {content_type}\r\nContent-Length: {declared}\r\n"
     );
     if let Some(passport) = passport {
         head.push_str(&format!("x-passport: {passport}\r\n"));
@@ -99,10 +127,10 @@ pub async fn stalled_body(service: &GraphqlService, passport: Option<&str>) -> O
         .await
         .expect("send the head");
     stream
-        .write_all(head_of_body.as_bytes())
+        .write_all(head_of_body)
         .await
         .expect("send the start of the body");
-    read_status(&mut stream).await
+    read_status(&mut stream, wait).await
 }
 
 /// Sends `body` with `Transfer-Encoding: chunked` (no declared length), 1 KiB per chunk, and
@@ -112,10 +140,20 @@ pub async fn chunked_multipart(
     passport: &str,
     body: &[u8],
 ) -> Option<String> {
+    chunked_request(service, passport, &multipart_type(), body).await
+}
+
+/// [`chunked_multipart`] for any `content_type`.
+pub async fn chunked_request(
+    service: &GraphqlService,
+    passport: &str,
+    content_type: &str,
+    body: &[u8],
+) -> Option<String> {
     let addr = service.base_url.trim_start_matches("http://").to_string();
     let head = format!(
         "POST /graphql HTTP/1.1\r\nHost: {addr}\r\n\
-         Content-Type: multipart/form-data; boundary={BOUNDARY}\r\n\
+         Content-Type: {content_type}\r\n\
          Transfer-Encoding: chunked\r\nx-passport: {passport}\r\n\r\n"
     );
     let mut stream = TcpStream::connect(&addr).await.expect("connect to the pod");
@@ -132,7 +170,7 @@ pub async fn chunked_multipart(
         }
     }
     let _ = stream.write_all(b"0\r\n\r\n").await;
-    read_status(&mut stream).await
+    read_status(&mut stream, Duration::from_secs(5)).await
 }
 
 /// A multipart body carrying `files` (named `0`, `1`, …), in the spec's order, for a
@@ -166,9 +204,9 @@ pub fn raw_upload_body(files: &[&[u8]]) -> Vec<u8> {
     body
 }
 
-async fn read_status(stream: &mut TcpStream) -> Option<String> {
+async fn read_status(stream: &mut TcpStream, wait: Duration) -> Option<String> {
     let mut response = vec![0_u8; 2048];
-    let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut response)).await;
+    let read = tokio::time::timeout(wait, stream.read(&mut response)).await;
     match read {
         Ok(Ok(n)) if n > 0 => Some(String::from_utf8_lossy(&response[..n]).into_owned()),
         _ => None,

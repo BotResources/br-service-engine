@@ -606,8 +606,20 @@ carrying the code (`graphql::MULTIPART_*_CODE`). Whether a schema declares `Uplo
 is read once from its SDL (`scalar Upload`), so a field, argument or enum value of
 that name does not count. Every other body is streamed to the function
 async-graphql-axum's extractor calls, so it is parsed exactly as before (an
-unparseable content type is refused before the body is read) and is not bounded by
-these limits.
+unparseable content type is refused before the body is read).
+
+Every authenticated body. Two bounds hold for every content type, JSON included:
+
+| Bound | Default | Refusal |
+|---|---|---|
+| `MultipartConfig::max_body_bytes` — the whole body, JSON as well as multipart (the name predates its reach); a declared `Content-Length` above it is refused before the body is read, a chunked body is cut on the chunk that crosses it | 16 MiB | `413` `BODY_TOO_LARGE` (`MULTIPART_TOO_LARGE` for a multipart body) |
+| `EngineConfig::body_read_timeout` (`with_body_read_timeout`) — from the passport resolving to the last byte of the body; past it the read is abandoned and what was received (buffered bytes, spooled files) is dropped | 30 s | `408` `BODY_READ_TIMEOUT` |
+
+Both refusals are GraphQL-shaped like the multipart ones (`graphql::BODY_TOO_LARGE_CODE`,
+`graphql::BODY_READ_TIMEOUT_CODE`). The bounds are per request: how many uploads
+may spool at once is not bounded yet. No engine service declares `Upload` today;
+the first one that does adds a concurrent-upload limit (a spool semaphore) sized
+with its `emptyDir`.
 
 Refusals on the wire. A refusal is a coded GraphQL error, never a transport
 error. A mutation refusal is `mutation_error(reason)`; a query or subscription
@@ -1381,8 +1393,9 @@ GitOps repository, sequenced after this release.
 `EngineConfig` carries one clock and a handful of bounds, every one validated
 at `Engine::boot`: durations and capacities are non-zero,
 `listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
-`beat`, `session_max_age` outlasts the idle `session_ttl`, and the multipart
-bounds are non-zero with `max_file_bytes` within `max_body_bytes`. A session lives at most `session_max_age`; when it does
+`beat`, `session_max_age` outlasts the idle `session_ttl`, the multipart
+bounds are non-zero with `max_file_bytes` within `max_body_bytes`, and
+`body_read_timeout` is non-zero. A session lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
 reaps a session that has lost its consumer. The bound is on the connection, not

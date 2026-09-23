@@ -203,9 +203,10 @@ reaches the manifest and that the two guards fail the render.
 ## 0.3.2 - 2026-09-23
 
 A security patch over 0.3.1. `POST /graphql` now resolves the passport before it
-reads the request body, and reads a GraphQL multipart request only within explicit
-bounds. No adopter code changes; one new optional configuration group with
-defaults.
+reads the request body, and then reads every body within explicit bounds: its size
+(JSON as well as a GraphQL multipart request) and the time it takes to arrive. No
+adopter code changes; one new optional configuration group and one timeout, both
+with defaults.
 
 ### Security
 
@@ -229,6 +230,15 @@ defaults.
   (`graphql/multipart/`), every other body streamed to the function
   async-graphql-axum's extractor calls, so it is parsed exactly as before (same
   content-type dispatch, same single-request rule, same rejection).
+- **An authenticated body is bounded in memory and in time.** Through 0.3.1 an
+  authenticated JSON body of any size was buffered whole, and a client that sent
+  its body slowly (or never finished it) held the request, its buffer and any
+  spooled file open for as long as it kept the connection. Every authenticated
+  body — JSON and multipart alike — is now capped by `max_body_bytes` (a declared
+  `Content-Length` above it is refused before the body is read, a chunked body is
+  cut on the chunk that crosses it) and must arrive whole within
+  `body_read_timeout`; past it the read is abandoned and whatever was received,
+  buffered bytes or spooled files, is dropped with it.
 
 ### Added
 
@@ -254,6 +264,14 @@ defaults.
   `413 MULTIPART_TOO_MANY_FILES`, `400 MULTIPART_MALFORMED`,
   `500 MULTIPART_SPOOL_UNAVAILABLE` (the path and the OS error are logged, never
   returned). The codes are public constants `graphql::MULTIPART_*_CODE`.
+- **Every authenticated body** — `MultipartConfig::max_body_bytes` (default
+  16 MiB) now bounds a JSON body too, refused `413 BODY_TOO_LARGE`; and
+  `EngineConfig::body_read_timeout` (`with_body_read_timeout`, default 30 s,
+  `config::DEFAULT_BODY_READ_TIMEOUT`, validated non-zero at boot) bounds the time
+  from the passport resolving to the last byte of the body, for every content type,
+  refused `408 BODY_READ_TIMEOUT`. Both are GraphQL-shaped like the multipart
+  refusals; the codes are public constants `graphql::BODY_TOO_LARGE_CODE` and
+  `graphql::BODY_READ_TIMEOUT_CODE`. No environment variable is added.
 - Conformance: `s241` — an unauthenticated multipart request (passport absent,
   undecodable, or not a passport) is `401` before a byte of its body is read,
   proven on a body the client never finishes sending (an authenticated control
@@ -267,6 +285,15 @@ defaults.
   the order rules, the no-`Upload` policy and its SDL detection, the spool failure,
   the content-type dispatch (any case of `multipart/form-data` reaches the bounded
   receiver; an unparseable type is refused unread) and the config validation.
+- Conformance: `s242` — an authenticated JSON body over `max_body_bytes` is
+  `413 BODY_TOO_LARGE`, by its declared length (answered at once, the body never
+  awaited) and as a chunked body cut in flight, while an anonymous oversized body
+  is still `401`; a JSON body and a multipart body stalled inside a file part being
+  spooled are `408 BODY_READ_TIMEOUT` at the read timeout, not before it, leaving
+  no named file in the spool; after every refusal the pod serves JSON and uploads
+  within bounds. Unit tests pin the declared and streamed JSON bound (nothing past
+  the crossing chunk is read), the inclusive limit, the deadline for both body
+  kinds, and the rendered codes.
 
 ### Changed
 
@@ -276,6 +303,10 @@ defaults.
   it carries (0.3.1's parser accepted parts in any order and silently spooled
   unmapped ones); a `multipart/*` type other than `form-data` is `400
   MULTIPART_MALFORMED`.
+- An authenticated JSON body over 16 MiB is refused `413 BODY_TOO_LARGE` (0.3.1
+  buffered any size), and an authenticated body that has not fully arrived 30 s
+  after its passport resolved is refused `408 BODY_READ_TIMEOUT` (0.3.1 waited with
+  no end).
 
 ### Adopter migration
 
@@ -285,7 +316,22 @@ defaults.
   `extraVolumes` / `extraVolumeMounts`; no engine service declares `Upload` today
   (blobs use presigned URLs), so none needs it. A service that expects larger
   uploads raises the bounds with `EngineConfig::with_multipart`.
-- `EngineConfig` gains the `multipart` field (the struct is `#[non_exhaustive]`).
+- A service whose clients send JSON documents over 16 MiB inline raises
+  `MultipartConfig::max_body_bytes` (the name predates its reach: it bounds every
+  body); one whose clients reach the pod unbuffered over slow links raises
+  `EngineConfig::with_body_read_timeout`. Behind the gateway, whose nginx buffers a
+  request body before it proxies it (its default), the defaults leave a wide margin.
+- `EngineConfig` gains the `multipart` and `body_read_timeout` fields (the struct is
+  `#[non_exhaustive]`).
+
+### Follow-up (documented, not implemented)
+
+- **No limit on concurrent uploads.** The bounds above are per request: an
+  authenticated client can keep several uploads spooling at once, each up to
+  `max_body_bytes` for up to `body_read_timeout`. No engine service declares
+  `Upload` today, so no pod spools anything; the first service that adopts
+  `Upload` adds a concurrent-upload limit (a spool semaphore, with its own coded
+  refusal) sized together with its `emptyDir` `sizeLimit`.
 
 ## 0.3.1 - 2026-09-23
 

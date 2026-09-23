@@ -38,6 +38,7 @@ pub const DEFAULT_MIGRATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
 pub const DEFAULT_MULTIPART_MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
 pub const DEFAULT_MULTIPART_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 pub const DEFAULT_MULTIPART_MAX_FILES: usize = 4;
+pub const DEFAULT_BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -79,6 +80,7 @@ pub struct EngineConfig {
     pub service_version: Option<String>,
     pub blob: Option<BlobConfig>,
     pub multipart: MultipartConfig,
+    pub body_read_timeout: Duration,
 }
 
 impl EngineConfig {
@@ -121,6 +123,7 @@ impl EngineConfig {
             service_version: None,
             blob: None,
             multipart: MultipartConfig::default(),
+            body_read_timeout: DEFAULT_BODY_READ_TIMEOUT,
         }
     }
 }

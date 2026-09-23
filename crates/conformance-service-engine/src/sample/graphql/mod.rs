@@ -21,5 +21,6 @@ pub use roots::{
     AssignmentQueries, EngineDelta, MutationRoot, QueryRoot, SubscriptionRoot, WidgetQueries,
 };
 pub use upload::{
-    UPLOAD_MISMATCH_CODE, UploadMutationRoot, UploadQueryRoot, boot_upload_service, upload_digest,
+    UPLOAD_MISMATCH_CODE, UploadMutationRoot, UploadQueryRoot, boot_upload_service,
+    boot_upload_service_with, upload_digest,
 };

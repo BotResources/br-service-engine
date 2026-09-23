@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::graphql::body;
+use crate::graphql::body::{self, BodyPolicy};
 use crate::graphql::multipart::{MultipartPolicy, declares_upload_scalar};
 use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
 use crate::graphql::state::GraphqlState;
@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 struct AppState<P: PassportPrincipal, Q, M, S> {
     schema: Schema<Q, M, S>,
     engine: Arc<GraphqlState<P>>,
-    multipart: Arc<MultipartPolicy>,
+    body: Arc<BodyPolicy>,
 }
 
 impl<P: PassportPrincipal, Q, M, S> Clone for AppState<P, Q, M, S> {
@@ -29,7 +29,7 @@ impl<P: PassportPrincipal, Q, M, S> Clone for AppState<P, Q, M, S> {
         Self {
             schema: self.schema.clone(),
             engine: self.engine.clone(),
-            multipart: self.multipart.clone(),
+            body: self.body.clone(),
         }
     }
 }
@@ -46,16 +46,17 @@ where
     S: SubscriptionType + 'static,
 {
     let schema_declares_upload = declares_upload_scalar(&schema.sdl());
-    let multipart = Arc::new(MultipartPolicy::new(
-        &engine.runtime().config().multipart,
-        schema_declares_upload,
-    ));
+    let config = engine.runtime().config();
+    let multipart = MultipartPolicy::new(&config.multipart, schema_declares_upload);
     tracing::debug!(
         schema_declares_upload,
+        max_body_bytes = multipart.max_body_bytes(),
         max_files = multipart.max_files(),
         spool_dir = %multipart.spool_dir().display(),
-        "graphql multipart bounds"
+        body_read_timeout_ms = %config.body_read_timeout.as_millis(),
+        "graphql request body bounds"
     );
+    let body = Arc::new(BodyPolicy::new(multipart, config.body_read_timeout));
     Router::new()
         .route("/graphql", post(graphql_post::<P, Q, M, S>))
         .route("/graphql/ws", get(graphql_ws::<P, Q, M, S>))
@@ -63,7 +64,7 @@ where
         .with_state(AppState {
             schema,
             engine,
-            multipart,
+            body,
         })
 }
 
@@ -120,7 +121,7 @@ where
         Ok(principal) => principal,
         Err(refused) => return refused,
     };
-    let request = match body::receive(&parts.headers, body, &state.multipart).await {
+    let request = match body::receive(&parts.headers, body, &state.body).await {
         Ok(request) => request.data(principal),
         Err(refusal) => return refusal.into_response(),
     };
