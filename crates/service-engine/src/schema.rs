@@ -1,7 +1,9 @@
-use sqlx::PgPool;
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migrate, Migrator};
+use sqlx::{PgConnection, PgPool};
 
 use crate::error::EngineError;
+
+mod released;
 
 pub const SCHEMA: &str = "service_engine";
 
@@ -56,8 +58,27 @@ pub(crate) fn migrator() -> Migrator {
     migrator
 }
 
+/// Applies the engine set. Under the migrator's own advisory lock, the stored
+/// checksum of an engine migration a released engine applied with other bytes
+/// is first adopted (see `released`); any other checksum difference still fails
+/// as sqlx's `VersionMismatch`.
 pub async fn migrate(pool: &PgPool) -> Result<(), EngineError> {
-    migrator().run(pool).await?;
+    let mut conn = pool.acquire().await?;
+    let migrated = migrate_locked(&mut conn).await;
+    if migrated.is_err() {
+        // A failed run can leave the session-level advisory lock held; closing
+        // the session releases it instead of pooling a locked connection.
+        let _ = conn.close().await;
+    }
+    migrated
+}
+
+async fn migrate_locked(conn: &mut PgConnection) -> Result<(), EngineError> {
+    let migrator = migrator();
+    conn.lock().await?;
+    released::adopt_released_checksums(conn, &migrator).await?;
+    migrator.run(&mut *conn).await?;
+    conn.unlock().await?;
     Ok(())
 }
 
