@@ -210,6 +210,85 @@ jobs:
           assert '^ *type: Recreate$'
           assert '^ *path: /readyz$'
           assert '^ *path: /livez$'
+      - name: helm template the fixture and assert the secure defaults
+        run: |
+          set -euo pipefail
+          rendered=$(helm template thin-example charts/br-engine-service/ci/thin-example)
+          assert() {
+            if ! grep -qE "$1" <<<"$rendered"; then
+              echo "::error::default render is missing: $1"
+              exit 1
+            fi
+          }
+          refute() {
+            if grep -qE "$1" <<<"$rendered"; then
+              echo "::error::default render must not contain: $1"
+              exit 1
+            fi
+          }
+          count() {
+            local found
+            found=$(grep -cE "$1" <<<"$rendered" || true)
+            if [ "$found" -ne "$2" ]; then
+              echo "::error::default render has ${found} × '$1', expected $2"
+              exit 1
+            fi
+          }
+          assert '^ *runAsNonRoot: true$'
+          assert '^ *runAsUser: 65532$'
+          assert '^ *runAsGroup: 65532$'
+          assert '^ *type: RuntimeDefault$'
+          assert '^ *automountServiceAccountToken: false$'
+          count '^ *readOnlyRootFilesystem: true$' 2
+          count '^ *allowPrivilegeEscalation: false$' 2
+          count '^ *- ALL$' 2
+          count '^ *startupProbe:$' 1
+          refute 'imagePullSecrets'
+          refute '^ *annotations:'
+          refute '^ *volumes:'
+          refute '^ *nodeSelector:'
+          refute '^ *tolerations:'
+          refute '^ *affinity:'
+      - name: helm template the fixture with every neutral field set
+        run: |
+          set -euo pipefail
+          fixture=charts/br-engine-service/ci/thin-example
+          rendered=$(helm template thin-example "$fixture" -f "$fixture/values-all-fields.yaml")
+          echo "$rendered"
+          assert() {
+            if ! grep -qE "$1" <<<"$rendered"; then
+              echo "::error::all-fields render is missing: $1"
+              exit 1
+            fi
+          }
+          assert '^ *example.com/reload: catalog-postgres$'
+          assert '^ *example.com/scrape: "true"$'
+          assert '^ *example.com/team: catalog$'
+          assert '^ *example.com/role: api$'
+          assert '^ *example.com/owner: catalog$'
+          assert '^ *- name: registry-credentials$'
+          assert '^ *automountServiceAccountToken: true$'
+          assert '^ *runAsUser: 10001$'
+          assert '^ *runAsNonRoot: true$'
+          assert '^ *readOnlyRootFilesystem: false$'
+          assert '^ *failureThreshold: 60$'
+          assert '^ *timeoutSeconds: 3$'
+          assert '^ *cpu: 50m$'
+          assert '^ *kubernetes.io/arch: arm64$'
+          assert '^ *key: example.com/dedicated$'
+          assert '^ *nodeAffinity:$'
+          assert '^ *- mountPath: /scratch$'
+          assert '^ *sizeLimit: 64Mi$'
+          assert '^ *- name: S3_PUBLIC_ENDPOINT$'
+          assert '^ *value: "https://files.example.com"$'
+          if helm template thin-example "$fixture" --set 'podLabels.app\.kubernetes\.io/name=x' >/dev/null 2>&1; then
+            echo "::error::a podLabels entry replaced a library selector label without failing the render"
+            exit 1
+          fi
+          if helm template thin-example "$fixture" --set probes.liveness.httpGet.path=/x >/dev/null 2>&1; then
+            echo "::error::probes accepted a path override; the probe paths are ops contract v1"
+            exit 1
+          fi
       - name: chart version bump guard
         run: bash .github/scripts/check-chart-version.sh
 

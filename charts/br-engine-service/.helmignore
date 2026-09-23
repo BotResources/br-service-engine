@@ -1,0 +1,3 @@
+# The CI fixture (a thin chart that depends on this one via file://) is not
+# part of the published library.
+ci/

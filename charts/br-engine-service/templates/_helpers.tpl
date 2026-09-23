@@ -33,7 +33,7 @@ app.kubernetes.io/part-of: br-service-engine
 {{- end -}}
 
 {{- define "br-engine-service.objectStoreEnv" -}}
-{{- if .Values.objectStore.enabled }}
+{{- if (.Values.objectStore | default dict).enabled }}
 - name: S3_ENDPOINT
   value: {{ required "objectStore.endpoint is required when objectStore.enabled" .Values.objectStore.endpoint | quote }}
 - name: S3_BUCKET
@@ -50,5 +50,9 @@ app.kubernetes.io/part-of: br-service-engine
     secretKeyRef:
       name: {{ .Values.objectStore.secret.name }}
       key: {{ .Values.objectStore.secret.secretKeyKey | default "S3_SECRET_KEY" }}
+{{- with .Values.objectStore.publicEndpoint }}
+- name: S3_PUBLIC_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
 {{- end }}
 {{- end -}}

@@ -1177,7 +1177,7 @@ GitOps and the NATS fabric.
 | Entry points | `<binary> migrate` (owner role; exits 0 when the engine, library and service sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
 | Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
 | App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
-| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled` — a thin chart wanting browser-facing presigns passes `S3_PUBLIC_ENDPOINT` through its own `env: []` until a chart minor adds `objectStore.publicEndpoint` |
+| Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled`, plus `S3_PUBLIC_ENDPOINT` from `objectStore.publicEndpoint` when set (chart 1.1) |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
@@ -1200,8 +1200,93 @@ Values a thin chart supplies: `image.{repository,tag}`, `port`, `serviceKey`,
 `postgres.{appRole,appSecret,ownerSecret,trustedNetworkHosts}`, `nats.url`,
 `engine.channel`, `objectStore.enabled` (+ the S3 config and secret ref),
 `env: []`, `resources`, `replicaCount`, `topologySpreadEnabled`,
-`networkPolicy.{enabled,ingress}`. The library names no namespace; ingress
-selectors are values. The chart itself is published to
+`networkPolicy.{enabled,ingress}`, and from chart 1.1 the neutral fields below.
+The library names no namespace; ingress selectors are values. A library
+chart's own `values.yaml` lands under `.Values.br-engine-service` of the thin
+chart, never at the top level the named templates read, so the library's
+`values.yaml` documents the interface and every default is coded in the
+templates: a thin chart leaves a key out to get the default.
+
+### Hardened pod and neutral fields (chart 1.1)
+
+One rule sorts every field: **what the engine binary defines** belongs to the
+library, with a default; **what the platform or the cluster defines** does not —
+at most a neutral field whose value the service chart sets. The library gives
+no label, annotation or secret name a platform meaning.
+
+| Field | Default | Why it is here |
+|---|---|---|
+| `podSecurityContext` | `runAsNonRoot: true`, `runAsUser`/`runAsGroup`/`fsGroup: 65532`, `seccompProfile: RuntimeDefault` | engine-defined: the binary runs as any non-root UID, and the engine image sets no `USER`, so the UID is explicit |
+| `containerSecurityContext` (`migrate` and `serve`) | `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]` | engine-defined: `migrate` and `serve` write no file (below) |
+| `automountServiceAccountToken` | `false` | engine-defined: the engine never calls the Kubernetes API |
+| `probes.{startup,readiness,liveness}` | startup `periodSeconds: 5`, `failureThreshold: 30`; readiness and liveness: kubelet defaults | engine-defined: the boot sequence (below); timing keys only |
+| `objectStore.publicEndpoint` | none | ops contract v1: the optional `S3_PUBLIC_ENDPOINT`, emitted when set |
+| `migrate.resources` | none | neutral: the init container's own requests/limits (`resources` stays `serve`'s) |
+| `deploymentAnnotations`, `podAnnotations`, `podLabels` | none | neutral: a rollout trigger, a scrape hint, a team label are the platform's |
+| `service.{labels,annotations}` | none | neutral: a discovery label is the platform's |
+| `imagePullSecrets` | none | neutral: registry credentials are the cluster's |
+| `nodeSelector`, `tolerations`, `affinity` | none | neutral: scheduling is the cluster's |
+| `extraVolumes`, `extraVolumeMounts` (`serve`) | none | neutral: a path the *service's own code* writes, kept writable without turning the read-only root off |
+
+A key set in `podSecurityContext` or `containerSecurityContext` overrides the
+default key of the same name, a key set to `null` is removed, and every other
+default stays: an image that must run as UID 1000 sets `runAsUser: 1000` and
+keeps the rest of the hardening. `podLabels` and `service.labels` add labels
+but never replace one of the four library labels (the selector and the chart
+identity): trying fails the render. `probes.*` accept only the timing keys
+(`initialDelaySeconds`, `periodSeconds`, `timeoutSeconds`, `successThreshold`,
+`failureThreshold`); the paths and the port are ops contract v1, and any other
+key fails the render.
+
+**Read-only root filesystem — verified.** `example-service migrate` and
+`example-service serve` were run against a real Postgres and NATS under a
+sandbox that refuses every file write outside `/dev`: `migrate` exits 0,
+`serve` boots and answers `/livez`, `/readyz`, `/sdl` and `/metrics`. The
+engine opens no file for writing; sqlx migrations are embedded at compile time,
+logs go to stdout. The one write path in the dependency tree is
+async-graphql's multipart parser, which spools a request's file parts to a
+temporary file before the handler runs; the engine schema has no `Upload`
+scalar (blobs go straight to the object store through presigned URLs), so under
+a read-only root such a request is refused with `400` and the pod carries on.
+The library therefore mounts no `emptyDir` — a writable `/tmp` would only give
+that pre-authentication spool somewhere to write.
+
+**startupProbe.** `serve` binds its listener last — after the app pool, the
+migration check, the NATS connect, `Engine::boot`, registration and the
+retention derivation — so `GET /livez` answering is the end of boot. The probe
+suspends liveness until then: 5 s × 30 = a 150 s boot budget (`migrate` runs in
+the init container, outside it). `/readyz` never gates startup: a healthy pod
+can hold it DOWN for long (the Identity scope handshake, a mirror converging),
+and a failed startupProbe restarts the container.
+
+**Extension point.** A service chart owns everything that is not the engine's:
+it ships its own templates beside the one include-only template, and reuses the
+library helpers (`br-engine-service.fullname`, `.labels`, `.selectorLabels`,
+`.port`) so its resources select the same pods. A second, labelled Service for
+a discovery mechanism is such a template, in the service chart, never in the
+library:
+
+```yaml
+# service chart: templates/discovery-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "br-engine-service.fullname" . }}-discovery
+  labels:
+    {{- include "br-engine-service.labels" . | nindent 4 }}
+    {{ .Values.discoveryLabel.key }}: {{ .Values.discoveryLabel.value | quote }}
+spec:
+  selector:
+    {{- include "br-engine-service.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ include "br-engine-service.port" . }}
+      targetPort: http
+```
+
+### Release
+
+The chart itself is published to
 `oci://ghcr.io/botresources/charts/br-engine-service` by `chart-release.yml` on
 the first `main` push that changes `Chart.yaml` `version`, tagged
 `chart/br-engine-service/v<version>`, independent of the crate's `v*` tag. The
