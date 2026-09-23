@@ -83,6 +83,8 @@ checksum)`).
   with no error value behind it.
 - `MutationFault::as_error`, a provided method (default `None`): a fault that is a
   `std::error::Error` returns `Some(self)` so the engine logs its chain.
+- `error::describe(&dyn Error) -> String`, the `top: cause: root` rendering the
+  engine logs, for a service that logs an engine error or keeps it as text.
 - CI guard `.github/scripts/check-released-migrations.sh`, run in the
   `fmt-clippy-test` job (checkout now `fetch-depth: 0`): it exports the engine
   migrations of every `v*` tag and fails when a released file is gone from HEAD or
@@ -106,8 +108,9 @@ checksum)`).
   faults now reach the client as `INTERNAL`).
 - `example-service`'s `AppFault` is the reference shape: `NotFound` carries the
   reason `NOT_FOUND` (a refusal the client can act on, no longer an uncoded
-  failure), and `Store` keeps the `EngineError` as its `source()` and returns
-  `Some(self)` from `as_error`.
+  failure), `Store` keeps the engine error's whole chain as text (rendered with
+  `error::describe`, so the type keeps its auto traits) and `as_error` returns
+  `Some(self)`; its `ReactionFault` keeps the chain the same way.
 - The engine now owns one lowercase-hex encoder (`hex::lower`); the four copies in
   blob signing, blob digests, seal hashes and NATS subject tokens use it, and the
   `unwrap` in the subject-token copy is gone.

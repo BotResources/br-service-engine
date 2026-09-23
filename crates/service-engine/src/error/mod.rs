@@ -8,6 +8,13 @@ use crate::session::SessionId;
 
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
 
+/// Renders `error` and its whole `source()` chain as `top: cause: root`, the
+/// form the engine logs. A service that keeps an engine error as text, or logs
+/// one, renders it with this so the cause is not lost.
+pub fn describe(error: &dyn StdError) -> String {
+    crate::chain::describe(error)
+}
+
 mod codec;
 pub use codec::{CronError, DecodeError};
 
