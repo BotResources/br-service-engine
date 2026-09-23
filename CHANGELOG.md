@@ -8,7 +8,7 @@ The library chart `br-engine-service` has its own version line (major = ops
 contract version) and its own tag `chart/br-engine-service/v{version}`; a
 chart-only release is a `## chart br-engine-service {version}` section.
 
-## 0.3.3 - 2026-09-23
+## 0.3.2 - 2026-09-23
 
 A patch: `migrate` upgrades a database that the 0.2.0 engine migrated, and every
 failure the engine answers reaches the client with a code.

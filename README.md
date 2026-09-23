@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.3", version = "0.3.3" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.2", version = "0.3.2" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,7 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
-| 0.3.3 | `v1.3.0` |
+| 0.3.2 | `v1.3.0` |
 | 0.3.1 | `v1.3.0` |
 | 0.3.0 | `v1.3.0` |
 | 0.2.0 | `v1.3.0` |
