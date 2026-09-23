@@ -542,7 +542,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
 name = "conformance-service-engine"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "async-graphql",
  "async-nats",
@@ -1019,7 +1019,7 @@ dependencies = [
 
 [[package]]
 name = "example-contract"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "br-core-integration",
  "serde",
@@ -1028,7 +1028,7 @@ dependencies = [
 
 [[package]]
 name = "example-lib-roster"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "async-graphql",
  "futures-util",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "example-service"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "async-graphql",
  "async-nats",
@@ -1067,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "example-twin"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "async-nats",
  "br-core-integration",
@@ -2992,7 +2992,7 @@ dependencies = [
 
 [[package]]
 name = "service-engine"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
