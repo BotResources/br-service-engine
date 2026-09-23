@@ -4,6 +4,94 @@ All notable changes to `br-service-engine` are documented here. The whole
 workspace ships **one version**: every crate inherits `version.workspace = true`,
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
+The library chart `br-engine-service` has its own version line (major = ops
+contract version) and its own tag `chart/br-engine-service/v{version}`; a
+chart-only release is a `## chart br-engine-service {version}` section.
+
+## chart br-engine-service 1.1.0 - 2026-09-23
+
+A minor: new optional fields, every one with a default; ops contract v1 is
+unchanged (entry points, env names, probe paths, `Recreate`). The engine crates
+do not change.
+
+### Changed — the pod is hardened by default
+
+**1.1.0 renders a different pod than 1.0.0 from the same values.** With no new
+key set, the Deployment now carries:
+
+- pod `securityContext`: `runAsNonRoot: true`, `runAsUser`/`runAsGroup`/
+  `fsGroup: 65532`, `seccompProfile: RuntimeDefault` — the engine image sets no
+  `USER`, so the UID is explicit;
+- on **both** containers (`migrate` and `serve`): `allowPrivilegeEscalation:
+  false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]`;
+- `automountServiceAccountToken: false` — the engine never calls the
+  Kubernetes API;
+- a `startupProbe` on `serve`: `GET /livez`, `periodSeconds: 5`,
+  `failureThreshold: 30` (150 s). `serve` binds its listener last, so `/livez`
+  answering is the end of boot; liveness is suspended until then.
+
+**Adopter impact.** A thin chart that bumps 1.0.0 → 1.1.0 and changes nothing
+gets the hardened pod. The engine binary runs that way: `migrate` and `serve`
+were verified against a real Postgres and NATS under a sandbox that refuses
+every file write (`migrate` exits 0; `serve` answers `/livez`, `/readyz`,
+`/sdl`, `/metrics`). An image whose **own** code cannot run that way sets the
+override — key by key, the rest of the hardening stays:
+`podSecurityContext.runAsUser: <uid>` for an image that needs a given UID,
+`extraVolumes` + `extraVolumeMounts` (an `emptyDir`) for a path the service's
+code writes, `containerSecurityContext.readOnlyRootFilesystem: false` only as a
+last resort, `automountServiceAccountToken: true` for code that calls the
+Kubernetes API, `probes.startup.failureThreshold` for a boot longer than 150 s.
+A key set to `null` removes that default key.
+
+### Added — neutral fields
+
+Absent by default; a key left out renders exactly as 1.0.0 did. The library
+gives none of them a platform meaning — the service chart sets the value.
+
+- `deploymentAnnotations`, `podAnnotations`, `podLabels`.
+- `service.labels`, `service.annotations` on the library Service.
+- `imagePullSecrets` (Kubernetes shape, `[{name: …}]`) on the pod.
+- `nodeSelector`, `tolerations`, `affinity`.
+- `migrate.resources` for the init container (`resources` stays `serve`'s).
+- `extraVolumes` (pod) and `extraVolumeMounts` (`serve`).
+- `probes.{startup,readiness,liveness}` — timing keys only
+  (`initialDelaySeconds`, `periodSeconds`, `timeoutSeconds`,
+  `successThreshold`, `failureThreshold`); readiness and liveness keep the
+  kubelet defaults unless set.
+- `objectStore.publicEndpoint` → `S3_PUBLIC_ENDPOINT` (ops contract v1's
+  optional S3 variable, until now passed through `env`).
+
+### Guards
+
+- `podLabels` / `service.labels` cannot replace a library label
+  (`app.kubernetes.io/name`, `/instance`, `/managed-by`, `/part-of`): the
+  render fails.
+- `probes.*` accept only the five timing keys; a path or port override fails
+  the render — the probe paths are ops contract v1.
+- An absent `objectStore` group no longer fails the render (read as disabled).
+- The env helpers no longer leave whitespace-only lines in the manifest.
+- `.helmignore` keeps `ci/` (the fixture thin chart) out of the published
+  package: 1.0.0 shipped it; 1.1.0 ships the library only.
+
+### Extension point, documented
+
+A service chart ships its own templates beside the include-only template and
+reuses the library helpers (`fullname`, `labels`, `selectorLabels`, `port`);
+the README shows a second, labelled Service written that way. Such resources
+belong to the service chart, never to the library.
+
+### CI
+
+The `chart` job also asserts the hardened defaults on the fixture's default
+render (both containers, `startupProbe`, no pull secret, no annotations), and
+renders `ci/thin-example/values-all-fields.yaml` to prove each neutral field
+reaches the manifest and that the two guards fail the render.
+
+### Release
+
+`chart-release.yml` packages and pushes
+`oci://ghcr.io/botresources/charts/br-engine-service:1.1.0` and tags
+`chart/br-engine-service/v1.1.0` on the merge to `main`.
 
 ## 0.3.1 - 2026-09-23
 
