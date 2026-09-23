@@ -36,7 +36,7 @@ pub fn subject_token(key: &serde_json::Value) -> Result<String, EngineError> {
         serde_json::Value::Bool(flag) => Ok(flag.to_string()),
         other => {
             let bytes = KeyBytes::encode(other)?;
-            Ok(format!("x{}", hex_lower(bytes.as_slice())))
+            Ok(format!("x{}", crate::hex::lower(bytes.as_slice())))
         }
     }
 }
@@ -47,15 +47,6 @@ fn is_token_safe(text: &str) -> bool {
         && text
             .chars()
             .all(|c| !c.is_whitespace() && !matches!(c, '.' | '*' | '>' | '\0'))
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(char::from_digit((byte >> 4) as u32, 16).unwrap());
-        out.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap());
-    }
-    out
 }
 
 #[cfg(test)]

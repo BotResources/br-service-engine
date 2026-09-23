@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::time::Duration;
 
 use base64::prelude::{BASE64_STANDARD, Engine as _};
@@ -104,7 +103,7 @@ fn sign(secret: &str, date: &str, region: &str, payload: &[u8]) -> Result<String
     let service_key = hmac(&region_key, b"s3")?;
     let signing_key = hmac(&service_key, b"aws4_request")?;
     let signature = hmac(&signing_key, payload)?;
-    Ok(hex_lower(&signature))
+    Ok(crate::hex::lower(&signature))
 }
 
 fn hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>, EngineError> {
@@ -112,14 +111,6 @@ fn hmac(key: &[u8], data: &[u8]) -> Result<Vec<u8>, EngineError> {
         .map_err(|_| EngineError::Blob("the SigV4 HMAC key length was rejected".into()))?;
     mac.update(data);
     Ok(mac.finalize().into_bytes().to_vec())
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 #[cfg(test)]

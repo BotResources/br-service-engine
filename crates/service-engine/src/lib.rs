@@ -1,5 +1,6 @@
 mod advisory;
 mod chain;
+mod hex;
 mod observe;
 #[cfg(test)]
 mod test_support;
