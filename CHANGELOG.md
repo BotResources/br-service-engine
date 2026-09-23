@@ -200,6 +200,86 @@ reaches the manifest and that the two guards fail the render.
 `oci://ghcr.io/botresources/charts/br-engine-service:1.1.0` and tags
 `chart/br-engine-service/v1.1.0` on the merge to `main`.
 
+## 0.3.2 - 2026-09-23
+
+A security patch over 0.3.1. `POST /graphql` now resolves the passport before it
+reads the request body, and reads a GraphQL multipart request only within explicit
+bounds. No adopter code changes; one new optional configuration group with
+defaults.
+
+### Security
+
+- **An unauthenticated multipart request could make the pod write to disk.**
+  Through 0.3.1 the handler took async-graphql-axum's `GraphQLRequest` extractor,
+  which parses the body — and, for a GraphQL multipart request (`operations` +
+  `map` + file parts), spools every file part to a temporary file — before the
+  handler looked at `X-Passport`. Any client that reached a pod could therefore
+  fill its writable filesystem (on a read-only root the request failed `400` and
+  nothing was written), and a JSON body of any size was buffered in memory before
+  the same `401`. The parser also bounded nothing: no body, file or file-count
+  limit, and a file part spooled even when `map` did not name it or the schema
+  declared no `Upload`. Found while verifying the engine under a read-only root
+  filesystem (chart `br-engine-service` 1.1.0, PR #17).
+- **The fix: authentication first, then a bounded read.** The handler resolves the
+  principal (passport decode, `PassportPrincipal::from_passport`, principal facts)
+  from the headers alone; a request whose passport is absent, does not decode or
+  is rejected is answered `401` with its body never read, whatever its content
+  type. The `401` status and body are those JSON clients already received. Only
+  then is the body read: a `multipart/*` body through the engine's own receiver
+  (`graphql/multipart/`), every other body exactly as async-graphql-axum parsed it
+  (same content-type dispatch, same single-request rule, same `400`/`413`
+  rejection).
+
+### Added
+
+- **Multipart bounds** — `EngineConfig::multipart: MultipartConfig`
+  (`with_multipart`; the type at `service_engine::` and `service_engine::graphql`),
+  validated at boot:
+  `max_body_bytes` (default 16 MiB; a declared `Content-Length` above it is refused
+  before the body is read, a chunked body is cut), `max_file_bytes` (default 8 MiB,
+  any single part), `max_files` (default 4, the uploads `map` binds — every path
+  counts), `spool_dir` (default unset: `std::env::temp_dir()`, i.e. `$TMPDIR`, else
+  `/tmp`). No environment variable is added to the ops contract.
+- The receiver enforces the spec's order (`operations`, `map`, then the files `map`
+  names), so the upload count and each file part's binding are judged before
+  anything is spooled; a part `map` does not name is refused unspooled. A schema
+  that declares no `Upload` scalar accepts no file (its effective `max_files` is
+  0): multipart stays accepted, and such a service never writes to disk. Files
+  spool to anonymous temporary files, freed when the request ends.
+- Coded refusals, a GraphQL-shaped body with `errors[0].extensions.code`:
+  `413 MULTIPART_TOO_LARGE`, `413 MULTIPART_FILE_TOO_LARGE`,
+  `413 MULTIPART_TOO_MANY_FILES`, `400 MULTIPART_MALFORMED`,
+  `500 MULTIPART_SPOOL_UNAVAILABLE` (the path and the OS error are logged, never
+  returned). The codes are public constants `graphql::MULTIPART_*_CODE`.
+- Conformance: `s241` — an unauthenticated multipart request (passport absent,
+  undecodable, or not a passport) is `401` before a byte of its body is read,
+  proven on a body the client never finishes sending and on a spool directory an
+  authenticated control shows the request would otherwise reach; an anonymous JSON
+  request keeps its `401` and body; an authenticated upload within bounds reaches
+  the resolver intact; each bound and the malformed order are refused with their
+  code and leave the spool empty; a schema without `Upload` accepts multipart
+  without files and refuses a file. Unit tests pin every bound, the order rules,
+  the no-`Upload` policy, the spool failure and the config validation.
+
+### Changed
+
+- An anonymous request is now refused before its body is parsed, so an anonymous
+  request whose body is also malformed answers `401` where 0.3.1 answered `400`.
+- A multipart request must follow the spec's part order and bind every file part
+  it carries (0.3.1's parser accepted parts in any order and silently spooled
+  unmapped ones); a `multipart/*` type other than `form-data` is `400
+  MULTIPART_MALFORMED`.
+
+### Adopter migration
+
+- None required. A service whose schema declares `Upload` and runs under a
+  read-only root filesystem mounts a writable `emptyDir` (with a `sizeLimit`) at
+  `/tmp` — or at its `MultipartConfig::spool_dir` — through the chart's
+  `extraVolumes` / `extraVolumeMounts`; no engine service declares `Upload` today
+  (blobs use presigned URLs), so none needs it. A service that expects larger
+  uploads raises the bounds with `EngineConfig::with_multipart`.
+- `EngineConfig` gains the `multipart` field (the struct is `#[non_exhaustive]`).
+
 ## 0.3.1 - 2026-09-23
 
 A patch over 0.3.0: a mirror accepts the key grammar a published language really
