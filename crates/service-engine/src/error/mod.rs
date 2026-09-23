@@ -121,8 +121,8 @@ pub enum EngineError {
     },
 
     #[error(
-        "mirror {mirror} requires key {key}, which is outside its consumed prefix {prefix}; a \
-         required key must live under a prefix the mirror consumes"
+        "mirror {mirror} requires key {key}, which is outside what it consumes as {prefix}; a \
+         required key must live under a consumed prefix, or be the consumed key itself"
     )]
     RequiredKeyOutsidePrefix {
         mirror: MirrorName,
@@ -219,6 +219,14 @@ pub enum EngineError {
 
     #[error("boot posture: {0}")]
     Posture(String),
+
+    #[error(
+        "owner posture: migrate refuses the owner role {role}, which is neither a superuser nor \
+         BYPASSRLS; a migration run by a role subject to row-level security touches no row of a \
+         FORCE ROW LEVEL SECURITY table and still reports success, so declare the owner role with \
+         BYPASSRLS"
+    )]
+    OwnerSubjectToRls { role: String },
 
     #[error(
         "schema version conflict: a live pod runs engine {live_engine} / service {live_service}, \

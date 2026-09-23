@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::nats::KvKey;
 
 use super::consumed::Consumed;
+use super::scope::KeyScope;
 use super::shadow::Shadows;
 
 type Presence = Arc<dyn Fn(&Shadows) -> bool + Send + Sync>;
@@ -35,7 +36,7 @@ impl RequiredKey {
     }
 
     pub(super) fn within_prefix(&self) -> bool {
-        self.key.starts_with(self.prefix)
+        KeyScope::parse(self.prefix).is_ok_and(|scope| scope.matches(self.key))
     }
 
     pub(super) fn is_present(&self, shadows: &Shadows) -> bool {

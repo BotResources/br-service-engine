@@ -1,10 +1,12 @@
 mod env;
 mod libraries;
 mod migrate;
+mod owner;
 mod serve;
 
 pub use libraries::LibraryMigrations;
 pub use migrate::apply_migration_chain;
+pub use owner::assert_owner_posture;
 pub use serve::ensure_migrated;
 
 use async_graphql::{ObjectType, SubscriptionType};

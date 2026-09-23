@@ -17,6 +17,7 @@ use super::leader::{MirrorGate, MirrorLeader};
 use super::projection::Project;
 use super::required::RequiredKey;
 use super::runtime::MirrorRuntime;
+use super::scope::KeyScope;
 use super::shadow::Shadows;
 
 #[derive(Debug, Clone)]
@@ -152,10 +153,10 @@ where
                     prefix: guard.prefix(),
                 });
             }
-            if !guard.prefix().ends_with('/') {
+            if let Err(refusal) = KeyScope::parse(guard.prefix()) {
                 return Err(EngineError::Config(format!(
-                    "mirror {} consumes prefix {:?} which must end with '/' so its manifest key \
-                     sits outside the data prefix",
+                    "mirror {} consumes {:?}, which {refusal}; consume a prefix ending in '/' or \
+                     '.' (its manifest is the sibling key outside it) or one whole key",
                     self.name.as_str(),
                     guard.prefix(),
                 )));

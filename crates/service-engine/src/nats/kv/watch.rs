@@ -47,6 +47,13 @@ impl KvWatch {
         &mut self,
         prefix: &KvPrefix,
     ) -> Option<Result<Watched<V>, NatsError>> {
+        self.next_where(|key| prefix.matches(key)).await
+    }
+
+    pub(crate) async fn next_where<V: DeserializeOwned>(
+        &mut self,
+        matches: impl Fn(&str) -> bool,
+    ) -> Option<Result<Watched<V>, NatsError>> {
         use futures_util::StreamExt;
         let entry = match self.inner.next().await {
             Some(Ok(entry)) => entry,
@@ -54,7 +61,7 @@ impl KvWatch {
             None => return None,
         };
         let revision = entry.revision;
-        if !prefix.matches(&entry.key) {
+        if !matches(&entry.key) {
             return Some(Ok(Watched::Boundary(revision)));
         }
         match entry_to_event::<V>(entry) {

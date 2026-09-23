@@ -55,7 +55,7 @@ impl BlackboxDb {
         run(
             &admin,
             &format!(
-                "CREATE ROLE \"{owner_role}\" LOGIN CREATEROLE NOSUPERUSER NOBYPASSRLS PASSWORD '{ROLE_PASSWORD}'"
+                "CREATE ROLE \"{owner_role}\" LOGIN CREATEROLE NOSUPERUSER BYPASSRLS PASSWORD '{ROLE_PASSWORD}'"
             ),
         )
         .await;

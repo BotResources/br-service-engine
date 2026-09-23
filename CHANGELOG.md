@@ -5,6 +5,92 @@ workspace ships **one version**: every crate inherits `version.workspace = true`
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 
+## 0.3.1 - 2026-09-23
+
+A patch over 0.3.0: a mirror accepts the key grammar a published language really
+uses, and `migrate` asserts the owner posture the ops contract already required.
+Both are additive for an adopter on 0.3.0 — every `/`-terminated consumption and
+offer keeps its behaviour and its manifest key — and the second only refuses a
+deployment that was already outside the contract.
+
+### Fixed
+
+- **A mirror consumes a `.`-terminated prefix and a single exact key.** 0.3.0
+  refused at registration every `Consumed::PREFIX` that did not end in `/`
+  (`invalid configuration: mirror … consumes prefix … which must end with '/' so its
+  manifest key sits outside the data prefix`), so a service consuming a producer
+  whose keys use `.` as the segment separator, or one singleton configuration key,
+  could not boot. The rule protected the manifest placement: `manifest_key(prefix)`
+  strips the trailing separator and appends `_manifest`, and under the mirror's
+  `starts_with` matching a prefix that ends mid-segment (`catalog/items`) would take
+  its own manifest (`catalog/items_manifest`) and any sibling sharing its
+  characters as data. 0.3.1 parses `Consumed::PREFIX` once into one of two forms
+  (`mirror/scope.rs`, crate-private `KeyScope`):
+  - a **prefix** ends in a segment separator, `/` or `.` (`catalog/items/`,
+    `catalog.item.`); the mirror reads every key that starts with it, and its
+    manifest key is the sibling `{prefix minus the separator}_manifest`
+    (`catalog/items_manifest`, `catalog.item_manifest`), which never starts with
+    the prefix, so a manifest is never read as data and a data key is never judged
+    as a manifest;
+  - any other string is **one exact key** (`catalog.settings`), read with one GET at
+    scan and matched by equality at watch — a key beneath it or sharing its
+    characters is not read. A single key is judged against no manifest: only an
+    engine offer writes a manifest, and an offer publishes a family under a prefix,
+    so no engine producer ever writes one beside a single key. A non-engine
+    producer's single key is versioned through `wire_version` (N9), as before.
+
+  `Mirror::validate` refuses, as `EngineError::Config` naming the mirror and the
+  string, only the forms that are ambiguous or malformed: a string ending in `_` or
+  `-` (a prefix cut mid-segment — it would otherwise silently read as a key nobody
+  publishes), a single key ending in `_manifest` (it would read an offer manifest as
+  data), a leading separator or two separators in a row (an empty segment), and a
+  character outside `[A-Za-z0-9_./-]`. `require_key::<C>(key)` accepts the consumed
+  single key itself; a key beneath a single key is `RequiredKeyOutsidePrefix`.
+- **An offer publishes under a `.`-terminated prefix too.** `register_offer` applies
+  the same grammar through `manifest_key`, so a producer and its consumers compute
+  one manifest key from one rule; an offer still refuses a single key. Because `x/`
+  and `x.` share the manifest key `x_manifest`, an engine refuses a second offer
+  whose manifest key another registered offer already claims; across services the
+  manifest carries its `prefix`, so such a collision reads as
+  `ManifestMismatch::Offer` and dead-letters instead of passing silently.
+- `manifest_key(prefix)` (public) accepts a `.`-terminated prefix and refuses a
+  single key or a malformed prefix with a message that names the form.
+
+### Added
+
+- **`migrate` asserts the owner posture.** Constitution principle 30 and the ops
+  contract require the owner role to carry `BYPASSRLS`: a data migration run by a
+  role subject to row-level security touches no row of a `FORCE ROW LEVEL SECURITY`
+  table and still reports success. 0.3.0's `migrate` never checked it, so an adopter
+  had to add its own guard. `engine::boot::assert_owner_posture(&PgPool)` (public)
+  passes a superuser or a `BYPASSRLS` role and refuses any other with the new
+  `EngineError::OwnerSubjectToRls { role }`; `apply_migration_chain` calls it right
+  after the pure library validation and before the first migration, so `migrate`
+  (the chart's init container) logs the refusal and exits non-zero with nothing
+  applied. The engine's own black-box and example harnesses now declare their owner
+  roles `BYPASSRLS`, as production does.
+- Conformance: `s238` (a `.` prefix and a single key read exactly their keys at scan
+  and at watch, with sibling, child, near-miss and manifest keys published beside
+  them), `s239` (a `.` prefix is judged against its sibling manifest, a single key
+  against none), `s240` (the owner posture matrix, and the chain refusing before it
+  applies anything), `bb15` (the real binary's `migrate` refuses an owner without
+  `BYPASSRLS` and exits non-zero). Unit tests pin the grammar, the manifest
+  placement for every accepted form, the refused forms, and the offer-side claim.
+
+### Adopter migration
+
+- mirror (additive): a consumption of a `.`-separated producer or of one
+  configuration key now registers as written — declare `Consumed::PREFIX` as the
+  prefix with its trailing `.` or `/`, or as the exact key. Nothing changes for a
+  `/`-terminated prefix. A string without a trailing separator is now one exact key:
+  if you meant a prefix, add the separator (0.3.0 refused that string, so no 0.3.0
+  adopter reads differently).
+- migrate (fail-loud): declare the owner role `BYPASSRLS` (or run `migrate` as a
+  superuser) — the ops contract already required it, and a `migrate` that now exits
+  with `OwnerSubjectToRls` names the role to fix in GitOps. A service-owned owner
+  posture guard in `main` is redundant and can be deleted.
+- `EngineError` gains `OwnerSubjectToRls` (the enum is `#[non_exhaustive]`).
+
 ## 0.3.0 - 2026-09-22
 
 ### lane: reset

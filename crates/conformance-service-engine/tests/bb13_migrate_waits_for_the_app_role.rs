@@ -26,7 +26,7 @@ async fn bb13_migrate_waits_for_the_app_role() {
     run(
         &admin,
         &format!(
-            "CREATE ROLE \"{owner_role}\" LOGIN CREATEROLE NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'"
+            "CREATE ROLE \"{owner_role}\" LOGIN CREATEROLE NOSUPERUSER BYPASSRLS PASSWORD '{password}'"
         ),
     )
     .await;

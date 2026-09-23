@@ -22,7 +22,7 @@ const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 use self::util::{dedup, merge_forward, wire_version_reason};
 use super::change::{Change, ChangeOp};
 use super::consumed::OfferManifest;
-use super::consumption::{Consumption, Effect, ReconcileKeysFn};
+use super::consumption::{Consumption, Effect, ReconcileKeysFn, refused};
 use super::handle::MirrorRun;
 use super::leader::MirrorGate;
 use super::projection::Project;
@@ -202,15 +202,18 @@ where
         &self,
         consumption: &Consumption,
     ) -> Result<Option<String>, EngineError> {
+        let scope = consumption
+            .scope
+            .as_ref()
+            .map_err(|refusal| refused(consumption.prefix, refusal))?;
+        let Some(manifest_key) = scope.manifest() else {
+            return Ok(None);
+        };
         let manifests = self
             .nats
             .bind_kv::<OfferManifest>(consumption.bucket)
             .await
             .map_err(EngineError::Nats)?;
-        let manifest_key = consumption
-            .manifest_key
-            .as_ref()
-            .map_err(|error| EngineError::Config(error.to_string()))?;
         let Some(found) = manifests
             .get(manifest_key)
             .await

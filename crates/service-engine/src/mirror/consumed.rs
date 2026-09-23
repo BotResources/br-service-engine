@@ -3,6 +3,7 @@ use std::any::TypeId;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use super::scope::KeyScope;
 use crate::error::EngineError;
 use crate::nats::{KV_PUBLISHED_LANGUAGE, KvKey};
 
@@ -31,13 +32,16 @@ pub fn is_raw_json<C: Consumed>() -> bool {
 }
 
 pub fn manifest_key(prefix: &str) -> Result<KvKey, EngineError> {
-    let base = prefix.strip_suffix('/').ok_or_else(|| {
-        EngineError::Config(format!(
-            "prefix {prefix:?} must end with '/' so its manifest key sits outside the data prefix"
-        ))
-    })?;
-    KvKey::new(format!("{base}_manifest"))
-        .map_err(|error| EngineError::Config(format!("manifest key for prefix {prefix}: {error}")))
+    match KeyScope::parse(prefix) {
+        Ok(KeyScope::Prefix { manifest, .. }) => Ok(manifest),
+        Ok(KeyScope::Key(_)) => Err(EngineError::Config(format!(
+            "{prefix:?} names one key, not a prefix; only a prefix ending in '/' or '.' has a \
+             manifest key, the sibling that sits outside its data"
+        ))),
+        Err(refusal) => Err(EngineError::Config(format!(
+            "prefix {prefix:?} {refusal}, so it has no manifest key"
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,9 +144,26 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_key_for_a_prefix_without_a_trailing_separator_is_refused() {
-        let refusal = manifest_key("identity/users").unwrap_err();
-        assert!(matches!(refusal, EngineError::Config(_)));
+    fn a_dot_terminated_prefix_has_a_sibling_manifest_key_too() {
+        let key = manifest_key("typed.v1.").unwrap();
+        assert_eq!(key.as_str(), "typed.v1_manifest");
+        assert!(!key.as_str().starts_with("typed.v1."));
+    }
+
+    #[test]
+    fn a_single_key_has_no_manifest_key() {
+        let refusal = manifest_key("typed/v1").unwrap_err();
+        assert!(
+            matches!(refusal, EngineError::Config(message) if message.contains("names one key"))
+        );
+    }
+
+    #[test]
+    fn a_malformed_prefix_has_no_manifest_key() {
+        let refusal = manifest_key("typed//").unwrap_err();
+        assert!(
+            matches!(refusal, EngineError::Config(message) if message.contains("empty segment"))
+        );
     }
 
     #[test]
