@@ -8,6 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::engine::boot::env::owner_database_url;
 use crate::engine::boot::libraries::{self, LibraryMigrations};
+use crate::engine::boot::owner::assert_owner_posture;
 use crate::engine::boot::{BootPlan, pg_error};
 use crate::error::EngineError;
 
@@ -20,17 +21,19 @@ pub(crate) async fn migrate<Q, M, S, R>(plan: BootPlan<Q, M, S, R>) -> Result<()
     let owner_url = owner_database_url()?;
     let owner = connect_owner(&owner_url, plan.config.migrate_connect_timeout).await?;
 
-    apply_migration_chain(
+    let applied = apply_migration_chain(
         &owner,
         plan.libraries,
         plan.service_migrator,
         &plan.config.app_role,
         plan.config.migrate_connect_timeout,
     )
-    .await?;
-
+    .await;
     owner.close().await;
-    Ok(())
+    if let Err(error) = &applied {
+        tracing::error!(%error, "migrate failed");
+    }
+    applied
 }
 
 pub async fn apply_migration_chain(
@@ -41,6 +44,7 @@ pub async fn apply_migration_chain(
     role_timeout: Duration,
 ) -> Result<(), EngineError> {
     libraries::validate(&libraries, &service_migrator)?;
+    assert_owner_posture(owner).await?;
 
     crate::schema::migrate(owner).await?;
 

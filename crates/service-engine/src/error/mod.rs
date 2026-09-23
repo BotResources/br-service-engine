@@ -221,6 +221,14 @@ pub enum EngineError {
     Posture(String),
 
     #[error(
+        "owner posture: migrate refuses the owner role {role}, which is neither a superuser nor \
+         BYPASSRLS; a migration run by a role subject to row-level security touches no row of a \
+         FORCE ROW LEVEL SECURITY table and still reports success, so declare the owner role with \
+         BYPASSRLS"
+    )]
+    OwnerSubjectToRls { role: String },
+
+    #[error(
         "schema version conflict: a live pod runs engine {live_engine} / service {live_service}, \
          this pod is engine {engine_version} / service {service_version}"
     )]
