@@ -323,6 +323,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       E2E_PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # The battery links ~260 test binaries. With the dev profile's full debuginfo they
+      # fill most of the runner's disk, and MinIO (store under /tmp, same disk) then
+      # refuses writes with 507. Line tables keep file:line in panics and backtraces.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -360,8 +365,13 @@ jobs:
           minio --version
       - name: conformance battery
         run: cargo test -p conformance-service-engine --all-targets --locked
+      - name: free the battery's test binaries (MinIO needs the disk in the example e2e)
+        run: bash .github/scripts/free-conformance-binaries.sh
       - name: example service e2e
         run: cargo test -p example-service --all-targets --locked -- --test-threads=3
+      - name: disk after the example service e2e
+        if: always()
+        run: df -h /
 
   conformance-blackbox:
     name: conformance-service-engine black-box (real binary)
