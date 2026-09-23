@@ -43,7 +43,7 @@ where
     if let Err(error) = ensure_migrated(&pool, &libraries, &service_migrator).await {
         if matches!(error, EngineError::MigrationsPending { .. }) {
             readiness.set_not_ready(REASON_MIGRATIONS_PENDING);
-            tracing::error!(%error, "refusing to serve a store that migrate has not finished");
+            tracing::error!(error = %crate::chain::describe(&error), "refusing to serve a store that migrate has not finished");
         }
         return Err(error);
     }

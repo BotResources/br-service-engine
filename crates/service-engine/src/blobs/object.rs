@@ -47,7 +47,7 @@ impl ObjectStore {
         let credentials = Credentials::new(&config.access_key, &config.secret_key);
         let http = reqwest::Client::builder()
             .build()
-            .map_err(|error| EngineError::Blob(error.to_string()))?;
+            .map_err(|error| EngineError::Blob(crate::chain::describe(&error)))?;
         Ok(Self {
             internal,
             public,
@@ -116,7 +116,7 @@ impl ObjectStore {
             .head(url)
             .send()
             .await
-            .map_err(|error| EngineError::Blob(error.to_string()))?
+            .map_err(|error| EngineError::Blob(crate::chain::describe(&error)))?
             .status();
         if status.is_success() {
             Ok(())
@@ -139,7 +139,7 @@ impl ObjectStore {
             .header("x-amz-checksum-mode", "ENABLED")
             .send()
             .await
-            .map_err(|error| EngineError::Blob(error.to_string()))?;
+            .map_err(|error| EngineError::Blob(crate::chain::describe(&error)))?;
         let status = response.status();
         if status == StatusCode::NOT_FOUND {
             return Ok(None);
@@ -181,7 +181,7 @@ impl ObjectStore {
             .delete(url)
             .send()
             .await
-            .map_err(|error| EngineError::Blob(error.to_string()))?
+            .map_err(|error| EngineError::Blob(crate::chain::describe(&error)))?
             .status();
         if status.is_success() || status == StatusCode::NOT_FOUND {
             Ok(())

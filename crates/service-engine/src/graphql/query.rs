@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use crate::blobs::{BlobRef, Disposition, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
+use crate::graphql::error::{OrInternal, engine_data, internal_fault};
 use crate::graphql::state::GraphqlState;
 use crate::persistence::{Aggregate, Persistence};
 use crate::principal::Principal;
@@ -22,8 +23,8 @@ pub struct Query<'a, P: Principal> {
 impl<'a, P: Principal> Query<'a, P> {
     pub fn new(ctx: &'a Context<'_>) -> Result<Self, Error> {
         Ok(Self {
-            state: ctx.data::<Arc<GraphqlState<P>>>()?,
-            principal: ctx.data::<P>()?,
+            state: engine_data::<Arc<GraphqlState<P>>>(ctx)?,
+            principal: engine_data::<P>(ctx)?,
         })
     }
 
@@ -33,7 +34,11 @@ impl<'a, P: Principal> Query<'a, P> {
         Pr::View: DeserializeOwned,
     {
         match self.fetch_bytes::<Pr>(key).await? {
-            Some(bytes) => Ok(Some(bytes.decode::<Pr::View>().map_err(Error::from)?)),
+            Some(bytes) => Ok(Some(
+                bytes
+                    .decode::<Pr::View>()
+                    .or_internal("decode a query view")?,
+            )),
             None => Ok(None),
         }
     }
@@ -46,7 +51,11 @@ impl<'a, P: Principal> Query<'a, P> {
         self.fetch_window_bytes::<Pr>(params)
             .await?
             .iter()
-            .map(|bytes| bytes.decode::<Pr::View>().map_err(Error::from))
+            .map(|bytes| {
+                bytes
+                    .decode::<Pr::View>()
+                    .or_internal("decode a query view")
+            })
             .collect()
     }
 
@@ -66,7 +75,7 @@ impl<'a, P: Principal> Query<'a, P> {
         V: crate::view::Projector<Principal = P>,
         V::Out: DeserializeOwned,
     {
-        let params = WindowParams::encode(query)?;
+        let params = WindowParams::encode(query).or_internal("encode a query window")?;
         self.fetch_window::<crate::view::ViewProjector<V>>(params)
             .await
     }
@@ -85,8 +94,16 @@ impl<'a, P: Principal> Query<'a, P> {
             return Ok(None);
         }
         let held = {
-            let mut conn = self.state.pg().acquire().await.map_err(EngineError::from)?;
-            match <V::Store as Persistence>::load(&mut conn, key).await? {
+            let mut conn = self
+                .state
+                .pg()
+                .acquire()
+                .await
+                .or_internal("acquire a connection for a download")?;
+            match <V::Store as Persistence>::load(&mut conn, key)
+                .await
+                .or_internal("load the aggregate that holds a blob")?
+            {
                 Some(aggregate) => Aggregate::blob_refs(&aggregate).contains(&reference),
                 None => false,
             }
@@ -95,9 +112,10 @@ impl<'a, P: Principal> Query<'a, P> {
             return Ok(None);
         }
         match self.state.blob_store() {
-            Some(store) => Ok(store
+            Some(store) => store
                 .download_url(self.state.pg(), reference, disposition)
-                .await?),
+                .await
+                .or_internal("sign a blob download"),
             None => Ok(None),
         }
     }
@@ -108,10 +126,11 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
-        let key_bytes = KeyBytes::encode(key)?;
+        let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
         let population = erased
             .populate(self.state.pg(), &WindowParams::none(), self.principal)
-            .await?;
+            .await
+            .or_internal("populate a query")?;
         Ok(is_member(&population, &key_bytes))
     }
 
@@ -123,7 +142,9 @@ impl<'a, P: Principal> Query<'a, P> {
         Pr: Projector<Principal = P> + Default,
     {
         match self.fetch_bytes::<Pr>(key).await? {
-            Some(bytes) => Ok(Some(Json(view_value(&bytes)?))),
+            Some(bytes) => Ok(Some(Json(
+                view_value(&bytes).or_internal("decode a query view")?,
+            ))),
             None => Ok(None),
         }
     }
@@ -138,7 +159,11 @@ impl<'a, P: Principal> Query<'a, P> {
         self.fetch_window_bytes::<Pr>(params)
             .await?
             .iter()
-            .map(|bytes| view_value(bytes).map(Json).map_err(Error::from))
+            .map(|bytes| {
+                view_value(bytes)
+                    .map(Json)
+                    .or_internal("decode a query view")
+            })
             .collect()
     }
 
@@ -148,10 +173,11 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
-        let key_bytes = KeyBytes::encode(key)?;
+        let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
         let population = erased
             .populate(self.state.pg(), &WindowParams::none(), self.principal)
-            .await?;
+            .await
+            .or_internal("populate a query")?;
         if !is_member(&population, &key_bytes) {
             return Ok(None);
         }
@@ -161,7 +187,8 @@ impl<'a, P: Principal> Query<'a, P> {
                 erased.renders_under_rls(),
                 std::slice::from_ref(&key_bytes),
             )
-            .await?;
+            .await
+            .or_internal("render a query")?;
         Ok(rendered.remove(&key_bytes).flatten())
     }
 
@@ -173,11 +200,13 @@ impl<'a, P: Principal> Query<'a, P> {
         let erased = self.erased(&projector)?;
         let population = erased
             .populate(self.state.pg(), &params, self.principal)
-            .await?;
+            .await
+            .or_internal("populate a query window")?;
         let keys = member_keys(&population);
         let rendered = self
             .render(&erased, erased.renders_under_rls(), &keys)
-            .await?;
+            .await
+            .or_internal("render a query window")?;
         Ok(keys
             .iter()
             .filter_map(|key| rendered.get(key).cloned().flatten())
@@ -194,7 +223,7 @@ impl<'a, P: Principal> Query<'a, P> {
             .registry()
             .projector(&name)
             .cloned()
-            .ok_or_else(|| Error::new(format!("no projector is registered under {name}")))
+            .ok_or_else(|| internal_fault(format_args!("no projector is registered under {name}")))
     }
 
     async fn render(

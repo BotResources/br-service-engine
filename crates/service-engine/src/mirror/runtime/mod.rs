@@ -240,7 +240,7 @@ where
             tracing::warn!(
                 mirror = %self.name,
                 subject,
-                %error,
+                error = %crate::chain::describe(&error),
                 "recording a mirror dead letter failed",
             );
         }

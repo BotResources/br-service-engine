@@ -95,7 +95,7 @@ pub(crate) async fn run_watch<P: Principal>(
         let mut watch = match bucket.watch_all().await {
             Ok(watch) => watch,
             Err(error) => {
-                tracing::warn!(%error, "the presence watch could not be opened; retrying");
+                tracing::warn!(error = %crate::chain::describe(&error), "the presence watch could not be opened; retrying");
                 tokio::select! {
                     () = &mut stopping => return,
                     () = tokio::time::sleep(RECONNECT_POLL) => continue,
@@ -113,7 +113,7 @@ pub(crate) async fn run_watch<P: Principal>(
                     }
                     Err(error) => {
                         tracing::warn!(
-                            %error,
+                            error = %crate::chain::describe(&error),
                             "reseeding presence after a reconnect failed; sessions keep their \
                              last values until a later reseed repairs them"
                         );
@@ -141,7 +141,7 @@ pub(crate) async fn run_watch<P: Principal>(
                     break;
                 }
                 Some(Err(error)) => {
-                    tracing::warn!(%error, "the presence watch dropped; re-establishing");
+                    tracing::warn!(error = %crate::chain::describe(&error), "the presence watch dropped; re-establishing");
                     reseed_pending = true;
                     break;
                 }
@@ -163,7 +163,7 @@ fn fold<P: Principal>(lanes: &[Arc<dyn PresenceLane<P>>], event: KvEvent<Value>)
     match outcome {
         Some(Ok(impact)) => Some(impact),
         Some(Err(error)) => {
-            tracing::warn!(%error, "a presence value could not be folded; the key is skipped");
+            tracing::warn!(error = %crate::chain::describe(&error), "a presence value could not be folded; the key is skipped");
             None
         }
         None => None,

@@ -3,10 +3,11 @@ use crate::inbound::DispatchError;
 use crate::inbound::sqlx_is_terminal;
 
 pub(crate) fn classify(error: &sqlx::Error) -> DispatchError {
+    let cause = crate::chain::describe(error);
     if sqlx_is_terminal(error) {
-        DispatchError::terminal(error.to_string())
+        DispatchError::terminal(cause)
     } else {
-        DispatchError::retry(error.to_string())
+        DispatchError::retry(cause)
     }
 }
 
@@ -14,9 +15,9 @@ pub(crate) fn classify_engine(error: &EngineError) -> DispatchError {
     match error {
         EngineError::Db(db) => classify(db),
         EngineError::Encode { .. } | EngineError::Decode { .. } | EngineError::Config(_) => {
-            DispatchError::terminal(error.to_string())
+            DispatchError::terminal(crate::chain::describe(error))
         }
-        _ => DispatchError::retry(error.to_string()),
+        _ => DispatchError::retry(crate::chain::describe(error)),
     }
 }
 

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_graphql::{Context, Error};
 
+use crate::graphql::error::{OrInternal, attach_error, engine_data, page_error};
 use crate::graphql::state::GraphqlState;
 use crate::principal::Principal;
 use crate::runtime::PageReport;
@@ -13,13 +14,13 @@ pub async fn attach_with_session<P: Principal>(
     session: SessionId,
     windows: Vec<WindowSpec>,
 ) -> Result<SessionStream, Error> {
-    let state = ctx.data::<Arc<GraphqlState<P>>>()?;
-    let principal = ctx.data::<P>()?.clone();
+    let state = engine_data::<Arc<GraphqlState<P>>>(ctx)?;
+    let principal = engine_data::<P>(ctx)?.clone();
     state
         .runtime()
         .attach(AttachRequest::new(principal, windows).with_session(session))
         .await
-        .map_err(|error| Error::new(error.to_string()))
+        .map_err(attach_error)
 }
 
 pub async fn page<P, V>(
@@ -31,12 +32,12 @@ where
     P: Principal,
     V: ViewProjector<Principal = P>,
 {
-    let state = ctx.data::<Arc<GraphqlState<P>>>()?;
-    let principal = ctx.data::<P>()?.clone();
-    let params = WindowParams::encode(cursor)?;
+    let state = engine_data::<Arc<GraphqlState<P>>>(ctx)?;
+    let principal = engine_data::<P>(ctx)?.clone();
+    let params = WindowParams::encode(cursor).or_internal("encode a page cursor")?;
     state
         .runtime()
         .page(&principal, session, V::NAME, params)
         .await
-        .map_err(|error| Error::new(error.to_string()))
+        .map_err(page_error)
 }

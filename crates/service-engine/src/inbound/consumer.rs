@@ -195,7 +195,7 @@ impl InboundConsumer {
                     if let Err(error) = message.ack_with(AckKind::Nak(None)).await {
                         tracing::warn!(
                             reaction = %self.subscription.reaction,
-                            %error,
+                            error = %crate::chain::describe(&*error),
                             "naking a pulled-but-unprocessed frame on shutdown failed; it \
                              redelivers to a live pod"
                         );

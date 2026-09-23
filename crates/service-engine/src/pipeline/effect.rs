@@ -57,10 +57,29 @@ fn internal_engine_failure(context: &'static str, error: EngineError) -> Mutatio
     tracing::error!(
         context,
         cause = %crate::chain::describe(&error),
-        "the mutation pipeline aborted on an internal engine error; the wire carries a generic \
-         reason while the underlying cause is kept here"
+        "the mutation pipeline aborted on an internal engine error; the client receives \
+         INTERNAL while the whole cause chain is kept here"
     );
-    MutationError::internal(error.to_string())
+    MutationError::internal(format!("{context} failed"))
+}
+
+/// A handler's error: a refusal keeps its reason and detail; a fault without
+/// a reason is logged here with its whole chain and reaches the client as
+/// `INTERNAL`.
+fn handler_failure<M: MutationInput>(error: M::Error) -> MutationError {
+    let reason = error.reason();
+    if reason.is_none() {
+        let cause = error
+            .as_error()
+            .map_or_else(|| error.to_string(), crate::chain::describe);
+        tracing::error!(
+            mutation = M::NAME,
+            %cause,
+            "a mutation handler failed without a reason; the client receives INTERNAL while \
+             the whole cause chain is kept here"
+        );
+    }
+    MutationError::refused(reason, error.to_string())
 }
 
 fn mutation_outbound<P: Principal>(
@@ -116,12 +135,12 @@ where
         Ok(output) => output,
         Err(error) => {
             let _ = tx.rollback().await;
-            return Err(MutationError::refused(error.reason(), error.to_string()));
+            return Err(handler_failure::<M>(error));
         }
     };
     if !staged.is_within(services.impacts_per_commit) {
         let _ = tx.rollback().await;
-        return Err(MutationError::internal(format!(
+        return Err(MutationError::fault(format!(
             "the mutation dirtied {} keys, over impacts_per_commit={}; a change this large must \
              go through the bulk path",
             staged.impacts.len(),
@@ -188,7 +207,7 @@ where
         Ok(output) => output,
         Err(error) => {
             let _ = tx.rollback().await;
-            return Err(MutationError::refused(error.reason(), error.to_string()));
+            return Err(handler_failure::<M>(error));
         }
     };
     flush_and_commit(tx, &staged, services.transport.as_ref())

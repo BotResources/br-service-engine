@@ -132,7 +132,7 @@ fn the_generic_arm_maps_reset_upsert_and_remove_over_a_concrete_principal() {
 }
 
 #[test]
-fn the_generic_arm_errs_naming_a_projector_the_union_does_not_map() {
+fn the_generic_arm_answers_internal_for_a_projector_the_union_does_not_map() {
     let erased = ErasedView::new(
         ProjectorName::from_static("unmapped"),
         KeyBytes::encode(&Uuid::now_v7()).expect("encode key"),
@@ -144,6 +144,16 @@ fn the_generic_arm_errs_naming_a_projector_the_union_does_not_map() {
     };
     match WidgetDelta::from_delta::<TestPrincipal>(&reset) {
         Ok(_) => panic!("a delta naming an unmapped projector must not map"),
-        Err(err) => assert!(err.message.contains("unmapped")),
+        Err(err) => {
+            assert_eq!(err.message, crate::graphql::INTERNAL_MESSAGE);
+            let code = err
+                .extensions
+                .as_ref()
+                .and_then(|extensions| extensions.get(crate::graphql::CODE_EXTENSION).cloned());
+            assert_eq!(
+                code,
+                Some(async_graphql::Value::from(crate::graphql::INTERNAL_CODE))
+            );
+        }
     }
 }

@@ -30,12 +30,12 @@ pub enum TransportError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RelayError {
-    #[error("database")]
+    #[error(transparent)]
     Db(#[from] sqlx::Error),
 
     #[error("publishing a claimed row: {0}")]
     Publish(String),
 
-    #[error("relay")]
-    Relay(#[source] BoxedError),
+    #[error(transparent)]
+    Relay(BoxedError),
 }

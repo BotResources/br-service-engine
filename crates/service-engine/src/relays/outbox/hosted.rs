@@ -102,7 +102,7 @@ impl HostedOutboxRelay {
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
             }
             Err(error) => {
-                tracing::warn!(reason = %error, "outbox hygiene sweep failed");
+                tracing::warn!(reason = %crate::chain::describe(&error), "outbox hygiene sweep failed");
             }
         }
     }
@@ -119,7 +119,7 @@ impl HostedOutboxRelay {
         match self.hosted.pending_stats().await {
             Ok((depth, oldest_age)) => crate::observe::record_outbox_depth(depth, oldest_age),
             Err(error) => {
-                tracing::warn!(reason = %error, "outbox depth gauge could not be sampled");
+                tracing::warn!(reason = %crate::chain::describe(&error), "outbox depth gauge could not be sampled");
             }
         }
     }

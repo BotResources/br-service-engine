@@ -19,11 +19,11 @@ pub enum CronError {
     #[error("the schedule of {job} has no fire time after {after}")]
     NoNextFire { job: JobName, after: Timestamp },
 
-    #[error("database")]
+    #[error(transparent)]
     Db(#[from] sqlx::Error),
 
-    #[error("job")]
-    Job(#[source] BoxedError),
+    #[error(transparent)]
+    Job(BoxedError),
 }
 
 #[derive(Debug, Error)]

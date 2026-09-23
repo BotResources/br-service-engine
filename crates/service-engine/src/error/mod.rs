@@ -298,14 +298,14 @@ pub enum EngineError {
     #[error(transparent)]
     Nats(#[from] crate::nats::NatsError),
 
-    #[error("database")]
+    #[error(transparent)]
     Db(#[from] sqlx::Error),
 
-    #[error("migrations")]
+    #[error(transparent)]
     Migrate(#[from] sqlx::migrate::MigrateError),
 
-    #[error("service")]
-    Service(#[source] BoxedError),
+    #[error(transparent)]
+    Service(BoxedError),
 
     #[error(transparent)]
     Scope(#[from] crate::scopes::ScopeError),

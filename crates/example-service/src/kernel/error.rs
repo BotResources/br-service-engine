@@ -3,11 +3,18 @@ use service_engine::gate::Reason;
 use service_engine::inbound::{Disposition, ReactionError, sqlx_is_terminal};
 use service_engine::pipeline::MutationFault;
 
+/// The aggregate a mutation names does not exist: a refusal the client can
+/// act on, so it carries a code like any other.
+pub const NOT_FOUND: Reason = Reason::new("NOT_FOUND");
+
+/// A mutation's error. A refusal carries its reason code; a store failure
+/// carries no reason, reaches the client as `INTERNAL`, and keeps the engine
+/// error as its `source()` so the engine logs the whole chain.
 #[derive(Debug)]
 pub enum AppFault {
     Refused(Reason),
     NotFound,
-    Store(String),
+    Store(EngineError),
 }
 
 impl std::fmt::Display for AppFault {
@@ -15,19 +22,31 @@ impl std::fmt::Display for AppFault {
         match self {
             Self::Refused(reason) => write!(f, "refused: {}", reason.code()),
             Self::NotFound => f.write_str("the aggregate does not exist"),
-            Self::Store(detail) => write!(f, "store: {detail}"),
+            Self::Store(_) => f.write_str("the store failed"),
         }
     }
 }
 
-impl std::error::Error for AppFault {}
+impl std::error::Error for AppFault {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error),
+            Self::Refused(_) | Self::NotFound => None,
+        }
+    }
+}
 
 impl MutationFault for AppFault {
     fn reason(&self) -> Option<Reason> {
         match self {
             Self::Refused(reason) => Some(*reason),
-            _ => None,
+            Self::NotFound => Some(NOT_FOUND),
+            Self::Store(_) => None,
         }
+    }
+
+    fn as_error(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self)
     }
 }
 
@@ -39,7 +58,7 @@ impl From<Reason> for AppFault {
 
 impl From<EngineError> for AppFault {
     fn from(error: EngineError) -> Self {
-        Self::Store(error.to_string())
+        Self::Store(error)
     }
 }
 
@@ -92,7 +111,7 @@ impl From<AppFault> for ReactionFault {
         match fault {
             AppFault::Refused(reason) => Self::Terminal(reason.code().to_string()),
             AppFault::NotFound => Self::NotYet("aggregate absent".into()),
-            AppFault::Store(detail) => Self::Store(detail),
+            AppFault::Store(error) => Self::from(error),
         }
     }
 }

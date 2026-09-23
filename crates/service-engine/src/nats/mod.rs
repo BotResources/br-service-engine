@@ -268,7 +268,7 @@ impl Nats {
         frame: &StreamFrame,
     ) -> Result<PublishOutcome, NatsError> {
         let token = subject_token(&frame.key).map_err(|error| NatsError::Store {
-            detail: error.to_string(),
+            detail: crate::chain::describe(&error),
         })?;
         let subject = chunk_subject(service, &token);
         let message_id = frame.message_id(&token);

@@ -96,7 +96,7 @@ impl BlobReaper {
             Ok(conn) => conn,
             Err(error) => {
                 round.failures += 1;
-                tracing::warn!(reason = %error, "the blob reaper could not acquire a connection");
+                tracing::warn!(reason = %crate::chain::describe(&error), "the blob reaper could not acquire a connection");
                 return round;
             }
         };
