@@ -102,11 +102,12 @@ pub use gate::{
 };
 pub use graphql::{
     AuthReject, CODE_EXTENSION, CONFLICT_CODE, FORBIDDEN_CODE, GraphqlState, INTERNAL_CODE,
-    INTERNAL_MESSAGE, JsonScalar, MutationAck, NOT_FOUND_CODE, PASSPORT_HEADER, PassportPrincipal,
-    PrincipalRejected, Query, RootPrefix, SchemaSlices, SliceFragment, UNAUTHENTICATED_CODE, ack,
-    ack_bulk, app, attach, attach_with_session, cause_json, coded_error, engine_schema, execute,
-    execute_bulk, forbidden, internal_error, internal_fault, key_json, lane_notice_stream,
-    mutation_error, page, serve, typed_presence_view, typed_view, with_sdl_route,
+    INTERNAL_MESSAGE, JsonScalar, MultipartConfig, MutationAck, NOT_FOUND_CODE, PASSPORT_HEADER,
+    PassportPrincipal, PrincipalRejected, Query, RootPrefix, SchemaSlices, SliceFragment,
+    UNAUTHENTICATED_CODE, ack, ack_bulk, app, attach, attach_with_session, cause_json, coded_error,
+    engine_schema, execute, execute_bulk, forbidden, internal_error, internal_fault, key_json,
+    lane_notice_stream, mutation_error, page, serve, typed_presence_view, typed_view,
+    with_sdl_route,
 };
 
 pub use housekeeping::beat::{Beat, BeatRound};

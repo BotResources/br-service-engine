@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.2", version = "0.3.2" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.3", version = "0.3.3" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,6 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.3.3 | `v1.3.0` |
 | 0.3.2 | `v1.3.0` |
 | 0.3.1 | `v1.3.0` |
 | 0.3.0 | `v1.3.0` |
@@ -573,7 +574,54 @@ claiming the envelope. The completeness gate is then exactly "every object type
 that is neither engine-injected nor a reactive delta envelope is owned by a
 fragment". The axum layer resolves the principal from the
 trusted `X-Passport` header (`PassportPrincipal`) before the executor runs — the
-kit does authZ only, never authN.
+kit does authZ only, never authN. On `POST /graphql` it does so from the headers
+alone, **before it reads a byte of the request body**: a request whose passport is
+absent, does not decode or is rejected is answered `401` with the body untouched,
+whatever its content type, so an unauthenticated client can make the pod neither
+buffer nor write anything. The `401` body is the one JSON clients have always
+received (`the X-Passport header is absent`, `… is malformed: …`, `the passport is
+rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
+(below), also before the body is read.
+
+Multipart requests. `POST /graphql` accepts the GraphQL multipart request
+(`operations`, then `map`, then the file parts `map` names) from an authenticated
+client only, and reads it under `EngineConfig::multipart` (`MultipartConfig`,
+validated at boot):
+
+| Bound | Default | Refusal |
+|---|---|---|
+| `max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
+| `max_file_bytes` — any single part: a file, `operations`, `map` | 8 MiB | `413` `MULTIPART_FILE_TOO_LARGE` |
+| `max_files` — the uploads `map` binds (every path counts, so one file bound to two variables counts twice); judged on `map`, before any file part is spooled — and `map` itself may weigh at most 1 KiB per allowed upload plus 1 KiB, so a padded `map` is refused before it is parsed | 4 | `413` `MULTIPART_TOO_MANY_FILES` |
+
+A body that breaks the spec's order, carries a part `map` does not name, or misses
+one it names is `400` `MULTIPART_MALFORMED`, refused before anything of that part
+is spooled. A schema that declares no `Upload` scalar accepts no file at all — its
+effective `max_files` is `0` — so a multipart request to it carries `operations`
+and an empty `map` only and nothing is ever spooled. A schema that declares
+`Upload` spools each file part to an anonymous temporary file (no name, freed when
+the request ends) in `MultipartConfig::spool_dir`, or in `std::env::temp_dir()`
+(`$TMPDIR`, else `/tmp`) when unset; a spool it cannot write is `500`
+`MULTIPART_SPOOL_UNAVAILABLE` (the path and the OS error go to the log, never to
+the client). Each refusal is a GraphQL-shaped body, `errors[0].extensions.code`
+carrying the code (`graphql::MULTIPART_*_CODE`). Whether a schema declares `Upload`
+is read once from its SDL (`scalar Upload`), so a field, argument or enum value of
+that name does not count. Every other body is streamed to the function
+async-graphql-axum's extractor calls, so it is parsed exactly as before (an
+unparseable content type is refused before the body is read).
+
+Every authenticated body. Two bounds hold for every content type, JSON included:
+
+| Bound | Default | Refusal |
+|---|---|---|
+| `MultipartConfig::max_body_bytes` — the whole body, JSON as well as multipart (the name predates its reach); a declared `Content-Length` above it is refused before the body is read, a chunked body is cut on the chunk that crosses it | 16 MiB | `413` `BODY_TOO_LARGE` (`MULTIPART_TOO_LARGE` for a multipart body) |
+| `EngineConfig::body_read_timeout` (`with_body_read_timeout`) — from the passport resolving to the last byte of the body; past it the read is abandoned and what was received (buffered bytes, spooled files) is dropped | 30 s | `408` `BODY_READ_TIMEOUT` |
+
+Both refusals are GraphQL-shaped like the multipart ones (`graphql::BODY_TOO_LARGE_CODE`,
+`graphql::BODY_READ_TIMEOUT_CODE`). The bounds are per request: how many uploads
+may spool at once is not bounded yet. No engine service declares `Upload` today;
+the first one that does adds a concurrent-upload limit (a spool semaphore) sized
+with its `emptyDir`.
 
 Refusals on the wire. A refusal is a coded GraphQL error, never a transport
 error. A mutation refusal is `mutation_error(reason)`; a query or subscription
@@ -1224,6 +1272,17 @@ GitOps and the NATS fabric.
 | Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
 | Metrics | `service_engine_*` (`metrics::ALL`) + `service_engine_leader{kind,name}`; common labels `service`, `pod`, `component` |
 
+Filesystem: `migrate` and `serve` write no file, with one opt-in exception — a
+service whose schema declares the `Upload` scalar spools the file parts of an
+**authenticated** multipart request to `std::env::temp_dir()` (`$TMPDIR`, else
+`/tmp`, or `MultipartConfig::spool_dir` when the service sets it). Under a
+read-only root filesystem such a service mounts a writable `emptyDir` there, with
+a `sizeLimit` sized for its concurrent uploads (each request spools at most
+`max_body_bytes`); without it an upload is refused with
+`MULTIPART_SPOOL_UNAVAILABLE` and nothing else changes. A service whose schema
+declares no `Upload` needs no writable path. `TMPDIR` is read by the standard
+library, not by `EngineConfig::from_env`, and is not an ops-contract variable.
+
 Postgres connection strings are read as full DSNs from a Secret
 (`DATABASE_URL`, `DATABASE_URL_OWNER`) — the chart never interpolates a password
 into a URL, so a role password carrying a URL-reserved character cannot corrupt
@@ -1336,7 +1395,9 @@ GitOps repository, sequenced after this release.
 `EngineConfig` carries one clock and a handful of bounds, every one validated
 at `Engine::boot`: durations and capacities are non-zero,
 `listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
-`beat`, and `session_max_age` outlasts the idle `session_ttl`. A session lives at most `session_max_age`; when it does
+`beat`, `session_max_age` outlasts the idle `session_ttl`, the multipart
+bounds are non-zero with `max_file_bytes` within `max_body_bytes`, and
+`body_read_timeout` is non-zero. A session lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
 reaps a session that has lost its consumer. The bound is on the connection, not

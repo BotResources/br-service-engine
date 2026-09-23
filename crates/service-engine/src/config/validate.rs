@@ -18,6 +18,7 @@ impl EngineConfig {
             ("nats_grace", self.nats_grace),
             ("message_retention", self.message_retention),
             ("publish_ack_timeout", self.publish_ack_timeout),
+            ("body_read_timeout", self.body_read_timeout),
         ] {
             if value.is_zero() {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));
@@ -94,7 +95,7 @@ impl EngineConfig {
                     .into(),
             ));
         }
-        Ok(())
+        self.multipart.validate()
     }
 }
 
@@ -138,6 +139,7 @@ mod tests {
         assert_eq!(c.window_capacity, 10_000);
         assert_eq!(c.impacts_per_commit, 1_000);
         assert_eq!(c.publish_ack_timeout, Duration::from_secs(2));
+        assert_eq!(c.body_read_timeout, Duration::from_secs(30));
         assert_eq!(c.service, None);
         c.validate().unwrap();
     }
@@ -169,6 +171,13 @@ mod tests {
                 .is_err()
         );
         assert!(config().with_nats_grace(Duration::ZERO).validate().is_err());
+        assert!(
+            config()
+                .with_body_read_timeout(Duration::ZERO)
+                .validate()
+                .is_err(),
+            "a zero body read timeout would refuse every authenticated body"
+        );
         assert!(
             config()
                 .with_offer_reconcile(Duration::ZERO)

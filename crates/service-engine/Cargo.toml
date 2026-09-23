@@ -27,9 +27,11 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 croner = { workspace = true }
 futures-channel = { workspace = true }
-futures-util = { workspace = true }
+futures-util = { workspace = true, features = ["io"] }
 hmac = { workspace = true }
 metrics = { workspace = true }
+mime = { workspace = true }
+multer = { workspace = true }
 pastey = { workspace = true }
 reqwest = { workspace = true }
 rusty-s3 = { workspace = true }
@@ -37,6 +39,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true, features = ["chrono", "json", "macros", "migrate", "uuid"] }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

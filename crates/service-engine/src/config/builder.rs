@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use crate::blobs::BlobConfig;
 use crate::config::EngineConfig;
+use crate::graphql::MultipartConfig;
 
 impl EngineConfig {
     pub fn with_service(mut self, service: impl Into<String>) -> Self {
@@ -28,6 +29,19 @@ impl EngineConfig {
 
     pub fn with_blob_storage(mut self, blob: BlobConfig) -> Self {
         self.blob = Some(blob);
+        self
+    }
+
+    pub fn with_multipart(mut self, multipart: MultipartConfig) -> Self {
+        self.multipart = multipart;
+        self
+    }
+
+    /// How long an authenticated `POST /graphql` may take to deliver its whole body, from
+    /// the moment its passport resolved. Past it the request is refused `408`
+    /// `BODY_READ_TIMEOUT` and anything already received is dropped.
+    pub fn with_body_read_timeout(mut self, body_read_timeout: Duration) -> Self {
+        self.body_read_timeout = body_read_timeout;
         self
     }
 

@@ -1,14 +1,19 @@
 use std::sync::Arc;
 
+use crate::error::EngineError;
+use crate::graphql::body::{self, BodyPolicy};
+use crate::graphql::multipart::{MultipartPolicy, declares_upload_scalar};
 use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
+use crate::graphql::refusal::coded_refusal;
 use crate::graphql::state::GraphqlState;
+use crate::graphql::{INTERNAL_CODE, INTERNAL_MESSAGE};
 use crate::readiness::{ReadinessHandle, readiness_route};
 use crate::stop::Stop;
 use async_graphql::http::ALL_WEBSOCKET_PROTOCOLS;
 use async_graphql::{Data, ObjectType, Schema, SubscriptionType};
-use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse};
+use async_graphql_axum::{GraphQLProtocol, GraphQLResponse};
 use axum::Router;
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{Request, State, WebSocketUpgrade};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -19,6 +24,7 @@ use tokio::net::TcpListener;
 struct AppState<P: PassportPrincipal, Q, M, S> {
     schema: Schema<Q, M, S>,
     engine: Arc<GraphqlState<P>>,
+    body: Arc<BodyPolicy>,
 }
 
 impl<P: PassportPrincipal, Q, M, S> Clone for AppState<P, Q, M, S> {
@@ -26,6 +32,7 @@ impl<P: PassportPrincipal, Q, M, S> Clone for AppState<P, Q, M, S> {
         Self {
             schema: self.schema.clone(),
             engine: self.engine.clone(),
+            body: self.body.clone(),
         }
     }
 }
@@ -41,11 +48,27 @@ where
     M: ObjectType + 'static,
     S: SubscriptionType + 'static,
 {
+    let schema_declares_upload = declares_upload_scalar(&schema.sdl());
+    let config = engine.runtime().config();
+    let multipart = MultipartPolicy::new(&config.multipart, schema_declares_upload);
+    tracing::debug!(
+        schema_declares_upload,
+        max_body_bytes = multipart.max_body_bytes(),
+        max_files = multipart.max_files(),
+        spool_dir = %multipart.spool_dir().display(),
+        body_read_timeout_ms = %config.body_read_timeout.as_millis(),
+        "graphql request body bounds"
+    );
+    let body = Arc::new(BodyPolicy::new(multipart, config.body_read_timeout));
     Router::new()
         .route("/graphql", post(graphql_post::<P, Q, M, S>))
         .route("/graphql/ws", get(graphql_ws::<P, Q, M, S>))
         .route("/readyz", readiness_route(readiness))
-        .with_state(AppState { schema, engine })
+        .with_state(AppState {
+            schema,
+            engine,
+            body,
+        })
 }
 
 const SDL_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
@@ -86,8 +109,7 @@ pub async fn serve(listener: TcpListener, app: Router, shutdown: Arc<Stop>) -> s
 
 async fn graphql_post<P, Q, M, S>(
     State(state): State<AppState<P, Q, M, S>>,
-    headers: HeaderMap,
-    request: GraphQLRequest,
+    request: Request,
 ) -> Response
 where
     P: PassportPrincipal,
@@ -95,20 +117,17 @@ where
     M: ObjectType + 'static,
     S: SubscriptionType + 'static,
 {
-    let mut principal = match resolve::<P>(state.engine.pg(), passport_header(&headers)).await {
+    let (parts, body) = request.into_parts();
+    // The principal is resolved from the headers alone, before a byte of the body is read:
+    // a client without a trusted passport makes the pod neither buffer nor spool anything.
+    let principal = match authenticate(&state.engine, &parts.headers).await {
         Ok(principal) => principal,
-        Err(reject) => return unauthorized(reject),
+        Err(denied) => return denied.into_response(),
     };
-    if let Err(error) = state
-        .engine
-        .runtime()
-        .registry()
-        .load_facts(state.engine.pg(), &mut principal)
-        .await
-    {
-        return facts_unavailable(&error);
-    }
-    let request = request.into_inner().data(principal);
+    let request = match body::receive(&parts.headers, body, &state.body).await {
+        Ok(request) => request.data(principal),
+        Err(refusal) => return refusal.into_response(),
+    };
     GraphQLResponse::from(state.schema.execute(request).await).into_response()
 }
 
@@ -124,19 +143,10 @@ where
     M: ObjectType + 'static,
     S: SubscriptionType + 'static,
 {
-    let mut principal = match resolve::<P>(state.engine.pg(), passport_header(&headers)).await {
+    let principal = match authenticate(&state.engine, &headers).await {
         Ok(principal) => principal,
-        Err(reject) => return unauthorized(reject),
+        Err(denied) => return denied.into_response(),
     };
-    if let Err(error) = state
-        .engine
-        .runtime()
-        .registry()
-        .load_facts(state.engine.pg(), &mut principal)
-        .await
-    {
-        return facts_unavailable(&error);
-    }
     let schema = state.schema.clone();
     let max_age = state.engine.runtime().config().session_max_age;
     let shutdown = state.engine.ws_shutdown();
@@ -150,6 +160,39 @@ where
         })
 }
 
+/// Why a request gets no principal: a passport that is absent, undecodable or rejected
+/// (`401`), or facts the pod could not load (`500` `INTERNAL`).
+enum Denied {
+    Unauthenticated(AuthReject),
+    FactsUnavailable(Box<EngineError>),
+}
+
+impl IntoResponse for Denied {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Unauthenticated(reject) => unauthorized(reject),
+            Self::FactsUnavailable(error) => facts_unavailable(&error),
+        }
+    }
+}
+
+/// The principal, from the headers alone: nothing of the body is read here.
+async fn authenticate<P: PassportPrincipal>(
+    engine: &GraphqlState<P>,
+    headers: &HeaderMap,
+) -> Result<P, Denied> {
+    let mut principal = resolve::<P>(engine.pg(), passport_header(headers))
+        .await
+        .map_err(Denied::Unauthenticated)?;
+    engine
+        .runtime()
+        .registry()
+        .load_facts(engine.pg(), &mut principal)
+        .await
+        .map_err(|error| Denied::FactsUnavailable(Box::new(error)))?;
+    Ok(principal)
+}
+
 fn passport_header(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(PASSPORT_HEADER)
@@ -159,20 +202,22 @@ fn passport_header(headers: &HeaderMap) -> Option<&str> {
 /// The principal's facts could not be loaded: an infrastructure fault, not a
 /// rejected passport. The cause is logged with its chain; the client receives
 /// `INTERNAL` in the GraphQL error shape and no detail.
-fn facts_unavailable(error: &crate::error::EngineError) -> Response {
+fn facts_unavailable(error: &EngineError) -> Response {
     tracing::error!(
         cause = %crate::chain::describe(error),
         "loading the principal's facts failed; the client receives INTERNAL"
     );
-    let body = serde_json::json!({
-        "errors": [{
-            "message": crate::graphql::INTERNAL_MESSAGE,
-            "extensions": { crate::graphql::CODE_EXTENSION: crate::graphql::INTERNAL_CODE },
-        }],
-    });
-    (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(body)).into_response()
+    coded_refusal(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        INTERNAL_CODE,
+        INTERNAL_MESSAGE,
+    )
 }
 
 fn unauthorized(reject: AuthReject) -> Response {
     (StatusCode::UNAUTHORIZED, reject.message()).into_response()
 }
+
+#[cfg(test)]
+#[path = "router_tests.rs"]
+mod tests;

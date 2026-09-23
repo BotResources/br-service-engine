@@ -32,4 +32,5 @@ example-contract = { workspace = true }
 example-service = { workspace = true }
 example-twin = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"] }
+tempfile = { workspace = true }
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
