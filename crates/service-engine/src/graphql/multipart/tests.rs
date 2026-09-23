@@ -33,6 +33,15 @@ fn chunks(body: Vec<u8>) -> impl Stream<Item = Result<Bytes, std::io::Error>> + 
     stream::iter([Ok(Bytes::from(body))])
 }
 
+/// The body as a network delivers it: many small reads, so a bound trips mid-part.
+fn trickle(body: Vec<u8>) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+    let pieces: Vec<_> = body
+        .chunks(37)
+        .map(|piece| Ok(Bytes::copy_from_slice(piece)))
+        .collect();
+    stream::iter(pieces)
+}
+
 fn policy(config: MultipartConfig) -> MultipartPolicy {
     MultipartPolicy::new(&config, true)
 }
@@ -131,7 +140,7 @@ async fn a_declared_length_over_the_body_limit_is_refused_before_the_body_is_pol
 }
 
 #[tokio::test]
-async fn a_streamed_body_crossing_the_body_limit_is_cut() {
+async fn a_streamed_body_crossing_the_body_limit_is_cut_mid_file() {
     let config = MultipartConfig::default()
         .with_max_body_bytes(400)
         .with_max_file_bytes(400);
@@ -141,7 +150,7 @@ async fn a_streamed_body_crossing_the_body_limit_is_cut() {
         part("map", None, br#"{"0":["variables.files.0"]}"#),
         part("0", Some("a.bin"), &[b'x'; 300]),
     ]);
-    match refusal(chunks(body), None, &policy(config)).await {
+    match refusal(trickle(body), None, &policy(config)).await {
         MultipartRefusal::TooLarge { limit } => assert_eq!(limit, 400),
         other => panic!("expected TooLarge, got {other:?}"),
     }
@@ -155,7 +164,7 @@ async fn a_file_over_the_part_limit_is_refused() {
         part("map", None, br#"{"0":["variables.files.0"]}"#),
         part("0", Some("a.bin"), &[b'x'; 65]),
     ]);
-    match refusal(chunks(body), None, &policy(config)).await {
+    match refusal(trickle(body), None, &policy(config)).await {
         MultipartRefusal::FileTooLarge { limit } => assert_eq!(limit, 64),
         other => panic!("expected FileTooLarge, got {other:?}"),
     }
@@ -184,7 +193,7 @@ async fn a_map_binding_too_many_uploads_is_refused_without_waiting_for_a_file_pa
     .await
     .expect("the upload count is judged on `map`, never on the file parts that follow it");
     match verdict {
-        MultipartRefusal::TooManyFiles { count, limit } => assert_eq!((count, limit), (2, 1)),
+        MultipartRefusal::TooManyFiles { limit } => assert_eq!(limit, 1),
         other => panic!("expected TooManyFiles, got {other:?}"),
     }
 }
@@ -198,7 +207,26 @@ async fn a_schema_without_upload_accepts_no_file() {
     ]);
     let policy = MultipartPolicy::new(&MultipartConfig::default(), false);
     match refusal(chunks(body), None, &policy).await {
-        MultipartRefusal::TooManyFiles { count, limit } => assert_eq!((count, limit), (1, 0)),
+        MultipartRefusal::TooManyFiles { limit } => assert_eq!(limit, 0),
+        other => panic!("expected TooManyFiles, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_map_heavier_than_its_allowance_is_refused_before_it_is_parsed() {
+    let paths = vec!["variables.files.0"; 200];
+    let heavy = serde_json::json!({ "0": paths }).to_string();
+    assert!(
+        heavy.len() > 1024 * 2,
+        "the map outweighs 1 KiB per allowed upload plus one"
+    );
+    let body = body(&[
+        part("operations", None, OPERATIONS.as_bytes()),
+        part("map", None, heavy.as_bytes()),
+    ]);
+    let policy = policy(MultipartConfig::default().with_max_files(1));
+    match refusal(trickle(body), None, &policy).await {
+        MultipartRefusal::TooManyFiles { limit } => assert_eq!(limit, 1),
         other => panic!("expected TooManyFiles, got {other:?}"),
     }
 }
@@ -256,46 +284,4 @@ async fn a_spool_directory_it_cannot_write_is_refused_as_unavailable() {
         MultipartRefusal::SpoolUnavailable(_) => {}
         other => panic!("expected SpoolUnavailable, got {other:?}"),
     }
-}
-
-#[test]
-fn the_defaults_are_documented_and_valid() {
-    let config = MultipartConfig::default();
-    assert_eq!(config.max_body_bytes, 16 * 1024 * 1024);
-    assert_eq!(config.max_file_bytes, 8 * 1024 * 1024);
-    assert_eq!(config.max_files, 4);
-    assert_eq!(config.spool_dir, None);
-    config.validate().expect("the defaults validate");
-    assert_eq!(
-        MultipartPolicy::new(&config, true).spool_dir(),
-        std::env::temp_dir(),
-        "no spool_dir spools to the platform temp dir, which honours TMPDIR"
-    );
-}
-
-#[test]
-fn a_zero_bound_or_a_part_limit_above_the_body_limit_is_refused() {
-    assert!(
-        MultipartConfig::default()
-            .with_max_body_bytes(0)
-            .validate()
-            .is_err()
-    );
-    assert!(
-        MultipartConfig::default()
-            .with_max_file_bytes(0)
-            .validate()
-            .is_err()
-    );
-    assert!(
-        MultipartConfig::default()
-            .with_max_body_bytes(10)
-            .with_max_file_bytes(11)
-            .validate()
-            .is_err()
-    );
-    MultipartConfig::default()
-        .with_max_files(0)
-        .validate()
-        .expect("zero files is a valid policy: multipart without uploads");
 }

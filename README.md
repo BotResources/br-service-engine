@@ -590,7 +590,7 @@ validated at boot):
 |---|---|---|
 | `max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
 | `max_file_bytes` — any single part: a file, `operations`, `map` | 8 MiB | `413` `MULTIPART_FILE_TOO_LARGE` |
-| `max_files` — the uploads `map` binds (every path counts, so one file bound to two variables counts twice); judged on `map`, before any file part is spooled | 4 | `413` `MULTIPART_TOO_MANY_FILES` |
+| `max_files` — the uploads `map` binds (every path counts, so one file bound to two variables counts twice); judged on `map`, before any file part is spooled — and `map` itself may weigh at most 1 KiB per allowed upload plus 1 KiB, so a padded `map` is refused before it is parsed | 4 | `413` `MULTIPART_TOO_MANY_FILES` |
 
 A body that breaks the spec's order, carries a part `map` does not name, or misses
 one it names is `400` `MULTIPART_MALFORMED`, refused before anything of that part
@@ -602,8 +602,12 @@ the request ends) in `MultipartConfig::spool_dir`, or in `std::env::temp_dir()`
 (`$TMPDIR`, else `/tmp`) when unset; a spool it cannot write is `500`
 `MULTIPART_SPOOL_UNAVAILABLE` (the path and the OS error go to the log, never to
 the client). Each refusal is a GraphQL-shaped body, `errors[0].extensions.code`
-carrying the code (`graphql::MULTIPART_*_CODE`). A JSON body is parsed exactly as
-async-graphql-axum's extractor parses it and is not bounded by these limits.
+carrying the code (`graphql::MULTIPART_*_CODE`). Whether a schema declares `Upload`
+is read once from its SDL (`scalar Upload`), so a field, argument or enum value of
+that name does not count. Every other body is streamed to the function
+async-graphql-axum's extractor calls, so it is parsed exactly as before (an
+unparseable content type is refused before the body is read) and is not bounded by
+these limits.
 
 Refusals on the wire. A refusal is a coded GraphQL error, never a transport
 error. A mutation refusal is `mutation_error(reason)`; a query or subscription

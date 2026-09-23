@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::graphql::body;
-use crate::graphql::multipart::MultipartPolicy;
+use crate::graphql::multipart::{MultipartPolicy, declares_upload_scalar};
 use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
 use crate::graphql::state::GraphqlState;
 use crate::readiness::{ReadinessHandle, readiness_route};
@@ -45,7 +45,7 @@ where
     M: ObjectType + 'static,
     S: SubscriptionType + 'static,
 {
-    let schema_declares_upload = schema.names().iter().any(|name| name == UPLOAD_SCALAR);
+    let schema_declares_upload = declares_upload_scalar(&schema.sdl());
     let multipart = Arc::new(MultipartPolicy::new(
         &engine.runtime().config().multipart,
         schema_declares_upload,
@@ -66,8 +66,6 @@ where
             multipart,
         })
 }
-
-const UPLOAD_SCALAR: &str = "Upload";
 
 const SDL_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 

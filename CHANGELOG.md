@@ -226,9 +226,9 @@ defaults.
   is rejected is answered `401` with its body never read, whatever its content
   type. The `401` status and body are those JSON clients already received. Only
   then is the body read: a `multipart/*` body through the engine's own receiver
-  (`graphql/multipart/`), every other body exactly as async-graphql-axum parsed it
-  (same content-type dispatch, same single-request rule, same `400`/`413`
-  rejection).
+  (`graphql/multipart/`), every other body streamed to the function
+  async-graphql-axum's extractor calls, so it is parsed exactly as before (same
+  content-type dispatch, same single-request rule, same rejection).
 
 ### Added
 
@@ -238,14 +238,17 @@ defaults.
   `max_body_bytes` (default 16 MiB; a declared `Content-Length` above it is refused
   before the body is read, a chunked body is cut), `max_file_bytes` (default 8 MiB,
   any single part), `max_files` (default 4, the uploads `map` binds — every path
-  counts), `spool_dir` (default unset: `std::env::temp_dir()`, i.e. `$TMPDIR`, else
-  `/tmp`). No environment variable is added to the ops contract.
+  counts; `map` itself may weigh at most 1 KiB per allowed upload plus 1 KiB, so a
+  padded `map` is refused before it is parsed), `spool_dir` (default unset:
+  `std::env::temp_dir()`, i.e. `$TMPDIR`, else `/tmp`). No environment variable is
+  added to the ops contract.
 - The receiver enforces the spec's order (`operations`, `map`, then the files `map`
   names), so the upload count and each file part's binding are judged before
   anything is spooled; a part `map` does not name is refused unspooled. A schema
-  that declares no `Upload` scalar accepts no file (its effective `max_files` is
-  0): multipart stays accepted, and such a service never writes to disk. Files
-  spool to anonymous temporary files, freed when the request ends.
+  that declares no `Upload` scalar (read from its SDL) accepts no file (its
+  effective `max_files` is 0): multipart stays accepted, and such a service never
+  writes to disk. Files spool to anonymous temporary files, freed when the request
+  ends.
 - Coded refusals, a GraphQL-shaped body with `errors[0].extensions.code`:
   `413 MULTIPART_TOO_LARGE`, `413 MULTIPART_FILE_TOO_LARGE`,
   `413 MULTIPART_TOO_MANY_FILES`, `400 MULTIPART_MALFORMED`,
@@ -253,13 +256,17 @@ defaults.
   returned). The codes are public constants `graphql::MULTIPART_*_CODE`.
 - Conformance: `s241` — an unauthenticated multipart request (passport absent,
   undecodable, or not a passport) is `401` before a byte of its body is read,
-  proven on a body the client never finishes sending and on a spool directory an
-  authenticated control shows the request would otherwise reach; an anonymous JSON
-  request keeps its `401` and body; an authenticated upload within bounds reaches
-  the resolver intact; each bound and the malformed order are refused with their
-  code and leave the spool empty; a schema without `Upload` accepts multipart
-  without files and refuses a file. Unit tests pin every bound, the order rules,
-  the no-`Upload` policy, the spool failure and the config validation.
+  proven on a body the client never finishes sending (an authenticated control
+  shows the same stalled body is waited for) and on a spool directory an
+  authenticated control shows the request would otherwise reach; an authenticated
+  upload within bounds reaches the resolver intact; each bound — declared and
+  chunked body, part, upload count — and the malformed order are refused with
+  their code; a schema without `Upload` accepts multipart without files and
+  refuses a file. `s115` pins the anonymous JSON `401` and its body. Unit tests pin
+  every bound (fed in small reads, so a bound trips mid-part), the `map` weight,
+  the order rules, the no-`Upload` policy and its SDL detection, the spool failure,
+  the content-type dispatch (any case of `multipart/form-data` reaches the bounded
+  receiver; an unparseable type is refused unread) and the config validation.
 
 ### Changed
 

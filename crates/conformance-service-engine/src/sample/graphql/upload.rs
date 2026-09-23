@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,6 +5,7 @@ use async_graphql::{Context, EmptySubscription, Object, Result, Upload};
 use service_engine::graphql::{MultipartConfig, RootPrefix, SliceFragment, coded_error};
 use service_engine::nats::Nats;
 use service_engine::{Engine, Readiness, ReadinessHandle, engine_schema};
+use tokio::io::AsyncReadExt;
 
 use crate::infra::TestDb;
 use crate::sample::graphql::boot::{GraphqlService, base_config, free_loopback_addr};
@@ -50,9 +50,12 @@ impl UploadMutationRoot {
     ) -> Result<bool> {
         let mut read = Vec::with_capacity(files.len());
         for file in &files {
-            let mut upload = file.value(ctx)?;
+            let upload = file.value(ctx)?;
+            // The spooled file is read on the blocking pool, never on the runtime's workers.
             let mut content = Vec::new();
-            upload.content.read_to_end(&mut content)?;
+            tokio::fs::File::from_std(upload.content)
+                .read_to_end(&mut content)
+                .await?;
             read.push(upload_digest(&upload.filename, &content));
         }
         if read == expected {

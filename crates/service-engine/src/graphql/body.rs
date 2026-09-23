@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
+use futures_util::TryStreamExt;
 
 use crate::graphql::multipart::{self, MultipartPolicy, MultipartRefusal};
 
@@ -27,9 +28,9 @@ impl IntoResponse for BodyRefusal {
 /// Reads the GraphQL request out of an authenticated `POST /graphql` body.
 ///
 /// A `multipart/*` body goes through the engine's bounded receiver. Every other body is
-/// parsed exactly as async-graphql-axum's `GraphQLRequest` extractor parses it — same
-/// content-type dispatch, same single-request rule, same rejection — so a JSON client sees
-/// no change.
+/// handed, as a lazily read stream, to the function async-graphql-axum's `GraphQLRequest`
+/// extractor calls — same content-type dispatch (an unparseable type is refused before the
+/// body is read), same single-request rule, same rejection — so a JSON client sees no change.
 pub(crate) async fn receive(
     headers: &HeaderMap,
     body: Body,
@@ -52,14 +53,11 @@ pub(crate) async fn receive(
         .await
         .map_err(BodyRefusal::Multipart);
     }
-    let bytes = axum::body::to_bytes(body, usize::MAX)
-        .await
-        .map_err(|error| {
-            rejection(ParseRequestError::Io(std::io::Error::other(
-                error.to_string(),
-            )))
-        })?;
-    async_graphql::http::receive_body(content_type, bytes.as_ref(), MultipartOptions::default())
+    let reader = body
+        .into_data_stream()
+        .map_err(|error| std::io::Error::other(error.to_string()))
+        .into_async_read();
+    async_graphql::http::receive_body(content_type, reader, MultipartOptions::default())
         .await
         .map_err(rejection)
 }
@@ -75,3 +73,7 @@ fn is_multipart(content_type: &str) -> bool {
 fn rejection(error: ParseRequestError) -> BodyRefusal {
     BodyRefusal::Parse(GraphQLRejection(error))
 }
+
+#[cfg(test)]
+#[path = "body_tests.rs"]
+mod tests;

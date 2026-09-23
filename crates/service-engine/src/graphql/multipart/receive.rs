@@ -12,6 +12,10 @@ use super::refusal::MultipartRefusal;
 
 const OPERATIONS: &str = "operations";
 const MAP: &str = "map";
+/// What `map` may weigh per upload it is allowed to bind (one file name and one variable
+/// path), plus one such allowance for the braces: a `map` past it binds more uploads than
+/// allowed or a path no schema has, and parsing it would cost far more memory than its bytes.
+const MAP_BYTES_PER_UPLOAD: u64 = 1024;
 
 type UploadMap = HashMap<String, Vec<String>>;
 
@@ -41,9 +45,13 @@ where
             limit: policy.max_body_bytes(),
         });
     }
+    let map_bytes = MAP_BYTES_PER_UPLOAD
+        .saturating_mul(policy.max_files() as u64 + 1)
+        .min(policy.max_file_bytes());
     let limits = SizeLimit::new()
         .whole_stream(policy.max_body_bytes())
-        .per_field(policy.max_file_bytes());
+        .per_field(policy.max_file_bytes())
+        .for_field(MAP, map_bytes);
     let mut multipart =
         Multipart::with_constraints(body, boundary, Constraints::new().size_limit(limits));
 
@@ -97,7 +105,13 @@ async fn upload_map(
     max_files: usize,
 ) -> Result<UploadMap, MultipartRefusal> {
     let field = named_part(multipart, MAP, "the second part must be `map`").await?;
-    let map: UploadMap = serde_json::from_slice(&field.bytes().await?).map_err(|_| {
+    let bytes = field.bytes().await.map_err(|error| match error {
+        multer::Error::FieldSizeExceeded { .. } => {
+            MultipartRefusal::TooManyFiles { limit: max_files }
+        }
+        other => other.into(),
+    })?;
+    let map: UploadMap = serde_json::from_slice(&bytes).map_err(|_| {
         MultipartRefusal::Malformed("`map` is not a JSON object of file names to variable paths")
     })?;
     if map.values().any(Vec::is_empty) {
@@ -105,12 +119,8 @@ async fn upload_map(
             "a `map` entry binds its file to no variable path",
         ));
     }
-    let count = map.values().map(Vec::len).sum();
-    if count > max_files {
-        return Err(MultipartRefusal::TooManyFiles {
-            count,
-            limit: max_files,
-        });
+    if map.values().map(Vec::len).sum::<usize>() > max_files {
+        return Err(MultipartRefusal::TooManyFiles { limit: max_files });
     }
     Ok(map)
 }

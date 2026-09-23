@@ -72,17 +72,15 @@ pub async fn post_multipart(
     (status, json, text)
 }
 
-/// Sends the head of a multipart body whose `Content-Length` promises one more MiB — under
-/// every body limit — that never comes, then waits for the status line. A pod that reads the
-/// body before judging the request cannot answer until the timeout.
-pub async fn stalled_upload(service: &GraphqlService, passport: Option<&str>) -> Option<String> {
+/// Sends a multipart request whose body stops inside its `operations` part, with a
+/// `Content-Length` promising one more MiB — under every body limit — that never comes, and
+/// waits five seconds for the status line. A pod that reads the body before judging the
+/// request cannot answer: it is still waiting for `operations` (`None`).
+pub async fn stalled_body(service: &GraphqlService, passport: Option<&str>) -> Option<String> {
     let addr = service.base_url.trim_start_matches("http://").to_string();
     let head_of_body = format!(
-        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{ops}\r\n\
-         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{map}\r\n\
-         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"0\"; filename=\"big.bin\"\r\n\r\n{fill}",
-        ops = operations(&[upload_digest("big.bin", b"")]),
-        map = map(1),
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n\
+         {{\"query\":\"{fill}",
         fill = "x".repeat(4096),
     );
     let declared = head_of_body.len() + 1024 * 1024;
@@ -104,6 +102,71 @@ pub async fn stalled_upload(service: &GraphqlService, passport: Option<&str>) ->
         .write_all(head_of_body.as_bytes())
         .await
         .expect("send the start of the body");
+    read_status(&mut stream).await
+}
+
+/// Sends `body` with `Transfer-Encoding: chunked` (no declared length), 1 KiB per chunk, and
+/// returns what the pod answers. A write the pod cuts short ends the sending, not the test.
+pub async fn chunked_multipart(
+    service: &GraphqlService,
+    passport: &str,
+    body: &[u8],
+) -> Option<String> {
+    let addr = service.base_url.trim_start_matches("http://").to_string();
+    let head = format!(
+        "POST /graphql HTTP/1.1\r\nHost: {addr}\r\n\
+         Content-Type: multipart/form-data; boundary={BOUNDARY}\r\n\
+         Transfer-Encoding: chunked\r\nx-passport: {passport}\r\n\r\n"
+    );
+    let mut stream = TcpStream::connect(&addr).await.expect("connect to the pod");
+    stream
+        .write_all(head.as_bytes())
+        .await
+        .expect("send the head");
+    for chunk in body.chunks(1024) {
+        let mut frame = format!("{:x}\r\n", chunk.len()).into_bytes();
+        frame.extend_from_slice(chunk);
+        frame.extend_from_slice(b"\r\n");
+        if stream.write_all(&frame).await.is_err() {
+            break;
+        }
+    }
+    let _ = stream.write_all(b"0\r\n\r\n").await;
+    read_status(&mut stream).await
+}
+
+/// A multipart body carrying `files` (named `0`, `1`, …), in the spec's order, for a
+/// raw-socket request.
+pub fn raw_upload_body(files: &[&[u8]]) -> Vec<u8> {
+    let names: Vec<String> = (0..files.len()).map(|i| format!("f{i}.bin")).collect();
+    let digests: Vec<String> = names
+        .iter()
+        .zip(files)
+        .map(|(name, file)| upload_digest(name, file))
+        .collect();
+    let mut body = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"operations\"\r\n\r\n{ops}\r\n\
+         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"map\"\r\n\r\n{map}\r\n",
+        ops = operations(&digests),
+        map = map(files.len()),
+    )
+    .into_bytes();
+    for (i, (name, file)) in names.iter().zip(files).enumerate() {
+        body.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{i}\"; \
+                 filename=\"{name}\"\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(file);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+    body
+}
+
+async fn read_status(stream: &mut TcpStream) -> Option<String> {
     let mut response = vec![0_u8; 2048];
     let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut response)).await;
     match read {
@@ -116,7 +179,9 @@ pub fn code(body: &serde_json::Value) -> &serde_json::Value {
     &body["errors"][0]["extensions"]["code"]
 }
 
-pub fn spool_is_empty(dir: &Path) -> bool {
+/// The spool holds anonymous files, so an empty directory proves only that no named file was
+/// left behind — it guards against a switch to named temporary files, not against a leak.
+pub fn spool_holds_no_named_file(dir: &Path) -> bool {
     std::fs::read_dir(dir)
         .expect("the spool directory is readable")
         .next()

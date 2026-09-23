@@ -3,21 +3,20 @@
 //!
 //! Before 0.3.2 async-graphql-axum's extractor parsed the body — spooling every file part to
 //! a temporary file — before the handler looked at the passport, so an unauthenticated
-//! client could make the pod write to disk. The spool of an anonymous temporary file leaves
-//! no name to observe afterwards, so absence is proven two ways: a body the client never
-//! finishes sending is answered at once (the pod did not wait to read it), and a spool
-//! directory that cannot be written is never reached (an authenticated control proves that
-//! same request would have hit it).
+//! client could make the pod write to disk. An anonymous temporary file leaves no name to
+//! observe afterwards, so absence is proven by behaviour: a body the client never finishes
+//! sending is answered at once (an authenticated control shows the same stalled body is
+//! waited for, as any pod that read before judging would wait), and a spool directory that
+//! cannot be written is never reached (an authenticated control shows the same request
+//! would reach it).
 
-mod graphql_support;
 mod multipart_support;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{boot_graphql_service, boot_upload_service};
-use graphql_support::post_json;
 use multipart_support::{
-    code, expected, map, operations, post_multipart, spool_is_empty, stalled_upload, upload_form,
-    valid_passport,
+    chunked_multipart, code, expected, map, operations, post_multipart, raw_upload_body,
+    spool_holds_no_named_file, stalled_body, upload_form, valid_passport,
 };
 use reqwest::multipart::{Form, Part};
 use service_engine::graphql::{
@@ -78,7 +77,7 @@ async fn s241_an_unauthenticated_multipart_body_is_refused_before_a_byte_of_it_i
              the spool is reached (it would answer 500 otherwise): {text}"
         );
 
-        let answer = stalled_upload(&service, header).await.unwrap_or_else(|| {
+        let answer = stalled_body(&service, header).await.unwrap_or_else(|| {
             panic!("passport {label}: the pod did not answer a body it never received — it waited to read it")
         });
         assert!(
@@ -86,59 +85,10 @@ async fn s241_an_unauthenticated_multipart_body_is_refused_before_a_byte_of_it_i
             "passport {label}: the refusal comes before the body is read: {answer}"
         );
     }
-
-    service.shutdown().await;
-    drop(nats);
-    db.cleanup().await;
-}
-
-#[tokio::test]
-async fn s241_an_anonymous_json_request_keeps_its_refusal() {
-    let db = TestDb::fresh().await;
-    let nats = TestNats::spawn().await;
-    nats.provision().await;
-    let service = boot_graphql_service(&db, nats.nats().await, "se_s241j", "pod-s241j").await;
-
-    let response = reqwest::Client::new()
-        .post(service.http("/graphql"))
-        .json(&serde_json::json!({ "query": "{ __typename }" }))
-        .send()
-        .await
-        .expect("the POST reaches the server");
-    assert_eq!(response.status().as_u16(), 401);
     assert_eq!(
-        response.text().await.unwrap_or_default(),
-        "the X-Passport header is absent",
-        "the anonymous JSON refusal keeps its status and its body"
-    );
-
-    let response = reqwest::Client::new()
-        .post(service.http("/graphql"))
-        .header("x-passport", "not-a-valid-passport")
-        .json(&serde_json::json!({ "query": "{ __typename }" }))
-        .send()
-        .await
-        .expect("the POST reaches the server");
-    assert_eq!(response.status().as_u16(), 401);
-    assert!(
-        response
-            .text()
-            .await
-            .unwrap_or_default()
-            .starts_with("the X-Passport header is malformed"),
-        "the malformed-passport JSON refusal keeps its body"
-    );
-
-    let (status, body) = post_json(
-        &service.base_url,
-        Some(&valid_passport()),
-        "{ __typename }",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(
-        status, 200,
-        "an authenticated JSON request is served: {body}"
+        stalled_body(&service, Some(&passport)).await,
+        None,
+        "control: with a valid passport the pod reads the body, so it waits for the rest"
     );
 
     service.shutdown().await;
@@ -176,8 +126,8 @@ async fn s241_an_authenticated_multipart_request_within_its_bounds_is_served() {
         "the resolver reads each file back as it was sent: {body}"
     );
     assert!(
-        spool_is_empty(spool.path()),
-        "a served upload leaves no file"
+        spool_holds_no_named_file(spool.path()),
+        "a served upload leaves no named file"
     );
 
     let (status, body, _) = post_multipart(
@@ -277,10 +227,19 @@ async fn s241_an_authenticated_multipart_request_over_a_bound_is_refused_with_it
             "{case}: refused with its status and code: {body}"
         );
         assert!(
-            spool_is_empty(spool.path()),
-            "{case}: a refusal leaves no file in the spool"
+            spool_holds_no_named_file(spool.path()),
+            "{case}: a refusal leaves no named file in the spool"
         );
     }
+
+    let over = [b'c'; 8 * 1024];
+    let answer = chunked_multipart(&service, &passport, &raw_upload_body(&[&over, &over]))
+        .await
+        .expect("the pod answers a chunked body it cuts");
+    assert!(
+        answer.starts_with("HTTP/1.1 413") && answer.contains(MULTIPART_TOO_LARGE_CODE),
+        "a chunked body, with no length to judge up front, is cut at max_body_bytes: {answer}"
+    );
 
     let (status, body, _) = post_multipart(
         &service,

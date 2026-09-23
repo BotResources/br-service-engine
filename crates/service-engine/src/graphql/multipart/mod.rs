@@ -11,6 +11,8 @@ mod receive;
 mod refusal;
 
 #[cfg(test)]
+mod config_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::PathBuf;
@@ -98,6 +100,17 @@ impl MultipartConfig {
         }
         Ok(())
     }
+}
+
+const UPLOAD_SCALAR: &str = "Upload";
+
+/// Whether the composed schema declares the `Upload` scalar — the only type a file part can
+/// bind to. Read from the SDL so a field, argument or enum value named `Upload` does not count.
+pub(crate) fn declares_upload_scalar(sdl: &str) -> bool {
+    sdl.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words.next() == Some("scalar") && words.next() == Some(UPLOAD_SCALAR)
+    })
 }
 
 /// The multipart bounds the router applies, fixed once when the app is built: the configured

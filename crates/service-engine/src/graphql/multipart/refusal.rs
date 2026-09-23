@@ -8,7 +8,8 @@ use crate::graphql::CODE_EXTENSION;
 pub const MULTIPART_TOO_LARGE_CODE: &str = "MULTIPART_TOO_LARGE";
 /// One part — a file, or the `operations` / `map` part — exceeds `max_file_bytes`. HTTP 413.
 pub const MULTIPART_FILE_TOO_LARGE_CODE: &str = "MULTIPART_FILE_TOO_LARGE";
-/// The `map` binds more uploads than `max_files` (zero for a schema without `Upload`). HTTP 413.
+/// The `map` binds more uploads than `max_files` (zero for a schema without `Upload`), or
+/// outweighs the 1 KiB per allowed upload it may carry. HTTP 413.
 pub const MULTIPART_TOO_MANY_FILES_CODE: &str = "MULTIPART_TOO_MANY_FILES";
 /// The body is not a GraphQL multipart request as the spec orders it. HTTP 400.
 pub const MULTIPART_MALFORMED_CODE: &str = "MULTIPART_MALFORMED";
@@ -19,7 +20,7 @@ pub const MULTIPART_SPOOL_UNAVAILABLE_CODE: &str = "MULTIPART_SPOOL_UNAVAILABLE"
 pub(crate) enum MultipartRefusal {
     TooLarge { limit: u64 },
     FileTooLarge { limit: u64 },
-    TooManyFiles { count: usize, limit: usize },
+    TooManyFiles { limit: usize },
     Malformed(&'static str),
     SpoolUnavailable(std::io::Error),
 }
@@ -55,8 +56,8 @@ impl MultipartRefusal {
             Self::FileTooLarge { limit } => {
                 format!("a part of the multipart request exceeds the {limit}-byte part limit")
             }
-            Self::TooManyFiles { count, limit } => {
-                format!("the multipart request binds {count} uploads; the limit is {limit}")
+            Self::TooManyFiles { limit } => {
+                format!("the multipart request binds more than {limit} uploads")
             }
             Self::Malformed(reason) => format!("malformed multipart request: {reason}"),
             Self::SpoolUnavailable(_) => "the uploaded file could not be received".to_string(),
@@ -81,8 +82,8 @@ impl IntoResponse for MultipartRefusal {
             Self::SpoolUnavailable(error) => tracing::error!(
                 code,
                 %error,
-                "a multipart file part could not be spooled; a schema that declares `Upload` \
-                 needs a writable spool directory"
+                "a multipart file part could not be spooled (is the spool directory writable, \
+                 with space and file handles to spare?)"
             ),
             _ => tracing::debug!(code, "a multipart request was refused"),
         }

@@ -96,3 +96,59 @@ async fn s115_a_resolver_refusal_is_a_coded_graphql_error_never_a_transport_erro
     drop(nats);
     db.cleanup().await;
 }
+
+#[tokio::test]
+async fn s115_an_anonymous_json_request_is_refused_with_its_documented_body() {
+    use br_core_auth::PassportHeader;
+
+    let db = TestDb::fresh().await;
+    let nats = TestNats::spawn().await;
+    nats.provision().await;
+    let service = boot_graphql_service(&db, nats.nats().await, "se_s115j", "pod-s115j").await;
+
+    let response = reqwest::Client::new()
+        .post(service.http("/graphql"))
+        .json(&serde_json::json!({ "query": "{ __typename }" }))
+        .send()
+        .await
+        .expect("the POST reaches the server");
+    assert_eq!(response.status().as_u16(), 401);
+    assert_eq!(
+        response.text().await.unwrap_or_default(),
+        "the X-Passport header is absent",
+        "the anonymous JSON refusal keeps its status and its body, the body never read"
+    );
+
+    let response = reqwest::Client::new()
+        .post(service.http("/graphql"))
+        .header("x-passport", "not-a-valid-passport")
+        .json(&serde_json::json!({ "query": "{ __typename }" }))
+        .send()
+        .await
+        .expect("the POST reaches the server");
+    assert_eq!(response.status().as_u16(), 401);
+    assert!(
+        response
+            .text()
+            .await
+            .unwrap_or_default()
+            .starts_with("the X-Passport header is malformed"),
+        "the malformed-passport JSON refusal keeps its body"
+    );
+
+    let (status, body) = post_json(
+        &service.base_url,
+        Some(&passport_for(Uuid::now_v7(), Uuid::now_v7()).to_header()),
+        "{ __typename }",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "an authenticated JSON request is served: {body}"
+    );
+
+    service.shutdown().await;
+    drop(nats);
+    db.cleanup().await;
+}
