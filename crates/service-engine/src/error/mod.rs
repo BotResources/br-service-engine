@@ -121,8 +121,8 @@ pub enum EngineError {
     },
 
     #[error(
-        "mirror {mirror} requires key {key}, which is outside its consumed prefix {prefix}; a \
-         required key must live under a prefix the mirror consumes"
+        "mirror {mirror} requires key {key}, which is outside what it consumes as {prefix}; a \
+         required key must live under a consumed prefix, or be the consumed key itself"
     )]
     RequiredKeyOutsidePrefix {
         mirror: MirrorName,

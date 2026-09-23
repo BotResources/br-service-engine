@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::error::EngineError;
+use crate::mirror::KeyScope;
 use crate::nats::KvKey;
 use crate::offer::{Offer, OfferTrigger};
 use crate::persistence::Aggregate;
@@ -65,9 +66,41 @@ where
 #[derive(Default, Clone)]
 pub(crate) struct OfferStagers {
     by_aggregate: BTreeMap<TypeId, Vec<Arc<dyn ErasedStager>>>,
+    manifests: BTreeMap<KvKey, &'static str>,
 }
 
 impl OfferStagers {
+    pub(crate) fn claim_manifest(
+        &mut self,
+        offer: &'static str,
+        prefix: &'static str,
+    ) -> Result<(), EngineError> {
+        let manifest = match KeyScope::parse(prefix) {
+            Ok(KeyScope::Prefix { manifest, .. }) => manifest,
+            Ok(KeyScope::Key(_)) => {
+                return Err(EngineError::Config(format!(
+                    "offer {offer} publishes {prefix:?}, which names one key; an offer publishes \
+                     a family of keys under a prefix ending in '/' or '.', beside its manifest"
+                )));
+            }
+            Err(refusal) => {
+                return Err(EngineError::Config(format!(
+                    "offer {offer} publishes prefix {prefix:?}, which {refusal}"
+                )));
+            }
+        };
+        if let Some(holder) = self.manifests.get(&manifest) {
+            return Err(EngineError::Config(format!(
+                "offer {offer} publishes prefix {prefix:?}, whose manifest key {} is already the \
+                 manifest key of offer {holder}; two offers on one base would overwrite each \
+                 other's manifest",
+                manifest.as_str(),
+            )));
+        }
+        self.manifests.insert(manifest, offer);
+        Ok(())
+    }
+
     pub(crate) fn register<O: Offer>(&mut self) {
         self.by_aggregate
             .entry(TypeId::of::<O::Row>())
@@ -106,5 +139,48 @@ impl OfferStagers {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refusal(stagers: &mut OfferStagers, offer: &'static str, prefix: &'static str) -> String {
+        match stagers.claim_manifest(offer, prefix).unwrap_err() {
+            EngineError::Config(message) => message,
+            other => panic!("expected a configuration error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_offer_publishes_under_a_slash_or_a_dot_terminated_prefix() {
+        let mut stagers = OfferStagers::default();
+        assert!(stagers.claim_manifest("slashed", "catalog/items/").is_ok());
+        assert!(stagers.claim_manifest("dotted", "catalog.item.").is_ok());
+    }
+
+    #[test]
+    fn an_offer_never_publishes_a_single_key() {
+        let mut stagers = OfferStagers::default();
+        assert!(refusal(&mut stagers, "single", "catalog.settings").contains("names one key"));
+    }
+
+    #[test]
+    fn an_offer_prefix_cut_mid_segment_is_refused() {
+        let mut stagers = OfferStagers::default();
+        assert!(refusal(&mut stagers, "cut", "catalog.item_").contains("ends mid-segment"));
+    }
+
+    #[test]
+    fn two_offers_whose_manifests_would_collide_are_refused() {
+        let mut stagers = OfferStagers::default();
+        stagers
+            .claim_manifest("slashed", "catalog/item/")
+            .expect("the first offer on the base claims its manifest");
+        let message = refusal(&mut stagers, "dotted", "catalog/item.");
+        assert!(message.contains("catalog/item_manifest"));
+        assert!(message.contains("offer slashed"));
+        assert!(refusal(&mut stagers, "again", "catalog/item/").contains("offer slashed"));
     }
 }

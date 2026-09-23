@@ -9,6 +9,7 @@ mod leader;
 mod projection;
 mod required;
 mod runtime;
+mod scope;
 mod shadow;
 mod watermark;
 
@@ -23,3 +24,5 @@ pub use known::{Bind, Column, KnownRow, Written, col};
 pub use leader::MirrorLeader;
 pub use projection::{Known, KnownScope, Project, Projection};
 pub use shadow::{Shadow, Shadows};
+
+pub(crate) use scope::KeyScope;

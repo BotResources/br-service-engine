@@ -6,10 +6,11 @@ use futures_util::stream::BoxStream;
 use sqlx::PgPool;
 
 use crate::error::EngineError;
-use crate::nats::{KvEvent, KvKey, KvPrefix, Nats, Watched};
+use crate::nats::{KvEvent, KvKey, Nats, Watched};
 
 use super::change::{Change, ChangeOp};
-use super::consumed::{Consumed, ConsumedManifest, manifest_key};
+use super::consumed::{Consumed, ConsumedManifest};
+use super::scope::{KeyScope, ScopeRefusal};
 use super::shadow::Shadows;
 
 pub(super) type Applier = Box<dyn FnOnce(&mut Shadows) + Send + 'static>;
@@ -54,7 +55,7 @@ type SnapshotFn = Arc<dyn Fn(&Shadows) -> Vec<Change> + Send + Sync>;
 pub(super) struct Consumption {
     pub(super) prefix: &'static str,
     pub(super) bucket: &'static str,
-    pub(super) manifest_key: Result<KvKey, EngineError>,
+    pub(super) scope: Result<KeyScope, ScopeRefusal>,
     pub(super) expected_manifest: ConsumedManifest,
     pub(super) load: LoadFn,
     pub(super) open_watch: OpenWatchFn,
@@ -63,6 +64,14 @@ pub(super) struct Consumption {
 
 pub(super) fn service<E: std::error::Error + Send + Sync + 'static>(error: E) -> EngineError {
     EngineError::Service(Box::new(error))
+}
+
+pub(super) fn refused(declared: &str, refusal: &ScopeRefusal) -> EngineError {
+    EngineError::Config(format!("consumed {declared:?} {refusal}"))
+}
+
+fn scope_of<C: Consumed>() -> Result<KeyScope, EngineError> {
+    KeyScope::parse(C::PREFIX).map_err(|refusal| refused(C::PREFIX, &refusal))
 }
 
 fn wire_effect<C: Consumed>(key: KvKey, value: C, revision: u64) -> Effect {
@@ -83,11 +92,19 @@ impl Consumption {
         let load: LoadFn = Arc::new(|nats: Nats| {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
-                let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
-                let entries = bucket
-                    .entries_with_revisions(&prefix)
-                    .await
-                    .map_err(service)?;
+                let entries = match scope_of::<C>()? {
+                    KeyScope::Prefix { prefix, .. } => bucket
+                        .entries_with_revisions(&prefix)
+                        .await
+                        .map_err(service)?,
+                    KeyScope::Key(key) => bucket
+                        .get_with_revision(&key)
+                        .await
+                        .map_err(service)?
+                        .map(|(value, revision)| (key, value, revision))
+                        .into_iter()
+                        .collect(),
+                };
                 let entries = entries
                     .into_iter()
                     .map(|(key, value, revision)| {
@@ -101,15 +118,15 @@ impl Consumption {
         let open_watch: OpenWatchFn = Arc::new(|nats: Nats, from: u64| {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
-                let prefix = KvPrefix::new(C::PREFIX).map_err(service)?;
+                let scope = scope_of::<C>()?;
                 let stream = futures_util::stream::unfold(
-                    (bucket.watch_all_from(from).await.map_err(service)?, prefix),
-                    |(mut watch, prefix)| async move {
-                        match watch.next_under::<C>(&prefix).await {
+                    (bucket.watch_all_from(from).await.map_err(service)?, scope),
+                    |(mut watch, scope)| async move {
+                        match watch.next_where::<C>(|key| scope.matches(key)).await {
                             None => None,
-                            Some(Err(error)) => Some((Err(service(error)), (watch, prefix))),
+                            Some(Err(error)) => Some((Err(service(error)), (watch, scope))),
                             Some(Ok(watched)) => {
-                                Some((Ok(into_update::<C>(watched)), (watch, prefix)))
+                                Some((Ok(into_update::<C>(watched)), (watch, scope)))
                             }
                         }
                     },
@@ -136,7 +153,7 @@ impl Consumption {
         Self {
             prefix: C::PREFIX,
             bucket: C::bucket(),
-            manifest_key: manifest_key(C::PREFIX),
+            scope: KeyScope::parse(C::PREFIX),
             expected_manifest: C::manifest(),
             load,
             open_watch,
@@ -198,20 +215,54 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     #[derive(Clone, Serialize, Deserialize)]
-    struct BadPrefix {
+    struct CutMidSegment {
         #[allow(dead_code)]
         v: u32,
     }
-    impl Consumed for BadPrefix {
-        const PREFIX: &'static str = "identity/users";
+    impl Consumed for CutMidSegment {
+        const PREFIX: &'static str = "catalog/item_";
+    }
+
+    #[derive(Clone, Serialize, Deserialize)]
+    struct Single {
+        #[allow(dead_code)]
+        v: u32,
+    }
+    impl Consumed for Single {
+        const PREFIX: &'static str = "catalog.settings";
+    }
+
+    #[derive(Clone, Serialize, Deserialize)]
+    struct Dotted {
+        #[allow(dead_code)]
+        v: u32,
+    }
+    impl Consumed for Dotted {
+        const PREFIX: &'static str = "catalog.item.";
     }
 
     #[test]
-    fn a_consumption_with_a_non_slash_prefix_defers_the_error_instead_of_panicking() {
-        let consumption = Consumption::of::<BadPrefix>();
-        assert!(matches!(
-            consumption.manifest_key,
-            Err(EngineError::Config(_))
-        ));
+    fn a_consumption_cut_mid_segment_defers_the_error_instead_of_panicking() {
+        let consumption = Consumption::of::<CutMidSegment>();
+        assert_eq!(consumption.scope, Err(ScopeRefusal::MidSegment('_')));
+    }
+
+    #[test]
+    fn a_single_key_consumption_carries_no_manifest() {
+        let consumption = Consumption::of::<Single>();
+        let scope = consumption.scope.expect("a whole key is accepted");
+        assert_eq!(scope.manifest(), None);
+    }
+
+    #[test]
+    fn a_dot_prefix_consumption_carries_its_sibling_manifest() {
+        let consumption = Consumption::of::<Dotted>();
+        let scope = consumption
+            .scope
+            .expect("a dot-terminated prefix is accepted");
+        assert_eq!(
+            scope.manifest().map(KvKey::as_str),
+            Some("catalog.item_manifest")
+        );
     }
 }
