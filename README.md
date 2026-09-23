@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.1", version = "0.3.1" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.3", version = "0.3.3" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,6 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.3.3 | `v1.3.0` |
 | 0.3.1 | `v1.3.0` |
 | 0.3.0 | `v1.3.0` |
 | 0.2.0 | `v1.3.0` |
@@ -584,6 +585,24 @@ the client sees a `next` payload carrying that same error then `complete`, never
 a transport-level `error` frame — the framing is async-graphql's own, unchanged
 by the engine.
 
+Failures on the wire. Every failure the engine answers carries a code too. What
+the client cannot fix — a database or NATS fault, a transaction that would not
+begin or commit, an engine wiring fault, a handler error whose
+`MutationFault::reason()` is `None` — reaches it as `INTERNAL`
+(`graphql::INTERNAL_CODE`) with the fixed message `internal error`
+(`graphql::INTERNAL_MESSAGE`) and no detail; the engine logs the cause at
+`error` with its whole `source()` chain where it converts the error. A handler
+fault joins its own chain to that log by returning `Some(self)` from
+`MutationFault::as_error` (the default logs its `Display` alone). The few
+failures a client can act on keep a specific code: paging a session the caller
+does not hold or a window it never attached is `NOT_FOUND`, attaching under a
+session id a live session holds is `CONFLICT`, attaching for a principal that no
+longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
+the request is answered `500` with the same `INTERNAL` error body, not `401`. A
+refusal that carries a reason is unchanged: its code and its `mutation refused:`
+message. `graphql::internal_error(context, &cause)` gives a service's own
+resolver the same shape.
+
 `register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
 the `Erase` context — the same `Ops` the write pipeline gives a handler — to
@@ -918,6 +937,20 @@ still pending, naming the pending library. A library owns **exactly one** schema
 `EngineError::LibraryMigrationEscapedSchema` (naming the library and the object) if
 that set created any relation outside its declared schema — a library may not reach
 into `public` or another library's schema.
+A released engine migration is immutable: sqlx stores the SHA-384 of every applied
+file and fails `migrate` with `VersionMismatch` when the embedded file differs. The
+engine keeps one exception table, `EDITED_AFTER_RELEASE` (`schema/released.rs`):
+the checksum of every released version of an engine migration that was later
+edited. Before the engine set runs, under the migrator's own advisory lock and in
+one transaction, `migrate` rewrites a stored checksum that appears there to the
+current one and logs the version with the old and new checksums at `info`; any
+other difference still fails as `VersionMismatch`. Only the engine's own versions
+listed there are read or written, so the library and service rows on the shared
+ledger are never touched. The one entry today is `9113000023`, whose header comment
+v0.3.0 removed after v0.2.0 had applied it. CI
+(`.github/scripts/check-released-migrations.sh`) exports every `v*` tag's engine
+migrations and fails when a released file is gone or differs from HEAD without its
+released checksum registered.
 `compose_service!` takes each slice's module, cargo feature and root objects on
 **one line** and generates, for the whole set, the `pub mod` declarations, the
 `QueryRoot`/`MutationRoot`/`SubscriptionRoot` merged objects and the `register`
@@ -1053,7 +1086,10 @@ whichever mode it lives:
   `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`); `serve` refuses an
   unmigrated store by name (`bb12`), `migrate` waits for the app role before it
   grants it (`bb13`), and `migrate` refuses an owner role that is neither a
-  superuser nor `BYPASSRLS`, exiting non-zero before the first migration (`bb15`).
+  superuser nor `BYPASSRLS`, exiting non-zero before the first migration (`bb15`);
+  the migration chain upgrades a store the v0.2.0 engine set migrated, whose
+  `9113000023` checksum v0.3.0 changed, and still refuses an unknown checksum
+  (`s241`, in-crate, against the real v0.2.0 files).
   A **multi-pod set**
   boots two instances of the binary against one Postgres and one NATS and proves the
   fleet behaviour §F called untested: a mutation committed on pod A produces the

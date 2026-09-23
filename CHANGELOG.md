@@ -8,6 +8,110 @@ The library chart `br-engine-service` has its own version line (major = ops
 contract version) and its own tag `chart/br-engine-service/v{version}`; a
 chart-only release is a `## chart br-engine-service {version}` section.
 
+## 0.3.3 - 2026-09-23
+
+A patch: `migrate` upgrades a database that the 0.2.0 engine migrated, and every
+failure the engine answers reaches the client with a code.
+
+**Adopter note: nothing to do.** Bump the pin. A database migrated by engine
+0.2.0 (svc-runners 0.1.0 on the dev stage, svc-accounts) now upgrades on the next
+`migrate`; before this release `migrate` on 0.3.0 or 0.3.1 exited 1 there with
+`VersionMismatch(9113000023)` (`sqlx migrate info`: `installed (different
+checksum)`).
+
+### Fixed
+
+- **`migrate` adopts the checksum a released engine applied for a migration that
+  was later edited.** v0.3.0 (`e667eb9`) removed the four-line header comment of
+  `9113000023_mirror_stream_identity.sql`, which v0.2.0 had applied; sqlx hashes
+  the whole file, so every database 0.2.0 migrated refused the 0.3.x engine set
+  (`ignore_missing` does not cover a changed checksum). Audit of every engine
+  migration across `v0.1.0`, `v0.2.0`, `v0.3.0`, `v0.3.1` and `main` (and every
+  commit on `main`): `9113000023` is the only file whose bytes changed —
+
+  | Migration | v0.1.0 | v0.2.0 | v0.3.0 / v0.3.1 / main |
+  |---|---|---|---|
+  | `9113000001`–`9113000022` | shipped | same bytes | same bytes |
+  | `9113000023_mirror_stream_identity.sql` | — | SHA-384 `74808ac1…daae46f` | SHA-384 `ea7d3984…d84720fd` |
+  | `9113000024`, `9113000025` | — | — | added |
+
+  `schema/released.rs` holds a data table, `EDITED_AFTER_RELEASE:
+  &[(version, &[released SHA-384])]`, with the one entry `9113000023 →
+  [v0.2.0's checksum]`. `schema::migrate` takes the sqlx migrator's own advisory
+  lock on one connection, rewrites in one transaction every stored checksum that
+  the table registers for its version to the embedded file's checksum, logs each
+  at `info` with the version and the old and new checksums, then runs the
+  migrator on the same locked connection. An unknown checksum is never touched
+  and still fails as `EngineError::Migrate(VersionMismatch(v))`, exactly as
+  before. Only the versions in the table — all inside the engine's reserved band —
+  are read or written, so library and service rows on the shared
+  `_sqlx_migrations` ledger are never touched. A failed run closes its connection
+  instead of pooling one that still holds the session advisory lock.
+- **Every failure reaches the client with a code (constitution principle 22).**
+  A mutation whose transaction did not begin or commit answered an uncoded
+  `mutation failed: database`; a query, a subscription attach or a page that
+  failed answered an uncoded message too. Now everything the client cannot fix —
+  a database or NATS fault, a begin or commit failure, an engine wiring fault, a
+  handler error whose `MutationFault::reason()` is `None` — is `INTERNAL`
+  (`extensions.code`), with the fixed message `internal error` and no database
+  detail. The few failures a client can act on keep a specific code: `NOT_FOUND`
+  for a page on a session the caller does not hold or a window it never attached,
+  `CONFLICT` for an attach under a session id a live session holds,
+  `UNAUTHENTICATED` for an attach whose principal no longer exists. A failure to
+  load the principal's facts is a `500` with the same `INTERNAL` body, no longer a
+  `401` carrying the error text. Refusals that carry a reason are unchanged: same
+  code, same `mutation refused: …` message.
+- **The engine's logs keep the whole cause chain.** `EngineError::Db` displayed
+  `database`, `Migrate` `migrations`, `Service` `service` (and `CronError::{Db,
+  Job}`, `RelayError::{Db, Relay}` likewise), so every `%error` log and every
+  adopter that logged an engine error saw the label, not the cause. These pure
+  wrappers are now `#[error(transparent)]`: their `Display` is the wrapped error's
+  and the chain does not repeat. Every engine log site that logged an error by
+  `Display` now logs its whole `source()` chain, as do the conversions to text the
+  engine stores or forwards (dispatch errors and dead-letter reasons, object
+  storage and NATS details). Where the engine converts a failure for the client it
+  logs the chain at `error` first: an engine fault in the mutation pipeline with
+  its context, a handler fault without a reason with the mutation name (and the
+  fault's own chain when it returns `Some(self)` from the new
+  `MutationFault::as_error`), a query, attach or page fault with its context.
+
+### Added
+
+- `graphql::{INTERNAL_CODE, INTERNAL_MESSAGE, NOT_FOUND_CODE, CONFLICT_CODE,
+  UNAUTHENTICATED_CODE}`, `graphql::internal_error(context, &cause)` (logs the
+  chain, answers `INTERNAL`) and `graphql::internal_fault(detail)` for a fault
+  with no error value behind it.
+- `MutationFault::as_error`, a provided method (default `None`): a fault that is a
+  `std::error::Error` returns `Some(self)` so the engine logs its chain.
+- CI guard `.github/scripts/check-released-migrations.sh`, run in the
+  `fmt-clippy-test` job (checkout now `fetch-depth: 0`): it exports the engine
+  migrations of every `v*` tag and fails when a released file is gone from HEAD or
+  differs from it without its released SHA-384 registered in
+  `EDITED_AFTER_RELEASE`. Every tag is checked, not only the last, so a registered
+  checksum cannot be dropped silently.
+- `s241` (conformance, in-crate, real Postgres): a store migrated by the real
+  v0.2.0 engine files plus a library and a service set upgrades through the
+  migration chain, its engine ledger then equals a fresh store's and its library
+  and service rows are untouched, and a second `migrate` changes nothing; a forged
+  unknown checksum still fails with `VersionMismatch` and is left as it was; a
+  fresh store migrates as before. The first scenario fails with
+  `Migrate(VersionMismatch(9113000023))` on 0.3.1.
+
+### Changed
+
+- The `Display` of `EngineError::{Db, Migrate, Service}` is now the wrapped
+  error's message, database text included. A service that forwards an engine
+  error's text to its clients should answer `INTERNAL` instead; both platform
+  adopters already do (svc-runners renders its code, svc-accounts' reasonless
+  faults now reach the client as `INTERNAL`).
+- `example-service`'s `AppFault` is the reference shape: `NotFound` carries the
+  reason `NOT_FOUND` (a refusal the client can act on, no longer an uncoded
+  failure), and `Store` keeps the `EngineError` as its `source()` and returns
+  `Some(self)` from `as_error`.
+- The engine now owns one lowercase-hex encoder (`hex::lower`); the four copies in
+  blob signing, blob digests, seal hashes and NATS subject tokens use it, and the
+  `unwrap` in the subject-token copy is gone.
+
 ## chart br-engine-service 1.1.0 - 2026-09-23
 
 A minor: new optional fields, every one with a default; ops contract v1 is
