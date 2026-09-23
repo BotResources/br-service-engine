@@ -94,7 +94,7 @@ impl EngineConfig {
                     .into(),
             ));
         }
-        Ok(())
+        self.multipart.validate()
     }
 }
 

@@ -4,6 +4,7 @@ mod negative;
 mod passport;
 mod rls;
 mod roots;
+mod upload;
 
 pub use boot::{
     GraphqlService, boot_graphql_service, boot_rls_query_service, root_field_collision,
@@ -18,4 +19,7 @@ pub use passport::{TENANT_CLAIM, passport_for};
 pub use rls::{RlsAssignmentProjector, RlsQueryRoot};
 pub use roots::{
     AssignmentQueries, EngineDelta, MutationRoot, QueryRoot, SubscriptionRoot, WidgetQueries,
+};
+pub use upload::{
+    UPLOAD_MISMATCH_CODE, UploadMutationRoot, UploadQueryRoot, boot_upload_service, upload_digest,
 };

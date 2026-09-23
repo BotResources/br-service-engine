@@ -5,6 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use crate::blobs::BlobConfig;
+use crate::graphql::MultipartConfig;
 use crate::inbound::{DEFAULT_ACK_WAIT, DEFAULT_MAX_ACK_PENDING};
 use crate::name::{ChannelName, PodId};
 
@@ -34,6 +35,9 @@ pub const DEFAULT_BLOB_REAPER_INTERVAL: Duration = Duration::from_secs(60);
 pub const DEFAULT_SCHEMA_VERSION_LIVENESS: Duration = Duration::from_secs(30);
 pub const DEFAULT_HTTP_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8080);
 pub const DEFAULT_MIGRATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
+pub const DEFAULT_MULTIPART_MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
+pub const DEFAULT_MULTIPART_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+pub const DEFAULT_MULTIPART_MAX_FILES: usize = 4;
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -74,6 +78,7 @@ pub struct EngineConfig {
     pub service: Option<String>,
     pub service_version: Option<String>,
     pub blob: Option<BlobConfig>,
+    pub multipart: MultipartConfig,
 }
 
 impl EngineConfig {
@@ -115,6 +120,7 @@ impl EngineConfig {
             service: None,
             service_version: None,
             blob: None,
+            multipart: MultipartConfig::default(),
         }
     }
 }

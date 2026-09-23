@@ -1,5 +1,7 @@
+mod body;
 mod compose;
 mod error;
+mod multipart;
 mod mutation;
 mod paging;
 mod prefix;
@@ -17,6 +19,10 @@ mod ws;
 pub use error::{
     CODE_EXTENSION, CONFLICT_CODE, FORBIDDEN_CODE, INTERNAL_CODE, INTERNAL_MESSAGE, NOT_FOUND_CODE,
     UNAUTHENTICATED_CODE, coded_error, forbidden, internal_error, internal_fault, mutation_error,
+};
+pub use multipart::{
+    MULTIPART_FILE_TOO_LARGE_CODE, MULTIPART_MALFORMED_CODE, MULTIPART_SPOOL_UNAVAILABLE_CODE,
+    MULTIPART_TOO_LARGE_CODE, MULTIPART_TOO_MANY_FILES_CODE, MultipartConfig,
 };
 pub use mutation::{MutationAck, ack, ack_bulk, execute, execute_bulk};
 pub use paging::{attach_with_session, page};
