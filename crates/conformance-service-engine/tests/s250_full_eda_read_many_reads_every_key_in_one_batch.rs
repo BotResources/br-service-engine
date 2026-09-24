@@ -128,6 +128,20 @@ async fn scans_of_the_event_tables(conn: &mut PgConnection) -> Vec<(String, i64)
     .expect("read the scan counters of the event tables")
 }
 
+async fn pin_one_sequential_scan_per_table_and_statement(conn: &mut PgConnection) {
+    for setting in [
+        "SET enable_indexscan = off",
+        "SET enable_indexonlyscan = off",
+        "SET enable_bitmapscan = off",
+        "SET enable_nestloop = off",
+    ] {
+        sqlx::query(setting)
+            .execute(&mut *conn)
+            .await
+            .expect("pin every read to one sequential scan per table and statement");
+    }
+}
+
 async fn scans_spent_reading(conn: &mut PgConnection, keys: &[Uuid]) -> Vec<(String, i64)> {
     let before = scans_of_the_event_tables(conn).await;
     TallyStore::read_many(conn, keys)
@@ -194,17 +208,7 @@ async fn s250_a_batched_read_scans_the_event_tables_as_often_for_many_keys_as_fo
         keys.push(tally_with(&mut conn, amounts).await);
     }
     keys.push(Uuid::now_v7());
-    for setting in [
-        "SET enable_indexscan = off",
-        "SET enable_indexonlyscan = off",
-        "SET enable_bitmapscan = off",
-        "SET enable_nestloop = off",
-    ] {
-        sqlx::query(setting)
-            .execute(&mut *conn)
-            .await
-            .expect("pin every read to one sequential scan per table and statement");
-    }
+    pin_one_sequential_scan_per_table_and_statement(&mut conn).await;
 
     let for_one = scans_spent_reading(&mut conn, &keys[..1]).await;
     let for_all = scans_spent_reading(&mut conn, &keys).await;
@@ -215,6 +219,29 @@ async fn s250_a_batched_read_scans_the_event_tables_as_often_for_many_keys_as_fo
     assert_eq!(
         for_all, for_one,
         "reading five keys costs the event tables the same scans as reading one: no read per key"
+    );
+
+    drop(conn);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s250_a_read_of_keys_with_no_snapshot_never_reads_the_event_log() {
+    let db = TestDb::fresh().await;
+    let mut conn = db.app_pool().acquire().await.expect("a connection");
+    tally_with(&mut conn, &[1, 2]).await;
+    pin_one_sequential_scan_per_table_and_statement(&mut conn).await;
+
+    let absent = [Uuid::now_v7(), Uuid::now_v7()];
+    let spent = scans_spent_reading(&mut conn, &absent).await;
+    assert_eq!(
+        spent,
+        vec![
+            (TABLE_EVENT_LOG.to_string(), 0),
+            (TABLE_EVENT_SNAPSHOT.to_string(), 1)
+        ],
+        "a key with no snapshot has no events, so the read stops at the snapshot table: the \
+         pipeline's key-reuse check before every create costs one statement"
     );
 
     drop(conn);

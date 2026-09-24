@@ -24,6 +24,9 @@ pub(super) async fn read_aggregates<T: EventSourced>(
     }
     let texts: Vec<String> = requested.keys().cloned().collect();
     let snapshots = select_snapshots(conn, T::NOUN.as_str(), &texts).await?;
+    if snapshots.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut logged = select_events_after_each(conn, T::NOUN.as_str(), &snapshots).await?;
     let mut aggregates = Vec::with_capacity(snapshots.len());
     for (key_text, version, state) in snapshots {
