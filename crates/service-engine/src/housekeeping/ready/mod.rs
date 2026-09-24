@@ -3,16 +3,16 @@ mod verdict;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::nats::{Nats, NatsCondition, NatsHealth, RelayHealth, RelayHealthReceiver};
-use crate::readiness::{Readiness, ReadinessHandle};
 use tokio::sync::watch;
 
 use crate::boot::REASON_MIRRORS;
 use crate::housekeeping::health::RelaysHealthReceiver;
 use crate::housekeeping::mirror::{MirrorsHealth, MirrorsHealthReceiver};
+use crate::nats::{Nats, NatsCondition, NatsHealth, RelayHealth, RelayHealthReceiver};
 use crate::observe::{
     DEP_INBOUND, DEP_LISTENER, DEP_MIRRORS, DEP_NATS, DEP_POSTGRES, record_dependency,
 };
+use crate::readiness::{Readiness, ReadinessHandle};
 
 use verdict::verdict;
 pub use verdict::{

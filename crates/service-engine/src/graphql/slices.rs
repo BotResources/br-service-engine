@@ -1,9 +1,8 @@
-use crate::error::CompositionError;
 use std::collections::BTreeMap;
 
 use async_graphql::{ObjectType, SubscriptionType};
 
-use crate::error::EngineError;
+use crate::error::{CompositionError, EngineError};
 use crate::graphql::prefix::RootPrefix;
 use crate::graphql::sdl;
 

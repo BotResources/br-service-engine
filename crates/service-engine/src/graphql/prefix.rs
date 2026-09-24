@@ -1,5 +1,4 @@
-use crate::error::CompositionError;
-use crate::error::EngineError;
+use crate::error::{CompositionError, EngineError};
 
 const MAX_PREFIX_LEN: usize = 40;
 

@@ -1,6 +1,7 @@
+use std::time::Duration;
+
 use crate::config::EngineConfig;
 use crate::name::{ChannelName, PodId};
-use std::time::Duration;
 
 fn config() -> EngineConfig {
     EngineConfig::new(

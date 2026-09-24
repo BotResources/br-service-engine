@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,7 +9,7 @@ use crate::accumulator::ingress::StreamingIngress;
 use crate::accumulator::runtime::AccumulatorRuntime;
 use crate::accumulator::seal;
 use crate::chain::describe;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::inbound::{HealthTracker, InboundHealth, ServeExit, SupervisorConfig};
 use crate::nats::{Nats, streaming_stream, subject_token};
 use crate::stop::Stop;

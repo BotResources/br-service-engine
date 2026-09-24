@@ -1,11 +1,12 @@
+use futures_util::future::BoxFuture;
+use futures_util::stream::{self, BoxStream};
+use sqlx::PgConnection;
+
 use super::*;
 use crate::error::AccumulatorError;
 use crate::impact::{Impact, TransportEvent};
 use crate::name::{AccumulatorName, NounName};
 use crate::transport::ImpactTransport;
-use futures_util::future::BoxFuture;
-use futures_util::stream::{self, BoxStream};
-use sqlx::PgConnection;
 
 struct NoTransport;
 

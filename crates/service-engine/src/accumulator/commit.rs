@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use crate::accumulator::ChunkSeq;
 use crate::accumulator::flush::{FlushOutcome, PendingChunk, Verdict};
 use crate::accumulator::guard::{self, StreamKey};
 use crate::accumulator::persisted::{ChunkAddress, read_persisted};
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::impact::{Dims, Impact};
 use crate::name::NounName;
 use crate::transport::ImpactTransport;

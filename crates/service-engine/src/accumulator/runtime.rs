@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -11,7 +10,7 @@ use crate::accumulator::reader::ChunkReader;
 use crate::accumulator::seal::{SealMarker, Swept};
 use crate::accumulator::{Accumulator, ChunkSeq, Durable, Registry, enroll, flush, lookup, seal};
 use crate::chain::describe;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::AccumulatorName;
 use crate::nats::{Nats, chunk_subject, streaming_stream, subject_token};
 use crate::stop::Stop;

@@ -1,7 +1,8 @@
+use std::time::Duration;
+
 use super::*;
 use crate::mirror::MirrorRun;
 use crate::stop::Stop;
-use std::time::Duration;
 
 #[derive(Default)]
 pub(super) struct Probe {

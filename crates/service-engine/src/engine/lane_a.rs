@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -6,7 +5,7 @@ use tokio::task::JoinHandle;
 use crate::accumulator::AccumulatorRuntime;
 use crate::accumulator::lane_a_loop::spawn_lane_a;
 use crate::config::EngineConfig;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::nats::Nats;
 use crate::stop::Stop;
 

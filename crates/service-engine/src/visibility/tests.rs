@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
+use uuid::Uuid;
+
 use super::*;
 use crate::population::Population;
-use uuid::Uuid;
 
 #[derive(Clone)]
 struct Project {

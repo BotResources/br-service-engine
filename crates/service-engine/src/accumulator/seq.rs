@@ -1,7 +1,6 @@
-use crate::error::AccumulatorError;
 use serde::Serialize;
 
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]

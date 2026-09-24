@@ -1,8 +1,8 @@
-use crate::readiness::ReadinessHandle;
 use sqlx::{PgPool, Row};
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
+use crate::readiness::ReadinessHandle;
 use crate::schema::SCHEMA;
 use crate::schema_version::{claim_with_handover, version_conflict_reason};
 use crate::transport::PgListenNotify;

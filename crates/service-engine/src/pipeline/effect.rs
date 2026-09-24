@@ -3,13 +3,12 @@ use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 use crate::accumulator::AccumulatorRuntime;
 use crate::blobs::BlobHandle;
 use crate::error::EngineError;
 use crate::offers::OfferStagers;
-use uuid::Uuid;
-
 use crate::pipeline::context::{Bulk, Mutation};
 use crate::pipeline::mutation::MutationInput;
 use crate::pipeline::ops::Ops;

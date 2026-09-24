@@ -1,7 +1,8 @@
-use super::*;
-use crate::persistence::{Persistence, PersistenceStyle};
 use futures_util::future::BoxFuture;
 use sqlx::PgConnection;
+
+use super::*;
+use crate::persistence::{Persistence, PersistenceStyle};
 
 #[derive(Clone)]
 struct Alpha;

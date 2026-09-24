@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 use super::*;
 use crate::mirror::projection::Projection;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Typed {

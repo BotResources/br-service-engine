@@ -1,4 +1,3 @@
-use crate::error::CompositionError;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -6,7 +5,7 @@ use sqlx::PgPool;
 
 use crate::accumulator::Accumulator;
 use crate::engine::Engine;
-use crate::error::EngineError;
+use crate::error::{CompositionError, EngineError};
 use crate::graphql::SliceFragment;
 use crate::inbound::{Budgets, ReactionMessage, Subscription};
 use crate::mirror::{MirrorReady, Project};

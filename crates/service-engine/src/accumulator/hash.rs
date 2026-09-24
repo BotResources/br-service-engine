@@ -1,9 +1,8 @@
-use crate::error::AccumulatorError;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SealHash([u8; 32]);

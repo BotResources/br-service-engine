@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,7 +8,7 @@ use crate::accumulator::single_flight::KeyedGate;
 use crate::accumulator::{Accumulated, Accumulator, ChunkSeq, Registered, Registry, lookup};
 use crate::config::DEFAULT_FOLD_CACHE_CAPACITY;
 use crate::dyn_compat::ErasedState;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::AccumulatorName;
 use crate::wire::{KeyBytes, Noun, encode_key};
 

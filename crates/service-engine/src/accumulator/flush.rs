@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use tokio::sync::oneshot;
 use crate::accumulator::ChunkSeq;
 use crate::accumulator::commit::commit_batch;
 use crate::accumulator::runtime::AccumulatorRuntime;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::{AccumulatorName, NounName};
 use crate::stop::Stop;
 use crate::transport::ImpactTransport;

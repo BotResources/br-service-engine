@@ -1,9 +1,8 @@
-use crate::error::AccumulatorError;
 use std::any::Any;
 use std::sync::Arc;
 
 use crate::accumulator::{Accumulator, ChunkSeq};
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::{AccumulatorName, NounName};
 use crate::wire::Noun;
 

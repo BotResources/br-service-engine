@@ -1,4 +1,3 @@
-use crate::error::CompositionError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -7,7 +6,7 @@ use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
 use async_graphql::registry::{MetaType, MetaTypeName, Registry};
 use async_graphql::{EmptyMutation, EmptySubscription, ObjectType, SubscriptionType};
 
-use crate::error::EngineError;
+use crate::error::{CompositionError, EngineError};
 
 const LANES_PAUSED_TYPE: &str = "LanesPaused";
 const LANES_RESUMED_TYPE: &str = "LanesResumed";

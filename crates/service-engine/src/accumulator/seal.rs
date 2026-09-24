@@ -1,4 +1,3 @@
-use crate::error::AccumulatorError;
 use std::time::Duration;
 
 use sqlx::{PgConnection, PgPool, Row};
@@ -6,7 +5,7 @@ use sqlx::{PgConnection, PgPool, Row};
 use crate::accumulator::guard;
 use crate::accumulator::{ChunkSeq, Registered};
 use crate::dyn_compat::ErasedState;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::time::Timestamp;
 use crate::wire::KeyBytes;
 

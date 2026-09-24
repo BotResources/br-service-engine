@@ -11,7 +11,6 @@ pub mod seal;
 mod seq;
 pub(crate) mod single_flight;
 
-use crate::error::AccumulatorError;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
@@ -24,7 +23,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::dyn_compat::ErasedAccumulator;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::{AccumulatorName, NounName};
 use crate::wire::Noun;
 

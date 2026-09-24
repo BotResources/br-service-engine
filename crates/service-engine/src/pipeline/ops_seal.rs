@@ -1,6 +1,5 @@
 use crate::accumulator::{Accumulator, ChunkSeq, SealHash};
-use crate::error::AccumulatorError;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::pipeline::ops::Ops;
 use crate::wire::Noun;
 
