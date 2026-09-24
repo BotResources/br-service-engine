@@ -1,6 +1,4 @@
 use br_core_auth::{Passport, PassportHeader};
-use futures_util::future::BoxFuture;
-use sqlx::PgPool;
 
 use crate::principal::Principal;
 
@@ -19,10 +17,7 @@ impl PrincipalRejected {
 }
 
 pub trait PassportPrincipal: Principal + Sized {
-    fn from_passport(
-        pg: &PgPool,
-        passport: Passport,
-    ) -> BoxFuture<'_, Result<Self, PrincipalRejected>>;
+    fn from_passport(passport: Passport) -> Result<Self, PrincipalRejected>;
 }
 
 pub enum AuthReject {
@@ -41,14 +36,9 @@ impl AuthReject {
     }
 }
 
-pub(crate) async fn resolve<P: PassportPrincipal>(
-    pg: &PgPool,
-    header: Option<&str>,
-) -> Result<P, AuthReject> {
+pub(crate) fn resolve<P: PassportPrincipal>(header: Option<&str>) -> Result<P, AuthReject> {
     let header = header.ok_or(AuthReject::Missing)?;
     let passport =
         Passport::from_header(header).map_err(|error| AuthReject::Malformed(error.to_string()))?;
-    P::from_passport(pg, passport)
-        .await
-        .map_err(|rejected| AuthReject::Rejected(rejected.0))
+    P::from_passport(passport).map_err(|rejected| AuthReject::Rejected(rejected.0))
 }

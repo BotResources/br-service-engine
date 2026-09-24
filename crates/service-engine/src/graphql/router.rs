@@ -119,8 +119,6 @@ where
     S: SubscriptionType + 'static,
 {
     let (parts, body) = request.into_parts();
-    // The principal is resolved from the headers alone, before a byte of the body is read:
-    // a client without a trusted passport makes the pod neither buffer nor spool anything.
     let principal = match authenticate(&state.engine, &parts.headers).await {
         Ok(principal) => principal,
         Err(denied) => return denied.into_response(),
@@ -129,8 +127,6 @@ where
         Ok(request) => request.data(principal),
         Err(refusal) => return refusal.into_response(),
     };
-    // The gateway's subscription leg: the same authenticated request, answered as a
-    // graphql-sse stream bounded like a WebSocket session.
     if sse::wants_event_stream(&parts.headers) {
         return sse::respond(&state.schema, request, stream_bounds(&state.engine));
     }
@@ -174,8 +170,6 @@ where
         })
 }
 
-/// Why a request gets no principal: a passport that is absent, undecodable or rejected
-/// (`401`), or facts the pod could not load (`500` `INTERNAL`).
 enum Denied {
     Unauthenticated(AuthReject),
     FactsUnavailable(Box<EngineError>),
@@ -190,14 +184,11 @@ impl IntoResponse for Denied {
     }
 }
 
-/// The principal, from the headers alone: nothing of the body is read here.
 async fn authenticate<P: PassportPrincipal>(
     engine: &GraphqlState<P>,
     headers: &HeaderMap,
 ) -> Result<P, Denied> {
-    let mut principal = resolve::<P>(engine.pg(), passport_header(headers))
-        .await
-        .map_err(Denied::Unauthenticated)?;
+    let mut principal = resolve::<P>(passport_header(headers)).map_err(Denied::Unauthenticated)?;
     engine
         .runtime()
         .registry()
@@ -213,9 +204,6 @@ fn passport_header(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-/// The principal's facts could not be loaded: an infrastructure fault, not a
-/// rejected passport. The cause is logged with its chain; the client receives
-/// `INTERNAL` in the GraphQL error shape and no detail.
 fn facts_unavailable(error: &EngineError) -> Response {
     tracing::error!(
         cause = %crate::chain::describe(error),
