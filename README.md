@@ -53,7 +53,7 @@ battery-backed.
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait (`VERSION`), `register_offer`, `register_offer_trigger::<O, T>` (a `T: OfferTrigger<O>` in the offer's own slice re-publishes the offer when it changes; its `row_key()` names the offer row's store key and its `key_from()` the offer's KvKey), leader-drained dirty keys, versioned watermark, boot + periodic reconcile, `OfferManifest` published at reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `upsert` (row-diff) / `replace_rows` (full-row set diff inside a declared `RowScope` — `RowScope::by(col(..))`, `.and(col(..))` for more columns, or the written-out `RowScope::whole_table()`: stages exactly the rows inserted, changed on any column, or deleted) both returning `Written` and staging nothing when unchanged, `KnownRow::PRINCIPAL` (the uuid key column whose principal's facts a staged row also refreshes), plus `retire` (stages only a deleted row) and the `Known`/`KnownScope` escape hatch (`replace_one`/`remove`), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Project::project(cx, keys)` called once per lead transaction with every key the transaction touches (one live change's keys, or every key of a rescan), `Projection::replace_rows` (full-row set diff inside a declared `RowScope` — `RowScope::any_of(column, keys)` for a batch, `RowScope::by(col(..))`, `.and(col(..))` for more columns, or the written-out `RowScope::whole_table()`: stages exactly the rows inserted, changed on any column, or deleted, returns `Written::{Changed, Unchanged}`, and costs one upsert per ~30,000 bound values plus one delete per call, whatever the number of keys) as the one row write, `Projection::conn` plus `impact_*` for hand SQL, `KnownRow::PRINCIPAL` (the uuid key column whose principal's facts a staged row also refreshes), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
@@ -313,31 +313,36 @@ scheduled commitment, so an extra reconcile after a takeover is harmless. The
 version
 lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
-`known_*` through the direct lane, joined by a `keyed_by` function. A consumed
+`known_*` through the direct lane, joined by a `keyed_by` function. The engine
+calls `Project::project(cx, keys)` once per lead transaction with every key that
+transaction touches: the keys `keyed_by` yields for one live change, or every key
+of a full rescan (boot, the periodic reconcile, a leader takeover). A projection
+therefore receives a batch and writes each table once for the whole batch, so a
+rescan of any number of keys costs the same statements as a rescan of one. A consumed
 value is a typed `Consumed`, never raw JSON: a mirror that consumes
 `serde_json::Value` is refused at registration (`EngineError::RawJsonConsumption`)
 unless it sets `Consumed::RAW_JSON_ESCAPE_HATCH`, so the join always reads typed
 rows (a typed value may still hold a `serde_json::Value` field). A `known_*` row
-is written either declaratively — implement `KnownRow` (`TABLE`, `NAMESPACE`,
+is written declaratively — implement `KnownRow` (`TABLE`, `NAMESPACE`,
 `KEY` — the key column names, which a write whose `key()` names other columns is
 refused against — and the value columns) and the engine generates the SQL behind
-`Projection::upsert` / `Projection::retire` / `Projection::replace_rows`, the
-documented path with no SQL in the projector — or manually through `replace_one`
-/ `remove` over the `Known` / `KnownScope` traits, the escape hatch for a write
-the declarative kit cannot express (`replace_one` stages its impact whether or not
-the row changed). A known row's impact key is always its key columns rendered and
-joined by `/`. `KnownRow::PRINCIPAL` is required: `None`, or
+`Projection::replace_rows`, the one row write of the kit, which writes a set and
+never one row per key. A write the kit cannot express runs through
+`Projection::conn` with bound parameters, set-based over the batch, and stages its
+own impacts with `impact_foreign` / `impact_resource` / `impact`. A known row's
+impact key is always its key columns rendered and joined by `/`. `KnownRow::PRINCIPAL` is required: `None`, or
 `Some(PrincipalColumn { column, deps })` when a principal fact loader reads the
 table — `column` names a uuid KEY column (anything else is refused,
 `EngineError::Config`) — and then every row the kit stages also stages
 `PrincipalFactsChanged { principal, deps }` for the principal in that column, so a
 change to one membership refreshes that member's facts and no other principal's.
-`upsert` stages only when it wrote the row, and `retire` only when it deleted
-one. `replace_rows(scope, rows)` replaces the set of rows whose `scope`
-columns match — equalities, `RowScope::by(col("project_id", id))` with
-`.and(col(..))` for each further column — or the whole table, which is written
-out as `RowScope::whole_table()`; a `RowScope` has no empty form, so a call can
-never widen to the whole table by mistake. The replace is one multi-row upsert per
+`replace_rows(scope, rows)` replaces the set of rows whose `scope`
+columns match — `RowScope::any_of("project_id", keys)` for the batch's keys (one
+`= ANY($1)` over a typed array: uuid, text, integer or boolean values of one
+type; an empty list matches no row and costs no statement), equalities,
+`RowScope::by(col("project_id", id))` with `.and(col(..))` for each further
+column — or the whole table, which is written out as `RowScope::whole_table()`;
+no `RowScope` widens to the whole table by mistake. The replace is one multi-row upsert per
 ~30,000 bound values that writes a row only when
 a value column differs (`IS DISTINCT FROM`), then one delete of the scoped rows
 the call did not name (a `NOT EXISTS` anti-join against the named keys, never a
@@ -345,7 +350,7 @@ per-row rescan of them, so a whole-table replace of 100k rows stays in the
 second range), each returning the keys it touched — so it stages exactly
 the rows inserted, changed on any column, or deleted, and nothing for an
 unchanged set. It refuses (`EngineError::Config`) a row outside the scope, a null
-scope column, two rows with one key and different values (keys compare by typed
+scope column, an `any_of` over mixed or non-key values, two rows with one key and different values (keys compare by typed
 column values, never by the `/`-joined impact key, so `("a/b", "c")` and
 `("a", "b/c")` are two rows; an exact duplicate is written once), rows that name different value columns, and a key column that is
 not a uuid, text, integer or boolean (the impact key of a deleted row is the
@@ -988,10 +993,11 @@ bootable reference service built only on this crate's public authoring surface �
 no `test-support`, no `pub(crate)` reach-around. A handful of 0.3 authoring
 gestures the example does not yet exercise — a hard `cx.delete` guarded by
 `register_post_delete_policy`, an `OfferTrigger`, `Mirror::require_key`, an
-`Inverse::Lookup` join, a `coded_error`/`forbidden` refusal, and branching on the
-`Written` mirror verdict — are demonstrated in the conformance sample
-(`crates/conformance-service-engine/src/sample/`, e.g. `pipeline.rs`,
-`widget_tag.rs`, `linked.rs`, `mirror.rs`, `graphql/forbidden.rs`); copy those for
+`Inverse::Lookup` join, a `coded_error`/`forbidden` refusal, a mirror keyed by a
+sum type, and a mirror join over a cascading foreign key — are demonstrated in the
+conformance sample (`crates/conformance-service-engine/src/sample/`, e.g.
+`pipeline.rs`, `widget_tag.rs`, `linked.rs`, `mirror/`, `declarative.rs`,
+`staffing.rs`, `graphql/forbidden.rs`); copy those for
 those idioms until the reference service grows them. Read the example as the
 how-to: a thin
 `kernel/` (the principal and its generic fact bag, the error base — and no scope
@@ -1271,7 +1277,7 @@ primitive that makes each one the easy path:
 | A read of one aggregate for a principal honours the view's declaration | `Query::load_visible::<View>(key)`: the row is loaded under RLS when the view declares `RLS`, then kept only if the view's `visible` (its `Visibility` by default) admits it; a hidden row and an absent key both answer `None`, so a caller cannot probe which keys exist. `Query::download` is built on it. A list is a view (`fetch_view_window`, a subscription) |
 | Hand SQL over a parent's children honours the parent's declaration | `Query::read_behind::<View>(key, \|parent, conn\| Box::pin(async move { … }))`: one read-only transaction (under RLS when the view declares `RLS`) loads the parent, and the closure runs with the parent and the connection only when the view's `visible` admits the parent; a hidden parent and an absent key both answer `None` and the closure never runs. A write inside it fails, and the transaction is rolled back at the end |
 | Hand SQL outside a view runs under the second enforcement layer | `Query::read_under_rls(\|conn\| Box::pin(async move { … }))`: a read-only transaction with the principal's RLS context applied through the registered `RlsApplier`, rolled back at the end. A write inside it fails; a fault answers `INTERNAL` with the cause in the log, never the database text; with no `RlsApplier` registered the read is refused (`INTERNAL`), never run without the context |
-| A mirror stages only what changed | `Projection::replace_rows(RowScope::by(col(..)), rows)` over `KnownRow` rows: full-row change detection inside a declared scope, and the whole table only as the written-out `RowScope::whole_table()`; a row whose table a principal fact loader reads declares `KnownRow::PRINCIPAL`, and the kit refreshes the facts of exactly the principals whose rows changed (see the mirror kit) |
+| A mirror stages only what changed, in statements that do not grow with its keys | `Project::project(cx, keys)` receives every key its transaction touches at once, and `Projection::replace_rows(RowScope::any_of(column, keys), rows)` over `KnownRow` rows writes the batch in one upsert and one delete per table, with full-row change detection inside the declared scope (the whole table only as the written-out `RowScope::whole_table()`); the kit has no single-row write, so a statement per key can only be a loop the service writes itself; a row whose table a principal fact loader reads declares `KnownRow::PRINCIPAL`, and the kit refreshes the facts of exactly the principals whose rows changed (see the mirror kit) |
 
 A keyset page over an append-only journal (`seq > $2 ORDER BY seq LIMIT $3`) or a
 context read is the case `read_under_rls` exists for: the SQL filters by the
@@ -1290,17 +1296,21 @@ Mirror tables follow three rules:
   and its key is a sum type — `enum RosterKey { User(Uuid), Project(Uuid),
   Org(Uuid) }` — so every write to the set runs in that mirror's one lead
   transaction, and no hand-written `pg_advisory_xact_lock` serializes two mirrors.
-- **Key a multi-source join per row.** `keyed_by` yields the natural scope of the
-  rows a change touches (the project whose members changed), and the projection
-  writes that scope with `replace_rows(RowScope::by(..), rows)`. A `()` key is for
-  a true singleton only.
-  Cost, stated plainly: a live change projects only the keys `keyed_by` yields; a
-  full rescan (boot, the periodic reconcile, a leader takeover) calls `project`
-  once per touched key, all in one transaction, so with `replace_rows` a rescan
-  is about two statements per key (the upsert and the delete) — linear in keys,
-  constant in rows. A `()` key with `RowScope::whole_table()` makes a rescan
-  constant but re-sends every row on every change; in both shapes only the rows
-  that changed are impacted.
+- **Key a multi-source join per row, and write the batch at once.** `keyed_by`
+  yields the natural scope of the rows a change touches (the project whose members
+  changed); `project` receives every touched key in one call and writes each table
+  once, with `replace_rows(RowScope::any_of("project_id", keys), rows)`. A live
+  change writes only the scopes of its keys. A full rescan (boot, the periodic
+  reconcile, a leader takeover) hands every key to that one call, so it costs one
+  upsert (per ~30,000 bound values) and one delete per table, whatever the number
+  of keys — what a `()` key over `RowScope::whole_table()` costs, without
+  re-sending every row on every live change. A `()` key is therefore for a true
+  singleton only. A sum-type key splits the batch by variant and writes each
+  table once. Two tables linked by a cascading foreign key take three calls:
+  upsert the parents of the present keys, replace the children over every key,
+  then retire the parents of the absent keys (`staffing.rs` in the conformance
+  sample), so a retired parent's children are deleted, and impacted, by the kit
+  rather than silently by the cascade.
 - **No clock reads in a projection.** A projection (and a principal fact loader)
   is a function of the consumed facts, never of the time it runs. A cohort is a
   written fact: "active" is `end_date IS NULL`, never `end_date > now()`. A
