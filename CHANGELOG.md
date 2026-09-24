@@ -1026,11 +1026,11 @@ the black-box battery greps — is the wording the engine now emits.
 
 ### lane: metrics
 
-- **13. Leader gauge per leased loop.** One `service_engine_leader{kind,name}` gauge (`metrics::LEADER`) reports whether this pod holds a leased loop's lease: `kind` is `relay`, `cron`, `offer` or `mirror` and `name` is the slot, `1` on the holder and `0` on a standby, carrying the usual `service`/`pod` identity labels. `observe::record_leader(kind, name, holder)` sets it. It replaces the three unprefixed per-loop names proposed in #128 with one fact keyed by `kind`. The relay and cron loops record it from the shared slot claim (`housekeeping/leader/mod.rs`: a won claim is `1`, a lost claim `0`, so a standby that competes reads `0` and a leader that stops winning a slot reads `0` on its next claim); the offer records it at its singleton claim and every renewal (`offers/leader.rs`); the mirror records it every beat from `on_beat` (`mirror/runtime/lead.rs`), so a standby holds `0` and a failover moves the `1` to the pod that takes the expired lease. The gauge is a level, so a stale value self-corrects on the next claim or beat and a gracefully finished process stops emitting when its scrape stops.
+- **13. Leader gauge per leased loop.** One `service_engine_leader{kind,name}` gauge (`metrics::LEADER`) reports whether this pod holds a leased loop's lease: `kind` is `relay`, `cron`, `offer` or `mirror` and `name` is the slot, `1` on the holder and `0` on a standby, carrying the usual `service`/`pod` identity labels. `observe::record_leader(kind, name, holder)` sets it. It replaces the three unprefixed per-loop names proposed in the design review with one fact keyed by `kind`. The relay and cron loops record it from the shared slot claim (`housekeeping/leader/mod.rs`: a won claim is `1`, a lost claim `0`, so a standby that competes reads `0` and a leader that stops winning a slot reads `0` on its next claim); the offer records it at its singleton claim and every renewal (`offers/leader.rs`); the mirror records it every beat from `on_beat` (`mirror/runtime/lead.rs`), so a standby holds `0` and a failover moves the `1` to the pod that takes the expired lease. The gauge is a level, so a stale value self-corrects on the next claim or beat and a gracefully finished process stops emitting when its scrape stops.
 
 ### lane: prefix
 
-- **Mandatory root-field prefix.** `compose_service!` now takes a mandatory `prefix = <snake_ident>;` after `principal`; a block without it does not compile. Every root field a service exposes must be `<prefix><UpperName>` — `RootPrefix::from_snake` (re-exported at `service_engine::` and `service_engine::graphql::`) validates the ident (non-empty, lowercase-first, `[a-z0-9_]`, no leading/trailing/double `_`, ≤ 40 chars) and derives the lowerCamel prefix the field carries; `RootPrefix::owns(field)` is true iff `field` is the prefix followed by one uppercase ASCII letter and any tail (a bare-prefix field is not owned). `Engine::declare_root_prefix` records it (a second, different value → `EngineError::RootPrefixRedeclared`), `compose_service!`'s generated `register` declares it before any slice, and a service that hand-registers fragments must call it itself. `SchemaSlices::assemble(fragments, prefix)` and `verify(sdl)` refuse a root field outside the prefix (`RootFieldOutsidePrefix`) and refuse registered fragments with no prefix declared (`RootPrefixUndeclared`). New boot errors: `RootPrefixInvalid`, `RootPrefixUndeclared`, `RootPrefixRedeclared`, `RootFieldOutsidePrefix` — all fail the boot before the pod serves. The gate is the only defense against two plain-SDL services shadowing one root: the gateway composer merges a duplicate plain-SDL root silently and routes it to one graph (probe recorded in the plan), so the engine refuses the duplicate at boot instead.
+- **Mandatory root-field prefix.** `compose_service!` now takes a mandatory `prefix = <snake_ident>;` after `principal`; a block without it does not compile. Every root field a service exposes must be `<prefix><UpperName>` — `RootPrefix::from_snake` (re-exported at `service_engine::` and `service_engine::graphql::`) validates the ident (non-empty, lowercase-first, `[a-z0-9_]`, no leading/trailing/double `_`, ≤ 40 chars) and derives the lowerCamel prefix the field carries; `RootPrefix::owns(field)` is true iff `field` is the prefix followed by one uppercase ASCII letter and any tail (a bare-prefix field is not owned). `Engine::declare_root_prefix` records it (a second, different value → `EngineError::RootPrefixRedeclared`), `compose_service!`'s generated `register` declares it before any slice, and a service that hand-registers fragments must call it itself. `SchemaSlices::assemble(fragments, prefix)` and `verify(sdl)` refuse a root field outside the prefix (`RootFieldOutsidePrefix`) and refuse registered fragments with no prefix declared (`RootPrefixUndeclared`). New boot errors: `RootPrefixInvalid`, `RootPrefixUndeclared`, `RootPrefixRedeclared`, `RootFieldOutsidePrefix` — all fail the boot before the pod serves. The gate is the only defense against two plain-SDL services shadowing one root: the gateway composer merges a duplicate plain-SDL root silently and routes it to one graph (verified by a composition probe), so the engine refuses the duplicate at boot instead.
 - **Library-slice embed.** `compose_service!` gains a `slice <name> ["feat"] from <lib>::<macro> { … }` arm: the named library macro is invoked at `(prefix = <prefix> ; principal = <P>)` inside `pub mod <name>`, contributing its own root objects and `register`. `service_engine::pastey` is re-exported so a library writes `::service_engine::pastey::paste!` without its own dependency.
 - **Generic `gated!` and `subscription_union!` arms.** `gated! { generics [P: Bound] ; Aggregate<P>, Principal ; … }` emits `impl<P: Bound>` blocks so a library writes its affordance gate once, generic over the principal. `subscription_union! { generics [P: Bound] ; view = … ; delta = … ; … }` makes `from_erased`/`from_delta` generic over the principal (the emitted GraphQL types stay non-generic, one name each); a callback resolver calls `Delta::from_delta::<P>(&delta)`. The non-generic arms are unchanged.
 - Conformance: `s210` (a fragment root field outside the declared prefix fails the boot loud with slice/field/prefix), `s211` (fragments registered with no prefix declared → `RootPrefixUndeclared`), `s212` (a prefixed service boots, serves `sampleWidget`/`sampleCloseWidget`/`sampleWidgets`, and every composed root field is under the prefix). Every hand-registered root field, resolver method and GraphQL literal in the conformance sample moves under the `sample` prefix, and the example-service under `example`.
@@ -1275,8 +1275,8 @@ House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
   `serve` instead.
 - cohort: `Visibility::{cohorts, memberships}` now return `Vec<Cohort>` and `CohortIndex::keys_in_cohorts` takes `&[Cohort]` — replace every `CohortKey::of(&[…])` with a typed `Cohort` (`Cohort::uuid("manager", id)`, `Cohort::flag("public", true)`, `Cohort::text`, `Cohort::int`), and bind `keys_in_cohorts` against the row's natural columns with `Cohort::uuids`/`texts`/`holds`.
 - cohort: `CohortKey::of` is removed — a routing `CohortKey` derived from a declared cohort is now `Cohort::…(…).key()`; a per-principal render group stays `CohortKey::principal(id)`.
-- cohort: drop the shadow cohort-key column with one migration (accounts `cohort_keys bytea[]`, runners `0001_runners.sql:34`); the `CohortIndex` seam now reads the natural columns.
-- cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency (accounts Orgs) replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
+- cohort: drop the shadow cohort-key column with one migration (an adopter's `cohort_keys bytea[]` column); the `CohortIndex` seam now reads the natural columns.
+- cohort: `Inverse` gains a `Lookup` variant — a service matching `Inverse` exhaustively adds the arm; a link-table dependency replaces its `projector_reset` fallback with a `Lookup` that queries the link table (defaulted, so consumers that never match `Inverse` need no change).
 
 - migrate (break): `BootPlan` gains `libraries: Vec<LibraryMigrations>` — add `libraries: vec![]` to every `BootPlan { .. }`. `EngineError::MigrationsPending` gains a `libraries` field — exhaustive matches update. A service embedding a library declares each `LibraryMigrations { name, schema, band, migrator }` and passes them here.
 - metrics (13, additive): a new `service_engine_leader{kind,name}` gauge; no adopter code change — dashboards and alerts gain the per-loop leader series.
@@ -1286,7 +1286,7 @@ House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
 - mirror (8, additive): a mirror that needs a configuration key declares `Mirror::require_key::<C>(key)` (the key must live under `C::PREFIX`); a `project`-time `Err(EngineError::Config)` guard on that key is now the mirror's readiness declaration.
 
 - graphql (item 10): delete any synthetic slice that claimed the `*Payload` subscription-envelope types — the engine derives them from the delta union that also lists `LanesPaused`/`LanesResumed`.
-- graphql (item 11): replace hand-rolled `forbidden()` copies (accounts `graphql.rs`, `context.rs`) with `service_engine::graphql::forbidden()`; a query or subscription refusal that needs another code uses `graphql::coded_error(code, message)`.
+- graphql (item 11): replace an adopter's hand-rolled `forbidden()` copies with `service_engine::graphql::forbidden()`; a query or subscription refusal that needs another code uses `graphql::coded_error(code, message)`.
 
 - blobs (break): `Query::download` and `BlobReader::download_url` take a third `blobs::Disposition` argument — pass `Disposition::Attachment` to keep 0.2 behaviour.
 - blobs (break): `ReaperRound` gains `skipped` and `failed` — a downstream exhaustive struct pattern or literal adds `..` / the fields.
@@ -1308,7 +1308,7 @@ House-rule debt closed before 0.3.0 ships; no API change, no behaviour change.
 
 ## 0.2.0 - 2026-09-16
 
-The `services`-rewrite experiment and the Runners adoption proved the engine
+The first service rewrite and the first adoption proved the engine
 composes across independently-authored slices but leaks at the seams: every serious defect was cross-slice wiring a
 slice was meant to call and never did. 0.2 makes those seams **declarative** —
 a missing interlock is now a loud boot error, not silent nothing — closes the
@@ -1547,8 +1547,8 @@ missing wiring a boot error rather than silent nothing.
   to roll the write back and answer the mutation with that `Reason` code (a
   refusing reaction is dead-lettered with it). It cannot save, so it cannot
   recurse. This generalises the cross-slice interlocks the 0.1 rewrite left
-  unwired — the two known uses are the Services breach interlock and the Runners
-  reconcile-journal impact. New public exports: `service_engine::{PostSave,
+  unwired — the two known uses are a breach interlock and a reconcile-journal
+  impact, one in each of the first two adopters. New public exports: `service_engine::{PostSave,
   Refused}`; new `EngineError::PolicyRefused { code }`.
 - **Seam completeness at registration.** `Engine::require_post_save_policy::<A>()`
   declares aggregate `A` *subject* to a post-save policy; `Engine::run` fails at
@@ -1571,8 +1571,8 @@ that removes the `Keys`-vs-`Query` choice — ship under H4, H5, H6 above.)
   `load`/`load_many` in it to hold different nouns in one transaction), and it
   makes two concurrent multi-aggregate writes deadlock-free. Absent keys are
   omitted, as for a batched read. This is the answer to the synchronous
-  cross-slice write that adoption flagged — the Runners retirement-blocker case
-  that took a global advisory lock at six sites.
+  cross-slice write that adoption flagged — a retirement-blocker case that took a
+  global advisory lock at six sites.
 - **Reason codes are `SCREAMING_SNAKE_CASE`.** `Reason::new` validates its argument
   against `^[A-Z][A-Z0-9_]+$` (a leading capital, then capitals, digits or
   underscores); a mistyped literal is a compile error at the `const` site, and a
