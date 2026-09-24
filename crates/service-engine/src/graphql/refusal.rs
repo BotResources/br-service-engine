@@ -18,10 +18,15 @@ pub const BODY_READ_TIMEOUT_CODE: &str = "BODY_READ_TIMEOUT";
 /// `status` with `{"errors":[{"message": message, "extensions":{"code": code}}]}`. The
 /// message names the violated bound, never a path, an OS error or a database error.
 pub(crate) fn coded_refusal(status: StatusCode, code: &'static str, message: &str) -> Response {
+    (status, Json(coded_body(code, message))).into_response()
+}
+
+/// `{"errors":[{"message": message, "extensions":{"code": code}}]}`: the GraphQL response
+/// shape of a coded refusal, for a caller that frames it itself.
+pub(crate) fn coded_body(code: &'static str, message: &str) -> serde_json::Value {
     let mut extensions = serde_json::Map::new();
     extensions.insert(CODE_EXTENSION.to_string(), code.into());
-    let body = serde_json::json!({
+    serde_json::json!({
         "errors": [{ "message": message, "extensions": extensions }],
-    });
-    (status, Json(body)).into_response()
+    })
 }

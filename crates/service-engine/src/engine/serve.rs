@@ -18,10 +18,10 @@ impl<P: Principal> Engine<P> {
         app: axum::Router,
     ) -> Result<(), EngineError> {
         let server_stop = Stop::new();
-        let ws_shutdown = self.ws_shutdown_sender();
+        let stream_shutdown = self.stream_shutdown_sender();
         let server = tokio::spawn(crate::graphql::serve(listener, app, server_stop.clone()));
         let outcome = self.run().await;
-        let _ = ws_shutdown.send(true);
+        let _ = stream_shutdown.send(true);
         server_stop.stop();
         if let Ok(Err(error)) = server.await {
             tracing::error!(error = %crate::chain::describe(&error), "the engine's http server ended with an error");

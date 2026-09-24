@@ -12,6 +12,7 @@ mod router;
 mod schema;
 mod sdl;
 mod slices;
+mod sse;
 mod state;
 mod subscription;
 mod union;

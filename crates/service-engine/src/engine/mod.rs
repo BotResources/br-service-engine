@@ -79,7 +79,7 @@ pub struct Engine<P: Principal> {
     root_prefix: Option<crate::graphql::RootPrefix>,
     schema_sdl: Option<String>,
     shutdown: Arc<tokio::sync::Notify>,
-    ws_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
+    stream_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     declared_scopes: Option<ScopeDeclaration>,
     contributed_scopes: Vec<&'static str>,
     reaction_principal: Option<Arc<dyn crate::principal::ReactionPrincipalResolver>>,
@@ -144,7 +144,7 @@ impl<P: Principal> Engine<P> {
             root_prefix: None,
             schema_sdl: None,
             shutdown: Arc::new(tokio::sync::Notify::new()),
-            ws_shutdown: Arc::new(tokio::sync::watch::channel(false).0),
+            stream_shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             declared_scopes: None,
             contributed_scopes: Vec::new(),
             reaction_principal: None,
@@ -160,12 +160,12 @@ impl<P: Principal> Engine<P> {
         self.shutdown.clone()
     }
 
-    pub(crate) fn ws_shutdown_sender(&self) -> Arc<tokio::sync::watch::Sender<bool>> {
-        self.ws_shutdown.clone()
+    pub(crate) fn stream_shutdown_sender(&self) -> Arc<tokio::sync::watch::Sender<bool>> {
+        self.stream_shutdown.clone()
     }
 
-    pub(crate) fn ws_shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
-        self.ws_shutdown.subscribe()
+    pub(crate) fn stream_shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stream_shutdown.subscribe()
     }
 
     pub fn set_schema_sdl(&mut self, sdl: String) {
