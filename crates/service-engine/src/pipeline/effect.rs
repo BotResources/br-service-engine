@@ -63,16 +63,19 @@ fn internal_engine_failure(context: &'static str, error: EngineError) -> Mutatio
     MutationError::internal(format!("{context} failed"))
 }
 
-fn handler_failure<M: MutationInput>(error: M::Error) -> MutationError {
-    if let Some(cause) = internal_cause(&error) {
-        tracing::error!(
-            mutation = M::NAME,
-            %cause,
-            "a mutation handler failed without a reason; the client receives INTERNAL while \
-             the whole cause chain is kept here"
-        );
+fn handler_failure(mutation: &'static str, fault: &impl MutationFault) -> MutationError {
+    match internal_cause(fault) {
+        Some(cause) => {
+            tracing::error!(
+                mutation,
+                %cause,
+                "a mutation handler failed without a reason; the client receives INTERNAL while \
+                 the whole cause chain is kept here and in the executor's MutationError"
+            );
+            MutationError::internal(cause)
+        }
+        None => MutationError::refused(fault.reason(), fault.to_string()),
     }
-    MutationError::refused(error.reason(), error.to_string())
 }
 
 fn internal_cause(fault: &impl MutationFault) -> Option<String> {
@@ -135,7 +138,7 @@ where
         Ok(output) => output,
         Err(error) => {
             let _ = tx.rollback().await;
-            return Err(handler_failure::<M>(error));
+            return Err(handler_failure(M::NAME, &error));
         }
     };
     if !staged.is_within(services.impacts_per_commit) {
@@ -207,7 +210,7 @@ where
         Ok(output) => output,
         Err(error) => {
             let _ = tx.rollback().await;
-            return Err(handler_failure::<M>(error));
+            return Err(handler_failure(M::NAME, &error));
         }
     };
     flush_and_commit(tx, &staged, services.transport.as_ref())
@@ -222,10 +225,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::internal_cause;
+    use super::handler_failure;
     use crate::error::EngineError;
     use crate::gate::Reason;
-    use crate::pipeline::MutationFault;
+    use crate::pipeline::{MutationError, MutationFault};
 
     #[derive(Debug, thiserror::Error)]
     enum BoardFault {
@@ -245,19 +248,26 @@ mod tests {
     }
 
     #[test]
-    fn a_fault_without_a_reason_is_logged_with_its_whole_source_chain() {
+    fn a_fault_without_a_reason_fails_internal_with_its_whole_source_chain_as_detail() {
         let fault = BoardFault::Load(EngineError::Config("the board table is absent".into()));
 
-        let cause = internal_cause(&fault);
+        let failure = handler_failure("board.close", &fault);
 
         assert_eq!(
-            cause.as_deref(),
-            Some("loading the board: invalid configuration: the board table is absent")
+            failure,
+            MutationError::internal(
+                "loading the board: invalid configuration: the board table is absent"
+            )
         );
     }
 
     #[test]
-    fn a_refusal_is_not_logged_as_an_internal_fault() {
-        assert_eq!(internal_cause(&BoardFault::Closed), None);
+    fn a_refusal_keeps_its_reason_and_its_own_display_as_detail() {
+        let failure = handler_failure("board.close", &BoardFault::Closed);
+
+        assert_eq!(
+            failure,
+            MutationError::refused(Some(Reason::new("BOARD_CLOSED")), "the board is closed")
+        );
     }
 }

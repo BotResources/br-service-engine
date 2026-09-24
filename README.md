@@ -662,8 +662,10 @@ engine keeps (dispatch and dead-letter reasons, render faults, relay, cron and
 mirror health, NATS, object-storage and published-language details). A service's
 own faults reach it by construction: `MutationFault` and `ReactionError` both
 require `std::error::Error`, a mutation fault without a reason is logged as
-`describe(&fault)`, and a reaction fault's dispatch and dead-letter reason is
-`describe(&fault)`. So a fault keeps the error it wraps as its `source()`
+`describe(&fault)` and is the `detail` of the `MutationError` that
+`MutationExecutor::run` / `run_bulk` returns (a refusal's `detail` is its own
+`Display`, the only detail a client reads), and a reaction fault's dispatch and
+dead-letter reason is `describe(&fault)`. So a fault keeps the error it wraps as its `source()`
 (`#[from]` or `#[source]` with thiserror) and writes only its own context in
 `Display`; it never pre-renders its cause into a `String`. `gate::Reason` is an
 error too (its `Display` is its code), so a mutation that can only refuse
