@@ -4,7 +4,6 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::name::{AccumulatorName, MirrorName, NounName, ProjectorName, RelayName};
-use crate::session::SessionId;
 
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
 
@@ -423,18 +422,6 @@ pub enum EngineError {
         slice: &'static str,
         field: String,
         prefix: String,
-    },
-
-    #[error(
-        "no live session {session} on this pod, so its window cannot be paged; a page request \
-         must be issued over the session's own connection, which pins it to the pod that holds it"
-    )]
-    NoLiveSession { session: SessionId },
-
-    #[error("session {session} holds no window on projector {projector} to page")]
-    NoSuchWindow {
-        session: SessionId,
-        projector: ProjectorName,
     },
 
     #[error(

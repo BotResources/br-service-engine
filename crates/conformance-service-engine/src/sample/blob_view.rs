@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::{ForeignKey, Impact};
 use service_engine::name::{NounName, ProjectorName};
@@ -65,6 +66,7 @@ impl Projector for DocProjector {
         &'a self,
         pg: &'a sqlx::PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {

@@ -13,6 +13,7 @@ use crate::delta::{Delta, ErasedView, Revision};
 use crate::error::EngineError;
 use crate::impact::ForeignKey;
 use crate::name::{NounName, ProjectorName};
+use crate::page::KeyCeiling;
 use crate::population::{Inverse, Population};
 use crate::principal::Principal;
 use crate::projector::{LoadScope, Projector};
@@ -52,6 +53,7 @@ impl<P: Principal> Projector for Widgets<P> {
         &'a self,
         _pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a P,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move { Ok(Population::Keys(BTreeSet::new())) })

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::future::BoxFuture;
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::{Deps, Dims, ForeignKey, Impact};
 use service_engine::name::{Namespace, NounName, ProjectorName};
@@ -90,6 +91,7 @@ impl Projector for SpyAssignments {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {

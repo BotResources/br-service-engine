@@ -5,11 +5,13 @@ use std::sync::atomic::Ordering;
 use crate::cohort::CohortKey;
 use crate::dyn_compat::ErasedPopulation;
 use crate::error::{AttachError, EngineError};
+use crate::page::KeyCeiling;
 use crate::principal::Principal;
 use crate::render::group::{Rendered, Renderer};
 use crate::render::pass::PassContext;
 use crate::render::repair::resnapshot;
 use crate::runtime::SessionRuntime;
+use crate::session::capacity::admit;
 use crate::session::live::{Held, Session, WindowShape, WindowState, members_of};
 use crate::session::stream::Outbox;
 use crate::session::{AttachRequest, SessionId, SessionStream, WindowSpec};
@@ -47,7 +49,7 @@ impl<P: Principal> SessionRuntime<P> {
                 });
             }
         }
-        let id = request.session.unwrap_or_default();
+        let id = SessionId::new();
         let outbox = Arc::new(Outbox::new(self.config.session_buffer));
         let windows = request
             .windows
@@ -57,24 +59,15 @@ impl<P: Principal> SessionRuntime<P> {
                 params: spec.params.clone(),
                 members: BTreeSet::new(),
                 shape: WindowShape::Fixed,
-                pages: Vec::new(),
             })
             .collect();
-        {
-            let mut table = self.table.lock().await;
-            if table
-                .get(id)
-                .is_some_and(|existing| existing.is_live() || existing.is_pending())
-            {
-                return Err(AttachError::DuplicateSession { session: id });
-            }
-            table.insert(Session::pending(
-                id,
-                request.principal.clone(),
-                windows,
-                outbox.clone(),
-            ));
-        }
+        self.table.lock().await.insert(Session::pending(
+            id,
+            request.principal.clone(),
+            windows,
+            outbox.clone(),
+        ));
+        let stream = SessionStream::new(id, outbox, self.dropped.clone());
 
         let snapshots = match self.snapshot(&request.principal, &request.windows).await {
             Ok(snapshots) => snapshots,
@@ -84,7 +77,7 @@ impl<P: Principal> SessionRuntime<P> {
             }
         };
 
-        let (held, stream) = {
+        let held = {
             let mut table = self.table.lock().await;
             match table.get(id) {
                 None => return Err(self.connect_gone()),
@@ -113,8 +106,7 @@ impl<P: Principal> SessionRuntime<P> {
             }
             session.last_sent.extend(seeded);
             session.reset_now();
-            let stream = SessionStream::new(id, outbox, self.dropped.clone());
-            (session.go_live(), stream)
+            session.go_live()
         };
         let opened = match held {
             Held::Replay(impacts) if impacts.is_empty() => Ok(()),
@@ -251,7 +243,12 @@ impl<P: Principal> SessionRuntime<P> {
                 source,
             };
             let population = projector
-                .populate(&self.pg, &spec.params, principal)
+                .populate(
+                    &self.pg,
+                    &spec.params,
+                    KeyCeiling::attach(self.config.window_capacity),
+                    principal,
+                )
                 .await
                 .map_err(refuse)?;
             if let ErasedPopulation::Query(query) = &population
@@ -262,6 +259,7 @@ impl<P: Principal> SessionRuntime<P> {
                 });
             }
             let members = members_of(&population);
+            admit(&spec.projector, members.len(), self.config.window_capacity)?;
             let shape = WindowShape::of(&population);
             let under_rls = projector.renders_under_rls();
             let cohort = if under_rls {

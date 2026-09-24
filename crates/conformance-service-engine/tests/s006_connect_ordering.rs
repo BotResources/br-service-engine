@@ -6,6 +6,7 @@ use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::spy::{Spy, SpyAssignments, WindowMode};
 use service_engine::config::EngineConfig;
 use service_engine::delta::Delta;
+use service_engine::error::AttachError;
 use service_engine::impact::Dims;
 use service_engine::runtime::SessionRuntime;
 use sqlx::PgPool;
@@ -140,16 +141,17 @@ async fn s006_an_impact_the_snapshot_already_saw_yields_no_second_delta() {
 }
 
 #[tokio::test]
-async fn s006_a_connection_abandoned_before_its_reset_is_reaped_after_the_session_ttl() {
+async fn s006_a_connection_abandoned_before_its_reset_is_reaped_at_the_next_gc() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
     let principal = member(&pool, Uuid::now_v7(), home).await;
     assignment(&pool, home, "alpha").await;
 
-    let ttl = Duration::from_millis(200);
-    let (engine, gate, _spy) =
-        connecting(&pool, render_config("pod-abandoned").with_session_ttl(ttl));
+    let (engine, gate, _spy) = connecting(
+        &pool,
+        render_config("pod-abandoned").with_session_ttl(Duration::from_secs(3600)),
+    );
 
     let connecting = {
         let engine = engine.clone();
@@ -165,18 +167,56 @@ async fn s006_a_connection_abandoned_before_its_reset_is_reaped_after_the_sessio
         0,
         "a connection that never enqueued its Reset is not a live session"
     );
+    assert_eq!(engine.pending_sessions().await, 1);
+    assert_eq!(
+        engine.gc().await,
+        1,
+        "a connection abandoned before it went live is collected at the next gc, long before \
+         its ttl, because the client dropped the stream it was attaching"
+    );
+    assert_eq!(engine.pending_sessions().await, 0);
+    assert_eq!(engine.gc().await, 0);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s006_a_connection_stuck_in_its_snapshot_past_the_session_ttl_is_reaped_and_refused() {
+    let db = TestDb::fresh().await;
+    let pool = db.app_pool().clone();
+    let home = Uuid::now_v7();
+    let principal = member(&pool, Uuid::now_v7(), home).await;
+    assignment(&pool, home, "alpha").await;
+
+    let ttl = Duration::from_millis(200);
+    let (engine, gate, _spy) = connecting(&pool, render_config("pod-stuck").with_session_ttl(ttl));
+
+    let connecting = {
+        let engine = engine.clone();
+        let request = attach_request(&principal, vec![window(SpyAssignments::NAME, false)]);
+        tokio::spawn(async move { engine.attach(request).await })
+    };
+    gate.wait_until_inside().await;
     assert_eq!(
         engine.gc().await,
         0,
-        "a pending connection is given its whole ttl before it is reaped"
+        "a connection still assembling its snapshot is given its whole ttl"
     );
     tokio::time::sleep(ttl * 2).await;
     assert_eq!(
         engine.gc().await,
         1,
-        "a connection abandoned before it went live is collected once its ttl has passed"
+        "a connection stuck past its ttl is collected"
     );
-    assert_eq!(engine.gc().await, 0);
+    gate.release();
+    let refused = connecting.await.expect("the attach task completes");
+    assert!(
+        matches!(refused, Err(AttachError::ConnectTimedOut { .. })),
+        "the attach that outlived its reaped session is refused, never opened on a stale \
+         snapshot, got {:?}",
+        refused.map(|stream| stream.id())
+    );
+    assert_eq!(engine.live_sessions().await, 0);
 
     db.cleanup().await;
 }

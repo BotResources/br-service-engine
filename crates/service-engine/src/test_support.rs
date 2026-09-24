@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::error::EngineError;
 use crate::impact::ForeignKey;
 use crate::name::{NounName, ProjectorName};
+use crate::page::KeyCeiling;
 use crate::population::{Inverse, Population};
 use crate::principal::{Principal, PrincipalId};
 use crate::projector::{LoadScope, Projector};
@@ -88,6 +89,7 @@ macro_rules! stub_projector {
                 &'a self,
                 _pg: &'a PgPool,
                 _window: &'a WindowParams,
+                _ceiling: KeyCeiling,
                 _principal: &'a TestPrincipal,
             ) -> BoxFuture<'a, Result<Population<$key>, EngineError>> {
                 Box::pin(async move { Ok(Population::Keys(BTreeSet::new())) })

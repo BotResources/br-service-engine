@@ -10,6 +10,7 @@ use conformance_service_engine::sample::principal::SamplePrincipal;
 use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::{AssignmentVisibility, GatedAssignmentProjector};
 use engine_twin::{SOON, await_ready, spy_engine, stage};
+use service_engine::KeyCeiling;
 use service_engine::delta::Delta;
 use service_engine::impact::{Deps, Impact};
 use service_engine::population::Population;
@@ -89,7 +90,7 @@ async fn s081_the_session_window_membership_is_derived_from_the_visibility_decla
 
     let projector = GatedAssignmentProjector::membership();
     let population = projector
-        .populate(&pool, &WindowParams::none(), &principal)
+        .populate(&pool, &WindowParams::none(), KeyCeiling::NONE, &principal)
         .await
         .expect("the window populates");
     let produced: BTreeSet<Uuid> = match population {

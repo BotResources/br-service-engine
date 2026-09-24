@@ -4,13 +4,6 @@ type CardMutation {
 	exampleAdvanceCard(id: UUID!): MutationAck!
 	exampleScheduleCardDeadline(id: UUID!, inSeconds: Int!): MutationAck!
 	exampleImportCards(boardId: UUID!, titles: [String!]!): MutationAck!
-	examplePageCards(session: UUID!, boardId: UUID!, before: UUID!, size: Int!): CardPage!
-}
-
-type CardPage {
-	added: Int!
-	released: Int!
-	delivered: Int!
 }
 
 type CardQuery {
@@ -31,8 +24,7 @@ type CardReset {
 }
 
 type CardSubscription {
-	exampleCardDeltas(boardId: UUID!): CardDelta!
-	exampleCardPageDeltas(session: UUID!, boardId: UUID!, size: Int!): CardDelta!
+	exampleCardDeltas(boardId: UUID!, size: Int!, before: UUID): CardDelta!
 }
 
 type CardUpsert {

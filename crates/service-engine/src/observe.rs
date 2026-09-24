@@ -9,13 +9,14 @@ use crate::metrics::{
     BLOBS_REAPED_TOTAL, CHUNK_CONFLICTS_TOTAL, CHUNK_FLUSH_DURATION_SECONDS, CHUNK_FLUSH_SIZE,
     COHORTS, CRON_DURATION_SECONDS, CRON_RUNS_TOTAL, DEAD_LETTERS_TOTAL, DEPENDENCY_UP,
     IMPACTS_COMMITTED_TOTAL, IMPACTS_RECEIVED_TOTAL, LABEL_DEPENDENCY, LABEL_JOB, LABEL_KIND,
-    LABEL_MIRROR, LABEL_NAME, LABEL_OUTCOME, LABEL_POD, LABEL_REASON, LABEL_SERVICE, LABEL_SOURCE,
-    LEADER, LEADER_SLOT_CLAIMS_TOTAL, MIRROR_RESTARTS_TOTAL, NOTIFICATION_QUEUE_USAGE,
-    OUTBOX_OLDEST_AGE_SECONDS, OUTBOX_PENDING, PASS_DELTAS, PASS_DURATION_SECONDS, PASS_IMPACTS,
-    PASS_OVERFLOWS_TOTAL, PENDING_SESSIONS, RELAY_DRAINS_TOTAL, RELAY_ROWS_TOTAL, RESETS_TOTAL,
-    SESSIONS, SESSIONS_ENDED_TOTAL, TRANSPORT_RECONNECTS_TOTAL,
+    LABEL_MIRROR, LABEL_NAME, LABEL_OUTCOME, LABEL_POD, LABEL_PROJECTOR, LABEL_REASON,
+    LABEL_SERVICE, LABEL_SOURCE, LEADER, LEADER_SLOT_CLAIMS_TOTAL, MIRROR_RESTARTS_TOTAL,
+    NOTIFICATION_QUEUE_USAGE, OUTBOX_OLDEST_AGE_SECONDS, OUTBOX_PENDING, PASS_DELTAS,
+    PASS_DURATION_SECONDS, PASS_IMPACTS, PASS_OVERFLOWS_TOTAL, PENDING_SESSIONS,
+    RELAY_DRAINS_TOTAL, RELAY_ROWS_TOTAL, RESETS_TOTAL, SESSIONS, SESSIONS_ENDED_TOTAL,
+    TRANSPORT_RECONNECTS_TOTAL, WINDOWS_OVER_CAPACITY_TOTAL,
 };
-use crate::name::{JobName, MirrorName};
+use crate::name::{JobName, MirrorName, ProjectorName};
 use crate::render::pass::PassReport;
 
 pub const REASON_MAX_AGE: &str = "max_age";
@@ -28,6 +29,9 @@ pub const DEP_LISTENER: &str = "listener";
 pub const DEP_NATS: &str = "nats";
 pub const DEP_MIRRORS: &str = "mirrors";
 pub const DEP_INBOUND: &str = "inbound";
+
+pub const WINDOW_REFUSED: &str = "refused";
+pub const WINDOW_KEPT: &str = "kept";
 
 pub const LEADER_OFFER: &str = "offer";
 pub const LEADER_MIRROR: &str = "mirror";
@@ -159,6 +163,17 @@ pub fn record_chunk_conflicts(count: usize) {
     if count > 0 {
         metrics::counter!(CHUNK_CONFLICTS_TOTAL, identity()).increment(count as u64);
     }
+}
+
+pub fn record_window_over_capacity(projector: &ProjectorName, outcome: &'static str) {
+    metrics::counter!(
+        WINDOWS_OVER_CAPACITY_TOTAL,
+        labelled([
+            (LABEL_PROJECTOR, projector.as_str().to_string()),
+            (LABEL_OUTCOME, outcome.to_string()),
+        ])
+    )
+    .increment(1);
 }
 
 pub fn record_mirror_restart(mirror: &MirrorName) {

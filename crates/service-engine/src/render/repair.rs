@@ -4,6 +4,7 @@ use crate::cohort::CohortKey;
 use crate::dyn_compat::ErasedPopulation;
 use crate::error::EngineError;
 use crate::name::ProjectorName;
+use crate::page::KeyCeiling;
 use crate::principal::Principal;
 use crate::render::group::{Rendered, Renderer};
 use crate::render::pass::PassContext;
@@ -24,7 +25,6 @@ struct WindowSpecShot {
     params: WindowParams,
     members: BTreeSet<KeyBytes>,
     shape: WindowShape,
-    paged: BTreeSet<KeyBytes>,
 }
 
 struct WindowShot {
@@ -50,7 +50,6 @@ pub(crate) async fn resnapshot<P: Principal>(
             params: window.params.clone(),
             members: window.members.clone(),
             shape: window.shape.clone(),
-            paged: window.pages.iter().flatten().cloned().collect(),
         })
         .collect();
 
@@ -68,7 +67,9 @@ pub(crate) async fn resnapshot<P: Principal>(
             .registry
             .projector(name)
             .ok_or_else(|| EngineError::UnboundProjector(name.clone()))?;
-        let population = projector.populate(ctx.pg, &spec.params, &principal).await?;
+        let population = projector
+            .populate(ctx.pg, &spec.params, KeyCeiling::NONE, &principal)
+            .await?;
         cost.populates += 1;
         if let ErasedPopulation::Query(query) = &population
             && query.interest().is_empty()
@@ -77,8 +78,7 @@ pub(crate) async fn resnapshot<P: Principal>(
                 projector: name.clone(),
             });
         }
-        let mut members = refreshed_members(&spec.members, &BTreeSet::new(), &population);
-        members.extend(spec.paged.iter().cloned());
+        let members = refreshed_members(&spec.members, &BTreeSet::new(), &population);
         let shape = spec.shape.refreshed(&population);
         let under_rls = projector.renders_under_rls();
         let cohort = if under_rls {
@@ -105,7 +105,7 @@ pub(crate) async fn resnapshot<P: Principal>(
     let mut seeded = Vec::new();
     for (index, shot) in shots.into_iter().enumerate() {
         let window = &mut session.windows[index];
-        window.members = shot.members;
+        window.replace_members(shot.members, id, ctx.config.window_capacity);
         window.shape = shot.shape;
         let projector = window.projector.clone();
         for (key, view) in shot.views {

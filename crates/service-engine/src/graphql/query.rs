@@ -8,6 +8,7 @@ use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
 use crate::graphql::error::{OrInternal, engine_data, internal_fault};
 use crate::graphql::state::GraphqlState;
+use crate::page::KeyCeiling;
 use crate::persistence::{Aggregate, Persistence};
 use crate::principal::Principal;
 use crate::projector::Projector;
@@ -148,7 +149,12 @@ impl<'a, P: Principal> Query<'a, P> {
         let erased = self.erased(&projector)?;
         let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
         let population = erased
-            .populate(self.state.pg(), &WindowParams::none(), self.principal)
+            .populate(
+                self.state.pg(),
+                &WindowParams::none(),
+                KeyCeiling::NONE,
+                self.principal,
+            )
             .await
             .or_internal("populate a query")?;
         if !is_member(&population, &key_bytes) {
@@ -172,7 +178,7 @@ impl<'a, P: Principal> Query<'a, P> {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
         let population = erased
-            .populate(self.state.pg(), &params, self.principal)
+            .populate(self.state.pg(), &params, KeyCeiling::NONE, self.principal)
             .await
             .or_internal("populate a query window")?;
         let keys = member_keys(&population);

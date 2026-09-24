@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use serde::Serialize;
 use service_engine::Cohort;
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gate, Gated, Reason};
 use service_engine::impact::{Deps, Dims, ForeignKey, Impact};
@@ -168,6 +169,7 @@ impl Projector for GatedAssignmentProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {

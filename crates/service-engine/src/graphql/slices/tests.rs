@@ -75,8 +75,8 @@ fn capabilities_of_one_aggregate_may_share_an_owned_type() {
             fragment("card", &["sampleCard", "sampleAdvanceCard"], &["CardView"]),
             fragment(
                 "card",
-                &["sampleCards", "samplePageCards"],
-                &["CardView", "CardPage"],
+                &["sampleCards", "sampleCardHistory"],
+                &["CardView", "CardHistory"],
             ),
         ],
         Some(&prefix()),

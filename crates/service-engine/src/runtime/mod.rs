@@ -1,7 +1,6 @@
 mod connect;
 mod counters;
 mod drain;
-mod paging;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -19,7 +18,6 @@ use crate::session::store::SessionTable;
 use crate::session::stream::DropList;
 
 pub use counters::RenderMetrics;
-pub use paging::PageReport;
 
 use counters::Counters;
 
@@ -121,6 +119,10 @@ impl<P: Principal> SessionRuntime<P> {
 
     pub async fn live_sessions(&self) -> usize {
         self.table.lock().await.live_ids().len()
+    }
+
+    pub async fn pending_sessions(&self) -> usize {
+        self.table.lock().await.pending_count()
     }
 
     pub async fn gc(&self) -> usize {

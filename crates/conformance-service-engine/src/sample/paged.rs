@@ -7,7 +7,7 @@ use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
 use service_engine::view::{Populate, Projector as ViewProjector, cohort_window};
-use service_engine::{Cohort, CohortKey};
+use service_engine::{Cohort, CohortKey, Page, WindowSize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -16,52 +16,34 @@ use crate::sample::gated::AssignmentVisibility;
 use crate::sample::principal::SamplePrincipal;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AssignmentPage {
-    pub before: Option<Uuid>,
-    pub size: Option<i64>,
-}
+pub struct AssignmentPage(Option<Page<Uuid>>);
 
 impl AssignmentPage {
-    pub fn head(size: i64) -> Self {
-        Self {
-            before: None,
-            size: Some(size),
-        }
+    pub fn head(size: WindowSize) -> Self {
+        Self(Some(Page::head(size)))
     }
 
-    pub fn before(before: Uuid, size: i64) -> Self {
-        Self {
-            before: Some(before),
-            size: Some(size),
-        }
+    pub fn before(before: Uuid, size: WindowSize) -> Self {
+        Self(Some(Page::before(before, size)))
+    }
+
+    pub fn whole() -> Self {
+        Self(None)
     }
 }
 
-async fn head_keys(pg: &PgPool, tenant: Uuid, size: i64) -> Result<BTreeSet<Uuid>, EngineError> {
+async fn newest_keys(
+    cx: &Populate<'_, SamplePrincipal>,
+    page: Option<&Page<Uuid>>,
+) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query(
-        "SELECT id FROM sample_assignment WHERE tenant_id = $1 ORDER BY id DESC LIMIT $2",
-    )
-    .bind(tenant)
-    .bind(size)
-    .fetch_all(pg)
-    .await?;
-    Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
-}
-
-async fn page_keys(
-    pg: &PgPool,
-    tenant: Uuid,
-    before: Uuid,
-    size: i64,
-) -> Result<BTreeSet<Uuid>, EngineError> {
-    let rows = sqlx::query(
-        "SELECT id FROM sample_assignment WHERE tenant_id = $1 AND id < $2 \
+        "SELECT id FROM sample_assignment WHERE tenant_id = $1 AND ($2::uuid IS NULL OR id < $2) \
          ORDER BY id DESC LIMIT $3",
     )
-    .bind(tenant)
-    .bind(before)
-    .bind(size)
-    .fetch_all(pg)
+    .bind(cx.principal().tenant())
+    .bind(page.and_then(Page::cursor))
+    .bind(page.map(|page| cx.limit(page)))
+    .fetch_all(cx.pool())
     .await?;
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
 }
@@ -104,13 +86,14 @@ impl ViewProjector for PagedAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         query: &AssignmentPage,
     ) -> Result<Population<Uuid>, EngineError> {
-        let tenant = cx.principal().tenant();
-        let keys = match (query.before, query.size) {
-            (Some(before), Some(size)) => page_keys(cx.pool(), tenant, before, size).await?,
-            (None, Some(size)) => head_keys(cx.pool(), tenant, size).await?,
-            _ => tenant_keys(cx.pool(), tenant).await?,
-        };
-        Ok(Population::Keys(keys))
+        let keys = newest_keys(cx, query.0.as_ref()).await?;
+        Ok(match &query.0 {
+            Some(page) => page.population(keys),
+            None => Population::Ordered {
+                keys,
+                open_head: true,
+            },
+        })
     }
 
     fn project(

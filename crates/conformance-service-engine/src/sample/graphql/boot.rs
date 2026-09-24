@@ -93,7 +93,7 @@ impl GraphqlService {
     }
 }
 
-pub(super) fn base_config(channel: &str, pod: &str) -> EngineConfig {
+pub fn base_config(channel: &str, pod: &str) -> EngineConfig {
     EngineConfig::new(
         ChannelName::new(channel).expect("a valid notify channel"),
         PodId::new(pod).expect("a valid pod id"),
@@ -117,8 +117,16 @@ pub async fn boot_graphql_service(
     channel: &str,
     pod: &str,
 ) -> GraphqlService {
+    boot_graphql_service_with(db, nats, base_config(channel, pod)).await
+}
+
+pub async fn boot_graphql_service_with(
+    db: &TestDb,
+    nats: Nats,
+    config: EngineConfig,
+) -> GraphqlService {
     let addr = free_loopback_addr().await;
-    let config = base_config(channel, pod).with_http_addr(addr);
+    let config = config.with_http_addr(addr);
 
     let mut engine = Engine::<SamplePrincipal>::boot(
         config,

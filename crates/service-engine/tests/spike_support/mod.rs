@@ -7,6 +7,7 @@ use br_core_auth::{AuthMethod, Passport, PassportClaims};
 use futures_util::future::BoxFuture;
 use idle_runtime::idle_runtime;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::accumulator::{Accumulator, AccumulatorRuntime, ChunkReader, ChunkSeq};
 use service_engine::cohort::{Cohort, CohortKey};
 use service_engine::delta::ErasedView;
@@ -98,6 +99,7 @@ impl Projector for Assignments {
         &'a self,
         _pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a Viewer,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move { Ok(Population::Keys(self.open.clone())) })
@@ -174,6 +176,7 @@ impl Projector for Notes {
         &'a self,
         _pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a Viewer,
     ) -> BoxFuture<'a, Result<Population<NoteKey>, EngineError>> {
         Box::pin(async move {
@@ -266,7 +269,7 @@ pub async fn render(
     viewer: &Viewer,
 ) -> Vec<ErasedView> {
     let population = projector
-        .populate(pg, &WindowParams::none(), viewer)
+        .populate(pg, &WindowParams::none(), KeyCeiling::NONE, viewer)
         .await
         .expect("populate");
     let keys: Vec<KeyBytes> = match population {
