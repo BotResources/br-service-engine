@@ -13,6 +13,7 @@ pub struct SamplePrincipal {
     id: PrincipalId,
     tenant: Uuid,
     passport: Passport,
+    registered_tenant: Option<Uuid>,
 }
 
 impl SamplePrincipal {
@@ -28,12 +29,31 @@ impl SamplePrincipal {
                 None,
                 PassportClaims::new(),
             ),
+            registered_tenant: None,
         }
     }
 
     pub fn tenant(&self) -> Uuid {
         self.tenant
     }
+
+    pub fn registered_tenant(&self) -> Option<Uuid> {
+        self.registered_tenant
+    }
+}
+
+pub fn load_registered_tenant<'a>(
+    pg: &'a PgPool,
+    principal: &'a mut SamplePrincipal,
+) -> BoxFuture<'a, Result<(), EngineError>> {
+    Box::pin(async move {
+        principal.registered_tenant =
+            sqlx::query_scalar("SELECT tenant_id FROM sample_member WHERE user_id = $1")
+                .bind(principal.id().as_uuid())
+                .fetch_optional(pg)
+                .await?;
+        Ok(())
+    })
 }
 
 impl Principal for SamplePrincipal {
