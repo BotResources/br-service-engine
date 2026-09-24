@@ -25,7 +25,6 @@ pub struct CardView {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BoardWindow {
     pub board_id: Option<Uuid>,
-    pub before: Option<Uuid>,
     pub size: Option<i64>,
 }
 
@@ -33,25 +32,12 @@ impl BoardWindow {
     pub fn of(board_id: Uuid) -> Self {
         Self {
             board_id: Some(board_id),
-            before: None,
             size: None,
         }
     }
 
-    pub fn head(board_id: Uuid, size: i64) -> Self {
-        Self {
-            board_id: Some(board_id),
-            before: None,
-            size: Some(size),
-        }
-    }
-
-    pub fn page(board_id: Uuid, before: Uuid, size: i64) -> Self {
-        Self {
-            board_id: Some(board_id),
-            before: Some(before),
-            size: Some(size),
-        }
+    pub fn sized(self, size: Option<i64>) -> Self {
+        Self { size, ..self }
     }
 }
 
@@ -76,15 +62,10 @@ impl Projector for CardsView {
         cx: &Populate<'_, AppPrincipal>,
         query: &BoardWindow,
     ) -> Result<Population<Uuid>, EngineError> {
-        let keys = match (query.board_id, query.before, query.size) {
-            (Some(board), Some(before), Some(size)) => {
-                store::cards_of_board_before(cx.pool(), board, before, size).await?
-            }
-            (Some(board), None, Some(size)) => {
-                store::cards_of_board_head(cx.pool(), board, size).await?
-            }
-            (Some(board), _, None) => store::cards_of_board(cx.pool(), board).await?,
-            (None, _, _) => store::all_card_ids(cx.pool()).await?,
+        let keys = match (query.board_id, query.size) {
+            (Some(board), Some(size)) => store::cards_of_board_head(cx.pool(), board, size).await?,
+            (Some(board), None) => store::cards_of_board(cx.pool(), board).await?,
+            (None, _) => store::all_card_ids(cx.pool()).await?,
         };
         Ok(Population::Keys(keys.into_iter().collect()))
     }

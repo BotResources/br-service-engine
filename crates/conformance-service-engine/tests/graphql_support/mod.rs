@@ -80,6 +80,11 @@ impl GraphqlWs {
         .await;
     }
 
+    pub async fn complete(&mut self, id: &str) {
+        self.send(serde_json::json!({ "id": id, "type": "complete" }))
+            .await;
+    }
+
     pub async fn next_data(&mut self, within: Duration) -> Option<serde_json::Value> {
         let deadline = tokio::time::Instant::now() + within;
         loop {

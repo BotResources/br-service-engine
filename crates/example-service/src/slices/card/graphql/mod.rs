@@ -3,7 +3,7 @@ mod item;
 
 use async_graphql::{MergedObject, MergedSubscription};
 
-pub use board::{CardBoardMutation, CardBoardQuery, CardBoardSubscription, CardDelta, CardPage};
+pub use board::{CardBoardMutation, CardBoardQuery, CardBoardSubscription, CardDelta};
 pub use item::{CardItemMutation, CardItemQuery};
 
 #[derive(MergedObject, Default)]

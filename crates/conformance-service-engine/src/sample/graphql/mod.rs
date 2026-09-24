@@ -7,8 +7,8 @@ mod roots;
 mod upload;
 
 pub use boot::{
-    GraphqlService, boot_graphql_service, boot_rls_query_service, root_field_collision,
-    type_collision,
+    GraphqlService, base_config, boot_graphql_service, boot_graphql_service_with,
+    boot_rls_query_service, root_field_collision, type_collision,
 };
 pub use forbidden::boot_forbidden_service;
 pub use negative::{

@@ -35,32 +35,24 @@ impl AssignmentPage {
             size: Some(size),
         }
     }
+
+    pub fn whole() -> Self {
+        Self::default()
+    }
 }
 
-async fn head_keys(pg: &PgPool, tenant: Uuid, size: i64) -> Result<BTreeSet<Uuid>, EngineError> {
-    let rows = sqlx::query(
-        "SELECT id FROM sample_assignment WHERE tenant_id = $1 ORDER BY id DESC LIMIT $2",
-    )
-    .bind(tenant)
-    .bind(size)
-    .fetch_all(pg)
-    .await?;
-    Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
-}
-
-async fn page_keys(
+async fn newest_keys(
     pg: &PgPool,
     tenant: Uuid,
-    before: Uuid,
-    size: i64,
-) -> Result<BTreeSet<Uuid>, EngineError> {
+    page: &AssignmentPage,
+) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query(
-        "SELECT id FROM sample_assignment WHERE tenant_id = $1 AND id < $2 \
+        "SELECT id FROM sample_assignment WHERE tenant_id = $1 AND ($2::uuid IS NULL OR id < $2) \
          ORDER BY id DESC LIMIT $3",
     )
     .bind(tenant)
-    .bind(before)
-    .bind(size)
+    .bind(page.before)
+    .bind(page.size)
     .fetch_all(pg)
     .await?;
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
@@ -104,13 +96,10 @@ impl ViewProjector for PagedAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         query: &AssignmentPage,
     ) -> Result<Population<Uuid>, EngineError> {
-        let tenant = cx.principal().tenant();
-        let keys = match (query.before, query.size) {
-            (Some(before), Some(size)) => page_keys(cx.pool(), tenant, before, size).await?,
-            (None, Some(size)) => head_keys(cx.pool(), tenant, size).await?,
-            _ => tenant_keys(cx.pool(), tenant).await?,
-        };
-        Ok(Population::Keys(keys))
+        Ok(Population::Ordered {
+            keys: newest_keys(cx.pool(), cx.principal().tenant(), query).await?,
+            open_head: query.before.is_none(),
+        })
     }
 
     fn project(

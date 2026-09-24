@@ -81,3 +81,18 @@ spec:
               the engine runs, labelled by source; service_engine_outbox_pending and
               service_engine_outbox_oldest_age_seconds show a backlog that is still draining before
               any of it is parked.
+        - alert: ServiceEngineWindowOverCapacity
+          expr: >-
+            sum by (service, projector, outcome) (service_engine_windows_over_capacity_total) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: A view's windows are outgrowing window_capacity
+            description: >-
+              service_engine_windows_over_capacity_total on {{ $labels.service }} for projector
+              {{ $labels.projector }} is above zero with outcome {{ $labels.outcome }} since a pod
+              started. kept is a live
+              window that grew past window_capacity: it stays open and keeps delivering, but the
+              next attach of that window is refused with WINDOW_TOO_LARGE. refused is clients
+              being refused now. Bound the view with a size or a narrower filter argument on its
+              delta subscription, or raise window_capacity for this service.

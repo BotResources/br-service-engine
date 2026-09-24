@@ -4,13 +4,9 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::name::{AccumulatorName, MirrorName, NounName, ProjectorName, RelayName};
-use crate::session::SessionId;
 
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
 
-/// Renders `error` and its whole `source()` chain as `top: cause: root`, the
-/// form the engine logs. A service that keeps an engine error as text, or logs
-/// one, renders it with this so the cause is not lost.
 pub fn describe(error: &dyn StdError) -> String {
     crate::chain::describe(error)
 }
@@ -428,18 +424,6 @@ pub enum EngineError {
         slice: &'static str,
         field: String,
         prefix: String,
-    },
-
-    #[error(
-        "no live session {session} on this pod, so its window cannot be paged; a page request \
-         must be issued over the session's own connection, which pins it to the pod that holds it"
-    )]
-    NoLiveSession { session: SessionId },
-
-    #[error("session {session} holds no window on projector {projector} to page")]
-    NoSuchWindow {
-        session: SessionId,
-        projector: ProjectorName,
     },
 
     #[error(

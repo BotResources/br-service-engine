@@ -1,3 +1,4 @@
+pub(crate) mod capacity;
 pub(crate) mod live;
 pub(crate) mod store;
 pub mod stream;
@@ -24,12 +25,6 @@ impl SessionId {
 
     pub fn as_uuid(self) -> Uuid {
         self.0
-    }
-}
-
-impl From<Uuid> for SessionId {
-    fn from(id: Uuid) -> Self {
-        Self(id)
     }
 }
 
@@ -109,21 +104,11 @@ impl WindowSpec {
 pub struct AttachRequest<P: Principal> {
     pub principal: P,
     pub windows: Vec<WindowSpec>,
-    pub session: Option<SessionId>,
 }
 
 impl<P: Principal> AttachRequest<P> {
     pub fn new(principal: P, windows: Vec<WindowSpec>) -> Self {
-        Self {
-            principal,
-            windows,
-            session: None,
-        }
-    }
-
-    pub fn with_session(mut self, session: SessionId) -> Self {
-        self.session = Some(session);
-        self
+        Self { principal, windows }
     }
 }
 

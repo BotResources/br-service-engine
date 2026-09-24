@@ -28,6 +28,7 @@ pub const OUTBOX_PENDING: &str = "service_engine_outbox_pending";
 pub const OUTBOX_OLDEST_AGE_SECONDS: &str = "service_engine_outbox_oldest_age_seconds";
 pub const DEPENDENCY_UP: &str = "service_engine_dependency_up";
 pub const LEADER: &str = "service_engine_leader";
+pub const WINDOWS_OVER_CAPACITY_TOTAL: &str = "service_engine_windows_over_capacity_total";
 
 pub const ALL: &[&str] = &[
     PASS_DURATION_SECONDS,
@@ -58,6 +59,7 @@ pub const ALL: &[&str] = &[
     OUTBOX_OLDEST_AGE_SECONDS,
     DEPENDENCY_UP,
     LEADER,
+    WINDOWS_OVER_CAPACITY_TOTAL,
 ];
 
 pub const LABEL_SERVICE: &str = "service";
@@ -70,6 +72,7 @@ pub const LABEL_DEPENDENCY: &str = "dependency";
 pub const LABEL_SOURCE: &str = "source";
 pub const LABEL_KIND: &str = "kind";
 pub const LABEL_NAME: &str = "name";
+pub const LABEL_PROJECTOR: &str = "projector";
 
 #[cfg(test)]
 mod tests {

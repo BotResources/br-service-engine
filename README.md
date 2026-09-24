@@ -59,6 +59,7 @@ battery-backed.
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
+| `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
 | `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
@@ -645,10 +646,11 @@ begin or commit, an engine wiring fault, a handler error whose
 `error` with its whole `source()` chain where it converts the error. A handler
 fault joins its own chain to that log by returning `Some(self)` from
 `MutationFault::as_error` (the default logs its `Display` alone). The few
-failures a client can act on keep a specific code: paging a session the caller
-does not hold or a window it never attached is `NOT_FOUND`, attaching under a
-session id a live session holds is `CONFLICT`, attaching for a principal that no
-longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
+failures a client can act on keep a specific code: attaching a window whose
+population exceeds `window_capacity` is `WINDOW_TOO_LARGE`
+(`graphql::WINDOW_TOO_LARGE_CODE`; the message names the capacity, never the
+projector nor the population size, which may count rows the caller cannot see),
+attaching for a principal that no longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
 the request is answered `500` with the same `INTERNAL` error body, not `401`. A
 refusal that carries a reason is unchanged: its code and its `mutation refused:`
 message. `graphql::internal_error(context, &cause)` gives a service's own
@@ -704,8 +706,8 @@ writes only a native `async fn populate(cx, q)` over a `Populate` context and
 `project(row, principal) -> Result<Out, EngineError>`. `project` is fallible: a
 stored row it cannot render (a nested blob that will not deserialize) returns
 `Err`, and the engine dead-letters that poison with the projector as source at
-**every render entry point** — a normal pass, the attach snapshot, a page, and a
-repair re-snapshot all record the poison the moment `project` fails, deduped on
+**every render entry point** — a normal pass, the attach snapshot and a repair
+re-snapshot all record the poison the moment `project` fails, deduped on
 projector plus key — and repairs, then ends, the faulted sessions rather than
 panicking the pod.
 No hand-written future plumbing and no render load SQL live in the view: the engine
@@ -809,42 +811,57 @@ cause silently dropped, so a service that attaches a large payload as a cause
 learns at the mutation, not by a viewer missing it — keep a cause to a small fact
 and carry bulk in the view.
 
-**Page through history behind a live window.** The kit gesture
-`service_engine::page::<P, V>(ctx, session, &cursor)` re-runs the
-projector's `populate` with a cursor and **appends** the older keys it returns to
-the window the session already holds, delivering the new keys as `Upsert`s on the
-contiguous revision — scrolling back never sends a `Reset`. The window is the
-live head `populate` filled at attach plus every appended page; a key changes
-wherever it sits (an edit to an old row reaches the viewer who holds it), a
-`Remove` leaves the window only when the row is deleted or becomes invisible,
-never because it fell off a page bound. `window_capacity` bounds the keys a
-session may hold across its pages: once appending a page would exceed it the
-**oldest appended page is released** — dropped from the window and from the
-session's `last_sent` with no `Remove` delta, since the client that asked for
-that page drops it too — while the live head is always retained. A paged history
-survives a principal-facts refresh and a reconnect `Reset` (still subject to its
-own visibility). The gesture is authorized against the caller's `Passport`: the
-engine serves only a **live session owned by the calling principal**. Because a
-session lives on the pod that holds its socket, a page request must be issued
-**over that session's own connection** (a mutation over the same WebSocket lands
-on the same pod); a page for a session this pod does not hold — or one held for a
-different principal — is refused with `EngineError::NoLiveSession`, so knowing
-another session's id buys an attacker nothing. Through the gateway there is no
-such connection: the session rides an event stream (see *Subscription
-transports*) and the `page` mutation is a separate `POST` the gateway may route
-to another replica, where it is refused the same way. Paging a gateway (SSE)
-session requires the session's pod (one replica) until 0.4.0 moves paging to
-subscription arguments.
-The client correlates the two by supplying its own `SessionId`:
-`attach_with_session` (kit) / a `session` argument on the subscription pins the
-id the `page` mutation then names. The
-reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
-size)` opens the head window and `pageCards(session, boardId, before, size)`
-appends an older page behind it. A page renders its appended keys **outside the
-session lock**, so its final delivery — taken back under the lock — skips any
-paged key a concurrent render pass has already delivered (its `last_sent` is
-present): a key scrolled in while it is being written settles on the committed
-view, never a stale page render that lost the race to the pass.
+**Paging is subscription arguments.** The window a session renders is exactly
+what the projector's `populate` returns for the subscription's arguments. A paged
+view takes its bound — a `size`, for a history a `before` cursor, a filter — as
+arguments of its delta subscription, carries them in its typed `Query`
+(`WindowSpec::view::<V>(&query, rls)` encodes them), and `populate` applies them
+(`ORDER BY … LIMIT size`); validate them at the resolver
+(`#[graphql(validator(minimum = 1))] size: Option<i64>`), so a malformed bound is
+a client error rather than a database fault. The client never names a session:
+the engine mints every `SessionId` at attach, and no root field takes one. To
+change its window the client ends the subscription and starts a new one with new
+variables — a **new session**, opened by a `Reset` at revision 1 that carries the
+whole new window, so the client keeps its list on screen until that `Reset`
+lands, treats the variable change like a reopened stream for the revision check,
+and never refetches. A write committed while the client switches is in the new
+`Reset`, which reads committed state. The old session is dropped with its stream
+at the next render pass or `gc`; the stream exists from the first moment of an
+attach, so an attach the client abandons mid-snapshot is dropped the same way,
+and a burst of window changes leaves one session. Nothing ties a window to a pod: any
+replica serves any subscription and any window change, with no session affinity
+and no cross-pod relay. Two patterns: **grow by re-subscribing** (a larger
+`size`; each change re-renders the whole window, so scrolling back through `n`
+pages costs O(n²) renders) and **one subscription per page** (`before` + `size`,
+one stream per page shown), the one to prefer for long histories. The reference
+`card` slice demonstrates the first: `exampleCardDeltas(boardId, size)`.
+
+After attach the window follows the shape of its population, whatever its
+arguments: a `Population::Keys` window is fixed — a row outside it enters only
+when a principal-facts refresh or a projector-wide impact (`cx.impact_all_view`)
+re-runs `populate`; a `Population::Ordered { open_head: true }` window repopulates on
+every change of its noun, so a new row enters a sized head and the oldest leaves
+it; a `Population::Query` window grows by discovery — a changed row that matches
+its predicate joins it.
+
+**`window_capacity` bounds a window at attach, never after.** An attach whose
+population holds more than `window_capacity` keys (default 10,000,
+`EngineConfig::with_window_capacity`, no env var) is refused before anything is
+rendered, with `AttachError::WindowTooLarge` answered as `WINDOW_TOO_LARGE`, and
+leaves no session behind; the client narrows the window with its arguments. A
+live window is never ended for its size: one that grows past the capacity (an
+open head without a `size`, a query window discovering rows) stays open on its
+contiguous revision, and the engine logs one `warn` naming the session, the
+projector, the size and the capacity when it crosses the bound, and counts
+`service_engine_windows_over_capacity_total{projector, outcome="kept"}` (a
+refusal counts `outcome="refused"`). Ending it instead would make the view flap
+under a high write rate — end, re-subscribe, a large `Reset`, grow, end again —
+and the sessions that meet the bound are few viewers of a busy view, so
+per-session memory is not the limit. A whole-collection view (`type Query = ()`)
+is therefore bounded by `window_capacity` at attach: once its collection
+outgrows the capacity every new attach is refused, and the `kept` count (the
+`ServiceEngineWindowOverCapacity` alert) is the warning that comes first: a view
+that trips it needs a `size` or a narrower filter among its arguments.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
@@ -1163,7 +1180,11 @@ whichever mode it lives:
   run the relay (`bb10`), and the mirror leader projects while a standby converges to
   readiness from the KV bucket and then takes over the expired lease to project a
   change published after the leader died (`bb11`, which shortens the lease and beat
-  through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env), and a
+  client that changes its window by re-subscribing with new arguments lands on
+  either pod with a `Reset` at revision 1 while a write committed through the other
+  pod reaches it, and no root field of the reference service or the battery's
+  sample lets a client name a session (`bb17`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
   and built on demand otherwise, so the mode is self-sufficient locally. `bb05`
   drives the real lane-A ingress: the `example-twin` binary streams the reply's
@@ -1200,7 +1221,8 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb13_migrate_waits_for_the_app_role \
     --test bb14_migrate_needs_only_the_owner_env \
     --test bb15_migrate_refuses_an_owner_subject_to_rls \
-    --test bb16_gateway_sse_subscription
+    --test bb16_gateway_sse_subscription \
+    --test bb17_paging_by_arguments_across_replicas
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1287,6 +1309,7 @@ GitOps and the NATS fabric.
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
+| Replicas | any count (`replicaCount`): a subscription over either transport (`/graphql/ws`, or `POST /graphql` as graphql-sse) attaches on the pod that serves it, and paging is subscription arguments, so there is no session affinity and no cross-pod relay; an attach whose window exceeds `window_capacity` is refused with `WINDOW_TOO_LARGE`, and a live window is never ended for its size |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
 | NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing separator stripped (`typed/v1/` → `typed/v1_manifest`, `typed.v1.` → `typed.v1_manifest`), a sibling outside the data prefix; a single consumed key has no manifest |
 | Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
@@ -1343,8 +1366,10 @@ refresh are identical. Each is bounded by `session_max_age` (from the handshake 
 the request) and by the engine's shutdown: the WebSocket is closed `1001`, the
 event stream sends `complete` and ends, and the client — the gateway, on the SSE
 leg — re-subscribes with a fresh `X-Passport`. A client that goes away releases
-the session with its connection. Paging a gateway (SSE) session requires the
-session's pod (one replica) until 0.4.0 moves paging to subscription arguments.
+the session with its connection. A window is a subscription's arguments (see
+*Paging is subscription arguments*): changing it is a new subscription, which the
+gateway may open on any replica, so an engine service runs at any replica count
+with no session affinity.
 
 ### Hardened pod and neutral fields (chart 1.1)
 
@@ -1443,7 +1468,8 @@ bounds are non-zero with `max_file_bytes` within `max_body_bytes`, and
 `body_read_timeout` is non-zero. A session lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
-reaps a session that has lost its consumer. The bound is on the connection, not
+reaps an attach still not live after it (a dropped stream is reaped at the next
+pass). The bound is on the connection, not
 only the session: the WebSocket principal is resolved once at the handshake and
 serves every operation on that socket — subscriptions and mutations alike — so
 the kit closes the `graphql-transport-ws` connection itself at `session_max_age`
@@ -1536,12 +1562,14 @@ the holder and `0` on a standby, so `sum by (kind, name)` is `1` where a loop is
 led and a failover shows as the gauge moving from the old pod to the new one.
 `service_engine_impacts_committed_total` is the notify-budget
 counter watched at the Postgres-cluster level; it counts impacts of committed
-transactions only, recorded after the commit, never a rolled-back mutation. The
-five shipped alerts are in
+transactions only, recorded after the commit, never a rolled-back mutation.
+`service_engine_windows_over_capacity_total{projector, outcome}` counts the
+windows that met `window_capacity`: `refused` at attach, `kept` for a live window
+that grew past it. The six shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
 a filling notification queue, the per-cluster notify budget nearing its ceiling,
-a sustained reset rate, an aging outbox backlog, and dead-lettered work waiting on
-a human.
+a sustained reset rate, an aging outbox backlog, dead-lettered work waiting on
+a human, and a view whose windows outgrow `window_capacity`.
 
 ## AI disclosure
 

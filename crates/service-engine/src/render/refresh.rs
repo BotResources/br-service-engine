@@ -96,7 +96,6 @@ pub(crate) async fn repopulate<P: Principal>(
         let name = window.projector.clone();
         let previous = window.members.clone();
         let previous_shape = window.shape.clone();
-        let paged: BTreeSet<KeyBytes> = window.pages.iter().flatten().cloned().collect();
         let projector = ctx
             .registry
             .projector(&name)
@@ -132,7 +131,6 @@ pub(crate) async fn repopulate<P: Principal>(
                 continue;
             }
             next = refreshed_members(&previous, &discovered, &population);
-            next.extend(paged.iter().cloned());
             shape = Some(previous_shape.refreshed(&population));
         }
         for key in next.difference(&previous) {
@@ -151,7 +149,7 @@ pub(crate) async fn repopulate<P: Principal>(
             continue;
         };
         let window = &mut session.windows[index];
-        window.members = next;
+        window.replace_members(next, id, ctx.config.window_capacity);
         if let Some(shape) = shape {
             window.shape = shape;
         }
