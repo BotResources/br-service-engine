@@ -149,12 +149,11 @@ impl AccumulatorRuntime {
         let accumulator = entry.name.clone();
         let mut held = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
         if held.len() >= self.max_buffered_chunks {
-            return Err(EngineError::Accumulator(
-                AccumulatorError::ChunkBufferFull {
-                    accumulator,
-                    limit: self.max_buffered_chunks,
-                },
-            ));
+            return Err(AccumulatorError::ChunkBufferFull {
+                accumulator,
+                limit: self.max_buffered_chunks,
+            }
+            .into());
         }
         held.push(PendingChunk {
             accumulator: entry.name,
@@ -166,12 +165,13 @@ impl AccumulatorRuntime {
         });
         drop(held);
         Ok(Durable::new(Box::pin(async move {
-            receipt.await.unwrap_or(Err(EngineError::Accumulator(
-                AccumulatorError::ChunkFlushAbandoned {
+            receipt
+                .await
+                .unwrap_or(Err(AccumulatorError::ChunkFlushAbandoned {
                     accumulator,
                     seq: seq.get(),
-                },
-            )))
+                }
+                .into()))
         })))
     }
 
@@ -208,11 +208,11 @@ impl AccumulatorRuntime {
         let key = encode_key::<A::Noun>(key)?;
         let (_high_water, state) = seal::seal_current(&entry, tx, &key, time::now()).await?;
         self.reader.forget(&entry.name, &key);
-        let state = *state.downcast::<A::State>().map_err(|_| {
-            EngineError::Accumulator(AccumulatorError::StateMismatch {
+        let state = *state
+            .downcast::<A::State>()
+            .map_err(|_| AccumulatorError::StateMismatch {
                 accumulator: entry.name.clone(),
-            })
-        })?;
+            })?;
         Ok(((entry.name, key), state))
     }
 
