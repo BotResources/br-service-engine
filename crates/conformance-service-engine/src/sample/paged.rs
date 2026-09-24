@@ -42,7 +42,7 @@ async fn newest_keys(
     )
     .bind(cx.principal().tenant())
     .bind(page.and_then(Page::cursor))
-    .bind(page.map(|page| cx.limit(page)))
+    .bind(page.map_or_else(|| cx.limit_all(), |page| cx.limit(page)))
     .fetch_all(cx.pool())
     .await?;
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())

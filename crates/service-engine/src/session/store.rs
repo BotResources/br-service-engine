@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crate::impact::Impact;
 use crate::principal::{Principal, PrincipalId};
 use crate::session::SessionId;
-use crate::session::live::Session;
+use crate::session::live::{Ending, Session};
 use crate::session::stream::DropList;
 
 pub(crate) struct SessionTable<P: Principal> {
@@ -89,13 +89,17 @@ impl<P: Principal> SessionTable<P> {
         }
     }
 
-    pub(crate) fn end_principal(&mut self, principal: PrincipalId) -> Vec<SessionId> {
+    pub(crate) fn end_principal(
+        &mut self,
+        principal: PrincipalId,
+        ending: Ending,
+    ) -> Vec<SessionId> {
         let ended = self.sessions_of(principal);
         let mut abandoned = Vec::new();
         for id in &ended {
             if let Some(session) = self.sessions.get_mut(id) {
                 let connecting = session.is_pending();
-                session.end();
+                session.end_as(ending);
                 if !connecting {
                     abandoned.push(*id);
                 }

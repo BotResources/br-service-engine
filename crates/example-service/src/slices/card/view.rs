@@ -77,8 +77,8 @@ impl Projector for CardsView {
                     store::cards_of_board_page(pg, board, page.cursor(), cx.limit(page)).await?;
                 page.population(keys)
             }
-            (Some(board), None) => keyed(store::cards_of_board(pg, board).await?),
-            (None, _) => keyed(store::all_card_ids(pg).await?),
+            (Some(board), None) => keyed(store::cards_of_board(pg, board, cx.limit_all()).await?),
+            (None, _) => keyed(store::all_card_ids(pg, cx.limit_all()).await?),
         })
     }
 

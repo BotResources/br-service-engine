@@ -10,6 +10,7 @@ use conformance_service_engine::sample::graphql::{
     base_config, boot_graphql_service_with, passport_for,
 };
 use conformance_service_engine::sample::render::*;
+use conformance_service_engine::sample::spy::{Spy, SpyAssignments, WindowMode};
 use conformance_service_engine::sample::{AssignmentPage, PagedAssignments, SamplePrincipal};
 use graphql_support::GraphqlWs;
 use service_engine::delta::Delta;
@@ -42,7 +43,7 @@ async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
     let principal = member(&pool, Uuid::now_v7(), home).await;
-    for n in 0..=CAPACITY {
+    for n in 0..CAPACITY + 3 {
         assignment(&pool, home, &format!("m{n}")).await;
     }
     let engine = runtime(
@@ -66,7 +67,10 @@ async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
                 ..
             }) if size == CAPACITY + 1
         ),
-        "a window one key over window_capacity is refused at attach, got {refused:?}"
+        "a whole-collection window over window_capacity is refused at attach, and its populate \
+         read {} of the {} matching rows, one past the capacity, got {refused:?}",
+        CAPACITY + 1,
+        CAPACITY + 3
     );
     assert_eq!(
         engine.live_sessions().await + engine.pending_sessions().await,
@@ -84,6 +88,55 @@ async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
         .expect("the same view narrowed by its arguments to window_capacity attaches");
     let reset = next_delta(&mut narrowed, SOON).await.expect("a Reset");
     assert_eq!(reset_views(&reset).len(), CAPACITY);
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s245_an_attach_whose_last_window_is_over_capacity_renders_none_of_its_windows() {
+    let db = TestDb::fresh().await;
+    let pool = db.app_pool().clone();
+    let home = Uuid::now_v7();
+    let principal = member(&pool, Uuid::now_v7(), home).await;
+    for n in 0..=CAPACITY {
+        assignment(&pool, home, &format!("m{n}")).await;
+    }
+    let spy = Spy::new();
+    let mut registry = paged_registry();
+    registry
+        .register_projector(
+            SpyAssignments::new(spy.clone()).with_window(WindowMode::OrderedHead(2)),
+        )
+        .expect("the spy projector registers on the bound noun");
+    let engine = runtime(
+        &pool,
+        render_config("pod-capacity-two-windows").with_window_capacity(CAPACITY),
+        registry,
+    );
+
+    let fitting = conformance_service_engine::sample::render::window(SpyAssignments::NAME, false);
+    let refused = engine
+        .attach(attach_request(
+            &principal,
+            vec![fitting, window(AssignmentPage::whole())],
+        ))
+        .await;
+    assert!(
+        matches!(refused, Err(AttachError::WindowTooLarge { .. })),
+        "the second window, over window_capacity, refuses the whole attach, got {refused:?}"
+    );
+    assert_eq!(spy.populates(), 1, "the fitting first window was populated");
+    assert_eq!(
+        (spy.loads(), spy.projects()),
+        (0, 0),
+        "no window is loaded or projected before every window of the attach is admitted"
+    );
+    let metrics = engine.metrics();
+    assert_eq!((metrics.loads, metrics.projections), (0, 0));
+    assert_eq!(
+        engine.live_sessions().await + engine.pending_sessions().await,
+        0
+    );
 
     db.cleanup().await;
 }

@@ -156,5 +156,6 @@ mod tests {
         assert_internal(&attach_error(AttachError::HeldImpacts(EngineError::Db(
             sqlx::Error::PoolTimedOut,
         ))));
+        assert_internal(&attach_error(AttachError::PrincipalRefreshFailed));
     }
 }

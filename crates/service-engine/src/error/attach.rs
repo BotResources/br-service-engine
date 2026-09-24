@@ -40,6 +40,12 @@ pub enum AttachError {
     #[error("the principal no longer exists, so the session it was attaching was ended")]
     PrincipalRevoked,
 
+    #[error(
+        "the principal could not be re-resolved or its facts reloaded while its session was \
+         connecting, so the session was ended"
+    )]
+    PrincipalRefreshFailed,
+
     #[error("the impacts held while the session was connecting could not be rendered")]
     HeldImpacts(#[source] EngineError),
 

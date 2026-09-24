@@ -48,7 +48,7 @@ battery-backed.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
-| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; a **required** non-locking `read_many` (one batched read per call — `WHERE id = ANY($1)` for a row store; there is no per-key default, so a store must write `read_many` to compile, and its contract is set-based: one statement per call, never one per key — the compiler checks that it exists, not how many statements it issues) with `load` on the blanket `PersistenceExt` as the one-key `read_many` (not overridable, so the mutation path, render and the gated reads read a row one way), `save`/`create`, a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
+| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; a **required** non-locking `read_many` (one batched read per call — `WHERE id = ANY($1)` for a row store; there is no per-key default, so a store must write `read_many` to compile, and its contract is set-based: one statement per call, never one per key — the compiler checks that it exists, not how many statements it issues) with `load` on the blanket `PersistenceExt` as the one-key `read_many` (not overridable, so the mutation path, render and the gated reads read a row one way), `save`/`create`, a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in the pipeline's `cx.load` / `cx.load_many` (`Ops`), never in `PersistenceExt::load`, so a lock-less store still serialises its writers while a direct `Store::load` call serialises nothing), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
 | `error` | `EngineError`, flat for the faults a service meets (`Config`, `Db`, `Service`, `Encode`, `Decode`, `Blob`, …), with capability groups carried as variants: `AccumulatorError` (chunks and seals, `EngineError::Accumulator`) and `CompositionError` (graphql schema composition and root prefix, `EngineError::Composition`); `AttachError`, `TransportError` / `RelayError`, `DecodeError` / `CronError`; `describe`, the one renderer of an error and its `source()` chain, each cause written once |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
 | `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
@@ -61,7 +61,7 @@ battery-backed.
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
-| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, `KeyCeiling::NONE` elsewhere); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling |
+| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, `KeyCeiling::NONE` elsewhere); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling, and a populate with no page binds `cx.limit_all()`, the ceiling itself |
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
@@ -633,9 +633,9 @@ kit does authZ only, never authN. On `POST /graphql` it does so from the headers
 alone, **before it reads a byte of the request body**: a request whose passport is
 absent, does not decode or is rejected is answered `401` with the body untouched,
 whatever its content type, so an unauthenticated client can make the pod neither
-buffer nor write anything. The `401` body is the one JSON clients have always
-received (`the X-Passport header is absent`, `… is malformed: …`, `the passport is
-rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
+buffer nor write anything. The `401` body is plain text, not JSON: the message
+clients have always received (`the X-Passport header is absent`, `… is malformed:
+…`, `the passport is rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
 (below), also before the body is read.
 
 The principal contract. `PassportPrincipal::from_passport(passport) ->
@@ -649,7 +649,10 @@ refresh. A loader that fails — a database fault, a missing grant, any error �
 an infrastructure fault: the request or the upgrade is answered `500` with the
 `INTERNAL` error body and no detail, the whole chain is logged at `error`, and a
 rejected passport still gets its exact `401` meanwhile (`s243`). At a refresh, the
-same failure ends the principal's sessions fail-closed. A loader has no rejecting
+same failure ends the principal's sessions fail-closed, and a session still
+connecting then refuses its attach with `AttachError::PrincipalRefreshFailed`,
+answered `INTERNAL`; only a `PrincipalResolver` answering `None` refuses it with
+`PrincipalRevoked`, answered `UNAUTHENTICATED` (`s258`). A loader has no rejecting
 outcome: a denial read from local data is authorization (`FORBIDDEN`, or an
 affordance `reasonCode`), never a `401`, because authentication belongs to the
 gateway.
@@ -724,8 +727,10 @@ population exceeds `window_capacity` is `WINDOW_TOO_LARGE`
 projector nor the population size, which may count rows the caller cannot see),
 a `WindowSize` argument below 1 is `WINDOW_SIZE_INVALID`
 (`WINDOW_SIZE_INVALID_CODE`, answered before the resolver runs), attaching for a
-principal that no longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
-the request is answered `500` with the same `INTERNAL` error body, not `401`. A
+principal that no longer exists is `UNAUTHENTICATED`; a principal refresh that
+faults while the attach connects is `INTERNAL`. When the principal's facts cannot
+be loaded the request is answered `500` with the same `INTERNAL` error body, not
+`401`. A
 refusal that carries a reason is unchanged: its code and its `mutation refused:`
 message. `graphql::internal_error(context, &cause)` gives a service's own
 resolver the same shape; the codes, the message and both helpers are
@@ -974,11 +979,18 @@ its predicate joins it.
 population holds more than `window_capacity` keys (default 10,000,
 `EngineConfig::with_window_capacity`, no env var) is refused before anything is
 rendered, with `AttachError::WindowTooLarge` answered as `WINDOW_TOO_LARGE`, and
-leaves no session behind; the client narrows the window with its arguments. The
-read behind the refusal is bounded too: at attach `cx.limit(&page)` is the page
-size clamped to `window_capacity + 1`, the one key past the capacity that proves
-the refusal, so a `size: 2147483647` reads at most `window_capacity + 1` keys
-before it is refused, and the refusal reports that size. A raw
+leaves no session behind; the client narrows the window with its arguments. An
+attach of several windows populates and admits every window before it renders
+any, so a refusal of its last window costs no load and no projection of the
+others. The read behind the refusal is bounded for a view that binds the attach
+bound as its `LIMIT`: at attach `cx.limit(&page)` is the page size clamped to
+`window_capacity + 1`, the one key past the capacity that proves the refusal, so
+a `size: 2147483647` reads at most `window_capacity + 1` keys before it is
+refused, and the refusal reports that size. A populate with no page (a
+whole-collection read, a filter without a `size`) binds `cx.limit_all()`:
+`window_capacity + 1` at attach and no limit elsewhere, so a client retrying a
+refused attach in a loop never reads the whole collection. A populate that binds
+neither reads its whole population before it is refused. A raw
 `projector::Projector` receives the same bound as `populate`'s `KeyCeiling`
 argument. A repopulation after attach runs under `KeyCeiling::NONE` and binds the
 page size as asked, so the ceiling never trims a live window; a query resolver's
@@ -1451,7 +1463,9 @@ Mirror tables follow three rules:
   two principals, or two distinct cohorts, from ever sharing one render.
 - `Persistence::read_many` (and so `PersistenceExt::load`) must stay non-locking; the engine serialises
   concurrent commands on one key with a per-key transaction advisory lock it takes
-  in `load`, so a slice needs no `Persistence::lock` to be correct. `lock` is an
+  in the pipeline's `cx.load` / `cx.load_many` (`Ops`), never in
+  `PersistenceExt::load`, so a slice that writes through the pipeline needs no
+  `Persistence::lock` to be correct, and a direct `Store::load` call locks nothing. `lock` is an
   optional optimisation — a `SELECT … FOR UPDATE` on the row (or snapshot) key that
   also pins the row image — and its default is a no-op; a slice may implement it to
   avoid a re-read under contention, never to obtain serialisation the engine
@@ -1644,13 +1658,16 @@ key fails the render.
 sandbox that refuses every file write outside `/dev`: `migrate` exits 0,
 `serve` boots and answers `/livez`, `/readyz`, `/sdl` and `/metrics`. The
 engine opens no file for writing; sqlx migrations are embedded at compile time,
-logs go to stdout. The one write path in the dependency tree is
-async-graphql's multipart parser, which spools a request's file parts to a
-temporary file before the handler runs; the engine schema has no `Upload`
-scalar (blobs go straight to the object store through presigned URLs), so under
-a read-only root such a request is refused with `400` and the pod carries on.
-The library therefore mounts no `emptyDir` — a writable `/tmp` would only give
-that pre-authentication spool somewhere to write.
+logs go to stdout. The one write path is the engine's own multipart spool, and
+only for a schema that declares the `Upload` scalar: it spools the file parts of
+an authenticated request, after the passport resolves (*Multipart requests*). A
+schema without `Upload` (the reference service's: blobs go straight to the
+object store through presigned URLs) accepts no file: a `map` that binds one is
+refused with `413` `MULTIPART_TOO_MANY_FILES` and nothing is written. A schema with
+`Upload` under a read-only root refuses an upload with `500`
+`MULTIPART_SPOOL_UNAVAILABLE` unless the service mounts an `emptyDir` for its
+spool (*Filesystem*). The library chart therefore mounts no `emptyDir` by
+default.
 
 **startupProbe.** `serve` binds its listener last — after the app pool, the
 migration check, the NATS connect, `Engine::boot` (with its schema-version
@@ -1803,8 +1820,9 @@ led and a failover shows as the gauge moving from the old pod to the new one.
 `service_engine_impacts_committed_total` is the notify-budget
 counter watched at the Postgres-cluster level; it counts impacts of committed
 transactions only, recorded after the commit, never a rolled-back mutation.
-`service_engine_windows_over_capacity_total{projector, outcome}` counts the
-windows that met `window_capacity`: `refused` at attach, `kept` for a live window
+`service_engine_windows_over_capacity_total{projector, outcome}`
+(`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, labels `metrics::LABEL_PROJECTOR` and
+`LABEL_OUTCOME`) counts the windows that met `window_capacity`: `refused` at attach, `kept` for a live window
 that grew past it. The six shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
 a filling notification queue, the per-cluster notify budget nearing its ceiling,

@@ -41,6 +41,10 @@ impl<'a, P: Principal> Populate<'a, P> {
         page.limit_under(self.ceiling)
     }
 
+    pub fn limit_all(&self) -> i64 {
+        self.ceiling.limit()
+    }
+
     pub fn pool(&self) -> &PgPool {
         self.pg
     }

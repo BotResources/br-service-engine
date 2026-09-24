@@ -36,7 +36,8 @@ migration line below.
   population holds more than `window_capacity` keys (default 10,000,
   `EngineConfig::with_window_capacity`) is refused before the render with the new
   `AttachError::WindowTooLarge`, answered as `WINDOW_TOO_LARGE`
-  (`WINDOW_TOO_LARGE_CODE`); the message names the capacity only. A
+  (`WINDOW_TOO_LARGE_CODE`); the message names the capacity only. An attach of
+  several windows populates and admits them all before it renders any. A
   whole-collection view (`type Query = ()`) is refused once its collection
   outgrows the capacity. Through 0.3.4 the capacity bounded the pages one session
   held and evicted the oldest page.
@@ -133,7 +134,8 @@ migration line below.
   `= ANY($1)`; an empty list matches no row and costs no statement),
   `RowScope::by(col(..))` with `.and(col(..))`, and the written-out
   `RowScope::whole_table()`. No scope widens to the whole table by mistake.
-- **`WindowSize`, `Page<K>`, `KeyCeiling` and `Populate::limit(&page)`.** A paged
+- **`WindowSize`, `Page<K>`, `KeyCeiling`, `Populate::limit(&page)` and
+  `Populate::limit_all()`.** A paged
   view takes `size: WindowSize` (a GraphQL `Int`; below 1 it is refused with
   `WINDOW_SIZE_INVALID` / `WINDOW_SIZE_INVALID_CODE` before the resolver runs) and
   carries a `Page<K>` (a `before` cursor and a size) in its `Query`;
@@ -141,9 +143,16 @@ migration line below.
   page behind one. `populate` binds `cx.limit(&page)`: at attach the page size
   clamped to `window_capacity + 1`, so an over-capacity attach reads at most one
   key past the capacity; a repopulation, a repair and a one-shot `fetch_window`
-  run under `KeyCeiling::NONE`.
+  run under `KeyCeiling::NONE`. A populate with no page (a whole-collection
+  read) binds `Populate::limit_all()`, the ceiling itself, so its refused attach
+  is bounded the same way. `WindowSize::new(u32) -> Result<WindowSize,
+  WindowSizeOutOfRange>` (`WindowSizeOutOfRange` is re-exported at the crate
+  root) and `WindowSize::MAX: u32`, equal to `i32::MAX`, the largest GraphQL
+  `Int`.
 - **Windows over capacity are counted:**
-  `service_engine_windows_over_capacity_total{projector, outcome}` counts a
+  `service_engine_windows_over_capacity_total{projector, outcome}`
+  (`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, listed in `metrics::ALL`; the new
+  label `metrics::LABEL_PROJECTOR` beside `LABEL_OUTCOME`) counts a
   refused attach (`refused`, not logged: the client can fix it) and a live window
   that grew past the capacity (`kept`, one `warn` naming the session, the
   projector, the size and the capacity). New alert `ServiceEngineWindowOverCapacity`
@@ -193,6 +202,11 @@ migration line below.
   keeps its NATS error's source.
 - The full-EDA row reads (`read_many`, `keys`, `erase`) return a decode fault as
   an error instead of panicking.
+- An attach whose principal refresh faults while it connects (the
+  `PrincipalResolver` or a fact loader fails) is refused with the new
+  `AttachError::PrincipalRefreshFailed`, answered `INTERNAL`; through 0.3.4 it was
+  `PrincipalRevoked`, answered `UNAUTHENTICATED` as if the principal no longer
+  existed. Only a resolver answering `None` still revokes the attach.
 
 ### Removed
 
@@ -219,7 +233,9 @@ migration line below.
 - **Capacity:** map `AttachError::WindowTooLarge` / `WINDOW_TOO_LARGE`. A
   whole-collection view (`type Query = ()`) is refused at attach above
   `window_capacity`: bound it with a `size` or a narrower filter argument, or
-  raise `EngineConfig::with_window_capacity`.
+  raise `EngineConfig::with_window_capacity`, and bind `cx.limit_all()` as the
+  `LIMIT` of every read that has no page, so a refused attach reads at most one
+  key past the capacity.
 - **`populate`:** a raw `projector::Projector::populate` or
   `ErasedProjector::populate` takes a `KeyCeiling` after the window arguments; an
   implementation that does not page ignores it, a direct caller passes
@@ -300,7 +316,9 @@ migration line below.
   read, `load_visible`, `read_under_rls`, `replace_rows` change detection and
   whole-table choice, the gated read of a parent's children, a whole-table
   replace within a statement timeout, a rescan written in as many statements for
-  many keys as for one), and `bb17` (two replicas: window changes on either pod,
+  many keys as for one), `s258` (an attach whose principal refresh faults while
+  it connects is `PrincipalRefreshFailed`, one whose principal no longer exists
+  is `PrincipalRevoked`), and `bb17` (two replicas: window changes on either pod,
   a write through one reaching a subscriber on the other, the dropped session on
   the pod the client left, `WINDOW_SIZE_INVALID`, no root field naming a
   session). `s136` and `s187` cover the handover wait and the refusal of a
