@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 mod engine_twin;
 
+use service_engine::error::AccumulatorError;
 use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
@@ -82,7 +83,7 @@ async fn s139_a_seal_retention_below_the_stream_max_age_fails_the_boot_loud() {
     assert!(
         matches!(
             outcome,
-            Err(EngineError::SealRetentionTooShort { ref stream, seal_retention, max_age })
+            Err(EngineError::Accumulator(AccumulatorError::SealRetentionTooShort { ref stream, seal_retention, max_age }))
                 if stream == "STREAMING_s139mismatch"
                     && seal_retention == Duration::from_secs(60)
                     && max_age == Duration::from_secs(600)

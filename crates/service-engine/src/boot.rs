@@ -1,10 +1,10 @@
-use crate::readiness::ReadinessHandle;
 use sqlx::{PgPool, Row};
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
-use crate::schema::{ENGINE_SCHEMA_VERSION, SCHEMA};
-use crate::schema_version::{claim_schema_version, version_conflict_reason};
+use crate::readiness::ReadinessHandle;
+use crate::schema::SCHEMA;
+use crate::schema_version::{claim_with_handover, version_conflict_reason};
 use crate::transport::PgListenNotify;
 use crate::transport::probe::{ListenerProbe, POOLER_REASON};
 
@@ -35,6 +35,7 @@ pub async fn establish_transport_with_probe(
     readiness: &ReadinessHandle,
     probe: ListenerProbe,
 ) -> Result<PgListenNotify, EngineError> {
+    config.validate()?;
     readiness.set_not_ready(REASON_POSTURE);
     if let Err(e) = assert_posture(&pool).await {
         tracing::error!(error = %crate::chain::describe(&e), "the PostgreSQL boot posture was refused");
@@ -42,15 +43,7 @@ pub async fn establish_transport_with_probe(
         return Err(e);
     }
     readiness.set_not_ready(REASON_SCHEMA_VERSION);
-    if let Err(e) = claim_schema_version(
-        &pool,
-        ENGINE_SCHEMA_VERSION,
-        config.schema_service_version(),
-        config.pod_id.as_str(),
-        config.schema_version_liveness,
-    )
-    .await
-    {
+    if let Err(e) = claim_with_handover(&pool, config, readiness).await {
         if let EngineError::SchemaVersionConflict {
             live_engine,
             live_service,

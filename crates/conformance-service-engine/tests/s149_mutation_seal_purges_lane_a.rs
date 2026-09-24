@@ -27,24 +27,13 @@ impl MutationInput for SealNote {
     const NAME: &'static str = "seal_note";
 }
 
-#[derive(Debug)]
-struct SealFault(String);
-
-impl std::fmt::Display for SealFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+#[derive(Debug, thiserror::Error)]
+#[error("the seal failed")]
+struct SealFault(#[from] EngineError);
 
 impl MutationFault for SealFault {
     fn reason(&self) -> Option<service_engine::gate::Reason> {
         None
-    }
-}
-
-impl From<EngineError> for SealFault {
-    fn from(error: EngineError) -> Self {
-        Self(error.to_string())
     }
 }
 

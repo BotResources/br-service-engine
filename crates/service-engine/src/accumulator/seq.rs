@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
@@ -13,10 +13,12 @@ impl ChunkSeq {
 
     pub fn new(value: u64) -> Result<Self, EngineError> {
         if value > Self::MAX {
-            return Err(EngineError::ChunkSeqOutOfRange {
-                seq: value,
-                max: Self::MAX,
-            });
+            return Err(EngineError::Accumulator(
+                AccumulatorError::ChunkSeqOutOfRange {
+                    seq: value,
+                    max: Self::MAX,
+                },
+            ));
         }
         Ok(Self(value))
     }
@@ -79,7 +81,7 @@ mod tests {
         let over = ChunkSeq::new(ChunkSeq::MAX + 1);
         assert!(matches!(
             over,
-            Err(EngineError::ChunkSeqOutOfRange { seq, max })
+            Err(EngineError::Accumulator(AccumulatorError::ChunkSeqOutOfRange { seq, max }))
                 if seq == (i64::MAX as u64) + 1 && max == i64::MAX as u64
         ));
         let deserialized: Result<ChunkSeq, _> =

@@ -66,7 +66,7 @@ impl Ops<'_> {
 
     fn note_config_terminal(&mut self, error: &EngineError) {
         if self.staged.terminal_violation.is_none() && matches!(error, EngineError::Config(_)) {
-            self.staged.terminal_violation = Some(error.to_string());
+            self.staged.terminal_violation = Some(crate::chain::describe(error));
         }
     }
 

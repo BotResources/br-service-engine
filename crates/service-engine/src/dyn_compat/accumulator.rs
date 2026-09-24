@@ -2,7 +2,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use crate::accumulator::{Accumulator, ChunkSeq};
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::{AccumulatorName, NounName};
 use crate::wire::Noun;
 
@@ -58,12 +58,11 @@ impl<A: Accumulator> ErasedAccumulator for AccumulatorAdapter<A> {
         seq: ChunkSeq,
         chunk: &serde_json::Value,
     ) -> Result<(), EngineError> {
-        let typed_state =
-            state
-                .downcast_mut::<A::State>()
-                .ok_or_else(|| EngineError::StateMismatch {
-                    accumulator: self.0.name(),
-                })?;
+        let typed_state = state.downcast_mut::<A::State>().ok_or_else(|| {
+            EngineError::Accumulator(AccumulatorError::StateMismatch {
+                accumulator: self.0.name(),
+            })
+        })?;
         let chunk: A::Chunk =
             serde_json::from_value(chunk.clone()).map_err(|source| EngineError::Decode {
                 what: "chunk",

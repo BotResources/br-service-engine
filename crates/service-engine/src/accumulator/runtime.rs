@@ -10,7 +10,7 @@ use crate::accumulator::reader::ChunkReader;
 use crate::accumulator::seal::{SealMarker, Swept};
 use crate::accumulator::{Accumulator, ChunkSeq, Durable, Registry, enroll, flush, lookup, seal};
 use crate::chain::describe;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::AccumulatorName;
 use crate::nats::{Nats, chunk_subject, streaming_stream, subject_token};
 use crate::stop::Stop;
@@ -149,10 +149,11 @@ impl AccumulatorRuntime {
         let accumulator = entry.name.clone();
         let mut held = self.buffer.lock().unwrap_or_else(|p| p.into_inner());
         if held.len() >= self.max_buffered_chunks {
-            return Err(EngineError::ChunkBufferFull {
+            return Err(AccumulatorError::ChunkBufferFull {
                 accumulator,
                 limit: self.max_buffered_chunks,
-            });
+            }
+            .into());
         }
         held.push(PendingChunk {
             accumulator: entry.name,
@@ -166,10 +167,11 @@ impl AccumulatorRuntime {
         Ok(Durable::new(Box::pin(async move {
             receipt
                 .await
-                .unwrap_or(Err(EngineError::ChunkFlushAbandoned {
+                .unwrap_or(Err(AccumulatorError::ChunkFlushAbandoned {
                     accumulator,
                     seq: seq.get(),
-                }))
+                }
+                .into()))
         })))
     }
 
@@ -208,7 +210,7 @@ impl AccumulatorRuntime {
         self.reader.forget(&entry.name, &key);
         let state = *state
             .downcast::<A::State>()
-            .map_err(|_| EngineError::StateMismatch {
+            .map_err(|_| AccumulatorError::StateMismatch {
                 accumulator: entry.name.clone(),
             })?;
         Ok(((entry.name, key), state))

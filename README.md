@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.4", version = "0.3.4" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.4.0", version = "0.4.0" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,6 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.4.0 | `v1.3.0` |
 | 0.3.4 | `v1.3.0` |
 | 0.3.3 | `v1.3.0` |
 | 0.3.2 | `v1.3.0` |
@@ -47,21 +48,24 @@ battery-backed.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
-| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
-| `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
-| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
+| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; a **required** non-locking `read_many` (one batched read per call — `WHERE id = ANY($1)` for a row store; there is no per-key default, so a store must write `read_many` to compile, and its contract is set-based: one statement per call, never one per key — the compiler checks that it exists, not how many statements it issues) with `load` on the blanket `PersistenceExt` as the one-key `read_many` (not overridable, so the mutation path, render and the gated reads read a row one way), `save`/`create`, a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in the pipeline's `cx.load` / `cx.load_many` (`Ops`), never in `PersistenceExt::load`, so a lock-less store still serialises its writers while a direct `Store::load` call serialises nothing), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
+| `error` | `EngineError`, flat for the faults a service meets (`Config`, `Db`, `Service`, `Encode`, `Decode`, `Blob`, …), with capability groups carried as variants: `AccumulatorError` (chunks and seals, `EngineError::Accumulator`) and `CompositionError` (graphql schema composition and root prefix, `EngineError::Composition`); `AttachError`, `TransportError` / `RelayError`, `DecodeError` / `CronError`; `describe`, the one renderer of an error and its `source()` chain, each cause written once |
+| `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys::<T, _>(cx)` lists a noun's keys for a window `populate`, at most the populate's ceiling (`cx.limit_all()`). A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
+| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter from one declaration (the trait has no in-memory window builder: a window is read through the store's `CohortIndex`), with `check_window_matches_visibility` holding a window to that filter in a test; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts(conn, cohorts, ceiling)`, which binds `ceiling.limit()` as its `LIMIT`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait (`VERSION`), `register_offer`, `register_offer_trigger::<O, T>` (a `T: OfferTrigger<O>` in the offer's own slice re-publishes the offer when it changes; its `row_key()` names the offer row's store key and its `key_from()` the offer's KvKey), leader-drained dirty keys, versioned watermark, boot + periodic reconcile, `OfferManifest` published at reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `upsert` (row-diff) / `replace` (key-set-diff, keys-only link rows) both returning `Written` and staging nothing when unchanged, plus `replace_one`/`remove`, `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Project::project(cx, keys)` called once per lead transaction with every key the transaction touches (one live change's keys, or every key of a rescan), `Projection::replace_rows` (full-row set diff inside a declared `RowScope` — `RowScope::any_of(column, keys)` for a batch, `RowScope::by(col(..))`, `.and(col(..))` for more columns, or the written-out `RowScope::whole_table()`: stages exactly the rows inserted, changed on any column, or deleted, returns `Written::{Changed, Unchanged}`, and costs one upsert per ~30,000 bound values plus one delete per call, whatever the number of keys) as the one row write, `Projection::conn` plus `impact_*` for hand SQL, `KnownRow::PRINCIPAL` (the uuid key column whose principal's facts a staged row also refreshes), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
+| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode; built in Rust with `WindowSize::new(u32) -> Result<_, WindowSizeOutOfRange>`, which refuses 0 and anything above `WindowSize::MAX`, `i32::MAX`, the largest GraphQL `Int`) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, at a one-shot window fetch and at a raw one-key `fetch`, `KeyCeiling::NONE` for a repopulation after attach); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling, and a populate with no page binds `cx.limit_all()`, the ceiling itself |
+| `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view::<View>(key)`, one row read through `load_visible` and projected, never the view's population; `fetch_view_window` over a typed `Query`, a window above `window_capacity` refused with `WINDOW_TOO_LARGE` as at attach; the raw projector's `fetch` / `fetch_json` decide membership from the projector's default window, read under the same admission ceiling and refused with `WINDOW_TOO_LARGE` above `window_capacity`, so a large collection is read by key through a view; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see, in the parent's snapshot (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a `REPEATABLE READ READ ONLY` transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; async-graphql's `custom-error-conversion` on, so `?` converts an engine refusal (`Reason`, `MutationError`, `AttachError`, `WindowSizeOutOfRange`) to its coded error, and `?` on any other error type does not compile — except a bare `String` or `&'static str`, which async-graphql still converts to an error with no code, so a refusal the engine has no type for goes through `coded_error` and a fault through `or_internal`; `OrInternal::or_internal(context)` for a fault (`INTERNAL`, cause logged); `coded_error`/`forbidden` for a refusal the engine has no type for; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -149,8 +153,8 @@ structural `(noun, key)` primary key and the log the `(noun, key, seq)` one, so 
 full-EDA slice enforces uniqueness and integrity in the aggregate's write-time
 gate and its hydration barrier, not in a declared FK/unique/check on the state.
 Both
-reads are non-locking — `load` is a plain read and `read_many` defaults to it —
-so the render side takes no row lock, whatever the author writes. The write
+reads are non-locking — `read_many` is a plain batched read and `load` derives
+from it — so the render side takes no row lock, whatever the author writes. The write
 pipeline serialises concurrent commands on one key itself: before `load` it takes
 a transaction advisory lock keyed on the aggregate's store type and its
 JSON-encoded key — `pg_advisory_xact_lock` over an FNV-1a hash of
@@ -167,11 +171,24 @@ or `DELETE` issued outside that path locks rows the pipeline does not know about
 and bypasses every policy — a CAS column is a symptom of a second domain, not a
 remedy. The advisory lock, like `lock`, runs inside the pipeline transaction under
 `lock_timeout`, so a contended write that waits past the timeout is retryable, not
-stuck; a render frame never waits on it. A CRUD or soft-EDA store overrides `read_many`
-with a single batched read of the same table `load` reads, so the author writes
-no render load SQL; a full-EDA store keeps the default `read_many` (a `load` per
-key) because the current state is the snapshot replayed forward, not a column
-read.
+stuck; a render frame never waits on it. `read_many` is required and
+has no per-key default, so the read of N keys costs one statement per call (two
+for `FullEda<T>`), never one per key: a CRUD or soft-EDA store reads its table
+with `WHERE id = ANY($1)`, and `FullEda<T>` reads every requested snapshot with
+one statement and every event logged past those snapshots with a second one —
+skipped when no requested key has a snapshot, so the key-reuse check before a
+create costs one statement — then replays each key forward. The compiler checks
+that `read_many` exists, not that it is set-based: a `read_many` that loops one
+query per key still compiles, and one statement per call is the store's contract.
+The read is the only batched part of `load_many`: it still takes its locks first,
+per key and in key order — one transaction advisory lock per key, plus one
+`Store::lock` statement per key for a store that implements `lock` — and a render
+frame takes none. `load` is not a `Persistence` method: it is
+`PersistenceExt::load`, implemented once for every store as the one-key case of
+`read_many`, so a store cannot override it and reads a row one way on the
+mutation path, on the render path and behind `Query::load_visible` /
+`Query::behind`. Bring `PersistenceExt` into scope (it is re-exported at the crate
+root) to call `Store::load` directly.
 
 `cx.load_many::<A>(&keys)` loads several aggregates of one noun in the one
 pipeline transaction, each locked for the transaction, so a handler can judge
@@ -251,11 +268,12 @@ accumulator as `Engine::push_chunk`, so late joiners replay from the store, the
 verified `Ops::seal` writes the final record and a seal marker in one
 transaction, and a chunk that arrives after the seal is refused on every pod.
 The seal marker's high water is the declared `last_seq`, so a chunk that landed
-beyond it fails the seal (`SealChunkBeyondLastSeq`) rather than being dropped
+beyond it fails the seal (`AccumulatorError::SealChunkBeyondLastSeq`, carried as
+`EngineError::Accumulator`) rather than being dropped
 after the producer was told it was durable, and re-sealing a key that already
-carries a marker is refused with `AlreadySealed` instead of rewriting the sealed
+carries a marker is refused with `AccumulatorError::AlreadySealed` instead of rewriting the sealed
 record. A replay that cannot assemble a contiguous prefix up to `last_seq` fails
-with `SealTruncated`; whether that is transient fold-lag worth retrying or a
+with `AccumulatorError::SealTruncated`; whether that is transient fold-lag worth retrying or a
 permanent loss to report is the reaction's call, informed by `cx.delivered` — the
 reference reply slice retries a bounded number of deliveries and then answers the
 runner with a `SealFailed` event so it resends the finish, never nak-ing forever
@@ -265,7 +283,7 @@ sealing pod purges the key's NATS subject
 synchronously; the beat is the backstop that purges any sealed key still in the
 stream if the pod died first. Name the stream with `EngineConfig::with_service`;
 a serviceless engine that registers an accumulator fails loud at boot
-(`AccumulatorWithoutService`) rather than silently folding in process with no
+(`AccumulatorError::AccumulatorWithoutService`) rather than silently folding in process with no
 stream to bind. `register_presence` binds the
 `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
@@ -302,17 +320,51 @@ scheduled commitment, so an extra reconcile after a takeover is harmless. The
 version
 lives in the offer's key for a breaking change (register a
 second `Offer`). `register_mirror` projects one or more consumed KV offers into
-`known_*` through the direct lane, joined by a `keyed_by` function. A consumed
+`known_*` through the direct lane, joined by a `keyed_by` function. The engine
+calls `Project::project(cx, keys)` once per lead transaction with every key that
+transaction touches: the keys `keyed_by` yields for one live change, or every key
+of a full rescan (boot, the periodic reconcile, a leader takeover). A projection
+therefore receives a batch and writes each table once for the whole batch, so a
+rescan of any number of keys costs the same statements as a rescan of one. A consumed
 value is a typed `Consumed`, never raw JSON: a mirror that consumes
 `serde_json::Value` is refused at registration (`EngineError::RawJsonConsumption`)
 unless it sets `Consumed::RAW_JSON_ESCAPE_HATCH`, so the join always reads typed
 rows (a typed value may still hold a `serde_json::Value` field). A `known_*` row
-is written either declaratively — implement `KnownRow` (table, key columns, value
-columns) and the engine generates the upsert and the delete behind
-`Projection::upsert` / `Projection::retire`, the documented path with no SQL in
-the projector — or manually through `replace_one` / `replace` / `remove` over the
-`Known` / `KnownScope` traits, the escape hatch for a write that is not a plain
-single-key upsert. A producer that extends a shared type is consumed with
+is written declaratively — implement `KnownRow` (`TABLE`, `NAMESPACE`,
+`KEY` — the key column names, which a write whose `key()` names other columns is
+refused against — and the value columns) and the engine generates the SQL behind
+`Projection::replace_rows`, the one row write of the kit, which writes a set and
+never one row per key. A write the kit cannot express runs through
+`Projection::conn` with bound parameters, set-based over the batch, and stages its
+own impacts with `impact_foreign` / `impact_resource` / `impact`. A known row's
+impact key is always its key columns rendered and joined by `/`. `KnownRow::PRINCIPAL` is required: `None`, or
+`Some(PrincipalColumn { column, deps })` when a principal fact loader reads the
+table — `column` names a uuid KEY column (anything else is refused,
+`EngineError::Config`) — and then every row the kit stages also stages
+`PrincipalFactsChanged { principal, deps }` for the principal in that column, so a
+change to one membership refreshes that member's facts and no other principal's.
+`replace_rows(scope, rows)` replaces the set of rows whose `scope`
+columns match — `RowScope::any_of("project_id", keys)` for the batch's keys (one
+`= ANY($1)` over a typed array: uuid, text, integer or boolean values of one
+type; an empty list matches no row and costs no statement), equalities,
+`RowScope::by(col("project_id", id))` with `.and(col(..))` for each further
+column — or the whole table, which is written out as `RowScope::whole_table()`;
+no `RowScope` widens to the whole table by mistake. The replace is one multi-row upsert per
+~30,000 bound values that writes a row only when
+a value column differs (`IS DISTINCT FROM`, so every value column needs an
+equality operator: a document column is `jsonb`, never `json`, and `xml` or
+`point` columns cannot be value columns; a `json` column fails every write with
+`operator does not exist: json = json`), then one delete of the scoped rows
+the call did not name (a `NOT EXISTS` anti-join against the named keys, never a
+per-row rescan of them, so a whole-table replace of 100k rows stays in the
+second range), each returning the keys it touched — so it stages exactly
+the rows inserted, changed on any column, or deleted, and nothing for an
+unchanged set. It refuses (`EngineError::Config`) a row outside the scope, a null
+scope column, an `any_of` over mixed or non-key values, two rows with one key and different values (keys compare by typed
+column values, never by the `/`-joined impact key, so `("a/b", "c")` and
+`("a", "b/c")` are two rows; an exact duplicate is written once), rows that name different value columns, and a key column that is
+not a uuid, text, integer or boolean (the impact key of a deleted row is the
+column's SQL text, which equals its rendering only for these). A producer that extends a shared type is consumed with
 `Extended<Core, Ext>`: the project names its own extension as the second type
 parameter and an unknown extension is denied at deserialization, never mirrored
 as opaque JSON. A mirror joins one or more offers, and the producer's wire
@@ -445,11 +497,13 @@ its real name and type — is minted only through the gated
 reference: a
 reference travels in a view by design, so a bare-reference presign would make it a
 permanent bearer capability that outlives the row and the viewer. `download`
-takes the same visibility path as `fetch` — it presigns only when the caller can
-currently see the referencing view (`populate` → membership) **and** the loaded
-referencing aggregate still lists the reference in `Aggregate::blob_refs`; a
-non-viewer, or a reference the named aggregate no longer holds, resolves to
-`None`. A resolver therefore mints a download through `Query::download` and never
+loads the referencing aggregate through `Query::load_visible::<View>` — the
+view's `Visibility` gate, under RLS when the view declares `RLS` — and presigns
+only when the principal can see that row **and** the row still lists the
+reference in `Aggregate::blob_refs`; a non-viewer, an absent key, or a reference
+the named aggregate no longer holds all resolve to `None`. The gate is the
+row's visibility, not membership of the view's default window, so a row the
+principal sees on any page of a paged view downloads. A resolver therefore mints a download through `Query::download` and never
 through a raw presign; the reference reply slice's `exampleReplyDownload(replyId,
 reference, disposition)` field is the reference resolver, its `disposition`
 argument defaulting to `ATTACHMENT`. That slice's `exampleAttachReply` takes an
@@ -522,8 +576,8 @@ person's blobs from storage and the reference table. Presigning uses the sans-IO
 `sha2` + `base64`) for the upload, and `reqwest` (rustls) as the thin HTTP client
 for the engine's own bucket HEAD/DELETE — no cloud SDK.
 
-The `graphql` module is the async-graphql surface kit, aligned to the intent's authoring ergonomics. A service lists its slices once with the
-`compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
+The `graphql` module is the async-graphql surface kit. A service lists its
+slices once with the `compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
 `SubscriptionRoot` and the `register` function; it composes those roots into one
 schema with `engine_schema`, mounts it with `app` (`POST
 /graphql` — JSON, or a graphql-sse event stream when `Accept` names
@@ -538,14 +592,21 @@ the pool into the schema. Mutation resolvers run on `Engine::mutation_executor`
 (`execute` / `ack` and their bulk forms), answering `{ success }` or a typed
 error carrying the gate's `Reason` code, and returning a `OneShot`'s inner value
 only in the mutation response. Query resolvers take a typed `Query` context and
-read rendered views through `cx.fetch::<Projector>(key)` /
-`cx.fetch_window::<Projector>(params)`, never the database; a view carrying
-`Affordances` round-trips through the rendered store, so the fetch is typed, not
-opaque JSON. The subscription is one typed union member per projector: the
-`subscription_union!` macro takes a service's `Projector => View` mapping once
-and emits the `Reset`/`Upsert`/`Remove` payloads over a typed view union (so a
-client subscribing to one projector's field receives only that member's deltas)
-with the contiguous revision and the causing event. Each capability builds a
+never a raw pool. A keyed view is read with `fetch_view::<View>(key)`, one row
+through `load_visible` projected by the view (never the view's population), and
+a list with `fetch_view_window::<View>(&query)`, a window above `window_capacity`
+refused with `WINDOW_TOO_LARGE`; a raw projector is read with
+`fetch::<Projector>(key)` / `fetch_window::<Projector>(params)` (and their
+`_json` forms), which decide membership from a window read under the same
+ceiling. One aggregate is read with `load_visible::<View>(key)`, hand SQL over a
+visible parent's children with `behind::<View>(&key).read(..)`, and any other
+hand SQL with `read_under_rls(..)`. Each typed fetch returns the view's own type
+(its `Affordances` included), not opaque JSON. The subscription is one typed
+union member per projector: the `subscription_union!` macro takes a service's
+`Projector => View` mapping once and emits the `Reset`/`Upsert`/`Remove`
+payloads over a typed view union (so a client subscribing to one projector's
+field receives only that member's deltas) with the contiguous revision and the
+causing event. Each capability builds a
 `SliceFragment` with `SliceFragment::derive::<Query, Mutation, Subscription>(slice)`
 — its root fields and owned object types are read from the capability's own
 `#[Object]`/`#[SimpleObject]` impls through async-graphql's type registry, never
@@ -555,15 +616,16 @@ fragments over one aggregate (a capability file per fragment, all naming the
 same aggregate); capabilities of one aggregate legitimately share its owned
 types, while two *different* aggregates claiming one type name is a collision.
 The engine assembles the registered fragments at the start of `run` (so through
-`run_with` too) and fails boot loud with `EngineError::DuplicateSchemaMember`,
+`run_with` too) and fails boot loud with `CompositionError::DuplicateSchemaMember` (carried as
+`EngineError::Composition`),
 naming both aggregates, if two claim the same root field or object type — the pod
 never serves an ambiguous schema. The gate does not trust the fragments blindly:
 when the service feeds the composed schema's SDL with
 `Engine::set_schema_sdl(schema.sdl())` before `run`, the engine parses that SDL
 with the real GraphQL parser (so a block-string description that wraps onto a
 field-shaped line is never mistaken for a phantom root field) and fails boot with
-`EngineError::UndeclaredSchemaMember` for a root field, or
-`EngineError::UndeclaredSchemaType` for an object type, that the schema exposes
+`CompositionError::UndeclaredSchemaMember` for a root field, or
+`CompositionError::UndeclaredSchemaType` for an object type, that the schema exposes
 but no fragment claims — the seam of a capability merged into the composed roots
 yet never registered. The engine's own injected object types (the mutation ack,
 the lane payloads) are themselves derived from the engine's wrapper types and
@@ -581,20 +643,44 @@ kit does authZ only, never authN. On `POST /graphql` it does so from the headers
 alone, **before it reads a byte of the request body**: a request whose passport is
 absent, does not decode or is rejected is answered `401` with the body untouched,
 whatever its content type, so an unauthenticated client can make the pod neither
-buffer nor write anything. The `401` body is the one JSON clients have always
-received (`the X-Passport header is absent`, `… is malformed: …`, `the passport is
-rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
+buffer nor write anything. The `401` body is plain text, not JSON: the message
+clients have always received (`the X-Passport header is absent`, `… is malformed:
+…`, `the passport is rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
 (below), also before the body is read.
+
+The principal contract. `PassportPrincipal::from_passport(passport) ->
+Result<Self, PrincipalRejected>` is pure and synchronous: it gets no pool and
+returns no future, so it decides from the passport alone, and its
+`PrincipalRejected` is the one `401` a principal can cause. Every database fact
+the principal carries is read by a loader registered with
+`register_principal_fact`; the engine runs the loaders after `from_passport` on
+every `POST /graphql` and every `/graphql/ws` upgrade, and again at each principal
+refresh. A loader that fails — a database fault, a missing grant, any error — is
+an infrastructure fault: the request or the upgrade is answered `500` with the
+`INTERNAL` error body and no detail, the whole chain is logged at `error`, and a
+rejected passport still gets its exact `401` meanwhile (`s243`). At a refresh, the
+same failure ends the principal's sessions fail-closed, and a session still
+connecting then refuses its attach with `AttachError::PrincipalRefreshFailed`,
+answered `INTERNAL`; only a `PrincipalResolver` answering `None` refuses it with
+`PrincipalRevoked`, answered `UNAUTHENTICATED` (`s258`). A loader has no rejecting
+outcome: a denial read from local data is authorization (`FORBIDDEN`, or an
+affordance `reasonCode`), never a `401`, because authentication belongs to the
+gateway.
+
+| Thing | Why it is the way it is |
+|---|---|
+| no pool in `from_passport` | the refresh re-resolves through `PrincipalResolver` and reloads the facts but never calls `from_passport`, so a read there went stale on a live session; and a fault there could only surface as a `401` |
+| facts only through loaders | one path, read per request and at every refresh, whose fault is always the coded `500` |
 
 Multipart requests. `POST /graphql` accepts the GraphQL multipart request
 (`operations`, then `map`, then the file parts `map` names) from an authenticated
-client only, and reads it under `EngineConfig::multipart` (`MultipartConfig`,
-validated at boot):
+client only, and reads it under `EngineConfig::max_body_bytes` (below) and
+`EngineConfig::multipart` (`MultipartConfig`, validated at boot):
 
 | Bound | Default | Refusal |
 |---|---|---|
-| `max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
-| `max_file_bytes` — any single part: a file, `operations`, `map` | 8 MiB | `413` `MULTIPART_FILE_TOO_LARGE` |
+| `EngineConfig::max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
+| `max_file_bytes` — any single part: a file, `operations`, `map`. Unset, it follows a lower `max_body_bytes` down, so lowering the body bound alone is enough; set, it must not exceed `max_body_bytes` (refused at boot) | 8 MiB, or `max_body_bytes` when that is lower | `413` `MULTIPART_FILE_TOO_LARGE` |
 | `max_files` — the uploads `map` binds (every path counts, so one file bound to two variables counts twice); judged on `map`, before any file part is spooled — and `map` itself may weigh at most 1 KiB per allowed upload plus 1 KiB, so a padded `map` is refused before it is parsed | 4 | `413` `MULTIPART_TOO_MANY_FILES` |
 
 A body that breaks the spec's order, carries a part `map` does not name, or misses
@@ -617,7 +703,7 @@ Every authenticated body. Two bounds hold for every content type, JSON included:
 
 | Bound | Default | Refusal |
 |---|---|---|
-| `MultipartConfig::max_body_bytes` — the whole body, JSON as well as multipart (the name predates its reach); a declared `Content-Length` above it is refused before the body is read, a chunked body is cut on the chunk that crosses it | 16 MiB | `413` `BODY_TOO_LARGE` (`MULTIPART_TOO_LARGE` for a multipart body) |
+| `EngineConfig::max_body_bytes` (`with_max_body_bytes`, `config::DEFAULT_MAX_BODY_BYTES`) — the whole body, JSON as well as multipart; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut on the chunk that crosses it. No environment variable feeds it | 16 MiB | `413` `BODY_TOO_LARGE` (`MULTIPART_TOO_LARGE` for a multipart body) |
 | `EngineConfig::body_read_timeout` (`with_body_read_timeout`) — from the passport resolving to the last byte of the body; past it the read is abandoned and what was received (buffered bytes, spooled files) is dropped | 30 s | `408` `BODY_READ_TIMEOUT` |
 
 Both refusals are GraphQL-shaped like the multipart ones (`graphql::BODY_TOO_LARGE_CODE`,
@@ -627,11 +713,32 @@ the first one that does adds a concurrent-upload limit (a spool semaphore) sized
 with its `emptyDir`.
 
 Refusals on the wire. A refusal is a coded GraphQL error, never a transport
-error. A mutation refusal is `mutation_error(reason)`; a query or subscription
-refusal is `graphql::coded_error(code, message)`, or `graphql::forbidden()` for
-the `FORBIDDEN` case — both re-exported at `service_engine::` and carrying the
-code in the `code` extension the frontend reads. On a query the client sees HTTP
-`200` with `errors[].extensions.code` and a null datum; on a subscription open
+error, and a resolver writes it with a bare `?`. The engine turns on
+async-graphql's `custom-error-conversion`, so `?` into `async_graphql::Error`
+converts only an error that says what the client gets:
+
+| `?` on | The client gets |
+|---|---|
+| `gate::Reason` (what `Gate::require` returns) | its code, with the code as message |
+| `MutationError` (what `MutationExecutor::run` / `run_bulk` return) | a refusal: its reason's code, message `mutation refused: <detail>`; a failure: `INTERNAL`, its cause logged when the failure was built |
+| `AttachError` (what `Engine::attach` returns) | `WindowTooLarge`: `WINDOW_TOO_LARGE`; `PrincipalRevoked`: `UNAUTHENTICATED`; any other: `INTERNAL`, cause logged |
+| `WindowSizeOutOfRange` (what `WindowSize::new` returns) | `WINDOW_SIZE_INVALID` |
+| any other error (`EngineError`, `sqlx::Error`, `serde_json::Error`, `std::io::Error`, …) | does not compile |
+
+The rule for a resolver: `?` a refusal, name a fault. A fault goes through
+`OrInternal::or_internal(context)` (`use service_engine::OrInternal`), which logs
+the context and the whole cause chain and answers `INTERNAL`. A refusal the
+engine has no type for is `graphql::coded_error(code, message)`, or
+`graphql::forbidden()` for the `FORBIDDEN` case; a service whose own refusal type
+recurs writes one `impl From<ItsRefusal> for async_graphql::Error` over
+`coded_error` (async-graphql's blanket `From<T: Display>` conflicted with it
+before). All of these are re-exported at `service_engine::` and carry the code
+in the `code` extension the frontend reads. The switch holds for the whole
+build: the engine's own conversions conflict with that blanket conversion, so
+the engine does not compile without the feature, and Cargo's feature
+unification turns it on for every crate of the build that uses async-graphql.
+On a query the client sees HTTP `200` with `errors[].extensions.code` and a
+null datum; on a subscription open
 the client sees a `next` payload carrying that same error then `complete`, never
 a transport-level `error` frame — on the WebSocket the framing is async-graphql's
 own, on the event stream the engine frames it the same way.
@@ -643,17 +750,67 @@ begin or commit, an engine wiring fault, a handler error whose
 (`graphql::INTERNAL_CODE`) with the fixed message `internal error`
 (`graphql::INTERNAL_MESSAGE`) and no detail; the engine logs the cause at
 `error` with its whole `source()` chain where it converts the error. A handler
-fault joins its own chain to that log by returning `Some(self)` from
-`MutationFault::as_error` (the default logs its `Display` alone). The few
-failures a client can act on keep a specific code: paging a session the caller
-does not hold or a window it never attached is `NOT_FOUND`, attaching under a
-session id a live session holds is `CONFLICT`, attaching for a principal that no
-longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
-the request is answered `500` with the same `INTERNAL` error body, not `401`. A
+fault is in that chain by construction: `MutationFault` requires
+`std::error::Error`, and the engine logs the fault with `error::describe`. The
+few failures a client can act on keep a specific code: attaching a window, or
+fetching one once (`fetch_window`, `fetch_window_json`, `fetch_view_window`),
+whose population exceeds `window_capacity` is `WINDOW_TOO_LARGE`
+(`graphql::WINDOW_TOO_LARGE_CODE`; the message names the capacity, never the
+projector nor the population size, which may count rows the caller cannot see),
+a `WindowSize` argument below 1 is `WINDOW_SIZE_INVALID`
+(`WINDOW_SIZE_INVALID_CODE`, answered before the resolver runs), attaching for a
+principal that no longer exists is `UNAUTHENTICATED`; a principal refresh that
+faults while the attach connects is `INTERNAL`. One failure the client cannot
+fix keeps a code too: a raw one-key `Query::fetch` / `fetch_json` whose
+projector's default window exceeds `window_capacity` is `WINDOW_TOO_LARGE`,
+with a message that says the service must read the key by its row; the engine
+logs it at `warn` (see the capacity section). When the principal's facts cannot
+be loaded the request is answered `500` with the same `INTERNAL` error body, not
+`401`. A
 refusal that carries a reason is unchanged: its code and its `mutation refused:`
-message. `graphql::internal_error(context, &cause)` gives a service's own
-resolver the same shape; the codes, the message and both helpers are
+message. `OrInternal::or_internal(context)` on a `Result`, or
+`graphql::internal_error(context, &cause)` on an error, gives a service's own
+resolver the same shape; the codes, the message, the trait and the helpers are
 re-exported at `service_engine::` like `coded_error`.
+
+Errors as text. `error::describe(&error)` renders an error and its whole
+`source()` chain, outermost first, joined by `: `. It is the engine's one
+renderer: every engine log site uses it, and so does every failure text the
+engine keeps (dispatch and dead-letter reasons, render faults, relay, cron and
+mirror health, NATS, object-storage and published-language details). A service's
+own faults reach it by construction: `MutationFault` and `ReactionError` both
+require `std::error::Error`, a mutation fault without a reason is logged as
+`describe(&fault)`, and a reaction fault's dispatch and dead-letter reason is
+`describe(&fault)`. So a fault keeps the error it wraps as its `source()`
+(`#[from]` or `#[source]` with thiserror) and writes only its own context in
+`Display`; it never pre-renders its cause into a `String`. `MutationError`, what
+`MutationExecutor::run` / `run_bulk` return, follows the same rule and has two
+states and no public field. A failure without a reason
+(`MutationError::internal`) writes only `mutation failed` and keeps its internal
+text (`describe(&fault)` for a handler fault) as its `source()` only:
+`describe(&error)` renders `mutation failed: <chain>` for a log, no accessor
+hands that text out, and a resolver that forwards the error with `?` into
+`async_graphql::Error` answers `INTERNAL` and nothing more. So the cause is
+never lost, `MutationError::internal(detail)` logs the detail at `error` when it
+builds the failure; the engine's own failures are logged once where they occur,
+so every failure is in the log exactly once, and a service does not log before
+it builds one. A refusal
+(`MutationError::refused(reason, detail)`) writes
+`mutation refused (<CODE>): <detail>`, its detail being the fault's own
+`Display`; `reason()`, `code()` and `refusal_detail()` answer `Some` for a
+refusal only, and `refusal_detail()` is the only detail a client reads. `?`
+forwards a refusal with its code (see *Refusals on the wire*); `execute` / `ack`
+do the same for a registered mutation. `gate::Reason` is an
+error too (its `Display` is its code), so a mutation that can only refuse
+declares `type Error = Reason`. A service that logs an engine error, or keeps
+one as text, calls the same function. A
+segment is written once: it is skipped when its parent's text equals it or ends
+with `: ` followed by it. So sqlx's `error returned from database: <text>`,
+whose `source()` is the database error `<text>` again, renders the database
+text once, and so do an async-nats `kind: source` error and a wrapper that
+repeats its source verbatim. The match is at a segment boundary only: a parent
+`cannot open config` over a cause `config` keeps both. A skipped segment is
+still the parent of its own cause, which is kept when distinct.
 
 `register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
@@ -697,15 +854,14 @@ Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `engine.eraser()` before `run` to erase while the pod is serving, exactly as
 `mutation_executor` and `blob_reader` are captured.
 
-The authoring ergonomics follow the intent. A projector is
-written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
+A projector is written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
 names its `type Noun` and `type Store`, a typed `Query`, its `type Visibility`, and
 writes only a native `async fn populate(cx, q)` over a `Populate` context and
 `project(row, principal) -> Result<Out, EngineError>`. `project` is fallible: a
 stored row it cannot render (a nested blob that will not deserialize) returns
 `Err`, and the engine dead-letters that poison with the projector as source at
-**every render entry point** — a normal pass, the attach snapshot, a page, and a
-repair re-snapshot all record the poison the moment `project` fails, deduped on
+**every render entry point** — a normal pass, the attach snapshot and a repair
+re-snapshot all record the poison the moment `project` fails, deduped on
 projector plus key — and repairs, then ends, the faulted sessions rather than
 panicking the pod.
 No hand-written future plumbing and no render load SQL live in the view: the engine
@@ -717,13 +873,16 @@ works in the typed `Query` through `register_view`, `Query::fetch_view` /
 is a zero-sized adapter, so a query resolver constructs no per-call state. The
 low-level `projector::Projector` stays as the escape hatch for a projector that
 joins nouns. `type Visibility` is the third enforcement point of one declaration:
-the same cohort rule that `populate` uses through `Visibility::window` is applied
-by the engine before it projects (the `visible` method defaults to it), so a row
-that leaves the principal's cohorts is delivered as a `Remove` and one that enters
-as an `Upsert`. When a principal's own facts change (a membership granted or
-revoked, staged with `Ops::impact_principal_facts`), the engine re-resolves the
-principal and repopulates every window shape — a `Population::Keys` window
-included — so both directions reach a live session then and there.
+the same cohort rule that `populate` reads through `view::cohort_window` (the
+store's `CohortIndex`) is applied by the engine before it projects (the `visible`
+method defaults to it), so a row that leaves the principal's cohorts is delivered
+as a `Remove` and one that enters as an `Upsert`. When a principal's own facts
+change (a membership granted or revoked, staged with
+`Ops::impact_principal_facts(principal, deps)`), the engine re-resolves the
+principal and repopulates its `Population::Keys` windows and open heads always,
+and its live (`Population::Query`) windows whose `Interest` meets `deps`: a
+`Visibility` whose `memberships` read a principal fact names that fact's bit in
+`Visibility::DEPS`, so both directions reach a live session then and there.
 
 The **window shape is derived from the declaration**, not hand-picked per
 `populate`: `Visibility::LIVE` (the read-side default) makes a cohort view a
@@ -735,8 +894,11 @@ member) and a membership change repopulates the window. `LIVE = false` is the
 explicit override for a closed `Keys` snapshot; returning a `Population` from
 `populate` directly bypasses inference. A cohort view reads **only the caller's
 rows** through the store's `CohortIndex` seam
-(`keys_in_cohorts(conn, &memberships)`) — one indexed query on the cohort
-columns, never a table scan filtered in memory. A cohort is a `(dimension,
+(`keys_in_cohorts(conn, &memberships, ceiling)`) — one indexed query on the
+cohort columns, never a table scan filtered in memory, and bounded: it binds
+`ceiling.limit()` as its `LIMIT`, so a whole-collection cohort attach reads at
+most `window_capacity + 1` keys before it is refused (a debug build panics when
+a store returns more keys than the ceiling). A cohort is a `(dimension,
 value)` the service names — `Cohort::uuid("manager", id)`, `Cohort::flag("public",
 true)`, `Cohort::text`, `Cohort::int`; the engine hashes it to a `CohortKey` for
 routing, and the store never stores the hash. `keys_in_cohorts` binds against the
@@ -809,45 +971,121 @@ cause silently dropped, so a service that attaches a large payload as a cause
 learns at the mutation, not by a viewer missing it — keep a cause to a small fact
 and carry bulk in the view.
 
-**Page through history behind a live window.** The kit gesture
-`service_engine::page::<P, V>(ctx, session, &cursor)` re-runs the
-projector's `populate` with a cursor and **appends** the older keys it returns to
-the window the session already holds, delivering the new keys as `Upsert`s on the
-contiguous revision — scrolling back never sends a `Reset`. The window is the
-live head `populate` filled at attach plus every appended page; a key changes
-wherever it sits (an edit to an old row reaches the viewer who holds it), a
-`Remove` leaves the window only when the row is deleted or becomes invisible,
-never because it fell off a page bound. `window_capacity` bounds the keys a
-session may hold across its pages: once appending a page would exceed it the
-**oldest appended page is released** — dropped from the window and from the
-session's `last_sent` with no `Remove` delta, since the client that asked for
-that page drops it too — while the live head is always retained. A paged history
-survives a principal-facts refresh and a reconnect `Reset` (still subject to its
-own visibility). The gesture is authorized against the caller's `Passport`: the
-engine serves only a **live session owned by the calling principal**. Because a
-session lives on the pod that holds its socket, a page request must be issued
-**over that session's own connection** (a mutation over the same WebSocket lands
-on the same pod); a page for a session this pod does not hold — or one held for a
-different principal — is refused with `EngineError::NoLiveSession`, so knowing
-another session's id buys an attacker nothing. Through the gateway there is no
-such connection: the session rides an event stream (see *Subscription
-transports*) and the `page` mutation is a separate `POST` the gateway may route
-to another replica, where it is refused the same way. Paging a gateway (SSE)
-session requires the session's pod (one replica) until 0.4.0 moves paging to
-subscription arguments.
-The client correlates the two by supplying its own `SessionId`:
-`attach_with_session` (kit) / a `session` argument on the subscription pins the
-id the `page` mutation then names. The
-reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
-size)` opens the head window and `pageCards(session, boardId, before, size)`
-appends an older page behind it. A page renders its appended keys **outside the
-session lock**, so its final delivery — taken back under the lock — skips any
-paged key a concurrent render pass has already delivered (its `last_sent` is
-present): a key scrolled in while it is being written settles on the committed
-view, never a stale page render that lost the race to the pass.
+**Paging is subscription arguments.** The window a session renders is exactly
+what the projector's `populate` returns for the subscription's arguments. A paged
+view takes its bound as arguments of its delta subscription — `size` and, for a
+page behind the head, a `before` cursor, beside any filter — and carries them in
+its typed `Query` as a `Page<K>` (`WindowSpec::view::<V>(&query, rls)` encodes
+them). The engine gives the two pieces as primitives. `WindowSize` is the size
+argument: the client sees a plain `Int` (`Int!` when required), a value below 1
+is refused before the resolver runs with `WINDOW_SIZE_INVALID`
+(`service_engine::WINDOW_SIZE_INVALID_CODE`), and a stored window argument
+cannot carry one either, because `WindowSize` refuses it on decode, so a zero or
+negative bound never reaches the database as a `LIMIT`. Declaring a `WindowSize`
+argument leaves every other `Int` argument of the schema as it was. This shape is
+the contract: the size is a plain GraphQL `Int` (no custom scalar reaches the
+SDL), the window arguments travel in the view's typed `Query` (a `Page<K>` there,
+never state the engine keeps between subscriptions), and a size below 1 is
+`WINDOW_SIZE_INVALID`.
+`Page<K>` (`Page::head(size)`, `Page::before(cursor, size)`, `Page::new`) is
+what `populate` reads: its SQL binds `page.cursor()` and `cx.limit(&page)`
+(`… AND ($2::uuid IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`) — the page
+has no limit of its own, so the only `LIMIT` at hand is the bounded one — and it
+returns `page.population(keys)`, which picks the shape so the author never does:
+a page with no cursor is an open head (`Population::Ordered { open_head: true }`
+— a new row enters it and the oldest leaves), a page behind a cursor is fixed
+(`open_head: false` — its rows change in place and a newer row never enters). In
+a debug build `page.population` panics when it receives more keys than the page
+size, so a `populate` that forgot to bind the limit fails in test rather than
+shipping. The client never names a session:
+the engine mints every `SessionId` at attach, and no root field takes one. To
+change its window the client ends the subscription and starts a new one with new
+variables — a **new session**, opened by a `Reset` at revision 1 that carries the
+whole new window, so the client keeps its list on screen until that `Reset`
+lands, treats the variable change like a reopened stream for the revision check,
+and never refetches. A write committed while the client switches is in the new
+`Reset`, which reads committed state. The old session is dropped with its stream
+at the next render pass or `gc`; the stream exists from the first moment of an
+attach, so an attach the client abandons mid-snapshot is dropped the same way,
+and a burst of window changes leaves one session. Nothing ties a window to a pod: any
+replica serves any subscription and any window change, with no session affinity
+and no cross-pod relay. Two patterns: **grow by re-subscribing** (a larger
+`size`; each change re-renders the whole window, so scrolling back through `n`
+pages costs O(n²) renders) and **one subscription per page** (`before` + `size`,
+one stream per page shown), the one to prefer for long histories. The reference
+`card` slice takes both arguments, `exampleCardDeltas(boardId, size, before)`:
+`size` is required, so its live list is always bounded, and the newest page is
+an open head while a page behind a cursor holds its rows.
+
+After attach the window follows the shape of its population, whatever its
+arguments: a `Population::Keys` window is fixed — a row outside it enters only
+when a principal-facts refresh or a projector-wide impact (`cx.impact_all_view`)
+re-runs `populate`; a `Population::Ordered { open_head: true }` window repopulates on
+every change of its noun, so a new row enters a sized head and the oldest leaves
+it; a `Population::Query` window grows by discovery — a changed row that matches
+its predicate joins it.
+
+**`window_capacity` bounds a window at attach, never after.** An attach whose
+population holds more than `window_capacity` keys (default 10,000,
+`EngineConfig::with_window_capacity`, no env var) is refused before anything is
+rendered, with `AttachError::WindowTooLarge` answered as `WINDOW_TOO_LARGE`, and
+leaves no session behind; the client narrows the window with its arguments. An
+attach of several windows populates and admits every window before it renders
+any, so a refusal of its last window costs no load and no projection of the
+others. A query resolver's one-shot `fetch_window` / `fetch_window_json` (and
+`fetch_view_window`, built on it) is judged the same way: it populates under the
+attach ceiling, and a window above `window_capacity` is refused with
+`WINDOW_TOO_LARGE` before any row is loaded or rendered. The read behind a
+refusal is bounded for a view that binds the attach bound as its `LIMIT`: at
+attach `cx.limit(&page)` is the page size clamped to `window_capacity + 1`, the
+one key past the capacity that proves the refusal, so
+a `size: 2147483647` reads at most `window_capacity + 1` keys before it is
+refused, and the refusal's `keys_read` reports that count, never the size of
+the collection. A populate with no page (a whole-collection read, a filter
+without a `size`) binds `cx.limit_all()`:
+`window_capacity + 1` at attach and at a one-shot fetch, no limit on a
+repopulation after attach, so a client retrying a refused attach in a loop never
+reads the whole collection. A raw one-key `Query::fetch` / `fetch_json` decides
+membership from the default window read under the same ceiling and is refused
+above `window_capacity` (a truncated window cannot decide membership). Its
+client has no window argument to narrow, so its `WINDOW_TOO_LARGE` message
+names the capacity and says that the service must read the key by its row, and
+the engine logs one `warn` per such refusal naming the projector, the keys read
+and the capacity: the fix is the service's, reading the key through
+`fetch_view`, which reads one row and never populates. The engine's own
+population sources take the same bound: `view::cohort_window` passes it to
+`CohortIndex::keys_in_cohorts`, and `full_eda::keys` reads at most
+`cx.limit_all()` keys. A populate that binds neither reads its whole population
+before it is refused. A raw `projector::Projector` receives the same bound as
+`populate`'s `KeyCeiling` argument. A repopulation after attach runs under
+`KeyCeiling::NONE` and binds the page size as asked, so the ceiling never trims
+a live window. Every refusal is counted as
+`service_engine_windows_over_capacity_total{projector, outcome="refused"}`. A
+window refusal (an attach or a one-shot window fetch) is not logged: its client
+can fix it with the window's arguments, and a client that retries in a loop
+would flood the log. A raw one-key refusal is logged, as above, because only
+the service can fix it. A live window is never ended for its size: one that
+grows past the capacity after its attach (an open head with no size, a query window
+discovering rows, a window that a principal-facts refresh or a projector-wide
+impact repopulates) stays open on its contiguous revision, and the engine logs
+one `warn` naming the session, the projector, the size and the capacity when it
+crosses the bound, and counts `outcome="kept"`. Ending it instead would make the
+view flap under a high write rate — end, re-subscribe, a large `Reset`, grow,
+end again — and the sessions that meet the bound are few viewers of a busy view,
+so per-session memory is not the limit. A whole-collection view (`type Query =
+()`) is therefore bounded by `window_capacity` at attach: once its collection
+outgrows the capacity every new attach is refused. A `kept` count comes only
+from a window that grows after attach; a `Population::Keys` whole-collection
+window grows only when it is repopulated, so for such a view the first signal
+can be `refused`. No shipped alert watches the counter: a client that asks for
+a `size` above the capacity counts `refused` while the service is sound, so an
+alert on it would page on a client's request. Read it on a dashboard: `refused`
+on a view that takes no `size` is a whole collection outgrowing the bound (give
+the view a `size` or a narrower filter argument, or raise the capacity), and
+each `kept` also has its `warn` line.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
-so a service can implement the intent's "Cancel work in flight": a direct-lane
+so a service can cancel work in flight: a direct-lane
 cancel decision (with the cancel gate as its affordance, a presence signal the
 producer watches and a scheduled deadline), a reaction that seals the producer's
 verified partial as cancelled, and a deadline reaction that seals whatever the
@@ -949,10 +1187,11 @@ bootable reference service built only on this crate's public authoring surface �
 no `test-support`, no `pub(crate)` reach-around. A handful of 0.3 authoring
 gestures the example does not yet exercise — a hard `cx.delete` guarded by
 `register_post_delete_policy`, an `OfferTrigger`, `Mirror::require_key`, an
-`Inverse::Lookup` join, a `coded_error`/`forbidden` refusal, and branching on the
-`Written` mirror verdict — are demonstrated in the conformance sample
-(`crates/conformance-service-engine/src/sample/`, e.g. `pipeline.rs`,
-`widget_tag.rs`, `linked.rs`, `mirror.rs`, `graphql/forbidden.rs`); copy those for
+`Inverse::Lookup` join, a `coded_error`/`forbidden` refusal, a mirror keyed by a
+sum type, and a mirror join over a cascading foreign key — are demonstrated in the
+conformance sample (`crates/conformance-service-engine/src/sample/`, e.g.
+`pipeline.rs`, `widget_tag.rs`, `linked.rs`, `mirror/`, `declarative.rs`,
+`staffing.rs`, `graphql/forbidden.rs`); copy those for
 those idioms until the reference service grows them. Read the example as the
 how-to: a thin
 `kernel/` (the principal and its generic fact bag, the error base — and no scope
@@ -1015,7 +1254,10 @@ released checksum registered.
 function — so `register.rs` calls the generated `slices::register(engine)` and
 `graphql.rs` mounts the generated roots, and neither is touched when a slice
 comes or goes. Removing a slice deletes its folder and its one line in the
-`compose_service!` block; adding one is the reverse.
+`compose_service!` block; adding one is the reverse. `cargo fmt` does not expand
+macros, so it never reaches a module the macro declares: a service's CI runs
+`rustfmt --edition 2024 --check src/slices/*/mod.rs` beside `cargo fmt --check`
+(the engine's CI does this for `example-service`).
 
 `compose_service!` takes a **mandatory** `prefix = <snake_ident>;` after
 `principal` (a block without it does not compile), and every root field the
@@ -1023,7 +1265,7 @@ service exposes must be `<prefix><UpperName>`: name each resolver method
 `<prefix>_<name>` (so `example_board` serves `exampleBoard`), never a bare
 `<prefix>` — a root method named exactly the prefix is refused. The engine
 validates the ident, derives the lowerCamel prefix once, declares it before any
-slice registers, and refuses at boot (`RootPrefixInvalid` /
+slice registers, and refuses at boot (`CompositionError::RootPrefixInvalid` /
 `RootPrefixUndeclared` / `RootFieldOutsidePrefix`, the pod never serves) any
 service that leaves a root field outside its prefix. A service that hand-registers
 `SliceFragment`s without `compose_service!` calls
@@ -1077,9 +1319,14 @@ roster::RosterQuery, subscription = roster::RosterSubscription }` and the
 principal, the macro emits the root objects, their root methods
 (`<prefix>_person` → `examplePerson`, `<prefix>_roster_deltas` →
 `exampleRosterDeltas`) and the slice's `register`, reaching `pastey` through
-`::service_engine::pastey` without its own dependency. The projector
-`RosterUsers<P>` is generic over a `RosterPrincipal` bound the host implements in
-one line (`impl RosterPrincipal for AppPrincipal {}`), and the delta union is
+`::service_engine::pastey` without its own dependency. The view
+`RosterUsers<P>` (a `view::Projector` over `RosterStore`, the read of
+`roster.known_persons`, declared `Unrestricted` with the `RosterIsOpen` reason)
+is generic over a `RosterPrincipal` bound the host implements in one line
+(`impl RosterPrincipal for AppPrincipal {}`). `<prefix>_person` reads its one row
+through `fetch_view`, so a roster of any size answers it; `RosterStore` refuses
+`save` and `create`, because the host's directory mirror is the table's only
+writer. The delta union is
 declared **once**, outside the callback macro, with the generic
 `subscription_union! { generics [P: RosterPrincipal] ; … }` arm, so the callback's
 subscription resolver only calls `RosterDelta::from_delta::<P>(&delta)`.
@@ -1163,7 +1410,13 @@ whichever mode it lives:
   run the relay (`bb10`), and the mirror leader projects while a standby converges to
   readiness from the KV bucket and then takes over the expired lease to project a
   change published after the leader died (`bb11`, which shortens the lease and beat
-  through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env), and a
+  client that changes its window by re-subscribing with new arguments lands on
+  either pod with a `Reset` at revision 1 while a write committed through the other
+  pod reaches it, the next page behind a `before` cursor is its own subscription,
+  a `size` below 1 is refused with `WINDOW_SIZE_INVALID` before any session
+  exists, and no root field of the reference service or the battery's sample lets
+  a client name a session (`bb17`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
   and built on demand otherwise, so the mode is self-sufficient locally. `bb05`
   drives the real lane-A ingress: the `example-twin` binary streams the reply's
@@ -1200,7 +1453,8 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb13_migrate_waits_for_the_app_role \
     --test bb14_migrate_needs_only_the_owner_env \
     --test bb15_migrate_refuses_an_owner_subject_to_rls \
-    --test bb16_gateway_sse_subscription
+    --test bb16_gateway_sse_subscription \
+    --test bb17_paging_by_arguments_across_replicas
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1215,6 +1469,64 @@ scenarios against them on real PostgreSQL and a spawned NATS — no MinIO, since
 the example binary boots without S3 (blobs are registered only when configured)
 and no black-box scenario exercises a blob.
 
+## Adopter SQL and reads
+
+The engine is not an ORM. A service writes its own SQL — a store's
+`read_many`/`save`, a `populate`, a `keys_in_cohorts`, a journal page — and that
+is the normal case. The rule for that SQL is bound parameters only: a value from
+a request, a principal or a consumed offer is always `.bind(…)`, never formatted
+into the statement; the only formatted parts are identifiers the service holds as
+`&'static str` constants. Around that SQL the engine asks seven things, and gives a
+primitive that makes each one the easy path:
+
+| Requirement | Primitive |
+|---|---|
+| A read over many keys is one statement, never one per key | `Persistence::read_many` is required and has no per-key default, so a store must write it; its contract is one statement per call (two for `FullEda<T>`), never one per key — the compiler checks that it exists, not that it is set-based; `load` is its one-key case on `PersistenceExt` and cannot be overridden |
+| A resolver reads only through a gate | `GraphqlState` exposes no pool: a resolver reads through a view, `load_visible`, `behind(..).read(..)` or `read_under_rls`, never through a raw connection that would skip both enforcement layers |
+| A read is bounded by what it answers | A cohort view populates through `view::cohort_window`, so its read is the store's `CohortIndex::keys_in_cohorts(conn, cohorts, ceiling)`, one indexed query on the cohort columns with `ceiling.limit()` as its `LIMIT`; `Visibility` has no in-memory window builder, so the engine gives no primitive that loads a table to filter it. A populate that has no cohort index binds `cx.limit_all()` (or `cx.limit(&page)`) as its `LIMIT`. An attach or a one-shot window fetch asks for `window_capacity + 1` keys at most. `Query::fetch_view::<View>(key)` reads the one row through `load_visible`, never the population; the raw projector's `Query::fetch` / `fetch_json` decide membership from the default window read under the same ceiling and refuse with `WINDOW_TOO_LARGE` above `window_capacity`, so a large collection is fetched by key through a view. A `populate` that ignores its ceiling still reads its whole population before the refusal: the bound holds only for a read that binds it |
+| A read of one aggregate for a principal honours the view's declaration | `Query::load_visible::<View>(key)`: the row is loaded under RLS when the view declares `RLS`, then kept only if the view's `visible` (its `Visibility` by default) admits it; a hidden row and an absent key both answer `None`, so a caller cannot probe which keys exist. `Query::download` is built on it. A list is a view (`fetch_view_window`, a subscription) |
+| Hand SQL over a parent's children honours the parent's declaration | `Query::behind::<View>(&key).read(\|parent, conn\| Box::pin(async move { … }))`: one `REPEATABLE READ READ ONLY` transaction (under RLS when the view declares `RLS`) loads the parent, and the closure runs with the parent and the connection only when the view's `visible` admits the parent; the gate and every statement of the closure read one snapshot, so a child committed after the gate is not read behind it. A hidden parent and an absent key both answer `None` and the closure never runs. A write inside it fails, and the transaction is rolled back at the end |
+| Hand SQL outside a view runs under the second enforcement layer | `Query::read_under_rls(\|conn\| Box::pin(async move { … }))`: a `REPEATABLE READ READ ONLY` transaction with the principal's RLS context applied through the registered `RlsApplier`, rolled back at the end; every statement of the closure reads one snapshot. A write inside it fails; a fault answers `INTERNAL` with the cause in the log, never the database text; with no `RlsApplier` registered the read is refused (`INTERNAL`), never run without the context |
+| A mirror stages only what changed, in statements that do not grow with its keys | `Project::project(cx, keys)` receives every key its transaction touches at once, and `Projection::replace_rows(RowScope::any_of(column, keys), rows)` over `KnownRow` rows writes the batch in one upsert and one delete per table, with full-row change detection inside the declared scope (the whole table only as the written-out `RowScope::whole_table()`); the kit has no single-row write, so a statement per key can only be a loop the service writes itself; a row whose table a principal fact loader reads declares `KnownRow::PRINCIPAL`, and the kit refreshes the facts of exactly the principals whose rows changed (see the mirror kit) |
+
+A keyset page over an append-only journal (`seq > $2 ORDER BY seq LIMIT $3`) or a
+context read is the case `read_under_rls` exists for: the SQL filters by the
+journal's own key, and the RLS policy filters by the principal, by construction.
+A service whose second layer is cohorts rather than RLS (no `RlsApplier`) reads a
+parent's children with `behind::<View>(&key).read(..)`: the parent's `Visibility` is the gate, and
+the children's SQL filters by the parent's key, which the closure receives with
+the parent. Or it declares the journal as a view: cohort columns on the fact row
+and a `before`-cursor window on the delta subscription.
+
+Mirror tables follow three rules:
+
+- **One mirror owns a table set.** A table that two projections write, or that
+  one projection reads to route impacts, belongs to one mirror. When the table
+  set has several sources (users, projects, orgs), the mirror consumes them all
+  and its key is a sum type — `enum RosterKey { User(Uuid), Project(Uuid),
+  Org(Uuid) }` — so every write to the set runs in that mirror's one lead
+  transaction, and no hand-written `pg_advisory_xact_lock` serializes two mirrors.
+- **Key a multi-source join per row, and write the batch at once.** `keyed_by`
+  yields the natural scope of the rows a change touches (the project whose members
+  changed); `project` receives every touched key in one call and writes each table
+  once, with `replace_rows(RowScope::any_of("project_id", keys), rows)`. A live
+  change writes only the scopes of its keys. A full rescan (boot, the periodic
+  reconcile, a leader takeover) hands every key to that one call, so it costs one
+  upsert (per ~30,000 bound values) and one delete per table, whatever the number
+  of keys — what a `()` key over `RowScope::whole_table()` costs, without
+  re-sending every row on every live change. A `()` key is therefore for a true
+  singleton only. A sum-type key splits the batch by variant and writes each
+  table once. Two tables linked by a cascading foreign key take three calls:
+  upsert the parents of the present keys, replace the children over every key,
+  then retire the parents of the absent keys (`staffing.rs` in the conformance
+  sample), so a retired parent's children are deleted, and impacted, by the kit
+  rather than silently by the cascade.
+- **No clock reads in a projection.** A projection (and a principal fact loader)
+  is a function of the consumed facts, never of the time it runs. A cohort is a
+  written fact: "active" is `end_date IS NULL`, never `end_date > now()`. A
+  transition driven by time is a write — `cx.schedule_at` or a cron — that records
+  the fact, and the projection reads it.
+
 ## Authoring caveats
 
 - A slice's `Visibility` declaration must be **total and injective**: `cohorts`
@@ -1224,9 +1536,11 @@ and no black-box scenario exercises a blob.
   declared cohort on the exact bytes of its dimension and value, never a 64-bit hash, so it is
   the totality and injectivity of the declaration — not a hash width — that keeps
   two principals, or two distinct cohorts, from ever sharing one render.
-- `Persistence::load` and `read_many` must stay non-locking; the engine serialises
+- `Persistence::read_many` (and so `PersistenceExt::load`) must stay non-locking; the engine serialises
   concurrent commands on one key with a per-key transaction advisory lock it takes
-  in `load`, so a slice needs no `Persistence::lock` to be correct. `lock` is an
+  in the pipeline's `cx.load` / `cx.load_many` (`Ops`), never in
+  `PersistenceExt::load`, so a slice that writes through the pipeline needs no
+  `Persistence::lock` to be correct, and a direct `Store::load` call locks nothing. `lock` is an
   optional optimisation — a `SELECT … FOR UPDATE` on the row (or snapshot) key that
   also pins the row image — and its default is a no-op; a slice may implement it to
   avoid a re-read under contention, never to obtain serialisation the engine
@@ -1243,34 +1557,70 @@ Recreate, never a rolling deploy: two versions must never share the store, since
 the engine schema and the service migrations move with the version. Boot enforces
 this after the posture check — it claims a single-row `service_engine.schema_version`
 (engine version, service version, pod, heartbeat) under a per-service advisory
-lock. A pod that finds a **different** version whose row is still live (its
-heartbeat inside `schema_version_liveness`, default 30s, refreshed by the beat)
-refuses to go UP: `Engine::boot` returns `EngineError::SchemaVersionConflict` and
-readiness stays DOWN with both versions named in the reason, turning a
-mis-configured rolling deploy into a loud failure instead of two versions quietly
-sharing one store. A stale row (a pod that died more than `schema_version_liveness`
-ago, so its heartbeat lapsed) never blocks — the booting pod claims the row. The
-service version comes from `EngineConfig::with_service_version`; the engine version
-is the engine crate's own version. If the beat's heartbeat later updates **no**
-row — another version has claimed the singleton while this pod ran, so it has been
-displaced — the pod lowers readiness to DOWN rather than keep serving over a store
-it no longer owns; it recovers when it once again owns the row.
+lock, so booting pods claim one at a time. The claim writes the heartbeat and
+every beat refreshes it; a row is live while its heartbeat is younger than
+`schema_version_liveness` (default 30 s). The write and the age both use the
+database's `now()`, so no pod clock enters the comparison. A pod of the **same**
+version (engine and service) claims at once, and a stale row (its heartbeat older
+than `schema_version_liveness`) never blocks. The service version comes from
+`EngineConfig::with_service_version`; the engine version is the engine crate's own
+version.
+
+**Schema-version handover.** Nothing clears a heartbeat when a pod stops, so right
+after a `Recreate` rollout stops the old pod, its heartbeat is still fresh. A pod
+that finds a **different** version whose row is still live therefore waits instead
+of exiting: it re-checks once per `beat` and claims as soon as that heartbeat is
+older than `schema_version_liveness`. The wait ends at a deadline — the time of the
+first conflict + `schema_version_liveness` + one `beat`. The extra beat covers an
+old pod that wrote one last heartbeat just after the first check: that heartbeat
+still ages out before the deadline, so one observed heartbeat change never ends the
+wait early. Only when the other heartbeat is still fresh at the deadline — the
+other version kept beating, as in a rolling deploy configured by mistake — does
+`Engine::boot` return `EngineError::SchemaVersionConflict`, with readiness DOWN and
+both versions named in the reason: a loud failure instead of two versions sharing
+one store. At each re-check the pod logs a `warn` that names both versions and the
+time left, and sets that reason on readiness; `serve` binds its listener last, so
+during boot the log is the operator's view (`/readyz` does not answer yet). A claim
+after a wait logs at `info`. The wait lasts at most `schema_version_liveness` + one
+`beat` (31 s with the defaults), inside the chart's 150 s startup budget (see
+*startupProbe*), so a `Recreate` rollout that changes the engine or service version
+starts the new pod once, without a restart. `EngineConfig::validate` refuses a
+`beat` that is not below `schema_version_liveness` (`ENGINE_BEAT_MS` comes from the
+environment): a live pod's heartbeat must never lapse between two of its own beats.
+
+A stopping pod does not expire its own heartbeat. Between such an expiry and a
+same-version sibling's next beat, another version could claim the row; the
+displaced sibling would only lower readiness while its relays, cron and mirrors
+keep writing — two versions on one store.
+
+If the beat's heartbeat later updates **no** row — another version claimed the
+singleton while this pod ran, because its beat stalled past that version's
+`schema_version_liveness` — the pod has been displaced: it lowers readiness to
+DOWN rather than keep serving over a store it no longer owns, and it recovers when
+it once again owns the row.
 
 ## Ops contract v1 — chart `br-engine-service` 1.x
 
 The engine publishes the shared deployment topology as a Helm **library** chart,
 `br-engine-service` (`charts/br-engine-service/`), on its own version line that
-starts at `1.0.0`. Chart major 1 **is** ops contract v1; the crate version
+starts at `1.0.0` and moves freely, independent of the crate version, which
 appears nowhere in the chart. A per-service **thin** chart depends on the library
 and supplies only values — no hand-written topology; the fixture
 `charts/br-engine-service/ci/thin-example/` pins that shape. The named templates
 (`br-engine-service.deployment`, `.service`, `.serviceaccount`, `.pdb`,
 `.networkpolicy`) render the topology from those values, and a thin chart invokes
-them from one include-only template. A change to any row in the table below is a
-chart **major** shipped under a **new chart name** (`br-engine-service-v2`); the
-old chart keeps serving old images. `check-chart-version.sh` refuses a `charts/**`
-change without a `Chart.yaml` `version` bump, but it cannot tell a minor from a
-contract-breaking major — that rule is the reviewer's to enforce.
+them from one include-only template. Which chart versions serve which engine
+versions is a compatibility matrix the deploying platform keeps outside this
+repository: an image is paired only with a chart version the matrix declares
+compatible with the engine compiled into it. A change to the
+chart's rendering of a row below is a new chart version and a new matrix entry;
+a row whose text changes with the engine's behaviour alone (the 0.4 `Roll` and
+`Replicas` rows) changes no chart. `check-chart-version.sh` refuses a `charts/**`
+change without a `Chart.yaml` `version` bump. Engine 0.4.0 ships with chart
+**1.1.1**: its `Chart.yaml` description now states this versioning rule (1.1.0's
+said a contract change ships under a new chart name), and it renders exactly
+what 1.1.0 renders, so the matrix entry for this release is chart 1.1.1 ↔
+engine 0.4.0.
 
 Only names the engine reads belong in the contract: `EngineConfig::from_env`
 reads the app group in one place, `migrate` reads the owner group, and the rest
@@ -1286,10 +1636,11 @@ GitOps and the NATS fabric.
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
-| Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
+| Roll | `Recreate`; the `service_engine.schema_version` singleton waits out a stopped version's heartbeat (at most `schema_version_liveness` + one beat, see *Schema-version handover*) and refuses a version that keeps beating |
+| Replicas | any count (`replicaCount`): a subscription over either transport (`/graphql/ws`, or `POST /graphql` as graphql-sse) attaches on the pod that serves it, and paging is subscription arguments, so there is no session affinity and no cross-pod relay; an attach whose window exceeds `window_capacity` is refused with `WINDOW_TOO_LARGE`, and a live window is never ended for its size |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
 | NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing separator stripped (`typed/v1/` → `typed/v1_manifest`, `typed.v1.` → `typed.v1_manifest`), a sibling outside the data prefix; a single consumed key has no manifest |
-| Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
+| Readiness reasons | a `REASON_*` constant of `boot` (the boot sequence, with `POOLER_REASON` when the listener never hears its own probe), `engine/boot` (`REASON_MIGRATIONS_PENDING`), `housekeeping/ready/verdict.rs` (the run-time verdicts; `REASON_MIRRORS` and `REASON_REQUIRED_KEYS` append the lagging mirrors and the absent keys), `inbound` (`REASON_MESSAGE_RETENTION`), `nats` (`REASON_NO_STREAM`), `blobs` (`REASON_BLOB_*`), `presence` (`presence.bucket`) or `scopes` (`REASON_SCOPES_*`); or a reason built at run time: `scope declaration rejected: ` + Identity's reason, and the two schema-version reasons, which name both versions — the handover wait (with the time left) and the refusal (see *Schema-version handover*) |
 | Metrics | `service_engine_*` (`metrics::ALL`) + `service_engine_leader{kind,name}`; common labels `service`, `pod`, `component` |
 
 Filesystem: `migrate` and `serve` write no file, with one opt-in exception — a
@@ -1343,8 +1694,10 @@ refresh are identical. Each is bounded by `session_max_age` (from the handshake 
 the request) and by the engine's shutdown: the WebSocket is closed `1001`, the
 event stream sends `complete` and ends, and the client — the gateway, on the SSE
 leg — re-subscribes with a fresh `X-Passport`. A client that goes away releases
-the session with its connection. Paging a gateway (SSE) session requires the
-session's pod (one replica) until 0.4.0 moves paging to subscription arguments.
+the session with its connection. A window is a subscription's arguments (see
+*Paging is subscription arguments*): changing it is a new subscription, which the
+gateway may open on any replica, so an engine service runs at any replica count
+with no session affinity.
 
 ### Hardened pod and neutral fields (chart 1.1)
 
@@ -1382,18 +1735,22 @@ key fails the render.
 sandbox that refuses every file write outside `/dev`: `migrate` exits 0,
 `serve` boots and answers `/livez`, `/readyz`, `/sdl` and `/metrics`. The
 engine opens no file for writing; sqlx migrations are embedded at compile time,
-logs go to stdout. The one write path in the dependency tree is
-async-graphql's multipart parser, which spools a request's file parts to a
-temporary file before the handler runs; the engine schema has no `Upload`
-scalar (blobs go straight to the object store through presigned URLs), so under
-a read-only root such a request is refused with `400` and the pod carries on.
-The library therefore mounts no `emptyDir` — a writable `/tmp` would only give
-that pre-authentication spool somewhere to write.
+logs go to stdout. The one write path is the engine's own multipart spool, and
+only for a schema that declares the `Upload` scalar: it spools the file parts of
+an authenticated request, after the passport resolves (*Multipart requests*). A
+schema without `Upload` (the reference service's: blobs go straight to the
+object store through presigned URLs) accepts no file: a `map` that binds one is
+refused with `413` `MULTIPART_TOO_MANY_FILES` and nothing is written. A schema with
+`Upload` under a read-only root refuses an upload with `500`
+`MULTIPART_SPOOL_UNAVAILABLE` unless the service mounts an `emptyDir` for its
+spool (*Filesystem*). The library chart therefore mounts no `emptyDir` by
+default.
 
 **startupProbe.** `serve` binds its listener last — after the app pool, the
-migration check, the NATS connect, `Engine::boot`, registration and the
-retention derivation — so `GET /livez` answering is the end of boot. The probe
-suspends liveness until then: 5 s × 30 = a 150 s boot budget (`migrate` runs in
+migration check, the NATS connect, `Engine::boot` (with its schema-version
+handover wait, at most 31 s by default), registration and the retention
+derivation — so `GET /livez` answering is the end of boot. The probe suspends
+liveness until then: 5 s × 30 = a 150 s boot budget (`migrate` runs in
 the init container, outside it). `/readyz` never gates startup: a healthy pod
 can hold it DOWN for long (the Identity scope handshake, a mirror converging),
 and a failed startupProbe restarts the container.
@@ -1437,13 +1794,16 @@ GitOps repository, sequenced after this release.
 
 `EngineConfig` carries one clock and a handful of bounds, every one validated
 at `Engine::boot`: durations and capacities are non-zero,
-`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
-`beat`, `session_max_age` outlasts the idle `session_ttl`, the multipart
-bounds are non-zero with `max_file_bytes` within `max_body_bytes`, and
-`body_read_timeout` is non-zero. A session lives at most `session_max_age`; when it does
+`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` and
+`schema_version_liveness` outlast the `beat`, `session_max_age` outlasts the
+idle `session_ttl`, `max_body_bytes` is non-zero, a multipart `max_file_bytes`
+the service sets is non-zero and within `max_body_bytes` (unset, it follows a
+lower `max_body_bytes` down), and `body_read_timeout` is non-zero. A session
+lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
-reaps a session that has lost its consumer. The bound is on the connection, not
+reaps an attach still not live after it (a dropped stream is reaped at the next
+pass). The bound is on the connection, not
 only the session: the WebSocket principal is resolved once at the handshake and
 serves every operation on that socket — subscriptions and mutations alike — so
 the kit closes the `graphql-transport-ws` connection itself at `session_max_age`
@@ -1536,12 +1896,17 @@ the holder and `0` on a standby, so `sum by (kind, name)` is `1` where a loop is
 led and a failover shows as the gauge moving from the old pod to the new one.
 `service_engine_impacts_committed_total` is the notify-budget
 counter watched at the Postgres-cluster level; it counts impacts of committed
-transactions only, recorded after the commit, never a rolled-back mutation. The
+transactions only, recorded after the commit, never a rolled-back mutation.
+`service_engine_windows_over_capacity_total{projector, outcome}`
+(`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, labels `metrics::LABEL_PROJECTOR` and
+`LABEL_OUTCOME`) counts the windows that met `window_capacity`: `refused` for
+an attach, a one-shot window fetch or a raw one-key fetch above the capacity,
+`kept` for a live window that grew past it; no shipped alert watches it (see the capacity section). The
 five shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
 a filling notification queue, the per-cluster notify budget nearing its ceiling,
-a sustained reset rate, an aging outbox backlog, and dead-lettered work waiting on
-a human.
+a sustained reset rate, an aging outbox backlog, and dead-lettered work waiting
+on a human.
 
 ## AI disclosure
 

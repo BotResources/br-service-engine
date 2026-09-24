@@ -10,6 +10,7 @@ use engine_twin::{SOON, await_ready};
 use service_engine::Engine;
 use service_engine::ReadinessHandle;
 use service_engine::accumulator::{ChunkSeq, Durable};
+use service_engine::error::AccumulatorError;
 use service_engine::error::EngineError;
 use uuid::Uuid;
 
@@ -109,7 +110,10 @@ async fn s037_engine_the_run_flush_loop_makes_chunks_durable_folds_them_and_refu
         .await
         .expect_err("a chunk after seal is refused by the flush loop");
     assert!(
-        matches!(refused, EngineError::SealedChunk { seq: 4, .. }),
+        matches!(
+            refused,
+            EngineError::Accumulator(AccumulatorError::SealedChunk { seq: 4, .. })
+        ),
         "a sealed key refuses a later chunk, got {refused:?}"
     );
     assert_eq!(

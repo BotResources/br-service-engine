@@ -1,12 +1,3 @@
-//! Once the passport has resolved, the body of `POST /graphql` is read within two bounds that
-//! hold for every content type: `MultipartConfig::max_body_bytes` for its size (JSON included,
-//! not only multipart) and `EngineConfig::body_read_timeout` for the time it may take to
-//! arrive. Before 0.3.2 an authenticated JSON body of any size was buffered in memory, and a
-//! client that sent its body slowly held the request open for as long as it liked.
-//!
-//! A refusal is a coded GraphQL error, and it leaves nothing behind: the spool holds no named
-//! file and the pod serves the next request.
-
 mod multipart_support;
 
 use std::time::{Duration, Instant};
@@ -21,8 +12,7 @@ use service_engine::graphql::{BODY_READ_TIMEOUT_CODE, BODY_TOO_LARGE_CODE, Multi
 
 const MAX_BODY_BYTES: u64 = 16 * 1024;
 
-/// A JSON request of `size` bytes or more: `{ __typename }` padded by a comment.
-fn json_query(size: usize) -> String {
+fn json_query_padded_to(size: usize) -> String {
     let query = format!("{{ __typename }} #{}", "x".repeat(size));
     serde_json::json!({ "query": query }).to_string()
 }
@@ -55,27 +45,23 @@ async fn s242_an_authenticated_json_body_over_max_body_bytes_is_refused_with_its
     nats.provision().await;
     let service =
         boot_upload_service_with(&db, nats.nats().await, "se_s242a", "pod-s242a", |config| {
-            config.with_multipart(
-                MultipartConfig::default()
-                    .with_max_body_bytes(MAX_BODY_BYTES)
-                    .with_max_file_bytes(8 * 1024),
-            )
+            config.with_max_body_bytes(MAX_BODY_BYTES)
         })
         .await;
     let passport = valid_passport();
 
-    let (status, body) = post_json(&service, Some(&passport), json_query(8 * 1024)).await;
+    let (status, body) = post_json(&service, Some(&passport), json_query_padded_to(8 * 1024)).await;
     assert!(
         status == 200 && body["data"]["__typename"].is_string(),
         "control: a JSON body under max_body_bytes is served: {status} {body}"
     );
 
-    let (status, body) = post_json(&service, Some(&passport), json_query(32 * 1024)).await;
+    let (status, body) =
+        post_json(&service, Some(&passport), json_query_padded_to(32 * 1024)).await;
     assert_eq!(
         (status, code(&body)),
         (413, &serde_json::json!(BODY_TOO_LARGE_CODE)),
-        "a JSON body over max_body_bytes is refused with its code, the multipart bound now \
-         bounding every body: {body}"
+        "a JSON body over EngineConfig::max_body_bytes is refused with its code: {body}"
     );
 
     let answer = stalled_request(
@@ -94,23 +80,28 @@ async fn s242_an_authenticated_json_body_over_max_body_bytes_is_refused_with_its
          {answer}"
     );
 
-    let answer = chunked_request(&service, &passport, JSON, json_query(32 * 1024).as_bytes())
-        .await
-        .expect("the pod answers a chunked JSON body it cuts");
+    let answer = chunked_request(
+        &service,
+        &passport,
+        JSON,
+        json_query_padded_to(32 * 1024).as_bytes(),
+    )
+    .await
+    .expect("the pod answers a chunked JSON body it cuts");
     assert!(
         answer.starts_with("HTTP/1.1 413") && answer.contains(BODY_TOO_LARGE_CODE),
         "a chunked JSON body, with no length to judge up front, is cut at max_body_bytes: \
          {answer}"
     );
 
-    let (status, body) = post_json(&service, None, json_query(32 * 1024)).await;
+    let (status, body) = post_json(&service, None, json_query_padded_to(32 * 1024)).await;
     assert_eq!(
         (status, body),
         (401, serde_json::json!("the X-Passport header is absent")),
         "the passport is still judged first: an anonymous oversized body is a 401, not a 413"
     );
 
-    let (status, body) = post_json(&service, Some(&passport), json_query(8 * 1024)).await;
+    let (status, body) = post_json(&service, Some(&passport), json_query_padded_to(8 * 1024)).await;
     assert_eq!(
         status, 200,
         "after the refusals the pod still serves a JSON body within its bound: {body}"
@@ -207,7 +198,7 @@ async fn s242_a_body_that_does_not_arrive_within_the_read_timeout_is_refused_wit
         (200, &serde_json::json!(true)),
         "a body that arrives in time is served after the refusals: {body}"
     );
-    let (status, body) = post_json(&service, Some(&passport), json_query(16)).await;
+    let (status, body) = post_json(&service, Some(&passport), json_query_padded_to(16)).await;
     assert_eq!(status, 200, "and so is a JSON body: {body}");
 
     service.shutdown().await;

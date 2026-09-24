@@ -1,7 +1,5 @@
 use br_core_auth::{AuthMethod, Passport, PassportClaims};
-use futures_util::future::BoxFuture;
 use service_engine::{PassportPrincipal, PrincipalRejected};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::sample::principal::SamplePrincipal;
@@ -19,18 +17,13 @@ pub fn passport_for(user: Uuid, tenant: Uuid) -> Passport {
 }
 
 impl PassportPrincipal for SamplePrincipal {
-    fn from_passport(
-        _pg: &PgPool,
-        passport: Passport,
-    ) -> BoxFuture<'_, Result<Self, PrincipalRejected>> {
-        Box::pin(async move {
-            let user = passport
-                .user_id()
-                .ok_or_else(|| PrincipalRejected::new("a human passport is required"))?;
-            let tenant = passport
-                .claim::<Uuid>(TENANT_CLAIM)
-                .ok_or_else(|| PrincipalRejected::new("the passport carries no tenant claim"))?;
-            Ok(SamplePrincipal::new(user, tenant))
-        })
+    fn from_passport(passport: Passport) -> Result<Self, PrincipalRejected> {
+        let user = passport
+            .user_id()
+            .ok_or_else(|| PrincipalRejected::new("a human passport is required"))?;
+        let tenant = passport
+            .claim::<Uuid>(TENANT_CLAIM)
+            .ok_or_else(|| PrincipalRejected::new("the passport carries no tenant claim"))?;
+        Ok(SamplePrincipal::new(user, tenant))
     }
 }

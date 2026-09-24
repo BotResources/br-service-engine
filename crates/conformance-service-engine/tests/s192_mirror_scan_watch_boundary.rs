@@ -1,12 +1,13 @@
 mod mirror_support;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use conformance_service_engine::TestDb;
 use conformance_service_engine::infra::TestNats;
-use conformance_service_engine::sample::RecordingTransport;
+use conformance_service_engine::sample::{RecordingTransport, replace_known_users};
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use mirror_support::{
@@ -137,33 +138,15 @@ impl Project<Uuid> for ScanProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let value = cx
+            let values: HashMap<Uuid, String> = cx
                 .shadow::<ScannedEntry>()
                 .values()
-                .find(|entry| entry.id == id)
-                .map(|entry| entry.value.clone());
-            match value {
-                Some(value) => {
-                    sqlx::query(
-                        "INSERT INTO known_users (user_id, email) VALUES ($1, $2) \
-                         ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email",
-                    )
-                    .bind(id)
-                    .bind(value)
-                    .execute(cx.conn())
-                    .await?;
-                }
-                None => {
-                    sqlx::query("DELETE FROM known_users WHERE user_id = $1")
-                        .bind(id)
-                        .execute(cx.conn())
-                        .await?;
-                }
-            }
-            Ok(())
+                .map(|entry| (entry.id, entry.value.clone()))
+                .collect();
+            replace_known_users(&mut cx, ids, &values).await
         })
     }
 }

@@ -3,12 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::dyn_compat::ErasedPopulation;
 use crate::error::EngineError;
 use crate::impact::Impact;
+use crate::page::KeyCeiling;
 use crate::principal::{Principal, PrincipalId};
 use crate::render::fault::Faults;
 use crate::render::pass::{PassContext, PassReport, Vanished};
 use crate::render::route::SessionWork;
 use crate::session::SessionId;
-use crate::session::live::refreshed_members;
+use crate::session::live::{Ending, refreshed_members};
 use crate::session::store::SessionTable;
 use crate::wire::KeyBytes;
 
@@ -42,9 +43,15 @@ pub(crate) async fn refresh_principals<P: Principal>(
                     "a principal refresh failed; its sessions are ended fail-closed rather than \
                      served under stale facts",
                 );
-                report.ended += table.end_principal(principal).len();
+                report.ended += table
+                    .end_principal(principal, Ending::PrincipalFaulted)
+                    .len();
             }
-            Ok(None) => report.ended += table.end_principal(principal).len(),
+            Ok(None) => {
+                report.ended += table
+                    .end_principal(principal, Ending::PrincipalRevoked)
+                    .len();
+            }
             Ok(Some(mut next)) => {
                 if let Err(error) = ctx.registry.load_facts(ctx.pg, &mut next).await {
                     tracing::error!(
@@ -53,7 +60,9 @@ pub(crate) async fn refresh_principals<P: Principal>(
                         "a principal fact reload failed; its sessions are ended fail-closed rather \
                          than served under stale facts",
                     );
-                    report.ended += table.end_principal(principal).len();
+                    report.ended += table
+                        .end_principal(principal, Ending::PrincipalFaulted)
+                        .len();
                     continue;
                 }
                 table.replace_principal(principal, next);
@@ -96,7 +105,6 @@ pub(crate) async fn repopulate<P: Principal>(
         let name = window.projector.clone();
         let previous = window.members.clone();
         let previous_shape = window.shape.clone();
-        let paged: BTreeSet<KeyBytes> = window.pages.iter().flatten().cloned().collect();
         let projector = ctx
             .registry
             .projector(&name)
@@ -112,7 +120,10 @@ pub(crate) async fn repopulate<P: Principal>(
         next.extend(discovered.iter().cloned());
         let mut shape = None;
         if entry.repopulate {
-            let population = match projector.populate(ctx.pg, &params, &principal).await {
+            let population = match projector
+                .populate(ctx.pg, &params, KeyCeiling::NONE, &principal)
+                .await
+            {
                 Ok(population) => population,
                 Err(error) => {
                     faults.record(id, &error);
@@ -132,7 +143,6 @@ pub(crate) async fn repopulate<P: Principal>(
                 continue;
             }
             next = refreshed_members(&previous, &discovered, &population);
-            next.extend(paged.iter().cloned());
             shape = Some(previous_shape.refreshed(&population));
         }
         for key in next.difference(&previous) {
@@ -151,7 +161,7 @@ pub(crate) async fn repopulate<P: Principal>(
             continue;
         };
         let window = &mut session.windows[index];
-        window.members = next;
+        window.replace_members(next, id, ctx.config.window_capacity);
         if let Some(shape) = shape {
             window.shape = shape;
         }

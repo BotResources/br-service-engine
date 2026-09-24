@@ -15,12 +15,7 @@ fn board(state: BoardState) -> BoardRow {
 }
 
 fn holder(org: Uuid) -> AppPrincipal {
-    AppPrincipal::new(
-        Uuid::now_v7(),
-        org,
-        vec![BOARD_ARCHIVE.to_string()],
-        false,
-    )
+    AppPrincipal::new(Uuid::now_v7(), org, vec![BOARD_ARCHIVE.to_string()], false)
 }
 
 fn bystander(org: Uuid) -> AppPrincipal {
@@ -66,11 +61,10 @@ fn the_gate_and_the_command_agree_on_the_same_reason() {
 }
 
 #[test]
-fn the_boards_window_equals_the_visibility_declaration_for_its_principal() {
+fn the_board_declaration_admits_the_org_public_and_member_cohorts_only() {
     use std::collections::BTreeSet;
 
-    use service_engine::population::Population;
-    use service_engine::visibility::{Visibility, check_window_matches_visibility};
+    use service_engine::visibility::check_window_matches_visibility;
 
     use super::BoardMemberships;
     use super::aggregate::Board;
@@ -100,17 +94,10 @@ fn the_boards_window_equals_the_visibility_declaration_for_its_principal() {
         (hidden.id, hidden.clone()),
     ];
 
-    let Population::Keys(keys) = Board::window(candidates.clone(), &principal) else {
-        panic!("the boards window is a Keys population produced by Board::window");
-    };
-
-    check_window_matches_visibility::<Board, _, _>(&keys, candidates, &principal)
-        .expect("the window BoardsView populates equals Board's visibility declaration");
-
-    assert_eq!(
-        keys,
-        BTreeSet::from([mine.id, public.id, member_board.id]),
-        "org, public and member cohorts are visible; a private board of another org is not"
-    );
-    assert!(!keys.contains(&hidden.id));
+    check_window_matches_visibility::<Board, _, _>(
+        &BTreeSet::from([mine.id, public.id, member_board.id]),
+        candidates,
+        &principal,
+    )
+    .expect("org, public and member cohorts are visible; a private board of another org is not");
 }

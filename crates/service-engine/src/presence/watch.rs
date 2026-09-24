@@ -35,7 +35,10 @@ pub(crate) async fn bind_and_seed<P: Principal>(
         .bind_ephemeral::<Value>(bucket_name)
         .await
         .map_err(|error| {
-            EngineError::Posture(format!("presence bucket {bucket_name} unusable: {error}"))
+            EngineError::Posture(format!(
+                "presence bucket {bucket_name} unusable: {}",
+                crate::chain::describe(&error)
+            ))
         })?;
     let max_age = bucket
         .max_age()

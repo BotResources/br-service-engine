@@ -1,8 +1,8 @@
-use crate::nats::KvKey;
 use sqlx::{PgConnection, Row};
 
 use crate::error::RelayError;
 use crate::name::RelayName;
+use crate::nats::KvKey;
 
 pub(crate) async fn read(
     conn: &mut PgConnection,

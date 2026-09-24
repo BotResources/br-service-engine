@@ -1,10 +1,11 @@
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
-use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
+use service_engine::persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
+use service_engine::{Cohort, KeyCeiling};
 use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
 
-use super::aggregate::{BoardRow, BoardState};
+use super::aggregate::{BoardRow, BoardState, MEMBER, ORG, PUBLIC};
 
 fn state_text(state: BoardState) -> &'static str {
     match state {
@@ -38,20 +39,6 @@ impl Persistence for BoardStore {
     type Event = ();
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
-
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<BoardRow>, EngineError>> {
-        Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, org_id, name, is_public, state FROM board WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.as_ref().map(row_to_board))
-        })
-    }
 
     fn lock<'a>(
         conn: &'a mut PgConnection,
@@ -116,6 +103,28 @@ impl Persistence for BoardStore {
     }
 }
 
+impl CohortIndex for BoardStore {
+    fn keys_in_cohorts<'a>(
+        conn: &'a mut PgConnection,
+        cohorts: &'a [Cohort],
+        ceiling: KeyCeiling,
+    ) -> BoxFuture<'a, Result<Vec<Uuid>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id FROM board \
+                 WHERE org_id = ANY($1) OR id = ANY($2) OR (is_public AND $3) LIMIT $4",
+            )
+            .bind(Cohort::uuids(cohorts, ORG))
+            .bind(Cohort::uuids(cohorts, MEMBER))
+            .bind(Cohort::holds(cohorts, PUBLIC, true))
+            .bind(ceiling.limit())
+            .fetch_all(conn)
+            .await?;
+            Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+        })
+    }
+}
+
 impl Aggregate for BoardRow {
     type Store = BoardStore;
 
@@ -135,27 +144,12 @@ pub async fn boards_of(pg: &PgPool, user: Uuid) -> Result<Vec<Uuid>, EngineError
         .collect())
 }
 
-pub async fn candidate_boards<'e, E>(exec: E) -> Result<Vec<(Uuid, BoardRow)>, EngineError>
+pub async fn org_board_ids<'e, E>(exec: E, limit: i64) -> Result<Vec<Uuid>, EngineError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let rows = sqlx::query("SELECT id, org_id, name, is_public, state FROM board")
-        .fetch_all(exec)
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|row| {
-            let board = row_to_board(row);
-            (board.id, board)
-        })
-        .collect())
-}
-
-pub async fn org_board_ids<'e, E>(exec: E) -> Result<Vec<Uuid>, EngineError>
-where
-    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-{
-    let rows = sqlx::query("SELECT id FROM org_board")
+    let rows = sqlx::query("SELECT id FROM org_board LIMIT $1")
+        .bind(limit)
         .fetch_all(exec)
         .await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
@@ -169,21 +163,6 @@ impl Persistence for OrgBoardStore {
     type Event = ();
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
-
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<BoardRow>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, org_id, name, is_public, state FROM org_board WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.as_ref().map(row_to_board))
-        })
-    }
 
     fn read_many<'a>(
         conn: &'a mut PgConnection,

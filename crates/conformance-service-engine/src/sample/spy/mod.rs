@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::future::BoxFuture;
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::{Deps, Dims, ForeignKey, Impact};
 use service_engine::name::{Namespace, NounName, ProjectorName};
@@ -90,6 +91,7 @@ impl Projector for SpyAssignments {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
@@ -102,7 +104,8 @@ impl Projector for SpyAssignments {
             }
             let population = match self.window {
                 WindowMode::Keys => {
-                    let rows = sqlx::query("SELECT id FROM sample_assignment")
+                    let rows = sqlx::query("SELECT id FROM sample_assignment LIMIT $1")
+                        .bind(ceiling.limit())
                         .fetch_all(pg)
                         .await?;
                     Population::Keys(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
@@ -111,7 +114,7 @@ impl Projector for SpyAssignments {
                     let rows = sqlx::query(
                         "SELECT id FROM sample_assignment ORDER BY title DESC LIMIT $1",
                     )
-                    .bind(limit)
+                    .bind(limit.min(ceiling.limit()))
                     .fetch_all(pg)
                     .await?;
                     Population::Ordered {
@@ -131,10 +134,13 @@ impl Projector for SpyAssignments {
                 }
                 WindowMode::QueryThenEmpty => Population::Keys(BTreeSet::new()),
                 WindowMode::MembershipQuery | WindowMode::MembershipOnlyQuery => {
-                    let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1")
-                        .bind(principal.tenant())
-                        .fetch_all(pg)
-                        .await?;
+                    let rows = sqlx::query(
+                        "SELECT id FROM sample_assignment WHERE tenant_id = $1 LIMIT $2",
+                    )
+                    .bind(principal.tenant())
+                    .bind(ceiling.limit())
+                    .fetch_all(pg)
+                    .await?;
                     Population::Query(
                         WindowQuery::new(
                             live_interest(self.dims, self.also.clone()),

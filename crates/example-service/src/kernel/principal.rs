@@ -128,28 +128,23 @@ impl Principal for AppPrincipal {
 }
 
 impl PassportPrincipal for AppPrincipal {
-    fn from_passport(
-        _pg: &PgPool,
-        passport: Passport,
-    ) -> BoxFuture<'_, Result<Self, PrincipalRejected>> {
-        Box::pin(async move {
-            let user = passport
-                .user_id()
-                .ok_or_else(|| PrincipalRejected::new("a human passport is required"))?;
-            let org = passport
-                .claim::<Uuid>(ORG_CLAIM)
-                .ok_or_else(|| PrincipalRejected::new("the passport carries no org claim"))?;
-            let scopes = passport
-                .claim::<Vec<String>>(SCOPES_CLAIM)
-                .unwrap_or_default();
-            Ok(AppPrincipal {
-                id: PrincipalId::from(user),
-                org,
-                scopes,
-                super_admin: passport.is_super_admin(),
-                passport,
-                facts: PrincipalFacts::new(),
-            })
+    fn from_passport(passport: Passport) -> Result<Self, PrincipalRejected> {
+        let user = passport
+            .user_id()
+            .ok_or_else(|| PrincipalRejected::new("a human passport is required"))?;
+        let org = passport
+            .claim::<Uuid>(ORG_CLAIM)
+            .ok_or_else(|| PrincipalRejected::new("the passport carries no org claim"))?;
+        let scopes = passport
+            .claim::<Vec<String>>(SCOPES_CLAIM)
+            .unwrap_or_default();
+        Ok(AppPrincipal {
+            id: PrincipalId::from(user),
+            org,
+            scopes,
+            super_admin: passport.is_super_admin(),
+            passport,
+            facts: PrincipalFacts::new(),
         })
     }
 }

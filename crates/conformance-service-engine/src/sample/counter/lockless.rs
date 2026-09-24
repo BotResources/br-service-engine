@@ -1,7 +1,7 @@
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
 use service_engine::name::NounName;
-use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
+use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle, RowBatch};
 use service_engine::wire::Noun;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -29,27 +29,31 @@ impl Persistence for LocklessCounterStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
+    fn read_many<'a>(
         conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<LocklessCounter>, EngineError>> {
+        keys: &'a [Uuid],
+    ) -> RowBatch<'a, Uuid, LocklessCounter> {
         Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, tenant, total, closed FROM sample_counter_crud WHERE id = $1",
+            let rows = sqlx::query(
+                "SELECT id, tenant, total, closed FROM sample_counter_crud WHERE id = ANY($1)",
             )
-            .bind(key)
-            .fetch_optional(conn)
+            .bind(keys)
+            .fetch_all(conn)
             .await?;
-            Ok(row.map(|row| {
-                LocklessCounter(CounterState::from_row(
-                    row.get("id"),
-                    row.get("tenant"),
-                    row.get("total"),
-                    row.get("closed"),
-                    None,
-                    0,
-                ))
-            }))
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let state = CounterState::from_row(
+                        row.get("id"),
+                        row.get("tenant"),
+                        row.get("total"),
+                        row.get("closed"),
+                        None,
+                        0,
+                    );
+                    (state.key, LocklessCounter(state))
+                })
+                .collect())
         })
     }
 

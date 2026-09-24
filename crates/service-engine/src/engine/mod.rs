@@ -15,8 +15,7 @@ pub use blobs::BlobReader;
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::nats::Nats;
-use crate::readiness::ReadinessHandle;
+use br_core_scope::ScopeDeclaration;
 use sqlx::PgPool;
 
 use crate::accumulator::{Accumulator, AccumulatorRuntime, ChunkSeq, Durable};
@@ -29,18 +28,19 @@ use crate::graphql::SliceFragment;
 use crate::housekeeping::beat::Beat;
 use crate::housekeeping::mirror::MirrorSupervisor;
 use crate::inbound::ReactionRegistry;
+use crate::nats::Nats;
 use crate::offers::OfferStagers;
 use crate::pipeline::MutationRegistry;
 use crate::pipeline::{AggregatePolicies, PolicySeams};
 use crate::presence::PresenceRegistry;
 use crate::principal::Principal;
+use crate::readiness::ReadinessHandle;
 use crate::registry::RenderRegistry;
 use crate::runtime::SessionRuntime;
 use crate::session::{AttachRequest, SessionStream};
 use crate::transport::probe::ListenerProbe;
 use crate::transport::{ImpactTransport, PgListenNotify};
 use crate::wire::Noun;
-use br_core_scope::ScopeDeclaration;
 
 pub struct Settle<P: Principal> {
     render: Arc<SessionRuntime<P>>,

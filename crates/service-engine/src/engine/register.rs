@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -6,7 +5,7 @@ use sqlx::PgPool;
 
 use crate::accumulator::Accumulator;
 use crate::engine::Engine;
-use crate::error::EngineError;
+use crate::error::{CompositionError, EngineError};
 use crate::graphql::SliceFragment;
 use crate::inbound::{Budgets, ReactionMessage, Subscription};
 use crate::mirror::{MirrorReady, Project};
@@ -26,10 +25,12 @@ impl<P: Principal> Engine<P> {
         prefix: crate::graphql::RootPrefix,
     ) -> Result<(), EngineError> {
         match &self.root_prefix {
-            Some(existing) if existing != &prefix => Err(EngineError::RootPrefixRedeclared {
-                first: existing.snake().to_string(),
-                second: prefix.snake().to_string(),
-            }),
+            Some(existing) if existing != &prefix => Err(EngineError::Composition(
+                CompositionError::RootPrefixRedeclared {
+                    first: existing.snake().to_string(),
+                    second: prefix.snake().to_string(),
+                },
+            )),
             _ => {
                 self.root_prefix = Some(prefix);
                 Ok(())
@@ -138,7 +139,7 @@ impl<P: Principal> Engine<P> {
     ) -> Result<(), EngineError>
     where
         M: ReactionMessage,
-        E: crate::inbound::ReactionError + Display + Send + 'static,
+        E: crate::inbound::ReactionError,
         H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
             + Send
             + Sync
@@ -155,7 +156,7 @@ impl<P: Principal> Engine<P> {
     ) -> Result<(), EngineError>
     where
         M: ReactionMessage,
-        E: crate::inbound::ReactionError + Display + Send + 'static,
+        E: crate::inbound::ReactionError,
         H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
             + Send
             + Sync

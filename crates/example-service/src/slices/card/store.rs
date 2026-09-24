@@ -30,20 +30,6 @@ impl Persistence for CardStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::SoftEda;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<CardAggregate>, EngineError>> {
-        Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, board_id, title, status, version FROM card WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.as_ref().map(|row| CardAggregate(row_to_card(row))))
-        })
-    }
-
     fn lock<'a>(
         conn: &'a mut PgConnection,
         key: &'a Uuid,
@@ -147,46 +133,42 @@ impl Aggregate for CardAggregate {
     }
 }
 
-pub async fn cards_of_board(pg: &PgPool, board: Uuid) -> Result<Vec<Uuid>, EngineError> {
-    let rows = sqlx::query("SELECT id FROM card WHERE board_id = $1 ORDER BY id")
-        .bind(board)
-        .fetch_all(pg)
-        .await?;
-    Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
-}
-
-pub async fn cards_of_board_head(
+pub async fn cards_of_board(
     pg: &PgPool,
     board: Uuid,
-    size: i64,
+    limit: i64,
 ) -> Result<Vec<Uuid>, EngineError> {
-    let rows = sqlx::query("SELECT id FROM card WHERE board_id = $1 ORDER BY id DESC LIMIT $2")
+    let rows = sqlx::query("SELECT id FROM card WHERE board_id = $1 ORDER BY id LIMIT $2")
         .bind(board)
-        .bind(size)
+        .bind(limit)
         .fetch_all(pg)
         .await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
-pub async fn cards_of_board_before(
+pub async fn cards_of_board_page(
     pg: &PgPool,
     board: Uuid,
-    before: Uuid,
-    size: i64,
+    before: Option<&Uuid>,
+    limit: i64,
 ) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query(
-        "SELECT id FROM card WHERE board_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
+        "SELECT id FROM card WHERE board_id = $1 AND ($2::uuid IS NULL OR id < $2) \
+         ORDER BY id DESC LIMIT $3",
     )
     .bind(board)
     .bind(before)
-    .bind(size)
+    .bind(limit)
     .fetch_all(pg)
     .await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
-pub async fn all_card_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
-    let rows = sqlx::query("SELECT id FROM card").fetch_all(pg).await?;
+pub async fn all_card_ids(pg: &PgPool, limit: i64) -> Result<Vec<Uuid>, EngineError> {
+    let rows = sqlx::query("SELECT id FROM card ORDER BY id LIMIT $1")
+        .bind(limit)
+        .fetch_all(pg)
+        .await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 

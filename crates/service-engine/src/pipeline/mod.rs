@@ -40,16 +40,8 @@ impl<T> OneShot<T> {
     }
 }
 
-pub trait MutationFault: Send + 'static {
+pub trait MutationFault: std::error::Error + Send + 'static {
     fn reason(&self) -> Option<Reason>;
-
-    /// This fault as an error, so the engine logs its whole `source()` chain
-    /// when the fault carries no reason and the client receives `INTERNAL`.
-    /// The default logs the fault's `Display` alone; a fault that implements
-    /// `std::error::Error` returns `Some(self)`.
-    fn as_error(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
 }
 
 impl MutationFault for Reason {
@@ -59,48 +51,79 @@ impl MutationFault for Reason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MutationError {
-    pub reason: Option<Reason>,
-    pub detail: String,
+pub struct MutationError(Outcome);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Outcome {
+    Refused { reason: Reason, detail: String },
+    Failed(InternalCause),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+struct InternalCause(String);
+
 impl MutationError {
-    pub fn refused(reason: Option<Reason>, detail: impl Into<String>) -> Self {
-        Self {
+    pub fn refused(reason: Reason, detail: impl Into<String>) -> Self {
+        Self(Outcome::Refused {
             reason,
             detail: detail.into(),
-        }
+        })
     }
 
     pub fn internal(detail: impl Into<String>) -> Self {
-        Self {
-            reason: None,
-            detail: detail.into(),
+        let detail = detail.into();
+        tracing::error!(
+            %detail,
+            "a mutation failed on an internal fault; the client receives INTERNAL while the \
+             cause is kept here"
+        );
+        Self::failed(detail)
+    }
+
+    pub(crate) fn failed(detail: impl Into<String>) -> Self {
+        Self(Outcome::Failed(InternalCause(detail.into())))
+    }
+
+    pub fn reason(&self) -> Option<Reason> {
+        match &self.0 {
+            Outcome::Refused { reason, .. } => Some(*reason),
+            Outcome::Failed(_) => None,
         }
     }
 
     pub fn code(&self) -> Option<&'static str> {
-        self.reason.map(|reason| reason.code())
+        self.reason().map(|reason| reason.code())
     }
 
-    /// An internal fault the engine raised itself, logged where it is raised:
-    /// the client receives `INTERNAL`, never this detail.
-    pub(crate) fn fault(detail: String) -> Self {
-        tracing::error!(
-            %detail,
-            "the mutation pipeline failed on an internal fault; the client receives INTERNAL"
-        );
-        Self::internal(detail)
+    pub fn refusal_detail(&self) -> Option<&str> {
+        match &self.0 {
+            Outcome::Refused { detail, .. } => Some(detail),
+            Outcome::Failed(_) => None,
+        }
     }
 }
 
 impl std::fmt::Display for MutationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.reason {
-            Some(reason) => write!(f, "mutation refused ({}): {}", reason.code(), self.detail),
-            None => write!(f, "mutation failed: {}", self.detail),
+        match &self.0 {
+            Outcome::Refused { reason, detail } => {
+                write!(f, "mutation refused ({}): {detail}", reason.code())
+            }
+            Outcome::Failed(_) => f.write_str("mutation failed"),
         }
     }
 }
 
-impl std::error::Error for MutationError {}
+impl std::error::Error for MutationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.0 {
+            Outcome::Refused { .. } => None,
+            Outcome::Failed(cause) => Some(cause),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "mutation_error_tests.rs"]
+mod mutation_error_tests;

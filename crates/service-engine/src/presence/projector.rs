@@ -8,6 +8,7 @@ use crate::cohort::{Cohort, CohortKey};
 use crate::error::EngineError;
 use crate::impact::{Dims, ForeignKey};
 use crate::name::{NounName, ProjectorName};
+use crate::page::KeyCeiling;
 use crate::population::{Interest, Inverse, Population, WindowPredicate, WindowQuery};
 use crate::presence::store::PresenceStore;
 use crate::presence::{Presence, PresenceKey};
@@ -54,6 +55,7 @@ impl<P: Principal, Pr: Presence> Projector for PresenceProjector<P, Pr> {
         &'a self,
         _pg: &'a sqlx::PgPool,
         window: &'a WindowParams,
+        ceiling: KeyCeiling,
         _principal: &'a P,
     ) -> BoxFuture<'a, Result<Population<Self::Key>, EngineError>> {
         Box::pin(async move {
@@ -62,6 +64,7 @@ impl<P: Principal, Pr: Presence> Projector for PresenceProjector<P, Pr> {
                 .keys()
                 .into_iter()
                 .filter(|key| Pr::in_window(key, window))
+                .take(ceiling.get())
                 .collect();
             let interest = Interest::new().on_noun(<Pr::Noun as Noun>::NAME, Dims::EMPTY);
             let predicate: WindowPredicate<Self::Key> = Arc::new(|_key, _impact| false);

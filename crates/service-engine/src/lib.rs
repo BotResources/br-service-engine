@@ -3,6 +3,8 @@ mod chain;
 mod hex;
 mod observe;
 #[cfg(test)]
+mod test_log;
+#[cfg(test)]
 mod test_support;
 
 pub mod accumulator;
@@ -31,6 +33,7 @@ pub mod name;
 pub mod nats;
 pub mod offer;
 mod offers;
+pub mod page;
 pub mod persistence;
 pub mod pipeline;
 pub mod population;
@@ -40,7 +43,7 @@ pub mod projector;
 pub mod readiness;
 pub mod render;
 pub mod schema;
-pub mod schema_version;
+mod schema_version;
 pub mod scopes;
 pub mod session;
 pub mod stop;
@@ -94,20 +97,22 @@ pub use delta::{Delta, ErasedView, Revision};
 pub use engine::boot::{BootPlan, LibraryMigrations, REASON_MIGRATIONS_PENDING, run_service};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
-pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
+pub use error::{
+    AccumulatorError, AttachError, CompositionError, CronError, DecodeError, EngineError,
+    RelayError, TransportError,
+};
 pub use full_eda::{EventSourced, FullEda};
 pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, ReasonFormat,
     check_gates_match_affordances, is_reason_code,
 };
 pub use graphql::{
-    AuthReject, CODE_EXTENSION, CONFLICT_CODE, FORBIDDEN_CODE, GraphqlState, INTERNAL_CODE,
-    INTERNAL_MESSAGE, JsonScalar, MultipartConfig, MutationAck, NOT_FOUND_CODE, PASSPORT_HEADER,
+    AuthReject, Behind, CODE_EXTENSION, FORBIDDEN_CODE, GraphqlState, INTERNAL_CODE,
+    INTERNAL_MESSAGE, JsonScalar, MultipartConfig, MutationAck, OrInternal, PASSPORT_HEADER,
     PassportPrincipal, PrincipalRejected, Query, RootPrefix, SchemaSlices, SliceFragment,
-    UNAUTHENTICATED_CODE, ack, ack_bulk, app, attach, attach_with_session, cause_json, coded_error,
-    engine_schema, execute, execute_bulk, forbidden, internal_error, internal_fault, key_json,
-    lane_notice_stream, mutation_error, page, serve, typed_presence_view, typed_view,
-    with_sdl_route,
+    UNAUTHENTICATED_CODE, WINDOW_TOO_LARGE_CODE, ack, ack_bulk, app, attach, cause_json,
+    coded_error, engine_schema, execute, execute_bulk, forbidden, internal_error, internal_fault,
+    key_json, lane_notice_stream, serve, typed_presence_view, typed_view, with_sdl_route,
 };
 
 pub use housekeeping::beat::{Beat, BeatRound};
@@ -125,9 +130,9 @@ pub use impact::{Deps, Dims, ForeignKey, Impact, TransportEvent};
 pub use inbound::{Disposition, ReactionError};
 pub use lanes::{Lane, LaneNotice, LanesPaused, LanesResumed};
 pub use mirror::{
-    Bind, Change, ChangeOp, Column, Consumed, ConsumedGuard, ConsumedManifest, Extended, Known,
-    KnownRow, KnownScope, ManifestMismatch, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader,
-    MirrorReady, OfferManifest, Project, Projection, Shadow, Shadows, Written, col, is_raw_json,
+    Bind, Change, ChangeOp, Column, Consumed, ConsumedGuard, ConsumedManifest, Extended, KnownRow,
+    ManifestMismatch, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader, MirrorReady, OfferManifest,
+    PrincipalColumn, Project, Projection, RowScope, Shadow, Shadows, Written, col, is_raw_json,
     manifest_key,
 };
 pub use name::{
@@ -142,8 +147,9 @@ pub use nats::{
 pub use offer::{Offer, OfferTrigger};
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
+pub use page::{KeyCeiling, Page, WINDOW_SIZE_INVALID_CODE, WindowSize, WindowSizeOutOfRange};
 pub use pastey;
-pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
+pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceExt, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
@@ -164,7 +170,7 @@ pub use relays::kv::{KvChange, KvDrainRelay, KvSource, KvWrite, Versioned};
 pub use relays::outbox::{HostedOutboxRelay, OutboxRelay};
 pub use render::{PassReport, SessionFault, Transition};
 #[cfg(feature = "test-support")]
-pub use runtime::{PageReport, RenderMetrics, SessionRuntime};
+pub use runtime::{RenderMetrics, SessionRuntime};
 pub use scopes::{ScopeError, ScopeManifest};
 pub use session::{AttachRequest, SessionId, SessionStream, WindowParams, WindowSpec};
 pub use stop::Stop;

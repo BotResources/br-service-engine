@@ -194,11 +194,18 @@ impl ObjectStore {
 }
 
 fn bucket(endpoint: &str, name: &str, region: &str) -> Result<Bucket, EngineError> {
-    let parsed = endpoint
-        .parse()
-        .map_err(|error| EngineError::Config(format!("object storage endpoint: {error}")))?;
-    Bucket::new(parsed, UrlStyle::Path, name.to_string(), region.to_string())
-        .map_err(|error| EngineError::Config(format!("object storage bucket: {error}")))
+    let parsed = endpoint.parse().map_err(|error| {
+        EngineError::Config(format!(
+            "object storage endpoint: {}",
+            crate::chain::describe(&error)
+        ))
+    })?;
+    Bucket::new(parsed, UrlStyle::Path, name.to_string(), region.to_string()).map_err(|error| {
+        EngineError::Config(format!(
+            "object storage bucket: {}",
+            crate::chain::describe(&error)
+        ))
+    })
 }
 
 fn decode_checksum(value: &str) -> Option<Sha256Digest> {

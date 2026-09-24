@@ -2,6 +2,7 @@ use example_contract::SealFailed;
 use futures_util::future::BoxFuture;
 use service_engine::SealHash;
 use service_engine::accumulator::ChunkSeq;
+use service_engine::error::AccumulatorError;
 use service_engine::error::EngineError;
 use service_engine::pipeline::Reaction;
 
@@ -18,9 +19,8 @@ pub fn reply_finished<'r>(
 ) -> BoxFuture<'r, Result<(), ReactionFault>> {
     Box::pin(async move {
         let cmd = msg.0;
-        let last_seq = ChunkSeq::new(cmd.last_seq)?;
-        let hash = SealHash::from_hex(&cmd.hash)
-            .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
+        let last_seq = ChunkSeq::new(cmd.last_seq).map_err(ReactionFault::Malformed)?;
+        let hash = SealHash::from_hex(&cmd.hash).map_err(ReactionFault::Malformed)?;
         let text: String = match cx.seal::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
             Ok(text) => text,
             Err(error) => return on_seal_error(cx, cmd.reply_id, cmd.board_id, error),
@@ -42,9 +42,8 @@ pub fn reply_cancelled<'r>(
 ) -> BoxFuture<'r, Result<(), ReactionFault>> {
     Box::pin(async move {
         let cmd = msg.0;
-        let last_seq = ChunkSeq::new(cmd.last_seq)?;
-        let hash = SealHash::from_hex(&cmd.hash)
-            .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
+        let last_seq = ChunkSeq::new(cmd.last_seq).map_err(ReactionFault::Malformed)?;
+        let hash = SealHash::from_hex(&cmd.hash).map_err(ReactionFault::Malformed)?;
         let text: String = match cx
             .seal_partial::<ReplyText>(&cmd.reply_id, last_seq, hash)
             .await
@@ -74,7 +73,7 @@ pub fn cancel_timed_out<'r>(
         };
         let text: String = match cx.seal_current::<ReplyText>(&msg.reply_id).await {
             Ok(text) => text,
-            Err(EngineError::AlreadySealed { .. }) => return Ok(()),
+            Err(EngineError::Accumulator(AccumulatorError::AlreadySealed { .. })) => return Ok(()),
             Err(error) => return Err(error.into()),
         };
         let cause = reply.complete_cancelled(text);
@@ -91,11 +90,15 @@ fn on_seal_error(
     error: EngineError,
 ) -> Result<(), ReactionFault> {
     match error {
-        EngineError::SealHashMismatch { .. } => answer_seal_failed(cx, reply_id, board_id, error),
-        EngineError::SealChunkBeyondLastSeq { .. } => {
+        EngineError::Accumulator(AccumulatorError::SealHashMismatch { .. }) => {
             answer_seal_failed(cx, reply_id, board_id, error)
         }
-        EngineError::SealTruncated { .. } if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS => {
+        EngineError::Accumulator(AccumulatorError::SealChunkBeyondLastSeq { .. }) => {
+            answer_seal_failed(cx, reply_id, board_id, error)
+        }
+        EngineError::Accumulator(AccumulatorError::SealTruncated { .. })
+            if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS =>
+        {
             answer_seal_failed(cx, reply_id, board_id, error)
         }
         other => Err(other.into()),

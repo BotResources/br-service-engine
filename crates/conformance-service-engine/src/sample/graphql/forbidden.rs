@@ -5,12 +5,14 @@ use async_graphql::{Context, EmptyMutation, Object, Result, Subscription};
 use futures_util::Stream;
 use service_engine::graphql::{SliceFragment, forbidden};
 use service_engine::nats::Nats;
-use service_engine::{Engine, Readiness, ReadinessHandle, engine_schema};
+use service_engine::{Engine, Gate, Readiness, ReadinessHandle, Reason, engine_schema};
 use tokio::task::JoinHandle;
 
 use crate::infra::TestDb;
 use crate::sample::graphql::boot::{GraphqlService, base_config, free_loopback_addr};
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
+
+pub const SAMPLE_REFUSED: Reason = Reason::new("SAMPLE_REFUSED");
 
 #[derive(Default)]
 pub struct ForbiddenQueryRoot;
@@ -19,6 +21,11 @@ pub struct ForbiddenQueryRoot;
 impl ForbiddenQueryRoot {
     async fn sample_forbidden_peek(&self, _ctx: &Context<'_>) -> Result<bool> {
         Err(forbidden())
+    }
+
+    async fn sample_refused_peek(&self, _ctx: &Context<'_>) -> Result<bool> {
+        Gate::blocked(SAMPLE_REFUSED).require()?;
+        Ok(true)
     }
 }
 
@@ -33,6 +40,14 @@ impl ForbiddenSubscriptionRoot {
     ) -> Result<impl Stream<Item = Result<bool>>> {
         Err::<futures_util::stream::Empty<Result<bool>>, _>(forbidden())
     }
+
+    async fn sample_refused_stream(
+        &self,
+        _ctx: &Context<'_>,
+    ) -> Result<impl Stream<Item = Result<bool>>> {
+        Gate::blocked(SAMPLE_REFUSED).require()?;
+        Ok(futures_util::stream::empty())
+    }
 }
 
 fn forbidden_slice() -> SliceFragment {
@@ -41,6 +56,8 @@ fn forbidden_slice() -> SliceFragment {
         vec![
             "sampleForbiddenPeek".to_string(),
             "sampleForbiddenStream".to_string(),
+            "sampleRefusedPeek".to_string(),
+            "sampleRefusedStream".to_string(),
         ],
         Vec::new(),
     )

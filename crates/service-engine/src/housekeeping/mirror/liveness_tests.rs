@@ -1,8 +1,9 @@
+use std::time::Duration;
+
 use super::*;
 use crate::housekeeping::mirror::tests::{Probe, flapping, until};
 use crate::mirror::MirrorRun;
 use crate::stop::Stop;
-use std::time::Duration;
 
 fn panics_once_then_flaps(probe: Arc<Probe>) -> MirrorHandle {
     MirrorHandle::new(

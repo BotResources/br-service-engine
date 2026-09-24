@@ -19,18 +19,17 @@ impl Erasable for LedgerEraser {
         person: PersonId,
     ) -> BoxFuture<'a, Result<Erased, ReactionFault>> {
         Box::pin(async move {
-            let touched = full_eda::erase::<LedgerAggregate, _>(
-                cx.connection(),
-                &person,
-                |person, event| match event {
-                    LedgerEvent::Recorded { author, .. } if *author == person.as_uuid() => {
-                        *author = Uuid::nil();
-                        true
+            let touched =
+                full_eda::erase::<LedgerAggregate, _>(cx.connection(), &person, |person, event| {
+                    match event {
+                        LedgerEvent::Recorded { author, .. } if *author == person.as_uuid() => {
+                            *author = Uuid::nil();
+                            true
+                        }
+                        LedgerEvent::Recorded { .. } => false,
                     }
-                    LedgerEvent::Recorded { .. } => false,
-                },
-            )
-            .await?;
+                })
+                .await?;
             let mut out = Erased::new();
             for id in &touched {
                 cx.impact::<Ledger>(id, Dims::ALL)?;

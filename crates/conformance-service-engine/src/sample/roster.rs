@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
 use service_engine::name::{NounName, ProjectorName};
@@ -52,10 +53,12 @@ impl Projector for RosterUsers {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         _principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT user_id FROM known_users")
+            let rows = sqlx::query("SELECT user_id FROM known_users LIMIT $1")
+                .bind(ceiling.limit())
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(

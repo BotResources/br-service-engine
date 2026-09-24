@@ -1,7 +1,7 @@
-use async_graphql::{Context, Error, Json, MergedObject, Object, Result, Subscription};
+use async_graphql::{Context, Json, MergedObject, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::session::{WindowParams, WindowSpec};
-use service_engine::{MutationAck, Query};
+use service_engine::{MutationAck, OrInternal, Query};
 use uuid::Uuid;
 
 use crate::sample::assignment::{AssignmentProjector, AssignmentView};
@@ -31,7 +31,7 @@ impl WidgetQueries {
             .await?;
         match view {
             Some(view) => Ok(Some(Json(
-                serde_json::to_value(view).map_err(|e| Error::new(e.to_string()))?,
+                serde_json::to_value(view).or_internal("encode a widget view")?,
             ))),
             None => Ok(None),
         }

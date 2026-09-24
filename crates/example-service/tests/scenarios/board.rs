@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use example_contract::PublishedBoard;
@@ -126,6 +127,71 @@ async fn board_direct_lane_gate_affordance_offer_visibility_oneshot() {
     assert!(
         !ids.contains(&b2.to_string()),
         "an outsider never sees another org's private board"
+    );
+
+    world.cleanup().await;
+}
+
+async fn create_board(world: &World, owner: &str, name: &str, is_public: bool) -> Uuid {
+    let id = Uuid::now_v7();
+    ok(&world
+        .gql(
+            owner,
+            "mutation($id:UUID!,$n:String!,$p:Boolean!){exampleCreateBoard(id:$id,name:$n,isPublic:$p){success}}",
+            serde_json::json!({ "id": id, "n": name, "p": is_public }),
+        )
+        .await);
+    id
+}
+
+async fn listed_boards(world: &World, viewer: &str) -> BTreeSet<Uuid> {
+    let listed = world
+        .gql(viewer, "query{exampleBoards{id}}", serde_json::json!({}))
+        .await;
+    ok(&listed)["exampleBoards"]
+        .as_array()
+        .unwrap_or_else(|| panic!("exampleBoards answers a list: {listed}"))
+        .iter()
+        .map(|view| {
+            view["id"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .expect("a board view carries its id")
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_boards_list_holds_exactly_the_org_public_and_member_cohorts() {
+    let world = World::start("pod-board-cohorts").await;
+    let home = Uuid::now_v7();
+    let away = Uuid::now_v7();
+    let viewer_id = Uuid::now_v7();
+    let colleague = passport(Uuid::now_v7(), home, &[], false);
+    let stranger = passport(Uuid::now_v7(), away, &[], false);
+    let viewer = passport(viewer_id, home, &[], false);
+
+    let mine = create_board(&world, &colleague, "Mine", false).await;
+    let public = create_board(&world, &stranger, "Public", true).await;
+    let shared = create_board(&world, &stranger, "Shared", false).await;
+    let hidden = create_board(&world, &stranger, "Hidden", false).await;
+    ok(&world
+        .gql(
+            &stranger,
+            "mutation($b:UUID!,$u:UUID!){exampleSetBoardMembership(boardId:$b,userId:$u,member:true){success}}",
+            serde_json::json!({ "b": shared, "u": viewer_id }),
+        )
+        .await);
+
+    let listed = listed_boards(&world, &viewer).await;
+    assert_eq!(
+        listed,
+        BTreeSet::from([mine, public, shared]),
+        "the list is the org cohort, the public cohort and the member cohort, read by the store"
+    );
+    assert!(
+        !listed.contains(&hidden),
+        "a private board of another org the viewer is not a member of is never listed"
     );
 
     world.cleanup().await;

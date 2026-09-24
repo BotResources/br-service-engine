@@ -98,7 +98,7 @@ impl<V> KvBucket<V> {
     pub async fn watch_all(&self) -> Result<KvWatch, NatsError> {
         let inner = self.store().watch_all().await.map_err(|e| NatsError::Kv {
             key: "watch".to_string(),
-            detail: e.to_string(),
+            detail: crate::chain::describe(&e),
         })?;
         Ok(KvWatch { inner })
     }
@@ -113,7 +113,7 @@ impl<V> KvBucket<V> {
             .await
             .map_err(|e| NatsError::Kv {
                 key: "watch".to_string(),
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?;
         Ok(KvWatch { inner })
     }

@@ -55,21 +55,16 @@ pub use crate::sample::reactions::{
     create_widget_coords, detonate_widget, detonate_widget_coords, lock_widget, lock_widget_coords,
 };
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SampleFault {
+    #[error("refused: {}", .0.code())]
     Refused(Reason),
+    #[error("the widget does not exist")]
     NotFound,
-    Store(String),
-}
-
-impl std::fmt::Display for SampleFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Refused(reason) => write!(f, "refused: {}", reason.code()),
-            Self::NotFound => f.write_str("the widget does not exist"),
-            Self::Store(detail) => write!(f, "store: {detail}"),
-        }
-    }
+    #[error("the handler rolls back after staging, as the scenario asks")]
+    DeliberateRollback,
+    #[error("the store failed")]
+    Store(#[from] EngineError),
 }
 
 impl MutationFault for SampleFault {
@@ -84,12 +79,6 @@ impl MutationFault for SampleFault {
 impl From<Reason> for SampleFault {
     fn from(reason: Reason) -> Self {
         Self::Refused(reason)
-    }
-}
-
-impl From<EngineError> for SampleFault {
-    fn from(error: EngineError) -> Self {
-        Self::Store(error.to_string())
     }
 }
 

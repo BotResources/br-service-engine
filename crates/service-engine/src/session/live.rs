@@ -17,7 +17,14 @@ pub(crate) type ViewKey = (ProjectorName, KeyBytes);
 pub(crate) enum Phase {
     Pending { held: Vec<Impact>, overflowed: bool },
     Live,
-    Ended,
+    Ended(Ending),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ending {
+    Closed,
+    PrincipalRevoked,
+    PrincipalFaulted,
 }
 
 pub(crate) enum Held {
@@ -145,8 +152,19 @@ impl<P: Principal> Session<P> {
         self.touched_at = Instant::now();
     }
 
+    pub(crate) fn ending(&self) -> Option<Ending> {
+        match self.phase {
+            Phase::Ended(ending) => Some(ending),
+            Phase::Pending { .. } | Phase::Live => None,
+        }
+    }
+
     pub(crate) fn end(&mut self) {
-        self.phase = Phase::Ended;
+        self.end_as(Ending::Closed);
+    }
+
+    pub(crate) fn end_as(&mut self, ending: Ending) {
+        self.phase = Phase::Ended(ending);
         self.outbox.close();
     }
 }

@@ -1,6 +1,6 @@
 use crate::blobs::BlobRowOp;
 use crate::error::EngineError;
-use crate::persistence::{Aggregate, Persistence};
+use crate::persistence::{Aggregate, Persistence, PersistenceExt};
 use crate::pipeline::ops::Ops;
 use crate::pipeline::ops::locking::{
     in_locked_order, lock_aggregate, lock_order, reconcile_key, render_key,
@@ -101,7 +101,7 @@ impl Ops<'_> {
         if let Err(EngineError::Db(db)) = outcome
             && crate::inbound::sqlx_is_terminal(db)
         {
-            self.staged.terminal_violation = Some(db.to_string());
+            self.staged.terminal_violation = Some(crate::chain::describe(db));
         }
     }
 }

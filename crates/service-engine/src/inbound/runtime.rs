@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -8,7 +10,6 @@ use crate::inbound::dispatch::Dispatch;
 use crate::inbound::subscription::{InboundConfig, Subscription};
 use crate::inbound::supervisor::{InboundHealth, SupervisorConfig};
 use crate::nats::Nats;
-use std::sync::Arc;
 
 pub struct InboundLoop {
     cancel: watch::Sender<bool>,

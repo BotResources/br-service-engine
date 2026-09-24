@@ -13,6 +13,7 @@ use crate::cohort::CohortKey;
 use crate::error::EngineError;
 use crate::impact::{Dims, ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};
+use crate::page::{KeyCeiling, Page};
 use crate::persistence::{CohortIndex, Persistence};
 use crate::population::{Interest, Inverse, Population, WindowQuery};
 use crate::principal::Principal;
@@ -24,11 +25,24 @@ use crate::wire::Noun;
 pub struct Populate<'a, P: Principal> {
     pg: &'a PgPool,
     principal: &'a P,
+    ceiling: KeyCeiling,
 }
 
 impl<'a, P: Principal> Populate<'a, P> {
-    pub(crate) fn new(pg: &'a PgPool, principal: &'a P) -> Self {
-        Self { pg, principal }
+    pub(crate) fn new(pg: &'a PgPool, principal: &'a P, ceiling: KeyCeiling) -> Self {
+        Self {
+            pg,
+            principal,
+            ceiling,
+        }
+    }
+
+    pub fn limit<K>(&self, page: &Page<K>) -> i64 {
+        page.limit_under(self.ceiling)
+    }
+
+    pub fn limit_all(&self) -> i64 {
+        self.ceiling.limit()
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -109,7 +123,14 @@ where
 {
     let cohorts = <V::Visibility as Visibility>::memberships(cx.principal());
     let mut conn = cx.pool().acquire().await.map_err(EngineError::from)?;
-    let keys = V::Store::keys_in_cohorts(&mut conn, &cohorts).await?;
+    let keys = V::Store::keys_in_cohorts(&mut conn, &cohorts, cx.ceiling).await?;
+    debug_assert!(
+        keys.len() <= cx.ceiling.get(),
+        "keys_in_cohorts returned {} keys under a ceiling of {}: bind ceiling.limit() as the \
+         LIMIT of its query",
+        keys.len(),
+        cx.ceiling.get()
+    );
     Ok(windowed::<V>(keys.into_iter().collect()))
 }
 
@@ -183,6 +204,7 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
         &'a self,
         pg: &'a PgPool,
         window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a V::Principal,
     ) -> BoxFuture<'a, Result<Population<ViewKey<V>>, EngineError>> {
         Box::pin(async move {
@@ -191,7 +213,7 @@ impl<V: Projector> RawProjector for ViewProjector<V> {
             } else {
                 window.decode::<V::Query>()?
             };
-            let cx = Populate::new(pg, principal);
+            let cx = Populate::new(pg, principal, ceiling);
             V::populate(&cx, &query).await
         })
     }

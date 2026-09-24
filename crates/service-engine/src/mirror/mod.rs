@@ -1,3 +1,4 @@
+mod bind;
 mod builder;
 mod change;
 mod consumed;
@@ -8,11 +9,14 @@ mod known;
 mod leader;
 mod projection;
 mod required;
+mod row_scope;
+mod rows;
 mod runtime;
 mod scope;
 mod shadow;
 mod watermark;
 
+pub use bind::{Bind, Column, col};
 pub use builder::{ConsumedGuard, Mirror, MirrorKeyed, MirrorReady};
 pub use change::{Change, ChangeOp};
 pub use consumed::{
@@ -20,9 +24,10 @@ pub use consumed::{
 };
 pub use extension::Extended;
 pub use handle::{MirrorHandle, MirrorRun};
-pub use known::{Bind, Column, KnownRow, Written, col};
+pub use known::{KnownRow, PrincipalColumn, Written};
 pub use leader::MirrorLeader;
-pub use projection::{Known, KnownScope, Project, Projection};
+pub use projection::{Project, Projection};
+pub use row_scope::RowScope;
 pub use shadow::{Shadow, Shadows};
 
 pub(crate) use scope::KeyScope;

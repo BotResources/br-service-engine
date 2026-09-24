@@ -10,6 +10,7 @@ use crate::cohort::CohortKey;
 use crate::error::EngineError;
 use crate::impact::{ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};
+use crate::page::KeyCeiling;
 use crate::population::{Inverse, Population};
 use crate::principal::Principal;
 use crate::session::WindowParams;
@@ -69,6 +70,7 @@ pub trait Projector: Send + Sync + 'static {
         &'a self,
         pg: &'a PgPool,
         window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a Self::Principal,
     ) -> BoxFuture<'a, Result<Population<Self::Key>, EngineError>>;
 

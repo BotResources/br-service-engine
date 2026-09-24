@@ -104,7 +104,7 @@ async fn s158_a_paused_lane_tells_every_session_before_grace_and_resumes_with_a_
         .expect("the session receives a Reset on return");
     assert!(
         matches!(reset, Delta::Reset { .. }),
-        "the intent's Reset on return reaches the session because a pause was signalled",
+        "a Reset on return reaches the session because a pause was signalled",
     );
     assert!(
         reset.revision().get() > opening_revision,

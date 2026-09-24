@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 
 use crate::cohort::Cohort;
 use crate::impact::Deps;
-use crate::population::Population;
 
 pub type Cohorts = Vec<Cohort>;
 
@@ -25,31 +24,6 @@ pub trait Visibility: Send + Sync + 'static {
         Self::cohorts(row)
             .into_iter()
             .any(|cohort| memberships.contains(&cohort))
-    }
-
-    fn visible_keys<K, I>(candidates: I, principal: &Self::Principal) -> BTreeSet<K>
-    where
-        K: Ord,
-        I: IntoIterator<Item = (K, Self::Row)>,
-    {
-        let memberships: BTreeSet<Cohort> = Self::memberships(principal).into_iter().collect();
-        candidates
-            .into_iter()
-            .filter(|(_, row)| {
-                Self::cohorts(row)
-                    .into_iter()
-                    .any(|cohort| memberships.contains(&cohort))
-            })
-            .map(|(key, _)| key)
-            .collect()
-    }
-
-    fn window<K, I>(candidates: I, principal: &Self::Principal) -> Population<K>
-    where
-        K: Ord,
-        I: IntoIterator<Item = (K, Self::Row)>,
-    {
-        Population::Keys(Self::visible_keys(candidates, principal))
     }
 }
 
@@ -82,14 +56,6 @@ where
 
     fn visible(_row: &Row, _principal: &Principal) -> bool {
         true
-    }
-
-    fn visible_keys<K, I>(candidates: I, _principal: &Principal) -> BTreeSet<K>
-    where
-        K: Ord,
-        I: IntoIterator<Item = (K, Row)>,
-    {
-        candidates.into_iter().map(|(key, _)| key).collect()
     }
 }
 
@@ -134,7 +100,11 @@ where
     K: Ord + Clone,
     I: IntoIterator<Item = (K, V::Row)>,
 {
-    let declared = V::visible_keys::<K, _>(candidates, principal);
+    let declared: BTreeSet<K> = candidates
+        .into_iter()
+        .filter(|(_, row)| V::visible(row, principal))
+        .map(|(key, _)| key)
+        .collect();
     let only_in_window: Vec<K> = window.difference(&declared).cloned().collect();
     let only_in_declaration: Vec<K> = declared.difference(window).cloned().collect();
     if only_in_window.is_empty() && only_in_declaration.is_empty() {

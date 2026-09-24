@@ -1,7 +1,7 @@
-use async_graphql::{Context, Object, Result, SimpleObject, Subscription};
+use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
-use service_engine::session::{SessionId, WindowSpec};
-use service_engine::{MutationAck, Query};
+use service_engine::session::WindowSpec;
+use service_engine::{MutationAck, OrInternal, Page, Query, WindowSize};
 use uuid::Uuid;
 
 use crate::kernel::AppPrincipal;
@@ -12,13 +12,6 @@ service_engine::subscription_union! {
     view = CardViewUnion;
     delta = CardDelta { reset = CardReset, upsert = CardUpsert, remove = CardRemove };
     Card => service_engine::view::ViewProjector<CardsView> => CardView,
-}
-
-#[derive(SimpleObject, Debug, Clone, Copy)]
-pub struct CardPage {
-    pub added: u64,
-    pub released: u64,
-    pub delivered: u64,
 }
 
 #[derive(Default)]
@@ -47,27 +40,6 @@ impl CardBoardMutation {
         service_engine::ack_bulk::<AppPrincipal, ImportCards>(ctx, ImportCards { board_id, titles })
             .await
     }
-
-    async fn example_page_cards(
-        &self,
-        ctx: &Context<'_>,
-        session: Uuid,
-        board_id: Uuid,
-        before: Uuid,
-        size: i64,
-    ) -> Result<CardPage> {
-        let report = service_engine::page::<AppPrincipal, CardsView>(
-            ctx,
-            SessionId::from(session),
-            &BoardWindow::page(board_id, before, size),
-        )
-        .await?;
-        Ok(CardPage {
-            added: report.added as u64,
-            released: report.released as u64,
-            delivered: report.delivered as u64,
-        })
-    }
 }
 
 #[derive(Default)]
@@ -79,32 +51,16 @@ impl CardBoardSubscription {
         &self,
         ctx: &Context<'_>,
         board_id: Uuid,
+        size: WindowSize,
+        before: Option<Uuid>,
     ) -> Result<impl Stream<Item = Result<CardDelta>>> {
+        let window = BoardWindow::paged(board_id, Page::new(before, size));
         let stream = service_engine::attach::<AppPrincipal>(
             ctx,
-            vec![WindowSpec::view::<CardsView>(
-                &BoardWindow::of(board_id),
-                false,
-            )?],
-        )
-        .await?;
-        Ok(stream.map(|delta| CardDelta::from_delta(&delta)))
-    }
-
-    async fn example_card_page_deltas(
-        &self,
-        ctx: &Context<'_>,
-        session: Uuid,
-        board_id: Uuid,
-        size: i64,
-    ) -> Result<impl Stream<Item = Result<CardDelta>>> {
-        let stream = service_engine::attach_with_session::<AppPrincipal>(
-            ctx,
-            SessionId::from(session),
-            vec![WindowSpec::view::<CardsView>(
-                &BoardWindow::head(board_id, size),
-                false,
-            )?],
+            vec![
+                WindowSpec::view::<CardsView>(&window, false)
+                    .or_internal("encode the card window")?,
+            ],
         )
         .await?;
         Ok(stream.map(|delta| CardDelta::from_delta(&delta)))

@@ -4,7 +4,8 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::mirror::{
-    Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col,
+    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, RowScope,
+    col,
 };
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
@@ -44,6 +45,8 @@ struct KnownPersonRow {
 impl KnownRow for KnownPersonRow {
     const TABLE: &'static str = KNOWN_PERSONS_TABLE;
     const NAMESPACE: &'static str = KNOWN_PERSON_NAMESPACE;
+    const KEY: &'static [&'static str] = &["user_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("user_id", self.id)]
@@ -65,21 +68,24 @@ impl Project<Uuid> for DirectoryProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let person = cx.shadow::<ConsumedPerson>().get(&person_key(id)).cloned();
-            match person {
-                Some(person) => cx
-                    .upsert(KnownPersonRow {
-                        id,
-                        email: person.email,
-                        display_name: person.display_name,
+            let rows: Vec<KnownPersonRow> = {
+                let persons = cx.shadow::<ConsumedPerson>();
+                ids.iter()
+                    .filter_map(|id| {
+                        persons.get(&person_key(*id)).map(|person| KnownPersonRow {
+                            id: *id,
+                            email: person.email.clone(),
+                            display_name: person.display_name.clone(),
+                        })
                     })
-                    .await
-                    .map(|_| ()),
-                None => cx.retire::<KnownPersonRow>(vec![col("user_id", id)]).await,
-            }
+                    .collect()
+            };
+            cx.replace_rows(RowScope::any_of("user_id", ids), rows)
+                .await
+                .map(|_| ())
         })
     }
 }

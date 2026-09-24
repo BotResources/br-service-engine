@@ -63,9 +63,10 @@ impl InboundConsumer {
             .await
             .map_err(|error| {
                 EngineError::Config(format!(
-                    "the inbound durable {} could not be created on {}: {error}",
+                    "the inbound durable {} could not be created on {}: {}",
                     self.subscription.reaction,
-                    coordinates.stream()
+                    coordinates.stream(),
+                    describe(&error)
                 ))
             })?;
         Ok(consumer)
@@ -162,8 +163,9 @@ impl InboundConsumer {
     ) -> Result<ServeExit, EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
-                "the inbound durable {} could not open its message stream: {error}",
-                self.subscription.reaction
+                "the inbound durable {} could not open its message stream: {}",
+                self.subscription.reaction,
+                describe(&error)
             ))
         })?;
         loop {
@@ -179,8 +181,9 @@ impl InboundConsumer {
                 Some(Ok(message)) => self.handle(&message).await,
                 Some(Err(error)) => {
                     return Err(EngineError::Config(format!(
-                        "the inbound durable {} lost its message stream: {error}",
-                        self.subscription.reaction
+                        "the inbound durable {} lost its message stream: {}",
+                        self.subscription.reaction,
+                        describe(&error)
                     )));
                 }
                 None => return Ok(ServeExit::Ended),
@@ -195,7 +198,7 @@ impl InboundConsumer {
                     if let Err(error) = message.ack_with(AckKind::Nak(None)).await {
                         tracing::warn!(
                             reaction = %self.subscription.reaction,
-                            error = %crate::chain::describe(&*error),
+                            error = %describe(&*error),
                             "naking a pulled-but-unprocessed frame on shutdown failed; it \
                              redelivers to a live pod"
                         );

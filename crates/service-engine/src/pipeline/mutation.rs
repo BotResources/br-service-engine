@@ -20,7 +20,7 @@ use crate::transport::ImpactTransport;
 
 pub trait MutationInput: Send + 'static {
     type Output: Send + 'static;
-    type Error: crate::pipeline::MutationFault + std::fmt::Display;
+    type Error: crate::pipeline::MutationFault;
 
     const NAME: &'static str;
 }
@@ -145,7 +145,7 @@ fn duplicate(kind: &str, name: &str) -> EngineError {
 
 fn downcast_input<M: MutationInput>(input: Box<dyn Any + Send>) -> Result<M, MutationError> {
     input.downcast::<M>().map(|boxed| *boxed).map_err(|_| {
-        MutationError::fault(format!(
+        MutationError::internal(format!(
             "the input for mutation {} did not downcast",
             M::NAME
         ))
@@ -191,7 +191,7 @@ async fn run_erased<P: Principal, M: MutationInput>(
     kind: &str,
 ) -> Result<M::Output, MutationError> {
     let Some(invoker) = invokers.get(M::NAME) else {
-        return Err(MutationError::fault(format!(
+        return Err(MutationError::internal(format!(
             "no {kind} is registered under the name {}",
             M::NAME
         )));
@@ -201,7 +201,7 @@ async fn run_erased<P: Principal, M: MutationInput>(
         .downcast::<M::Output>()
         .map(|boxed| *boxed)
         .map_err(|_| {
-            MutationError::fault(format!(
+            MutationError::internal(format!(
                 "the output of mutation {} did not downcast",
                 M::NAME
             ))

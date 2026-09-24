@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gate, Gated, Reason};
 use service_engine::impact::ForeignKey;
@@ -64,25 +65,6 @@ impl Persistence for WidgetStore {
     type Event = ();
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
-
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<WidgetRow>, EngineError>> {
-        Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, tenant_id, label, closed FROM sample_widget WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.map(|row| WidgetRow {
-                id: row.get("id"),
-                tenant_id: row.get("tenant_id"),
-                label: row.get("label"),
-                closed: row.get("closed"),
-            }))
-        })
-    }
 
     fn read_many<'a>(
         conn: &'a mut PgConnection,
@@ -211,11 +193,13 @@ impl Projector for WidgetProjector {
         &'a self,
         pg: &'a sqlx::PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_widget WHERE tenant_id = $1")
+            let rows = sqlx::query("SELECT id FROM sample_widget WHERE tenant_id = $1 LIMIT $2")
                 .bind(principal.tenant())
+                .bind(ceiling.limit())
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(

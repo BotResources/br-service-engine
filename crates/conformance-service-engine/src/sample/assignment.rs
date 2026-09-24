@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::Cohort;
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::{Dims, ForeignKey};
 use service_engine::name::{NounName, ProjectorName};
@@ -55,26 +56,6 @@ impl Persistence for AssignmentStore {
     type Event = ();
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
-
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<AssignmentRow>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, tenant_id, title, closed FROM sample_assignment WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.map(|row| AssignmentRow {
-                id: row.get("id"),
-                tenant_id: row.get("tenant_id"),
-                title: row.get("title"),
-                closed: row.get("closed"),
-            }))
-        })
-    }
 
     fn read_many<'a>(
         conn: &'a mut PgConnection,
@@ -156,13 +137,16 @@ impl CohortIndex for AssignmentStore {
     fn keys_in_cohorts<'a>(
         conn: &'a mut PgConnection,
         cohorts: &'a [Cohort],
+        ceiling: KeyCeiling,
     ) -> BoxFuture<'a, Result<Vec<Uuid>, EngineError>> {
         Box::pin(async move {
             let tenants = Cohort::uuids(cohorts, "tenant");
-            let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = ANY($1)")
-                .bind(&tenants)
-                .fetch_all(conn)
-                .await?;
+            let rows =
+                sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = ANY($1) LIMIT $2")
+                    .bind(&tenants)
+                    .bind(ceiling.limit())
+                    .fetch_all(conn)
+                    .await?;
             Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
         })
     }
@@ -202,13 +186,16 @@ impl Projector for AssignmentProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1")
-                .bind(principal.tenant())
-                .fetch_all(pg)
-                .await?;
+            let rows =
+                sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1 LIMIT $2")
+                    .bind(principal.tenant())
+                    .bind(ceiling.limit())
+                    .fetch_all(pg)
+                    .await?;
             Ok(Population::Keys(
                 rows.iter()
                     .map(|r| r.get::<Uuid, _>("id"))

@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 use crate::accumulator::ChunkSeq;
 use crate::accumulator::commit::commit_batch;
 use crate::accumulator::runtime::AccumulatorRuntime;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::{AccumulatorName, NounName};
 use crate::stop::Stop;
 use crate::transport::ImpactTransport;
@@ -63,19 +63,25 @@ pub(crate) async fn flush_once(
                 let accumulator = pending.accumulator;
                 let _ = pending.done.send(match verdict {
                     Verdict::Durable => Ok(()),
-                    Verdict::Refused { sealed_high_water } => Err(EngineError::SealedChunk {
-                        seq: seq.get(),
-                        sealed_high_water,
-                    }),
-                    Verdict::Conflict => Err(EngineError::ChunkConflict {
-                        accumulator,
-                        key: String::from_utf8_lossy(pending.key.as_slice()).into_owned(),
-                        seq: seq.get(),
-                    }),
-                    Verdict::Unmapped => Err(EngineError::ChunkFlushAbandoned {
-                        accumulator,
-                        seq: seq.get(),
-                    }),
+                    Verdict::Refused { sealed_high_water } => {
+                        Err(EngineError::Accumulator(AccumulatorError::SealedChunk {
+                            seq: seq.get(),
+                            sealed_high_water,
+                        }))
+                    }
+                    Verdict::Conflict => {
+                        Err(EngineError::Accumulator(AccumulatorError::ChunkConflict {
+                            accumulator,
+                            key: String::from_utf8_lossy(pending.key.as_slice()).into_owned(),
+                            seq: seq.get(),
+                        }))
+                    }
+                    Verdict::Unmapped => Err(EngineError::Accumulator(
+                        AccumulatorError::ChunkFlushAbandoned {
+                            accumulator,
+                            seq: seq.get(),
+                        },
+                    )),
                 });
             }
             if !deferred.is_empty() {

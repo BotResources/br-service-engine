@@ -3,6 +3,7 @@ pub mod blob;
 pub mod blob_boot;
 pub mod blob_verified;
 pub mod blob_view;
+pub mod counted;
 pub mod counter;
 pub mod cron;
 pub mod declarative;
@@ -13,6 +14,7 @@ pub mod erase;
 pub mod gate;
 pub mod gated;
 pub mod graphql;
+pub mod latch;
 pub mod library;
 pub mod linked;
 pub mod mirror;
@@ -33,6 +35,7 @@ pub mod staffing;
 pub mod stream;
 pub mod titles;
 pub mod transport;
+pub mod visible;
 pub mod widget;
 pub mod widget_tag;
 
@@ -78,10 +81,11 @@ pub const TABLES: &[&str] = &[
 ];
 
 pub use mirror::{
-    DIRECTORY_MIRROR, REQUIRED_USER_KEY, SampleDirectory, SamplePublishedUser, backfills,
-    directory_mirror, directory_mirror_handle, known_users, mirror_dead_letters,
+    DIRECTORY_MIRROR, KnownUserRow, REQUIRED_USER_KEY, SampleDirectory, SamplePublishedUser,
+    backfills, directory_mirror, directory_mirror_handle, known_users, mirror_dead_letters,
     publish_offer_manifest, publish_required_user, publish_roster, publish_versioned_user,
-    read_offer_manifest, required_key_mirror, retract_required_user, retract_user, user_prefix,
+    read_offer_manifest, replace_known_users, required_key_mirror, retract_required_user,
+    retract_user, user_prefix,
 };
 
 pub use counter::{
@@ -136,8 +140,7 @@ pub use assignment::{
 };
 pub use gate::Gate;
 pub use gated::{
-    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, VisibleAssignments,
-    reasons,
+    AssignmentVisibility, GatedAssignmentProjector, GatedAssignmentView, Mode, reasons,
 };
 pub use linked::{LINK_NAMESPACE, LinkedAssignments, link_assignment};
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
@@ -173,6 +176,7 @@ pub use titles::{MiskeyedProjector, TitleFacts, TitleProjector, TitleView};
 pub use transport::{
     RecordingTransport, SAMPLE_CHANNEL, StagingGate, StagingTransport, staged_impacts,
 };
+pub use visible::{SnapshotAssignmentVisibility, VisibleAssignments};
 pub use widget::{Widget, WidgetFacts, WidgetProjector, WidgetRow, WidgetStore, WidgetView};
 pub use widget_tag::{
     DeleteWidgetTag, SetWidgetTag, WidgetTag, WidgetTagStore, delete_widget_tag, set_widget_tag,

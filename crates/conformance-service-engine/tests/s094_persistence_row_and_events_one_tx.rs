@@ -46,7 +46,7 @@ async fn s094_a_failing_constraint_rolls_back_the_state_row_and_its_events_toget
         .await
         .expect_err("the fact-log ceiling rejects the write");
     assert!(
-        refused.reason.is_none(),
+        refused.reason().is_none(),
         "a storage violation is not a gate refusal"
     );
 

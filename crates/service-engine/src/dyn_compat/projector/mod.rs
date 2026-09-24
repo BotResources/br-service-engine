@@ -10,6 +10,7 @@ use crate::dyn_compat::ErasedFacts;
 use crate::error::EngineError;
 use crate::impact::{ForeignKey, Impact};
 use crate::name::{NounName, ProjectorName};
+use crate::page::KeyCeiling;
 use crate::population::{Interest, Inverse, InverseLookup, Population};
 use crate::principal::Principal;
 use crate::projector::{Emission, LoadScope, Projector};
@@ -125,6 +126,7 @@ pub trait ErasedProjector<P: Principal>: Send + Sync + 'static {
         &'a self,
         pg: &'a PgPool,
         window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a P,
     ) -> BoxFuture<'a, Result<ErasedPopulation, EngineError>>;
 

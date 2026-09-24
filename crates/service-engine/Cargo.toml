@@ -11,7 +11,7 @@ repository.workspace = true
 test-support = []
 
 [dependencies]
-async-graphql = { workspace = true }
+async-graphql = { workspace = true, features = ["custom-error-conversion"] }
 async-graphql-axum = { workspace = true }
 async-nats = { workspace = true }
 axum = { workspace = true }
@@ -44,6 +44,9 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
 
 [[test]]
 name = "dyn_compatible"

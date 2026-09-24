@@ -6,7 +6,7 @@ use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
 use async_graphql::registry::{MetaType, MetaTypeName, Registry};
 use async_graphql::{EmptyMutation, EmptySubscription, ObjectType, SubscriptionType};
 
-use crate::error::EngineError;
+use crate::error::{CompositionError, EngineError};
 
 const LANES_PAUSED_TYPE: &str = "LanesPaused";
 const LANES_RESUMED_TYPE: &str = "LanesResumed";
@@ -108,8 +108,10 @@ pub(crate) struct ParsedSchema {
 }
 
 pub(crate) fn parse_schema_members(sdl: &str) -> Result<ParsedSchema, EngineError> {
-    let document = parse_schema(sdl).map_err(|error| EngineError::SchemaParse {
-        detail: error.to_string(),
+    let document = parse_schema(sdl).map_err(|error| {
+        EngineError::Composition(CompositionError::SchemaParse {
+            detail: crate::chain::describe(&error),
+        })
     })?;
 
     let mut declared_roots: Option<BTreeSet<String>> = None;

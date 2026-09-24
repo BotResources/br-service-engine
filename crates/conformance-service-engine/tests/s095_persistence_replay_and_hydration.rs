@@ -2,7 +2,7 @@ use conformance_service_engine::infra::TestDb;
 use conformance_service_engine::sample::counter::FullCounterStore;
 use conformance_service_engine::sample::replay_from_scratch;
 use service_engine::error::EngineError;
-use service_engine::persistence::Persistence;
+use service_engine::persistence::PersistenceExt;
 use sqlx::PgPool;
 use uuid::Uuid;
 

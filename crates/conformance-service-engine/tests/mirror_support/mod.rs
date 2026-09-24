@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use conformance_service_engine::sample::replace_known_users;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
@@ -51,44 +53,27 @@ impl Project<Uuid> for CatalogProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let value = value_of(&cx, id);
-            match value {
-                Some(value) => {
-                    sqlx::query(
-                        "INSERT INTO known_users (user_id, email) VALUES ($1, $2) \
-                         ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email",
-                    )
-                    .bind(id)
-                    .bind(value)
-                    .execute(cx.conn())
-                    .await?;
-                }
-                None => {
-                    sqlx::query("DELETE FROM known_users WHERE user_id = $1")
-                        .bind(id)
-                        .execute(cx.conn())
-                        .await?;
-                }
-            }
-            Ok(())
+            let values = values_by_id(&cx);
+            replace_known_users(&mut cx, ids, &values).await
         })
     }
 }
 
-fn value_of(cx: &Projection<'_>, id: Uuid) -> Option<String> {
-    cx.shadow::<CatalogEntry>()
+fn values_by_id(cx: &Projection<'_>) -> HashMap<Uuid, String> {
+    let mut values: HashMap<Uuid, String> = cx
+        .shadow::<OtherEntry>()
         .values()
-        .find(|entry| entry.id == id)
-        .map(|entry| entry.value.clone())
-        .or_else(|| {
-            cx.shadow::<OtherEntry>()
-                .values()
-                .find(|entry| entry.id == id)
-                .map(|entry| entry.value.clone())
-        })
+        .map(|entry| (entry.id, entry.value.clone()))
+        .collect();
+    values.extend(
+        cx.shadow::<CatalogEntry>()
+            .values()
+            .map(|entry| (entry.id, entry.value.clone())),
+    );
+    values
 }
 
 pub struct FailingProjection;
@@ -99,13 +84,10 @@ impl Project<Uuid> for FailingProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            sqlx::query("DELETE FROM known_users WHERE user_id = $1")
-                .bind(id)
-                .execute(cx.conn())
-                .await?;
+            replace_known_users(&mut cx, ids, &HashMap::new()).await?;
             Err(EngineError::Config("deliberate projector failure".into()))
         })
     }

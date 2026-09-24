@@ -2,7 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_graphql::{Context, EmptySubscription, Object, Result, Upload};
-use service_engine::graphql::{MultipartConfig, RootPrefix, SliceFragment, coded_error};
+use service_engine::graphql::{
+    MultipartConfig, OrInternal, RootPrefix, SliceFragment, coded_error,
+};
 use service_engine::nats::Nats;
 use service_engine::{Engine, EngineConfig, Readiness, ReadinessHandle, engine_schema};
 use tokio::io::AsyncReadExt;
@@ -11,13 +13,8 @@ use crate::infra::TestDb;
 use crate::sample::graphql::boot::{GraphqlService, base_config, free_loopback_addr};
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver};
 
-/// A schema that declares the `Upload` scalar, so the engine spools the file parts of an
-/// authenticated multipart request. The mutation acknowledges when every file reads back as
-/// `expected` ([`upload_digest`] of each), and refuses with the code below naming what it read.
 pub const UPLOAD_MISMATCH_CODE: &str = "UPLOAD_MISMATCH";
 
-/// `filename:bytes:fnv1a64` — what the client expects and what the resolver read, compared
-/// without carrying the content itself in `operations`.
 pub fn upload_digest(filename: &str, content: &[u8]) -> String {
     let hash = content
         .iter()
@@ -50,12 +47,12 @@ impl UploadMutationRoot {
     ) -> Result<bool> {
         let mut read = Vec::with_capacity(files.len());
         for file in &files {
-            let upload = file.value(ctx)?;
-            // The spooled file is read on the blocking pool, never on the runtime's workers.
+            let upload = file.value(ctx).or_internal("open a spooled upload")?;
             let mut content = Vec::new();
             tokio::fs::File::from_std(upload.content)
                 .read_to_end(&mut content)
-                .await?;
+                .await
+                .or_internal("read a spooled upload")?;
             read.push(upload_digest(&upload.filename, &content));
         }
         if read == expected {
@@ -90,8 +87,6 @@ pub async fn boot_upload_service(
     .await
 }
 
-/// [`boot_upload_service`] with the whole engine config shaped by `configure`: the body
-/// bounds, the body read timeout, …
 pub async fn boot_upload_service_with(
     db: &TestDb,
     nats: Nats,

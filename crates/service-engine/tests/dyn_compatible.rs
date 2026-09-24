@@ -4,6 +4,7 @@ use br_core_auth::{AuthMethod, Passport, PassportClaims};
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::accumulator::{Accumulator, ChunkSeq};
 use service_engine::dyn_compat::{
     ErasedAccumulator, ErasedProjector, erase_accumulator, erase_projector,
@@ -114,6 +115,7 @@ impl Projector for Tickets {
         &'a self,
         _pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a Viewer,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async { Ok(Population::Keys(BTreeSet::new())) })

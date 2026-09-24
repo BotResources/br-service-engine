@@ -9,7 +9,7 @@ use crate::accumulator::ingress::StreamingIngress;
 use crate::accumulator::runtime::AccumulatorRuntime;
 use crate::accumulator::seal;
 use crate::chain::describe;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::inbound::{HealthTracker, InboundHealth, ServeExit, SupervisorConfig};
 use crate::nats::{Nats, streaming_stream, subject_token};
 use crate::stop::Stop;
@@ -22,11 +22,13 @@ pub(crate) async fn validate_stream(
     let stream = streaming_stream(service);
     let max_age = nats.stream_max_age(&stream).await?;
     if max_age.is_zero() || seal_retention < max_age {
-        return Err(EngineError::SealRetentionTooShort {
-            stream,
-            seal_retention,
-            max_age,
-        });
+        return Err(EngineError::Accumulator(
+            AccumulatorError::SealRetentionTooShort {
+                stream,
+                seal_retention,
+                max_age,
+            },
+        ));
     }
     Ok(())
 }

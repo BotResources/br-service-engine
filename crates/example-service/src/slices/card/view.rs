@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use service_engine::Page;
 use service_engine::error::EngineError;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
@@ -24,35 +25,28 @@ pub struct CardView {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BoardWindow {
-    pub board_id: Option<Uuid>,
-    pub before: Option<Uuid>,
-    pub size: Option<i64>,
+    board_id: Option<Uuid>,
+    page: Option<Page<Uuid>>,
 }
 
 impl BoardWindow {
     pub fn of(board_id: Uuid) -> Self {
         Self {
             board_id: Some(board_id),
-            before: None,
-            size: None,
+            page: None,
         }
     }
 
-    pub fn head(board_id: Uuid, size: i64) -> Self {
+    pub fn paged(board_id: Uuid, page: Page<Uuid>) -> Self {
         Self {
             board_id: Some(board_id),
-            before: None,
-            size: Some(size),
+            page: Some(page),
         }
     }
+}
 
-    pub fn page(board_id: Uuid, before: Uuid, size: i64) -> Self {
-        Self {
-            board_id: Some(board_id),
-            before: Some(before),
-            size: Some(size),
-        }
-    }
+fn keyed(keys: Vec<Uuid>) -> Population<Uuid> {
+    Population::Keys(keys.into_iter().collect())
 }
 
 #[derive(Default)]
@@ -76,17 +70,16 @@ impl Projector for CardsView {
         cx: &Populate<'_, AppPrincipal>,
         query: &BoardWindow,
     ) -> Result<Population<Uuid>, EngineError> {
-        let keys = match (query.board_id, query.before, query.size) {
-            (Some(board), Some(before), Some(size)) => {
-                store::cards_of_board_before(cx.pool(), board, before, size).await?
+        let pg = cx.pool();
+        Ok(match (query.board_id, &query.page) {
+            (Some(board), Some(page)) => {
+                let keys =
+                    store::cards_of_board_page(pg, board, page.cursor(), cx.limit(page)).await?;
+                page.population(keys)
             }
-            (Some(board), None, Some(size)) => {
-                store::cards_of_board_head(cx.pool(), board, size).await?
-            }
-            (Some(board), _, None) => store::cards_of_board(cx.pool(), board).await?,
-            (None, _, _) => store::all_card_ids(cx.pool()).await?,
-        };
-        Ok(Population::Keys(keys.into_iter().collect()))
+            (Some(board), None) => keyed(store::cards_of_board(pg, board, cx.limit_all()).await?),
+            (None, _) => keyed(store::all_card_ids(pg, cx.limit_all()).await?),
+        })
     }
 
     fn project(card: &CardAggregate, _principal: &AppPrincipal) -> Result<CardView, EngineError> {

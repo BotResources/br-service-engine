@@ -8,6 +8,7 @@ use sqlx::PgConnection;
 use crate::blobs::BlobRef;
 use crate::cohort::Cohort;
 use crate::error::EngineError;
+use crate::page::KeyCeiling;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceStyle {
@@ -25,10 +26,11 @@ pub trait Persistence: Send + Sync + 'static {
 
     const STYLE: PersistenceStyle;
 
-    fn load<'a>(
+    #[allow(clippy::type_complexity)] // the RowBatch alias here reads as a sealed trait to semver-checks
+    fn read_many<'a>(
         conn: &'a mut PgConnection,
-        key: &'a Self::Key,
-    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>>;
+        keys: &'a [Self::Key],
+    ) -> BoxFuture<'a, Result<Vec<(Self::Key, Self::Aggregate)>, EngineError>>;
 
     fn lock<'a>(
         _conn: &'a mut PgConnection,
@@ -57,21 +59,6 @@ pub trait Persistence: Send + Sync + 'static {
         })
     }
 
-    fn read_many<'a>(
-        conn: &'a mut PgConnection,
-        keys: &'a [Self::Key],
-    ) -> RowBatch<'a, Self::Key, Self::Aggregate> {
-        Box::pin(async move {
-            let mut rows = Vec::with_capacity(keys.len());
-            for key in keys {
-                if let Some(aggregate) = Self::load(&mut *conn, key).await? {
-                    rows.push((key.clone(), aggregate));
-                }
-            }
-            Ok(rows)
-        })
-    }
-
     fn save<'a>(
         conn: &'a mut PgConnection,
         aggregate: &'a Self::Aggregate,
@@ -96,10 +83,33 @@ pub trait Persistence: Send + Sync + 'static {
     }
 }
 
+pub trait PersistenceExt: Persistence {
+    fn load<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>>;
+}
+
+impl<S: Persistence> PersistenceExt for S {
+    fn load<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>> {
+        Box::pin(async move {
+            let rows = Self::read_many(conn, std::slice::from_ref(key)).await?;
+            Ok(rows
+                .into_iter()
+                .find(|(found, _)| found == key)
+                .map(|(_, aggregate)| aggregate))
+        })
+    }
+}
+
 pub trait CohortIndex: Persistence {
     fn keys_in_cohorts<'a>(
         conn: &'a mut PgConnection,
         cohorts: &'a [Cohort],
+        ceiling: KeyCeiling,
     ) -> BoxFuture<'a, Result<Vec<Self::Key>, EngineError>>;
 }
 

@@ -5,15 +5,22 @@ use serde::de::DeserializeOwned;
 
 use crate::blobs::{BlobRef, Disposition, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
-use crate::error::EngineError;
+use crate::error::{AttachError, EngineError};
+use crate::graphql::convert::one_key_refusal;
 use crate::graphql::error::{OrInternal, engine_data, internal_fault};
 use crate::graphql::state::GraphqlState;
+use crate::page::KeyCeiling;
 use crate::persistence::{Aggregate, Persistence};
 use crate::principal::Principal;
 use crate::projector::Projector;
 use crate::render::group::Renderer;
 use crate::session::WindowParams;
+use crate::session::capacity::admit;
 use crate::wire::{KeyBytes, ViewBytes};
+
+mod read;
+
+pub use read::Behind;
 
 pub struct Query<'a, P: Principal> {
     state: &'a Arc<GraphqlState<P>>,
@@ -65,9 +72,13 @@ impl<'a, P: Principal> Query<'a, P> {
     ) -> Result<Option<V::Out>, Error>
     where
         V: crate::view::Projector<Principal = P>,
-        V::Out: DeserializeOwned,
     {
-        self.fetch::<crate::view::ViewProjector<V>>(key).await
+        match self.load_visible::<V>(key).await? {
+            Some(row) => Ok(Some(
+                V::project(&row, self.principal).or_internal("project a query view")?,
+            )),
+            None => Ok(None),
+        }
     }
 
     pub async fn fetch_view_window<V>(&self, query: &V::Query) -> Result<Vec<V::Out>, Error>
@@ -90,25 +101,10 @@ impl<'a, P: Principal> Query<'a, P> {
         V: crate::view::Projector<Principal = P>,
         <V::Store as Persistence>::Aggregate: Aggregate,
     {
-        if !self.visible::<crate::view::ViewProjector<V>>(key).await? {
+        let Some(aggregate) = self.load_visible::<V>(key).await? else {
             return Ok(None);
-        }
-        let held = {
-            let mut conn = self
-                .state
-                .pg()
-                .acquire()
-                .await
-                .or_internal("acquire a connection for a download")?;
-            match <V::Store as Persistence>::load(&mut conn, key)
-                .await
-                .or_internal("load the aggregate that holds a blob")?
-            {
-                Some(aggregate) => Aggregate::blob_refs(&aggregate).contains(&reference),
-                None => false,
-            }
         };
-        if !held {
+        if !Aggregate::blob_refs(&aggregate).contains(&reference) {
             return Ok(None);
         }
         match self.state.blob_store() {
@@ -118,20 +114,6 @@ impl<'a, P: Principal> Query<'a, P> {
                 .or_internal("sign a blob download"),
             None => Ok(None),
         }
-    }
-
-    async fn visible<Pr>(&self, key: &Pr::Key) -> Result<bool, Error>
-    where
-        Pr: Projector<Principal = P> + Default,
-    {
-        let projector = Pr::default();
-        let erased = self.erased(&projector)?;
-        let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
-        let population = erased
-            .populate(self.state.pg(), &WindowParams::none(), self.principal)
-            .await
-            .or_internal("populate a query")?;
-        Ok(is_member(&population, &key_bytes))
     }
 
     pub async fn fetch_json<Pr>(
@@ -174,11 +156,10 @@ impl<'a, P: Principal> Query<'a, P> {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
         let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
-        let population = erased
-            .populate(self.state.pg(), &WindowParams::none(), self.principal)
-            .await
-            .or_internal("populate a query")?;
-        if !is_member(&population, &key_bytes) {
+        let members = self
+            .admitted_members(&projector, &erased, &WindowParams::none(), one_key_refusal)
+            .await?;
+        if !members.contains(&key_bytes) {
             return Ok(None);
         }
         let mut rendered = self
@@ -198,11 +179,9 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
-        let population = erased
-            .populate(self.state.pg(), &params, self.principal)
-            .await
-            .or_internal("populate a query window")?;
-        let keys = member_keys(&population);
+        let keys = self
+            .admitted_members(&projector, &erased, &params, Error::from)
+            .await?;
         let rendered = self
             .render(&erased, erased.renders_under_rls(), &keys)
             .await
@@ -211,6 +190,31 @@ impl<'a, P: Principal> Query<'a, P> {
             .iter()
             .filter_map(|key| rendered.get(key).cloned().flatten())
             .collect())
+    }
+
+    async fn admitted_members<Pr>(
+        &self,
+        projector: &Pr,
+        erased: &Arc<dyn ErasedProjector<P>>,
+        params: &WindowParams,
+        refusal: fn(AttachError) -> Error,
+    ) -> Result<Vec<KeyBytes>, Error>
+    where
+        Pr: Projector<Principal = P>,
+    {
+        let capacity = self.state.runtime().config().window_capacity;
+        let population = erased
+            .populate(
+                self.state.pg(),
+                params,
+                KeyCeiling::admission(capacity),
+                self.principal,
+            )
+            .await
+            .or_internal("populate a query window")?;
+        let keys = member_keys(&population);
+        admit(&projector.name(), keys.len(), capacity).map_err(refusal)?;
+        Ok(keys)
     }
 
     fn erased<Pr>(&self, projector: &Pr) -> Result<Arc<dyn ErasedProjector<P>>, Error>
@@ -244,14 +248,6 @@ impl<'a, P: Principal> Query<'a, P> {
             .render(erased, rls, cohort, self.principal, keys)
             .await?;
         Ok(rendered)
-    }
-}
-
-fn is_member(population: &ErasedPopulation, key: &KeyBytes) -> bool {
-    match population {
-        ErasedPopulation::Keys(keys) => keys.contains(key),
-        ErasedPopulation::Ordered { keys, .. } => keys.contains(key),
-        ErasedPopulation::Query(query) => query.authoritative() && query.keys().contains(key),
     }
 }
 

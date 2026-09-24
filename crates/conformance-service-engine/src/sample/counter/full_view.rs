@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::BoxFuture;
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
 use service_engine::name::{NounName, ProjectorName};
@@ -44,13 +45,17 @@ impl Projector for FullCounterProjector {
         &'a self,
         pg: &'a sqlx::PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_counter_full_snapshot WHERE tenant = $1")
-                .bind(principal.tenant())
-                .fetch_all(pg)
-                .await?;
+            let rows = sqlx::query(
+                "SELECT id FROM sample_counter_full_snapshot WHERE tenant = $1 LIMIT $2",
+            )
+            .bind(principal.tenant())
+            .bind(ceiling.limit())
+            .fetch_all(pg)
+            .await?;
             Ok(Population::Keys(
                 rows.iter()
                     .map(|row| row.get::<Uuid, _>("id"))

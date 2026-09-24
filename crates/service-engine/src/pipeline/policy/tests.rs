@@ -1,7 +1,8 @@
-use super::*;
-use crate::persistence::{Persistence, PersistenceStyle};
 use futures_util::future::BoxFuture;
 use sqlx::PgConnection;
+
+use super::*;
+use crate::persistence::{Persistence, PersistenceStyle};
 
 #[derive(Clone)]
 struct Alpha;
@@ -17,10 +18,10 @@ macro_rules! dummy_store {
             type Key = u32;
             type Event = ();
             const STYLE: PersistenceStyle = PersistenceStyle::Crud;
-            fn load<'a>(
+            fn read_many<'a>(
                 _c: &'a mut PgConnection,
-                _k: &'a u32,
-            ) -> BoxFuture<'a, Result<Option<$agg>, EngineError>> {
+                _k: &'a [u32],
+            ) -> BoxFuture<'a, Result<Vec<(u32, $agg)>, EngineError>> {
                 Box::pin(async { unimplemented!() })
             }
             fn save<'a>(

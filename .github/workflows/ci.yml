@@ -30,6 +30,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
+      - name: rustfmt --check on the slice modules compose_service! declares
+        run: rustfmt --edition 2024 --check crates/example-service/src/slices/*/mod.rs
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: cargo test
@@ -120,6 +122,14 @@ jobs:
             echo "::notice::no prior unified v* tag, skipping semver-checks (first lockstep release)"
             exit 0
           fi
+          current=$(awk -F'"' '/^\[workspace.package\]/{p=1; next} /^\[/{p=0} p && /^version *=/{print $2; exit}' Cargo.toml)
+          IFS=. read -r base_major base_minor _ <<<"${baseline#v}"
+          IFS=. read -r cur_major cur_minor _ <<<"${current}"
+          breaking=0
+          if [ "$cur_major" != "$base_major" ] || { [ "$cur_major" = 0 ] && [ "$cur_minor" != "$base_minor" ]; }; then
+            breaking=1
+            echo "::notice::${baseline} -> v${current} is a breaking bump: the gate runs no check, so each crate also lists its breaks (report-only); every one needs its CHANGELOG adopter-migration line"
+          fi
           shopt -s nullglob
           base_wt="$(mktemp -d)/baseline"
           git worktree add --detach "$base_wt" "$baseline"
@@ -156,6 +166,12 @@ jobs:
               --baseline-rustdoc "$base_wt/target/semver-baseline/doc/${lib}.json" \
               --current-rustdoc "$PWD/target/semver-current/doc/${lib}.json"; then
               fail=1
+            fi
+            if [ "$breaking" = 1 ]; then
+              echo "breaks ${crate} carries since ${baseline} (listed as if v${current} were a minor bump, report-only):"
+              cargo semver-checks -p "${crate}" --release-type minor \
+                --baseline-rustdoc "$base_wt/target/semver-baseline/doc/${lib}.json" \
+                --current-rustdoc "$PWD/target/semver-current/doc/${lib}.json" || true
             fi
             echo "::endgroup::"
           done
@@ -329,10 +345,7 @@ jobs:
       E2E_PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-      - name: free runner disk (the battery's test binaries and the MinIO fixture share it)
-        # One debug binary per scenario fills the runner; past that MinIO answers
-        # 507 Insufficient Storage to the example-service blob scenarios. The
-        # removed toolchains are preinstalled on the image and unused here.
+      - name: free runner disk (one debug binary per scenario fills it, then MinIO answers 507 to the blob scenarios; the removed toolchains are unused here)
         run: |
           set -euo pipefail
           df -h /
@@ -445,4 +458,5 @@ jobs:
             --test bb14_migrate_needs_only_the_owner_env \
             --test bb15_migrate_refuses_an_owner_subject_to_rls \
             --test bb16_gateway_sse_subscription \
+            --test bb17_paging_by_arguments_across_replicas \
             --test s202_serve_derives_message_retention

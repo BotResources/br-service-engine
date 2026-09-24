@@ -1,5 +1,5 @@
 use crate::accumulator::{Accumulator, ChunkSeq, SealHash};
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::pipeline::ops::Ops;
 use crate::wire::Noun;
 
@@ -50,12 +50,14 @@ impl Ops<'_> {
             .replay_verified::<A>(key, last_seq)
             .await?;
         if found != hash {
-            return Err(EngineError::SealHashMismatch {
-                accumulator: self.accumulators.name_of::<A>()?,
-                last_seq: last_seq.get(),
-                expected: hash.to_hex(),
-                found: found.to_hex(),
-            });
+            return Err(EngineError::Accumulator(
+                AccumulatorError::SealHashMismatch {
+                    accumulator: self.accumulators.name_of::<A>()?,
+                    last_seq: last_seq.get(),
+                    expected: hash.to_hex(),
+                    found: found.to_hex(),
+                },
+            ));
         }
         let sealed = self
             .accumulators

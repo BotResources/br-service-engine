@@ -1,5 +1,6 @@
 mod accumulator_support;
 
+use service_engine::error::AccumulatorError;
 use std::time::Duration;
 
 use accumulator_support::{rows, state};
@@ -55,7 +56,7 @@ async fn s146_sealing_an_already_sealed_key_is_refused_with_already_sealed() {
     assert!(
         matches!(
             refused,
-            EngineError::AlreadySealed { ref accumulator, high_water: 3 }
+            EngineError::Accumulator(AccumulatorError::AlreadySealed { ref accumulator, high_water: 3 })
                 if accumulator.as_str() == "note_body"
         ),
         "{refused:?}"
@@ -85,11 +86,11 @@ async fn s146_a_chunk_beyond_the_declared_last_seq_fails_the_seal_and_is_never_d
     assert!(
         matches!(
             refused,
-            EngineError::SealChunkBeyondLastSeq {
+            EngineError::Accumulator(AccumulatorError::SealChunkBeyondLastSeq {
                 ref accumulator,
                 last_seq: 2,
                 max_seq: 3
-            } if accumulator.as_str() == "note_body"
+            }) if accumulator.as_str() == "note_body"
         ),
         "{refused:?}"
     );
@@ -117,10 +118,10 @@ async fn s146_a_chunk_beyond_the_declared_last_seq_fails_the_seal_and_is_never_d
     assert!(
         matches!(
             refused,
-            EngineError::SealedChunk {
+            EngineError::Accumulator(AccumulatorError::SealedChunk {
                 seq: 4,
                 sealed_high_water: 4
-            }
+            })
         ),
         "{refused:?}"
     );
@@ -180,7 +181,10 @@ async fn s146_a_slow_seal_does_not_block_another_keys_flush() {
         .expect("the deferred chunk resolves once the lock is free")
         .expect_err("a chunk on the now-sealed key is refused");
     assert!(
-        matches!(refused, EngineError::SealedChunk { seq: 2, .. }),
+        matches!(
+            refused,
+            EngineError::Accumulator(AccumulatorError::SealedChunk { seq: 2, .. })
+        ),
         "{refused:?}"
     );
 }
@@ -207,7 +211,12 @@ async fn s146_a_registered_accumulator_without_a_service_fails_loud_at_boot() {
 
     let outcome = engine.run().await;
     assert!(
-        matches!(outcome, Err(EngineError::AccumulatorWithoutService)),
+        matches!(
+            outcome,
+            Err(EngineError::Accumulator(
+                AccumulatorError::AccumulatorWithoutService
+            ))
+        ),
         "a serviceless engine with an accumulator refuses to run rather than folding in process only: {outcome:?}"
     );
     assert_eq!(

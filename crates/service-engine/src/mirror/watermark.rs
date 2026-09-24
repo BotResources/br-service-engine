@@ -36,7 +36,8 @@ pub(super) async fn snapshot(
     let stream = nats.bind_stream(&format!("KV_{bucket}")).await?;
     let info = stream.get_info().await.map_err(|error| {
         EngineError::Config(format!(
-            "mirror {mirror}, bucket {bucket}: cannot read stream metadata: {error}"
+            "mirror {mirror}, bucket {bucket}: cannot read stream metadata: {}",
+            crate::chain::describe(&error)
         ))
     })?;
     Ok(Snapshot {

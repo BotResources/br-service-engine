@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::{Dims, ForeignKey};
 use service_engine::name::{NounName, ProjectorName};
@@ -70,15 +71,17 @@ impl Projector for NoteProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<NoteKey>, EngineError>> {
         Box::pin(async move {
             let rows = sqlx::query(
                 "SELECT n.assignment_id, n.seq FROM sample_note n \
                  JOIN sample_assignment a ON a.id = n.assignment_id \
-                 WHERE a.tenant_id = $1 ORDER BY n.assignment_id, n.seq DESC",
+                 WHERE a.tenant_id = $1 ORDER BY n.assignment_id, n.seq DESC LIMIT $2",
             )
             .bind(principal.tenant())
+            .bind(ceiling.limit())
             .fetch_all(pg)
             .await?;
             Ok(Population::Ordered {

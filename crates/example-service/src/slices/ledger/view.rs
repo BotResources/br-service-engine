@@ -43,14 +43,14 @@ impl Projector for LedgersView {
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
         Ok(Population::Keys(
-            store::all_ledger_ids(cx.pool())
-                .await?
-                .into_iter()
-                .collect(),
+            store::all_ledger_ids(cx).await?.into_iter().collect(),
         ))
     }
 
-    fn project(ledger: &LedgerAggregate, _principal: &AppPrincipal) -> Result<LedgerView, EngineError> {
+    fn project(
+        ledger: &LedgerAggregate,
+        _principal: &AppPrincipal,
+    ) -> Result<LedgerView, EngineError> {
         let state = &ledger.0;
         Ok(LedgerView {
             id: state.id,

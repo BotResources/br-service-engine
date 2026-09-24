@@ -1,5 +1,6 @@
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::accumulator::{Accumulator, ChunkSeq};
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
@@ -43,21 +44,6 @@ impl Persistence for EraseNoteStore {
     type Event = ();
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
-
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<EraseNote>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, owner, tenant, body, blob_ref FROM sample_erase_note WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.map(row_to_note))
-        })
-    }
 
     fn read_many<'a>(
         conn: &'a mut PgConnection,
@@ -187,14 +173,17 @@ impl Projector for EraseNoteProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows =
-                sqlx::query("SELECT id FROM sample_erase_note WHERE tenant = $1 ORDER BY id")
-                    .bind(principal.tenant())
-                    .fetch_all(pg)
-                    .await?;
+            let rows = sqlx::query(
+                "SELECT id FROM sample_erase_note WHERE tenant = $1 ORDER BY id LIMIT $2",
+            )
+            .bind(principal.tenant())
+            .bind(ceiling.limit())
+            .fetch_all(pg)
+            .await?;
             Ok(Population::Keys(
                 rows.iter().map(|row| row.get::<Uuid, _>("id")).collect(),
             ))

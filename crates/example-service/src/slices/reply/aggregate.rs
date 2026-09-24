@@ -3,16 +3,18 @@ use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::gate::{Gate, Reason};
 use service_engine::name::NounName;
-use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
+use service_engine::persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
-use service_engine::{BlobRef, Cohort};
-use sqlx::{PgConnection, PgPool, Row};
+use service_engine::{BlobRef, Cohort, KeyCeiling};
+use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::kernel::AppPrincipal;
 
 pub const NOT_STREAMING: Reason = Reason::new("REPLY_NOT_STREAMING");
+
+const ORG: &str = "org";
 
 pub struct Reply;
 
@@ -26,11 +28,11 @@ impl Visibility for Reply {
     type Principal = AppPrincipal;
 
     fn cohorts(row: &ReplyRow) -> Cohorts {
-        vec![Cohort::uuid("org", row.org_id)]
+        vec![Cohort::uuid(ORG, row.org_id)]
     }
 
     fn memberships(principal: &AppPrincipal) -> Cohorts {
-        vec![Cohort::uuid("org", principal.org())]
+        vec![Cohort::uuid(ORG, principal.org())]
     }
 }
 
@@ -128,21 +130,6 @@ impl Persistence for ReplyStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<ReplyRow>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, board_id, org_id, text, status, blob_ref FROM reply WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.as_ref().map(row_to_reply))
-        })
-    }
-
     fn lock<'a>(
         conn: &'a mut PgConnection,
         key: &'a Uuid,
@@ -222,17 +209,21 @@ impl Aggregate for ReplyRow {
     }
 }
 
-pub async fn candidate_replies(pg: &PgPool) -> Result<Vec<(Uuid, ReplyRow)>, EngineError> {
-    let rows = sqlx::query("SELECT id, board_id, org_id, text, status, blob_ref FROM reply")
-        .fetch_all(pg)
-        .await?;
-    Ok(rows
-        .iter()
-        .map(|row| {
-            let reply = row_to_reply(row);
-            (reply.id, reply)
+impl CohortIndex for ReplyStore {
+    fn keys_in_cohorts<'a>(
+        conn: &'a mut PgConnection,
+        cohorts: &'a [Cohort],
+        ceiling: KeyCeiling,
+    ) -> BoxFuture<'a, Result<Vec<Uuid>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query("SELECT id FROM reply WHERE org_id = ANY($1) LIMIT $2")
+                .bind(Cohort::uuids(cohorts, ORG))
+                .bind(ceiling.limit())
+                .fetch_all(conn)
+                .await?;
+            Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
         })
-        .collect())
+    }
 }
 
 pub async fn load_replies_conn(

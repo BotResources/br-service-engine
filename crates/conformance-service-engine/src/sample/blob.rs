@@ -34,25 +34,6 @@ impl Persistence for DocStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<DocRow>, EngineError>> {
-        Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, tenant_id, name, blob_ref FROM sample_doc WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.map(|row| DocRow {
-                id: row.get("id"),
-                tenant_id: row.get("tenant_id"),
-                name: row.get("name"),
-                blob_ref: row.get("blob_ref"),
-            }))
-        })
-    }
-
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Uuid],
@@ -175,9 +156,7 @@ pub fn attach_doc<'m>(
         cx.create(&doc).await?;
         cx.impact_caused::<Doc, _>(&doc.id, "attached")?;
         if input.fail {
-            return Err(SampleFault::Store(
-                "deliberate rollback after staging".into(),
-            ));
+            return Err(SampleFault::DeliberateRollback);
         }
         Ok(OneShot(blob.upload_url()))
     })

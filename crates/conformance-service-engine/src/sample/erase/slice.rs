@@ -15,22 +15,13 @@ use crate::sample::erase::store::{erase_ledger, erase_memos};
 use crate::sample::presence::{Typing, typing_key};
 use crate::sample::principal::SamplePrincipal;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EraseFault {
-    Store(String),
+    #[error("the store failed")]
+    Store(#[from] EngineError),
+    #[error("this slice always fails its erase")]
     Boom,
 }
-
-impl std::fmt::Display for EraseFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Store(detail) => write!(f, "store: {detail}"),
-            Self::Boom => f.write_str("this slice always fails its erase"),
-        }
-    }
-}
-
-impl std::error::Error for EraseFault {}
 
 impl MutationFault for EraseFault {
     fn reason(&self) -> Option<Reason> {
@@ -38,15 +29,9 @@ impl MutationFault for EraseFault {
     }
 }
 
-impl From<EngineError> for EraseFault {
-    fn from(error: EngineError) -> Self {
-        Self::Store(error.to_string())
-    }
-}
-
 impl From<sqlx::Error> for EraseFault {
     fn from(error: sqlx::Error) -> Self {
-        Self::Store(error.to_string())
+        Self::Store(EngineError::from(error))
     }
 }
 

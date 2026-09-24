@@ -6,7 +6,7 @@ use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
 use crate::mirror::{OfferManifest, manifest_key};
 use crate::name::RelayName;
-use crate::nats::{KvBucket, KvKey, KvPrefix, NatsError};
+use crate::nats::{KvBucket, KvKey, KvPrefix};
 use crate::offer::Offer;
 use crate::offers::leader::OfferLeader;
 use crate::offers::marker;
@@ -36,10 +36,19 @@ pub(crate) async fn reconcile<O: Offer>(
         puts.push((kv_key, agg_key));
     }
 
-    let prefix = KvPrefix::new(O::PREFIX)
-        .map_err(|error| RelayError::Publish(format!("offer prefix {}: {error}", O::PREFIX)))?;
+    let prefix = KvPrefix::new(O::PREFIX).map_err(|error| {
+        RelayError::Publish(format!(
+            "offer prefix {}: {}",
+            O::PREFIX,
+            crate::chain::describe(&error)
+        ))
+    })?;
     let mut retracts: Vec<KvKey> = Vec::new();
-    for (kv_key, _) in bucket.entries(&prefix).await.map_err(published_language)? {
+    for (kv_key, _) in bucket
+        .entries(&prefix)
+        .await
+        .map_err(RelayError::published_language)?
+    {
         if !live.contains(&kv_key) {
             retracts.push(kv_key);
         }
@@ -80,20 +89,19 @@ async fn publish_manifest<O: Offer>(manifest: &KvBucket<OfferManifest>) -> Resul
     match manifest
         .get_with_revision(&key)
         .await
-        .map_err(published_language)?
+        .map_err(RelayError::published_language)?
     {
         Some((found, _)) if found == want => Ok(()),
         Some((_, revision)) => manifest
             .update_if(&key, &want, revision)
             .await
             .map(|_| ())
-            .map_err(published_language),
-        None => manifest.put(&key, &want).await.map_err(published_language),
+            .map_err(RelayError::published_language),
+        None => manifest
+            .put(&key, &want)
+            .await
+            .map_err(RelayError::published_language),
     }
-}
-
-fn published_language(error: NatsError) -> RelayError {
-    RelayError::Publish(format!("published language: {error}"))
 }
 
 fn relay(error: crate::error::EngineError) -> RelayError {

@@ -4,8 +4,8 @@ use service_engine::gate::{Affordances, Gated};
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::principal::RlsApplier;
-use service_engine::view::{Populate, Projector};
-use service_engine::visibility::{Unrestricted, Visibility};
+use service_engine::view::{Populate, Projector, cohort_window};
+use service_engine::visibility::Unrestricted;
 use uuid::Uuid;
 
 use super::aggregate::{Board, BoardRow, BoardState};
@@ -23,11 +23,6 @@ pub struct BoardView {
     pub is_public: bool,
     pub archived: bool,
     pub affordances: Affordances,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BoardFilter {
-    pub public_only: bool,
 }
 
 fn view_of(row: &BoardRow, principal: &AppPrincipal) -> BoardView {
@@ -51,7 +46,7 @@ impl Projector for BoardsView {
     type Principal = AppPrincipal;
     type Noun = Board;
     type Store = BoardStore;
-    type Query = BoardFilter;
+    type Query = ();
     type Out = BoardView;
     type Visibility = Board;
 
@@ -59,13 +54,9 @@ impl Projector for BoardsView {
 
     async fn populate(
         cx: &Populate<'_, AppPrincipal>,
-        query: &BoardFilter,
+        _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        let mut candidates = store::candidate_boards(cx.pool()).await?;
-        if query.public_only {
-            candidates.retain(|(_, row)| row.is_public);
-        }
-        Ok(Board::window(candidates, cx.principal()))
+        cohort_window::<Self>(cx).await
     }
 
     fn project(row: &BoardRow, principal: &AppPrincipal) -> Result<BoardView, EngineError> {
@@ -98,7 +89,7 @@ impl Projector for OrgBoardsRls {
     ) -> Result<Population<Uuid>, EngineError> {
         let mut tx = cx.pool().begin().await?;
         AppRls.apply(&mut tx, cx.principal()).await?;
-        let ids = store::org_board_ids(&mut *tx).await?;
+        let ids = store::org_board_ids(&mut *tx, cx.limit_all()).await?;
         tx.rollback().await?;
         Ok(Population::Keys(ids.into_iter().collect()))
     }

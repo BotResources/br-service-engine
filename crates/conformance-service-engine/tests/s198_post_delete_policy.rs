@@ -125,10 +125,10 @@ async fn s198_a_store_without_delete_refuses_the_call_with_delete_unsupported() 
         .run::<DeleteWidgetTag>(principal.clone(), DeleteWidgetTag { widget_id: widget })
         .await
         .expect_err("a store without delete cannot be hard-deleted through cx.delete");
+    let described = service_engine::error::describe(&refused);
     assert!(
-        refused.detail.contains("Persistence::delete"),
-        "the failure names the missing store delete, not a generic error: {}",
-        refused.detail
+        described.contains("Persistence::delete"),
+        "the failure names the missing store delete, not a generic error: {described}"
     );
     assert_eq!(
         widget_tag_count(&pool, widget).await,

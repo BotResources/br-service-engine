@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::CompositionError;
 
 fn prefix() -> RootPrefix {
     RootPrefix::from_snake("sample").expect("sample is a valid prefix")
@@ -39,12 +40,12 @@ fn a_root_field_claimed_by_two_slices_fails_loud_with_both_names() {
     );
     assert!(matches!(
         clash,
-        Err(EngineError::DuplicateSchemaMember {
+        Err(EngineError::Composition(CompositionError::DuplicateSchemaMember {
             kind: "root field",
             first: "widget",
             second: "shadow",
             ref member,
-        }) if member == "sampleWidget"
+        })) if member == "sampleWidget"
     ));
 }
 
@@ -59,12 +60,12 @@ fn two_distinct_aggregates_claiming_one_type_fail_loud() {
     );
     assert!(matches!(
         clash,
-        Err(EngineError::DuplicateSchemaMember {
+        Err(EngineError::Composition(CompositionError::DuplicateSchemaMember {
             kind: "type",
             first: "widget",
             second: "assignment",
             ref member,
-        }) if member == "View"
+        })) if member == "View"
     ));
 }
 
@@ -75,8 +76,8 @@ fn capabilities_of_one_aggregate_may_share_an_owned_type() {
             fragment("card", &["sampleCard", "sampleAdvanceCard"], &["CardView"]),
             fragment(
                 "card",
-                &["sampleCards", "samplePageCards"],
-                &["CardView", "CardPage"],
+                &["sampleCards", "sampleCardHistory"],
+                &["CardView", "CardHistory"],
             ),
         ],
         Some(&prefix()),
@@ -91,7 +92,10 @@ fn fragments_registered_with_no_prefix_declared_is_rejected() {
         None,
     )
     .unwrap_err();
-    assert!(matches!(err, EngineError::RootPrefixUndeclared));
+    assert!(matches!(
+        err,
+        EngineError::Composition(CompositionError::RootPrefixUndeclared)
+    ));
 }
 
 #[test]
@@ -103,7 +107,7 @@ fn a_fragment_root_field_outside_the_prefix_fails_loud_with_slice_field_and_pref
     .unwrap_err();
     assert!(matches!(
         err,
-        EngineError::RootFieldOutsidePrefix { slice: "widget", ref field, ref prefix }
+        EngineError::Composition(CompositionError::RootFieldOutsidePrefix { slice: "widget", ref field, ref prefix })
             if field == "widget" && prefix == "sample"
     ));
 }
@@ -117,7 +121,7 @@ fn a_fragment_root_field_equal_to_the_bare_prefix_is_not_owned() {
     .unwrap_err();
     assert!(matches!(
         err,
-        EngineError::RootFieldOutsidePrefix { ref field, .. } if field == "sample"
+        EngineError::Composition(CompositionError::RootFieldOutsidePrefix { ref field, .. }) if field == "sample"
     ));
 }
 
@@ -133,7 +137,7 @@ fn a_root_field_the_schema_exposes_but_no_slice_declared_is_rejected() {
                type WidgetView {\n\tid: UUID!\n}\ntype AssignmentView {\n\tid: UUID!\n}\n";
     let err = slices.verify(sdl).unwrap_err();
     assert!(
-        matches!(err, EngineError::UndeclaredSchemaMember { ref member } if member == "sampleAssignment")
+        matches!(err, EngineError::Composition(CompositionError::UndeclaredSchemaMember { ref member }) if member == "sampleAssignment")
     );
 }
 
@@ -150,7 +154,7 @@ fn verify_refuses_an_sdl_root_field_outside_the_prefix() {
     let err = slices.verify(sdl).unwrap_err();
     assert!(matches!(
         err,
-        EngineError::RootFieldOutsidePrefix { ref field, .. } if field == "widget"
+        EngineError::Composition(CompositionError::RootFieldOutsidePrefix { ref field, .. }) if field == "widget"
     ));
 }
 
@@ -169,7 +173,7 @@ fn an_object_type_the_schema_exposes_but_no_fragment_owns_fails_the_gate_loud() 
                type WidgetView {\n\tid: UUID!\n}\ntype AssignmentView {\n\tid: UUID!\n}\n";
     let err = slices.verify(sdl).unwrap_err();
     assert!(
-        matches!(err, EngineError::UndeclaredSchemaType { ref ty } if ty == "AssignmentView"),
+        matches!(err, EngineError::Composition(CompositionError::UndeclaredSchemaType { ref ty }) if ty == "AssignmentView"),
         "an unclaimed object type fails the boot gate loud: {err:?}"
     );
 }

@@ -7,7 +7,7 @@ use crate::accumulator::ChunkSeq;
 use crate::accumulator::flush::{FlushOutcome, PendingChunk, Verdict};
 use crate::accumulator::guard::{self, StreamKey};
 use crate::accumulator::persisted::{ChunkAddress, read_persisted};
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::impact::{Dims, Impact};
 use crate::name::NounName;
 use crate::transport::ImpactTransport;
@@ -106,10 +106,10 @@ pub(crate) async fn commit_batch(
         accumulators.push(pending.accumulator.as_str().to_string());
         keys.push(pending.key.decode::<serde_json::Value>()?);
         seqs.push(i64::try_from(pending.seq.get()).map_err(|_| {
-            EngineError::ChunkSeqOutOfRange {
+            EngineError::Accumulator(AccumulatorError::ChunkSeqOutOfRange {
                 seq: pending.seq.get(),
                 max: ChunkSeq::MAX,
-            }
+            })
         })?);
         chunks.push(pending.chunk.clone());
         touched.insert((pending.noun.clone(), pending.key.clone()));

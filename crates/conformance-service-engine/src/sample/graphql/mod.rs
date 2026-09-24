@@ -1,21 +1,29 @@
 mod boot;
+mod counted;
+mod facts;
 mod forbidden;
 mod negative;
 mod passport;
+mod query_service;
+mod reads;
 mod rls;
 mod roots;
+mod snapshot;
 mod upload;
 
 pub use boot::{
-    GraphqlService, boot_graphql_service, boot_rls_query_service, root_field_collision,
-    type_collision,
+    GraphqlService, base_config, boot_graphql_service, boot_graphql_service_with,
+    boot_rls_query_service, root_field_collision, type_collision,
 };
-pub use forbidden::boot_forbidden_service;
+pub use counted::{CountedQueryRoot, boot_counted_service};
+pub use facts::boot_fact_service;
+pub use forbidden::{SAMPLE_REFUSED, boot_forbidden_service};
 pub use negative::{
     boot_colliding_slices, boot_field_outside_prefix, boot_undeclared_root_field,
     boot_without_prefix,
 };
 pub use passport::{TENANT_CLAIM, passport_for};
+pub use reads::{ReadsQueryRoot, RlsOnlyAssignments, boot_reads_service};
 pub use rls::{RlsAssignmentProjector, RlsQueryRoot};
 pub use roots::{
     AssignmentQueries, EngineDelta, MutationRoot, QueryRoot, SubscriptionRoot, WidgetQueries,

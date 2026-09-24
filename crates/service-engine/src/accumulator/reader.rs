@@ -8,7 +8,7 @@ use crate::accumulator::single_flight::KeyedGate;
 use crate::accumulator::{Accumulated, Accumulator, ChunkSeq, Registered, Registry, lookup};
 use crate::config::DEFAULT_FOLD_CACHE_CAPACITY;
 use crate::dyn_compat::ErasedState;
-use crate::error::EngineError;
+use crate::error::{AccumulatorError, EngineError};
 use crate::name::AccumulatorName;
 use crate::wire::{KeyBytes, Noun, encode_key};
 
@@ -52,7 +52,7 @@ impl ChunkReader {
         self.capacity = capacity.max(1);
     }
 
-    pub fn pool(&self) -> &PgPool {
+    pub(crate) fn pool(&self) -> &PgPool {
         &self.pg
     }
 
@@ -94,11 +94,11 @@ impl ChunkReader {
         for row in &rows {
             let seq = ChunkSeq::from_storable(row.get::<i64, _>("seq"));
             if seq != expected {
-                return Err(EngineError::SealTruncated {
+                return Err(EngineError::Accumulator(AccumulatorError::SealTruncated {
                     accumulator: entry.name.clone(),
                     last_seq: last_seq.get(),
                     contiguous_to: expected.to_i64() - 1,
-                });
+                }));
             }
             let chunk = row.get::<serde_json::Value, _>("chunk");
             entry.erased.fold(&mut state, seq, &chunk)?;
@@ -106,16 +106,18 @@ impl ChunkReader {
             expected = seq.next();
         }
         if expected.to_i64() != last_seq.to_i64() + 1 {
-            return Err(EngineError::SealTruncated {
+            return Err(EngineError::Accumulator(AccumulatorError::SealTruncated {
                 accumulator: entry.name.clone(),
                 last_seq: last_seq.get(),
                 contiguous_to: expected.to_i64() - 1,
-            });
+            }));
         }
         let folded = state
             .downcast_ref::<A::State>()
-            .ok_or_else(|| EngineError::StateMismatch {
-                accumulator: entry.name.clone(),
+            .ok_or_else(|| {
+                EngineError::Accumulator(AccumulatorError::StateMismatch {
+                    accumulator: entry.name.clone(),
+                })
             })?
             .clone();
         let digest = crate::accumulator::SealHash::of_values(values.iter());
@@ -210,8 +212,10 @@ impl ChunkReader {
 
         let folded = state
             .downcast_ref::<A::State>()
-            .ok_or_else(|| EngineError::StateMismatch {
-                accumulator: entry.name.clone(),
+            .ok_or_else(|| {
+                EngineError::Accumulator(AccumulatorError::StateMismatch {
+                    accumulator: entry.name.clone(),
+                })
             })?
             .clone();
         self.store(entry.name.clone(), key, state, mark);

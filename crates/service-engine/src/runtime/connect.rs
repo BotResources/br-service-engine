@@ -2,24 +2,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::cohort::CohortKey;
-use crate::dyn_compat::ErasedPopulation;
 use crate::error::{AttachError, EngineError};
 use crate::principal::Principal;
-use crate::render::group::{Rendered, Renderer};
 use crate::render::pass::PassContext;
 use crate::render::repair::resnapshot;
 use crate::runtime::SessionRuntime;
-use crate::session::live::{Held, Session, WindowShape, WindowState, members_of};
+use crate::session::live::{Ending, Held, Session, WindowShape, WindowState};
 use crate::session::stream::Outbox;
-use crate::session::{AttachRequest, SessionId, SessionStream, WindowSpec};
-use crate::wire::KeyBytes;
-
-struct WindowSnapshot {
-    members: BTreeSet<KeyBytes>,
-    shape: WindowShape,
-    views: Rendered,
-}
+use crate::session::{AttachRequest, SessionId, SessionStream};
 
 impl<P: Principal> SessionRuntime<P> {
     pub async fn attach(&self, request: AttachRequest<P>) -> Result<SessionStream, AttachError> {
@@ -47,7 +37,7 @@ impl<P: Principal> SessionRuntime<P> {
                 });
             }
         }
-        let id = request.session.unwrap_or_default();
+        let id = SessionId::new();
         let outbox = Arc::new(Outbox::new(self.config.session_buffer));
         let windows = request
             .windows
@@ -57,24 +47,15 @@ impl<P: Principal> SessionRuntime<P> {
                 params: spec.params.clone(),
                 members: BTreeSet::new(),
                 shape: WindowShape::Fixed,
-                pages: Vec::new(),
             })
             .collect();
-        {
-            let mut table = self.table.lock().await;
-            if table
-                .get(id)
-                .is_some_and(|existing| existing.is_live() || existing.is_pending())
-            {
-                return Err(AttachError::DuplicateSession { session: id });
-            }
-            table.insert(Session::pending(
-                id,
-                request.principal.clone(),
-                windows,
-                outbox.clone(),
-            ));
-        }
+        self.table.lock().await.insert(Session::pending(
+            id,
+            request.principal.clone(),
+            windows,
+            outbox.clone(),
+        ));
+        let stream = SessionStream::new(id, outbox, self.dropped.clone());
 
         let snapshots = match self.snapshot(&request.principal, &request.windows).await {
             Ok(snapshots) => snapshots,
@@ -84,13 +65,14 @@ impl<P: Principal> SessionRuntime<P> {
             }
         };
 
-        let (held, stream) = {
+        let held = {
             let mut table = self.table.lock().await;
             match table.get(id) {
                 None => return Err(self.connect_gone()),
                 Some(session) if !session.is_pending() => {
+                    let ending = session.ending();
                     table.remove(id);
-                    return Err(self.connect_lost());
+                    return Err(self.connect_lost(ending));
                 }
                 Some(_) => {}
             }
@@ -113,8 +95,7 @@ impl<P: Principal> SessionRuntime<P> {
             }
             session.last_sent.extend(seeded);
             session.reset_now();
-            let stream = SessionStream::new(id, outbox, self.dropped.clone());
-            (session.go_live(), stream)
+            session.go_live()
         };
         let opened = match held {
             Held::Replay(impacts) if impacts.is_empty() => Ok(()),
@@ -133,11 +114,14 @@ impl<P: Principal> SessionRuntime<P> {
         }
     }
 
-    fn connect_lost(&self) -> AttachError {
+    fn connect_lost(&self, ending: Option<Ending>) -> AttachError {
         if self.shutting_down.load(Ordering::SeqCst) {
-            AttachError::ShuttingDown
-        } else {
-            AttachError::PrincipalRevoked
+            return AttachError::ShuttingDown;
+        }
+        match ending {
+            Some(Ending::PrincipalRevoked) => AttachError::PrincipalRevoked,
+            Some(Ending::PrincipalFaulted) => AttachError::PrincipalRefreshFailed,
+            Some(Ending::Closed) | None => AttachError::ShuttingDown,
         }
     }
 
@@ -227,69 +211,9 @@ impl<P: Principal> SessionRuntime<P> {
         crate::observe::record_resets(reset, crate::observe::REASON_RECONNECT);
         Ok(reset)
     }
-
-    async fn snapshot(
-        &self,
-        principal: &P,
-        specs: &[WindowSpec],
-    ) -> Result<Vec<WindowSnapshot>, AttachError> {
-        let dead_letters = self.dead_letters();
-        let renderer = Renderer {
-            pg: &self.pg,
-            chunks: &self.chunks,
-            rls: self.registry.rls(),
-            dead_letters: Some(&dead_letters),
-        };
-        let mut snapshots = Vec::with_capacity(specs.len());
-        for spec in specs {
-            let projector = self
-                .registry
-                .projector(&spec.projector)
-                .ok_or_else(|| AttachError::UnknownProjector(spec.projector.clone()))?;
-            let refuse = |source| AttachError::Snapshot {
-                projector: spec.projector.clone(),
-                source,
-            };
-            let population = projector
-                .populate(&self.pg, &spec.params, principal)
-                .await
-                .map_err(refuse)?;
-            if let ErasedPopulation::Query(query) = &population
-                && query.interest().is_empty()
-            {
-                return Err(AttachError::EmptyInterest {
-                    projector: spec.projector.clone(),
-                });
-            }
-            let members = members_of(&population);
-            let shape = WindowShape::of(&population);
-            let under_rls = projector.renders_under_rls();
-            let cohort = if under_rls {
-                CohortKey::principal(principal.id())
-            } else {
-                projector.cohort(principal)
-            };
-            let keys: Vec<KeyBytes> = members.iter().cloned().collect();
-            let (views, cost) = renderer
-                .render(projector, under_rls, cohort, principal, &keys)
-                .await
-                .map_err(refuse)?;
-            self.counters.populates.fetch_add(1, Ordering::Relaxed);
-            self.counters
-                .loads
-                .fetch_add(cost.loads as u64, Ordering::Relaxed);
-            self.counters
-                .projections
-                .fetch_add(cost.projections as u64, Ordering::Relaxed);
-            snapshots.push(WindowSnapshot {
-                members,
-                shape,
-                views,
-            });
-        }
-        Ok(snapshots)
-    }
 }
+
+mod snapshot;
 
 #[cfg(test)]
 mod tests;

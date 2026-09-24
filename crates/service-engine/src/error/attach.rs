@@ -4,7 +4,6 @@ use thiserror::Error;
 
 use super::EngineError;
 use crate::name::ProjectorName;
-use crate::session::SessionId;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -41,6 +40,12 @@ pub enum AttachError {
     #[error("the principal no longer exists, so the session it was attaching was ended")]
     PrincipalRevoked,
 
+    #[error(
+        "the principal could not be re-resolved or its facts reloaded while its session was \
+         connecting, so the session was ended"
+    )]
+    PrincipalRefreshFailed,
+
     #[error("the impacts held while the session was connecting could not be rendered")]
     HeldImpacts(#[source] EngineError),
 
@@ -50,6 +55,13 @@ pub enum AttachError {
     #[error("the engine is shutting down")]
     ShuttingDown,
 
-    #[error("a live session already holds the id {session}")]
-    DuplicateSession { session: SessionId },
+    #[error(
+        "the window on {projector} holds more than window_capacity {capacity} keys; its populate \
+         read {keys_read} keys before the refusal"
+    )]
+    WindowTooLarge {
+        projector: ProjectorName,
+        keys_read: usize,
+        capacity: usize,
+    },
 }
