@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::error::Error as StdError;
 
 use futures_util::future::BoxFuture;
@@ -8,8 +7,10 @@ use crate::error::EngineError;
 use crate::impact::{Dims, ForeignKey, Impact};
 use crate::wire::Noun;
 
+use super::bind::Column;
 use super::consumed::Consumed;
-use super::known::{self, Column, KnownRow, Written};
+use super::known::{self, KnownRow, Written};
+use super::rows;
 use super::shadow::{Shadow, Shadows};
 
 pub struct Projection<'a> {
@@ -64,7 +65,7 @@ impl<'a> Projection<'a> {
     }
 
     pub async fn upsert<R: KnownRow>(&mut self, row: R) -> Result<Written, EngineError> {
-        let foreign_key = row.foreign_key();
+        let foreign_key = known::foreign_key_of(&row.key());
         let written = known::upsert(self.conn, &row).await?;
         if written.is_effective() {
             self.impact_foreign(R::NAMESPACE, &foreign_key)?;
@@ -86,24 +87,21 @@ impl<'a> Projection<'a> {
         Ok(())
     }
 
-    pub async fn replace<S, R, I>(&mut self, scope: S, rows: I) -> Result<Written, EngineError>
+    pub async fn replace_rows<R, I>(
+        &mut self,
+        scope: Vec<Column>,
+        rows: I,
+    ) -> Result<Written, EngineError>
     where
-        S: KnownScope,
-        R: Known,
+        R: KnownRow,
         I: IntoIterator<Item = R>,
     {
-        let rows: Vec<R> = rows.into_iter().collect();
-        let incoming: BTreeSet<String> = rows.iter().map(Known::foreign_key).collect();
-        let previous: BTreeSet<String> = scope.delete(self.conn).await?.into_iter().collect();
-        for row in &rows {
-            row.upsert(self.conn).await?;
-        }
-        let mut effective = 0_usize;
-        for key in previous.symmetric_difference(&incoming) {
+        let changed =
+            rows::replace_rows::<R>(self.conn, &scope, rows.into_iter().collect()).await?;
+        for key in &changed {
             self.impact_foreign(R::NAMESPACE, key)?;
-            effective += 1;
         }
-        Ok(if effective == 0 {
+        Ok(if changed.is_empty() {
             Written::Unchanged
         } else {
             Written::Changed

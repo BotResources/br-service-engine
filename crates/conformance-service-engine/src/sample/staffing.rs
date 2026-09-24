@@ -1,11 +1,13 @@
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Change, Known, KnownScope, Mirror, MirrorReady, Project, Projection};
+use service_engine::mirror::{
+    Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col,
+};
 use service_engine::name::MirrorName;
 use service_engine::nats::{KvKey, Nats};
 use service_engine::{Consumed, Shadows};
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::mirror::SamplePublishedUser;
@@ -14,7 +16,7 @@ pub const STAFFING_MIRROR: MirrorName = MirrorName::from_static("staffing");
 const GROUP_PREFIX: &str = "identity/groups/";
 const USER_PREFIX: &str = "identity/users/";
 const GROUP_NAMESPACE: &str = "identity.group";
-const MEMBER_NAMESPACE: &str = "identity.user";
+const MEMBER_NAMESPACE: &str = "identity.group_member";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SamplePublishedGroup {
@@ -79,25 +81,17 @@ struct KnownGroupRow {
     name: String,
 }
 
-impl Known for KnownGroupRow {
+impl KnownRow for KnownGroupRow {
+    const TABLE: &'static str = "known_groups";
     const NAMESPACE: &'static str = GROUP_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id"];
 
-    fn foreign_key(&self) -> String {
-        self.id.to_string()
+    fn key(&self) -> Vec<Column> {
+        vec![col("group_id", self.id)]
     }
 
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO known_groups (group_id, name) VALUES ($1, $2) \
-                 ON CONFLICT (group_id) DO UPDATE SET name = EXCLUDED.name",
-            )
-            .bind(self.id)
-            .bind(&self.name)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
+    fn values(&self) -> Vec<Column> {
+        vec![col("name", self.name.clone())]
     }
 }
 
@@ -106,65 +100,17 @@ struct KnownMemberRow {
     user_id: Uuid,
 }
 
-impl Known for KnownMemberRow {
+impl KnownRow for KnownMemberRow {
+    const TABLE: &'static str = "known_user_group";
     const NAMESPACE: &'static str = MEMBER_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id", "user_id"];
 
-    fn foreign_key(&self) -> String {
-        self.user_id.to_string()
+    fn key(&self) -> Vec<Column> {
+        vec![col("group_id", self.group_id), col("user_id", self.user_id)]
     }
 
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO known_user_group (group_id, user_id) VALUES ($1, $2) \
-                 ON CONFLICT (group_id, user_id) DO NOTHING",
-            )
-            .bind(self.group_id)
-            .bind(self.user_id)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
-    }
-}
-
-struct ByGroup(Uuid);
-
-impl KnownScope for ByGroup {
-    const NAMESPACE: &'static str = GROUP_NAMESPACE;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
-        Box::pin(async move {
-            sqlx::query("DELETE FROM known_groups WHERE group_id = $1")
-                .bind(self.0)
-                .execute(conn)
-                .await?;
-            Ok(vec![self.0.to_string()])
-        })
-    }
-}
-
-struct GroupMembers(Uuid);
-
-impl KnownScope for GroupMembers {
-    const NAMESPACE: &'static str = MEMBER_NAMESPACE;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
-        Box::pin(async move {
-            let rows: Vec<Uuid> = sqlx::query_scalar(
-                "DELETE FROM known_user_group WHERE group_id = $1 RETURNING user_id",
-            )
-            .bind(self.0)
-            .fetch_all(conn)
-            .await?;
-            Ok(rows.into_iter().map(|id| id.to_string()).collect())
-        })
+    fn values(&self) -> Vec<Column> {
+        Vec::new()
     }
 }
 
@@ -183,27 +129,34 @@ impl Project<Uuid> for StaffingProjection {
                 .shadow::<SamplePublishedGroup>()
                 .get(&group_key(group_id))
                 .cloned();
-            let Some(group) = group else {
-                return cx.remove(ByGroup(group_id)).await;
+            let members: Vec<KnownMemberRow> = match &group {
+                None => Vec::new(),
+                Some(group) => {
+                    let users = cx.shadow::<SamplePublishedUser>();
+                    group
+                        .members
+                        .iter()
+                        .filter(|id| users.get(&user_key(**id)).is_some())
+                        .map(|id| KnownMemberRow {
+                            group_id,
+                            user_id: *id,
+                        })
+                        .collect()
+                }
             };
-            cx.replace_one(KnownGroupRow {
+            let Some(group) = group else {
+                cx.replace_rows(vec![col("group_id", group_id)], members)
+                    .await?;
+                return cx
+                    .retire::<KnownGroupRow>(vec![col("group_id", group_id)])
+                    .await;
+            };
+            cx.upsert(KnownGroupRow {
                 id: group_id,
                 name: group.name,
             })
             .await?;
-            let members: Vec<KnownMemberRow> = {
-                let users = cx.shadow::<SamplePublishedUser>();
-                group
-                    .members
-                    .iter()
-                    .filter(|id| users.get(&user_key(**id)).is_some())
-                    .map(|id| KnownMemberRow {
-                        group_id,
-                        user_id: *id,
-                    })
-                    .collect()
-            };
-            cx.replace(GroupMembers(group_id), members)
+            cx.replace_rows(vec![col("group_id", group_id)], members)
                 .await
                 .map(|_| ())
         })

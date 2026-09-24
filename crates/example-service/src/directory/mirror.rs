@@ -44,6 +44,7 @@ struct KnownPersonRow {
 impl KnownRow for KnownPersonRow {
     const TABLE: &'static str = KNOWN_PERSONS_TABLE;
     const NAMESPACE: &'static str = KNOWN_PERSON_NAMESPACE;
+    const KEY: &'static [&'static str] = &["user_id"];
 
     fn key(&self) -> Vec<Column> {
         vec![col("user_id", self.id)]

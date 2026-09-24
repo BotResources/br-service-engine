@@ -30,6 +30,7 @@ struct KnownUserRow {
 impl KnownRow for KnownUserRow {
     const TABLE: &'static str = "known_users";
     const NAMESPACE: &'static str = USER_NAMESPACE;
+    const KEY: &'static [&'static str] = &["user_id"];
 
     fn key(&self) -> Vec<Column> {
         vec![col("user_id", self.id)]
@@ -48,6 +49,7 @@ struct KnownGroupRow {
 impl KnownRow for KnownGroupRow {
     const TABLE: &'static str = "known_groups";
     const NAMESPACE: &'static str = GROUP_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id"];
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.id)]

@@ -6,11 +6,11 @@ use conformance_service_engine::sample::RecordingTransport;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Column, Known, KnownRow, KnownScope, Project, Projection, col};
+use service_engine::mirror::{Column, KnownRow, Project, Projection, col};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Mirror};
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 const ROSTER_PREFIX: &str = "roster/";
@@ -36,6 +36,7 @@ struct GroupRow {
 impl KnownRow for GroupRow {
     const TABLE: &'static str = "known_groups";
     const NAMESPACE: &'static str = GROUP_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id"];
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.id)]
@@ -51,46 +52,17 @@ struct MemberRow {
     user_id: Uuid,
 }
 
-impl Known for MemberRow {
+impl KnownRow for MemberRow {
+    const TABLE: &'static str = "known_user_group";
     const NAMESPACE: &'static str = MEMBER_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id", "user_id"];
 
-    fn foreign_key(&self) -> String {
-        self.user_id.to_string()
+    fn key(&self) -> Vec<Column> {
+        vec![col("group_id", self.group_id), col("user_id", self.user_id)]
     }
 
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO known_user_group (group_id, user_id) VALUES ($1, $2) \
-                 ON CONFLICT (group_id, user_id) DO NOTHING",
-            )
-            .bind(self.group_id)
-            .bind(self.user_id)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
-    }
-}
-
-struct Members(Uuid);
-
-impl KnownScope for Members {
-    const NAMESPACE: &'static str = MEMBER_NAMESPACE;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
-        Box::pin(async move {
-            let removed: Vec<Uuid> = sqlx::query_scalar(
-                "DELETE FROM known_user_group WHERE group_id = $1 RETURNING user_id",
-            )
-            .bind(self.0)
-            .fetch_all(conn)
-            .await?;
-            Ok(removed.into_iter().map(|id| id.to_string()).collect())
-        })
+    fn values(&self) -> Vec<Column> {
+        Vec::new()
     }
 }
 
@@ -121,11 +93,12 @@ impl Project<Uuid> for RosterProjection {
                         group_id: id,
                         user_id: *user_id,
                     });
-                    cx.replace(Members(id), members).await?;
+                    cx.replace_rows(vec![col("group_id", id)], members).await?;
                     Ok(())
                 }
                 None => {
-                    cx.remove(Members(id)).await?;
+                    cx.replace_rows(vec![col("group_id", id)], Vec::<MemberRow>::new())
+                        .await?;
                     cx.retire::<GroupRow>(vec![col("group_id", id)]).await
                 }
             }
