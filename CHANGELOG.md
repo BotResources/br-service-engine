@@ -515,7 +515,7 @@ A patch: `migrate` upgrades a database that the 0.2.0 engine migrated, and every
 failure the engine answers reaches the client with a code.
 
 **Adopter note: nothing to do.** Bump the pin. A database migrated by engine
-0.2.0 (svc-runners 0.1.0 on the dev stage, svc-accounts) now upgrades on the next
+0.2.0 (every adopter that ran 0.2.0 before this patch) now upgrades on the next
 `migrate`; before this release `migrate` on 0.3.0 or 0.3.1 exited 1 there with
 `VersionMismatch(9113000023)` (`sqlx migrate info`: `installed (different
 checksum)`).
@@ -604,9 +604,9 @@ checksum)`).
 
 - The `Display` of `EngineError::{Db, Migrate, Service}` is now the wrapped
   error's message, database text included. A service that forwards an engine
-  error's text to its clients should answer `INTERNAL` instead; both platform
-  adopters already do (svc-runners renders its code, svc-accounts' reasonless
-  faults now reach the client as `INTERNAL`).
+  error's text to its clients should answer `INTERNAL` instead; the known
+  adopters already do (one renders its code, the other's reasonless faults now
+  reach the client as `INTERNAL`).
 - `example-service`'s `AppFault` is the reference shape: `NotFound` carries the
   reason `NOT_FOUND` (a refusal the client can act on, no longer an uncoded
   failure), `Store` keeps the engine error's whole chain as text (rendered with
