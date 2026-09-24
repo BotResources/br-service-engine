@@ -47,13 +47,13 @@ battery-backed.
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
-| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; `load`/`save`/`create`, a non-locking `read_many` (the batched render read; defaults to `load` and both are non-locking, so an author who writes only `load` gets a lock-free render), a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
+| `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; a **required** non-locking `read_many` (one batched read per call — `WHERE id = ANY($1)` for a row store; there is no per-key default, so a store without a batched read does not compile) with `load` derived from it (a one-key `read_many`; override it only when a single-key read is cheaper), `save`/`create`, a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in `load`, so a lock-less store still serialises), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
 | `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
 | `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait (`VERSION`), `register_offer`, `register_offer_trigger::<O, T>` (a `T: OfferTrigger<O>` in the offer's own slice re-publishes the offer when it changes; its `row_key()` names the offer row's store key and its `key_from()` the offer's KvKey), leader-drained dirty keys, versioned watermark, boot + periodic reconcile, `OfferManifest` published at reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `upsert` (row-diff) / `replace` (key-set-diff, keys-only link rows) both returning `Written` and staging nothing when unchanged, plus `replace_one`/`remove`, `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `upsert` (row-diff) / `replace_rows` (full-row set diff inside a declared scope: stages exactly the rows inserted, changed on any column, or deleted) both returning `Written` and staging nothing when unchanged, plus `retire` and the `Known`/`KnownScope` escape hatch (`replace_one`/`remove`), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
@@ -61,7 +61,7 @@ battery-backed.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `read_under_rls(|conn| …)`, hand SQL in a read-only transaction under the principal's RLS context), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -149,8 +149,8 @@ structural `(noun, key)` primary key and the log the `(noun, key, seq)` one, so 
 full-EDA slice enforces uniqueness and integrity in the aggregate's write-time
 gate and its hydration barrier, not in a declared FK/unique/check on the state.
 Both
-reads are non-locking — `load` is a plain read and `read_many` defaults to it —
-so the render side takes no row lock, whatever the author writes. The write
+reads are non-locking — `read_many` is a plain batched read and `load` derives
+from it — so the render side takes no row lock, whatever the author writes. The write
 pipeline serialises concurrent commands on one key itself: before `load` it takes
 a transaction advisory lock keyed on the aggregate's store type and its
 JSON-encoded key — `pg_advisory_xact_lock` over an FNV-1a hash of
@@ -167,11 +167,14 @@ or `DELETE` issued outside that path locks rows the pipeline does not know about
 and bypasses every policy — a CAS column is a symptom of a second domain, not a
 remedy. The advisory lock, like `lock`, runs inside the pipeline transaction under
 `lock_timeout`, so a contended write that waits past the timeout is retryable, not
-stuck; a render frame never waits on it. A CRUD or soft-EDA store overrides `read_many`
-with a single batched read of the same table `load` reads, so the author writes
-no render load SQL; a full-EDA store keeps the default `read_many` (a `load` per
-key) because the current state is the snapshot replayed forward, not a column
-read.
+stuck; a render frame never waits on it. `read_many` is required and
+has no per-key default, so a render frame or a `load_many` over N keys costs one
+statement per call, never N: a CRUD or soft-EDA store reads its table with
+`WHERE id = ANY($1)`, and `FullEda<T>` reads every requested snapshot with one
+statement and every event logged past those snapshots with a second one, then
+replays each key forward. `load` is the one-key case of the same read, so the
+mutation path and the render path cannot read a row two different ways; a store
+overrides `load` only when a single-key read is genuinely cheaper.
 
 `cx.load_many::<A>(&keys)` loads several aggregates of one noun in the one
 pipeline transaction, each locked for the transaction, so a handler can judge
@@ -307,12 +310,25 @@ value is a typed `Consumed`, never raw JSON: a mirror that consumes
 `serde_json::Value` is refused at registration (`EngineError::RawJsonConsumption`)
 unless it sets `Consumed::RAW_JSON_ESCAPE_HATCH`, so the join always reads typed
 rows (a typed value may still hold a `serde_json::Value` field). A `known_*` row
-is written either declaratively — implement `KnownRow` (table, key columns, value
-columns) and the engine generates the upsert and the delete behind
-`Projection::upsert` / `Projection::retire`, the documented path with no SQL in
-the projector — or manually through `replace_one` / `replace` / `remove` over the
-`Known` / `KnownScope` traits, the escape hatch for a write that is not a plain
-single-key upsert. A producer that extends a shared type is consumed with
+is written either declaratively — implement `KnownRow` (`TABLE`, `NAMESPACE`,
+`KEY` — the key column names, which a write whose `key()` names other columns is
+refused against — and the value columns) and the engine generates the SQL behind
+`Projection::upsert` / `Projection::retire` / `Projection::replace_rows`, the
+documented path with no SQL in the projector — or manually through `replace_one`
+/ `remove` over the `Known` / `KnownScope` traits, the escape hatch for a write
+the declarative kit cannot express (`replace_one` stages its impact whether or not
+the row changed). A known row's impact key is always its key columns rendered and
+joined by `/`. `replace_rows(scope, rows)` replaces the set of rows whose `scope`
+columns (equalities, e.g. `vec![col("project_id", id)]`; empty = the whole table)
+match: one multi-row upsert per ~30,000 bound values that writes a row only when
+a value column differs (`IS DISTINCT FROM`), then one delete of the scoped rows
+the call did not name, each returning the keys it touched — so it stages exactly
+the rows inserted, changed on any column, or deleted, and nothing for an
+unchanged set. It refuses (`EngineError::Config`) a row outside the scope, a null
+scope column, two rows with one key and different values (an exact duplicate is
+written once), rows that name different value columns, and a key column that is
+not a uuid, text, integer or boolean (the impact key of a deleted row is the
+column's SQL text, which equals its rendering only for these). A producer that extends a shared type is consumed with
 `Extended<Core, Ext>`: the project names its own extension as the second type
 parameter and an unknown extension is denied at deserialization, never mirrored
 as opaque JSON. A mirror joins one or more offers, and the producer's wire
@@ -445,11 +461,13 @@ its real name and type — is minted only through the gated
 reference: a
 reference travels in a view by design, so a bare-reference presign would make it a
 permanent bearer capability that outlives the row and the viewer. `download`
-takes the same visibility path as `fetch` — it presigns only when the caller can
-currently see the referencing view (`populate` → membership) **and** the loaded
-referencing aggregate still lists the reference in `Aggregate::blob_refs`; a
-non-viewer, or a reference the named aggregate no longer holds, resolves to
-`None`. A resolver therefore mints a download through `Query::download` and never
+loads the referencing aggregate through `Query::load_visible::<View>` — the
+view's `Visibility` gate, under RLS when the view declares `RLS` — and presigns
+only when the principal can see that row **and** the row still lists the
+reference in `Aggregate::blob_refs`; a non-viewer, an absent key, or a reference
+the named aggregate no longer holds all resolve to `None`. The gate is the
+row's visibility, not membership of the view's default window, so a row the
+principal sees on any page of a paged view downloads. A resolver therefore mints a download through `Query::download` and never
 through a raw presign; the reference reply slice's `exampleReplyDownload(replyId,
 reference, disposition)` field is the reference resolver, its `disposition`
 argument defaulting to `ATTACHMENT`. That slice's `exampleAttachReply` takes an
@@ -1214,6 +1232,55 @@ blob scenarios need it), and a dedicated `conformance-service-engine black-box
 scenarios against them on real PostgreSQL and a spawned NATS — no MinIO, since
 the example binary boots without S3 (blobs are registered only when configured)
 and no black-box scenario exercises a blob.
+
+## Adopter SQL and reads
+
+The engine is not an ORM. A service writes its own SQL — a store's
+`read_many`/`save`, a `populate`, a `keys_in_cohorts`, a journal page — and that
+is the normal case. The rule for that SQL is bound parameters only: a value from
+a request, a principal or a consumed offer is always `.bind(…)`, never formatted
+into the statement; the only formatted parts are identifiers the service holds as
+`&'static str` constants. Around that SQL the engine asks four things, and gives a
+primitive that makes each one the easy path:
+
+| Requirement | Primitive |
+|---|---|
+| A read over many keys is one statement, never one per key | `Persistence::read_many` is required and has no per-key default, so a store without a batched read does not compile; `load` is derived from it |
+| A read of one aggregate for a principal honours the view's declaration | `Query::load_visible::<View>(key)`: the row is loaded under RLS when the view declares `RLS`, then kept only if the view's `visible` (its `Visibility` by default) admits it; a hidden row and an absent key both answer `None`, so a caller cannot probe which keys exist. `Query::download` is built on it. A list is a view (`fetch_view_window`, a subscription) |
+| Hand SQL outside a view runs under the second enforcement layer | `Query::read_under_rls(\|conn\| Box::pin(async move { … }))`: a read-only transaction with the principal's RLS context applied through the registered `RlsApplier`, rolled back at the end. A write inside it fails; a fault answers `INTERNAL` with the cause in the log, never the database text; with no `RlsApplier` registered the read is refused (`INTERNAL`), never run without the context |
+| A mirror stages only what changed | `Projection::replace_rows(scope, rows)` over `KnownRow` rows: full-row change detection inside a declared scope (see the mirror kit) |
+
+A keyset page over an append-only journal (`seq > $2 ORDER BY seq LIMIT $3`) or a
+context read is the case `read_under_rls` exists for: the SQL filters by the
+journal's own key, and the RLS policy filters by the principal, by construction.
+A service whose second layer is cohorts rather than RLS (no `RlsApplier`) gates
+the parent with `load_visible` and reads the parent's children by the parent's
+key, or declares the journal as a view: cohort columns on the fact row and a
+`before`-cursor window on the delta subscription.
+
+Mirror tables follow three rules:
+
+- **One mirror owns a table set.** A table that two projections write, or that
+  one projection reads to route impacts, belongs to one mirror. When the table
+  set has several sources (users, projects, orgs), the mirror consumes them all
+  and its key is a sum type — `enum RosterKey { User(Uuid), Project(Uuid),
+  Org(Uuid) }` — so every write to the set runs in that mirror's one lead
+  transaction, and no hand-written `pg_advisory_xact_lock` serializes two mirrors.
+- **Key a multi-source join per row.** `keyed_by` yields the natural scope of the
+  rows a change touches (the project whose members changed), and the projection
+  writes that scope with `replace_rows`. A `()` key is for a true singleton only.
+  Cost, stated plainly: a live change projects only the keys `keyed_by` yields; a
+  full rescan (boot, the periodic reconcile, a leader takeover) calls `project`
+  once per touched key, all in one transaction, so with `replace_rows` a rescan
+  is about two statements per key (the upsert and the delete) — linear in keys,
+  constant in rows. A `()` key with a whole-table `replace_rows` makes a rescan
+  constant but re-sends every row on every change; in both shapes only the rows
+  that changed are impacted.
+- **No clock reads in a projection.** A projection (and a principal fact loader)
+  is a function of the consumed facts, never of the time it runs. A cohort is a
+  written fact: "active" is `end_date IS NULL`, never `end_date > now()`. A
+  transition driven by time is a write — `cx.schedule_at` or a cron — that records
+  the fact, and the projection reads it.
 
 ## Authoring caveats
 
