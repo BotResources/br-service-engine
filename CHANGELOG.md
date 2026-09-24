@@ -114,7 +114,10 @@ release is chart 1.1.1 ↔ engine 0.4.0.
   an `AttachError` `WINDOW_TOO_LARGE`, `UNAUTHENTICATED` or `INTERNAL`; on a
   `WindowSizeOutOfRange` `WINDOW_SIZE_INVALID`. `?` on any other error
   (`EngineError`, `sqlx`, `serde_json`, `std::io`, …) no longer compiles: a fault
-  goes through `OrInternal::or_internal(context)`. Through 0.3.4 a bare `?` sent
+  goes through `OrInternal::or_internal(context)`. A bare `String` or
+  `&'static str` still converts (async-graphql keeps those two conversions) and
+  reaches the client with no code: build a refusal with `coded_error` and a fault
+  with `or_internal`. Through 0.3.4 a bare `?` sent
   a refusal without its code, and a fault's `Display` text (a database message
   included) to the client uncoded. The engine does not compile without the
   feature: its conversions conflict with the blanket one.
