@@ -252,9 +252,10 @@ migration line below.
   `Option`; a service that lowered the part bound only so a lower body bound could
   boot removes its `with_max_file_bytes` call.
 - **Faults:** derive `thiserror::Error` on every `MutationFault` and
-  `ReactionError` type (or implement `std::error::Error`), keep the wrapped error
-  as `#[from]` / `#[source]` instead of a pre-rendered `String`, write only your
-  own context in `Display`, and delete any `as_error` override.
+  `ReactionError` type (or implement `std::error::Error`); a `ReactionError` type
+  must now also be `Send`. Keep the wrapped error as `#[from]` / `#[source]`
+  instead of a pre-rendered `String`, write only your own context in `Display`,
+  and delete any `as_error` override.
 - **`MutationError`:** build it with `MutationError::refused(reason, detail)` (a
   `Reason`, no longer an `Option`) or `MutationError::internal(detail)`; read
   `reason()`, `code()` and `refusal_detail()` instead of the fields; log it with
@@ -1524,8 +1525,8 @@ into `graphql/item.rs` and `graphql/board.rs`.
   in-cohort row reaches an open session and a membership change repopulates the
   window; `LIVE = false` is the explicit override for a closed `Keys` snapshot.
   Returning a `Population` directly from `populate` still bypasses inference. This
-  closes issue defect #4 (a freshly created key never reached open subscribers
-  under a `Population::Keys`/`Fixed` window) — a bug class the engine introduced —
+  closes the defect where a freshly created key never reached open subscribers
+  under a `Population::Keys`/`Fixed` window — a bug class the engine introduced —
   and is now the engine's own presence-projector idiom.
 
 ### H6. `Unrestricted` visibility requires a stated reason
