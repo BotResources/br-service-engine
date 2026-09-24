@@ -65,25 +65,6 @@ impl Persistence for WidgetStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<WidgetRow>, EngineError>> {
-        Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, tenant_id, label, closed FROM sample_widget WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.map(|row| WidgetRow {
-                id: row.get("id"),
-                tenant_id: row.get("tenant_id"),
-                label: row.get("label"),
-                closed: row.get("closed"),
-            }))
-        })
-    }
-
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Uuid],

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::name::NounName;
 use service_engine::persistence::Persistence;
+use service_engine::schema::{TABLE_EVENT_LOG, TABLE_EVENT_SNAPSHOT};
 use service_engine::{EventSourced, FullEda};
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -107,6 +108,40 @@ async fn tally_with(conn: &mut PgConnection, amounts: &[i64]) -> Uuid {
     id
 }
 
+async fn scans_of_the_event_tables(conn: &mut PgConnection) -> Vec<(String, i64)> {
+    for statement in [
+        "SELECT pg_stat_force_next_flush()",
+        "SELECT pg_stat_clear_snapshot()",
+    ] {
+        sqlx::query(statement)
+            .execute(&mut *conn)
+            .await
+            .expect("flush this backend's table statistics");
+    }
+    sqlx::query_as(
+        "SELECT schemaname || '.' || relname, seq_scan + COALESCE(idx_scan, 0) \
+         FROM pg_stat_user_tables WHERE schemaname || '.' || relname = ANY($1) ORDER BY 1",
+    )
+    .bind(vec![TABLE_EVENT_LOG, TABLE_EVENT_SNAPSHOT])
+    .fetch_all(&mut *conn)
+    .await
+    .expect("read the scan counters of the event tables")
+}
+
+async fn scans_spent_reading(conn: &mut PgConnection, keys: &[Uuid]) -> Vec<(String, i64)> {
+    let before = scans_of_the_event_tables(conn).await;
+    TallyStore::read_many(conn, keys)
+        .await
+        .expect("the batched read succeeds");
+    let after = scans_of_the_event_tables(conn).await;
+    assert_eq!(before.len(), 2, "both event tables are counted");
+    before
+        .into_iter()
+        .zip(after)
+        .map(|((table, was), (_, is))| (table, is - was))
+        .collect()
+}
+
 #[tokio::test]
 async fn s250_a_batched_read_hydrates_every_key_to_the_state_a_single_load_reaches() {
     let db = TestDb::fresh().await;
@@ -144,6 +179,42 @@ async fn s250_a_batched_read_hydrates_every_key_to_the_state_a_single_load_reach
         (single.total, single.version),
         (53, 5),
         "load, derived from read_many, reaches the same state"
+    );
+
+    drop(conn);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s250_a_batched_read_scans_the_event_tables_as_often_for_many_keys_as_for_one() {
+    let db = TestDb::fresh().await;
+    let mut conn = db.app_pool().acquire().await.expect("a connection");
+    let mut keys = Vec::new();
+    for amounts in [&[1, 2][..], &[3, 4, 5, 6], &[7], &[8, 9, 10, 11, 12]] {
+        keys.push(tally_with(&mut conn, amounts).await);
+    }
+    keys.push(Uuid::now_v7());
+    for setting in [
+        "SET enable_indexscan = off",
+        "SET enable_indexonlyscan = off",
+        "SET enable_bitmapscan = off",
+        "SET enable_nestloop = off",
+    ] {
+        sqlx::query(setting)
+            .execute(&mut *conn)
+            .await
+            .expect("pin every read to one sequential scan per table and statement");
+    }
+
+    let for_one = scans_spent_reading(&mut conn, &keys[..1]).await;
+    let for_all = scans_spent_reading(&mut conn, &keys).await;
+    assert!(
+        for_one.iter().all(|(_, scans)| *scans > 0),
+        "the counters observe the read: {for_one:?}"
+    );
+    assert_eq!(
+        for_all, for_one,
+        "reading five keys costs the event tables the same scans as reading one: no read per key"
     );
 
     drop(conn);

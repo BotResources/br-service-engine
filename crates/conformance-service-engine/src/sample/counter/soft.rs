@@ -29,30 +29,6 @@ impl Persistence for SoftCounterStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::SoftEda;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<SoftCounter>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, tenant, total, closed, version FROM sample_counter_soft WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.map(|row| {
-                SoftCounter(CounterState::from_row(
-                    row.get("id"),
-                    row.get("tenant"),
-                    row.get("total"),
-                    row.get("closed"),
-                    None,
-                    row.get("version"),
-                ))
-            }))
-        })
-    }
-
     fn lock<'a>(
         conn: &'a mut PgConnection,
         key: &'a Uuid,

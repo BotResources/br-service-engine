@@ -3,11 +3,12 @@ use service_engine::error::EngineError;
 use service_engine::name::NounName;
 use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
 use service_engine::wire::Noun;
-use sqlx::{PgConnection, Row};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::sample::counter::domain::CounterState;
-use crate::sample::counter::event::{CounterEvent, EVENT_VERSION, upcast};
+use crate::sample::counter::event::{CounterEvent, EVENT_VERSION};
+use crate::sample::counter::full_read::{hydrate_many, replay, select_events_after};
 use crate::sample::counter::slice::CounterAggregate;
 
 pub struct FullCounterNoun;
@@ -29,24 +30,6 @@ impl Persistence for FullCounterStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::FullEda;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<FullCounter>, EngineError>> {
-        Box::pin(async move {
-            let Some(mut state) = select_snapshot(conn, key).await? else {
-                return Ok(None);
-            };
-            for (seq, version, payload) in select_events_after(conn, key, state.version).await? {
-                let event = upcast(version, &payload)?;
-                state.apply(&event);
-                state.version = seq;
-            }
-            state.check_hydrated()?;
-            Ok(Some(FullCounter(state)))
-        })
-    }
-
     fn lock<'a>(
         conn: &'a mut PgConnection,
         key: &'a Uuid,
@@ -65,26 +48,10 @@ impl Persistence for FullCounterStore {
         keys: &'a [Uuid],
     ) -> BoxFuture<'a, Result<Vec<(Uuid, FullCounter)>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query(
-                "SELECT id, tenant, total, closed, last_author, version \
-                 FROM sample_counter_full_snapshot WHERE id = ANY($1)",
-            )
-            .bind(keys)
-            .fetch_all(conn)
-            .await?;
-            Ok(rows
+            Ok(hydrate_many(conn, keys)
+                .await?
                 .into_iter()
-                .map(|row| {
-                    let state = CounterState::from_row(
-                        row.get("id"),
-                        row.get("tenant"),
-                        row.get("total"),
-                        row.get("closed"),
-                        row.get("last_author"),
-                        row.get("version"),
-                    );
-                    (state.key, FullCounter(state))
-                })
+                .map(|state| (state.key, FullCounter(state)))
                 .collect())
         })
     }
@@ -110,54 +77,6 @@ impl Persistence for FullCounterStore {
             insert_snapshot(conn, &aggregate.0).await
         })
     }
-}
-
-pub(crate) async fn select_snapshot(
-    conn: &mut PgConnection,
-    key: &Uuid,
-) -> Result<Option<CounterState>, EngineError> {
-    let row = sqlx::query(
-        "SELECT id, tenant, total, closed, last_author, version \
-         FROM sample_counter_full_snapshot WHERE id = $1",
-    )
-    .bind(key)
-    .fetch_optional(conn)
-    .await?;
-    Ok(row.map(|row| {
-        CounterState::from_row(
-            row.get("id"),
-            row.get("tenant"),
-            row.get("total"),
-            row.get("closed"),
-            row.get("last_author"),
-            row.get("version"),
-        )
-    }))
-}
-
-pub(crate) async fn select_events_after(
-    conn: &mut PgConnection,
-    key: &Uuid,
-    after: i64,
-) -> Result<Vec<(i64, i32, serde_json::Value)>, EngineError> {
-    let rows = sqlx::query(
-        "SELECT seq, version, payload FROM sample_counter_full_event \
-         WHERE counter = $1 AND seq > $2 ORDER BY seq",
-    )
-    .bind(key)
-    .bind(after)
-    .fetch_all(conn)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            (
-                row.get::<i64, _>("seq"),
-                row.get::<i32, _>("version"),
-                row.get::<serde_json::Value, _>("payload"),
-            )
-        })
-        .collect())
 }
 
 async fn append_events(
@@ -234,14 +153,8 @@ pub async fn replay_from_scratch(
     key: &Uuid,
     tenant: Uuid,
 ) -> Result<CounterState, EngineError> {
-    let mut state = CounterState::open(*key, tenant);
-    for (seq, version, payload) in select_events_after(conn, key, 0).await? {
-        let event = upcast(version, &payload)?;
-        state.apply(&event);
-        state.version = seq;
-    }
-    state.check_hydrated()?;
-    Ok(state)
+    let events = select_events_after(conn, key, 0).await?;
+    replay(CounterState::open(*key, tenant), events)
 }
 
 impl Aggregate for FullCounter {

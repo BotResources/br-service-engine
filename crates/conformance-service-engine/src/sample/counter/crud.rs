@@ -29,30 +29,6 @@ impl Persistence for CrudCounterStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<CrudCounter>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, tenant, total, closed FROM sample_counter_crud WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.map(|row| {
-                CrudCounter(CounterState::from_row(
-                    row.get("id"),
-                    row.get("tenant"),
-                    row.get("total"),
-                    row.get("closed"),
-                    None,
-                    0,
-                ))
-            }))
-        })
-    }
-
     fn lock<'a>(
         conn: &'a mut PgConnection,
         key: &'a Uuid,
