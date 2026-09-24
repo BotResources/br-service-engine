@@ -13,7 +13,7 @@ pub struct GraphqlState<P: Principal> {
     runtime: Arc<SessionRuntime<P>>,
     pg: PgPool,
     blobs: Arc<OnceCell<BlobStore>>,
-    ws_shutdown: tokio::sync::watch::Receiver<bool>,
+    stream_shutdown: tokio::sync::watch::Receiver<bool>,
 }
 
 impl<P: Principal> GraphqlState<P> {
@@ -22,14 +22,14 @@ impl<P: Principal> GraphqlState<P> {
         runtime: Arc<SessionRuntime<P>>,
         pg: PgPool,
         blobs: Arc<OnceCell<BlobStore>>,
-        ws_shutdown: tokio::sync::watch::Receiver<bool>,
+        stream_shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> Self {
         Self {
             executor,
             runtime,
             pg,
             blobs,
-            ws_shutdown,
+            stream_shutdown,
         }
     }
 
@@ -37,8 +37,8 @@ impl<P: Principal> GraphqlState<P> {
         &self.pg
     }
 
-    pub(crate) fn ws_shutdown(&self) -> tokio::sync::watch::Receiver<bool> {
-        self.ws_shutdown.clone()
+    pub(crate) fn stream_shutdown(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.stream_shutdown.clone()
     }
 
     pub(crate) fn blob_store(&self) -> Option<&BlobStore> {

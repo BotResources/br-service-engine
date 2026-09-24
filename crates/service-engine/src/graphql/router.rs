@@ -5,6 +5,7 @@ use crate::graphql::body::{self, BodyPolicy};
 use crate::graphql::multipart::{MultipartPolicy, declares_upload_scalar};
 use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
 use crate::graphql::refusal::coded_refusal;
+use crate::graphql::sse;
 use crate::graphql::state::GraphqlState;
 use crate::graphql::{INTERNAL_CODE, INTERNAL_MESSAGE};
 use crate::readiness::{ReadinessHandle, readiness_route};
@@ -128,7 +129,20 @@ where
         Ok(request) => request.data(principal),
         Err(refusal) => return refusal.into_response(),
     };
+    // The gateway's subscription leg: the same authenticated request, answered as a
+    // graphql-sse stream bounded like a WebSocket session.
+    if sse::wants_event_stream(&parts.headers) {
+        return sse::respond(&state.schema, request, stream_bounds(&state.engine));
+    }
     GraphQLResponse::from(state.schema.execute(request).await).into_response()
+}
+
+fn stream_bounds<P: PassportPrincipal>(engine: &GraphqlState<P>) -> sse::StreamBounds {
+    sse::StreamBounds {
+        max_age: engine.runtime().config().session_max_age,
+        keep_alive: sse::KEEP_ALIVE_INTERVAL,
+        shutdown: engine.stream_shutdown(),
+    }
 }
 
 async fn graphql_ws<P, Q, M, S>(
@@ -149,7 +163,7 @@ where
     };
     let schema = state.schema.clone();
     let max_age = state.engine.runtime().config().session_max_age;
-    let shutdown = state.engine.ws_shutdown();
+    let shutdown = state.engine.stream_shutdown();
     upgrade
         .protocols(ALL_WEBSOCKET_PROTOCOLS)
         .on_upgrade(move |socket| async move {

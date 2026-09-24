@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.3", version = "0.3.3" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.3.4", version = "0.3.4" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,6 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.3.4 | `v1.3.0` |
 | 0.3.3 | `v1.3.0` |
 | 0.3.2 | `v1.3.0` |
 | 0.3.1 | `v1.3.0` |
@@ -60,7 +61,7 @@ battery-backed.
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -525,8 +526,10 @@ The `graphql` module is the async-graphql surface kit, aligned to the intent's a
 `compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
 `SubscriptionRoot` and the `register` function; it composes those roots into one
 schema with `engine_schema`, mounts it with `app` (`POST
-/graphql`, the GraphQL-over-WebSocket subscription on `GET /graphql/ws`, and
-`/readyz`), and runs both the engine loop and that HTTP server with one call:
+/graphql` — JSON, or a graphql-sse event stream when `Accept` names
+`text/event-stream`, the gateway's subscription leg —, the GraphQL-over-WebSocket
+subscription on `GET /graphql/ws`, and `/readyz`; see *Subscription transports*),
+and runs both the engine loop and that HTTP server with one call:
 `Engine::run_with(app)` (or `run_with_listener(listener, app)` when the caller
 pre-binds), which shuts both down gracefully on the engine's shutdown signal.
 `serve` and `Engine::run` stay for callers that drive the two lifecycles
@@ -630,8 +633,8 @@ the `FORBIDDEN` case — both re-exported at `service_engine::` and carrying the
 code in the `code` extension the frontend reads. On a query the client sees HTTP
 `200` with `errors[].extensions.code` and a null datum; on a subscription open
 the client sees a `next` payload carrying that same error then `complete`, never
-a transport-level `error` frame — the framing is async-graphql's own, unchanged
-by the engine.
+a transport-level `error` frame — on the WebSocket the framing is async-graphql's
+own, on the event stream the engine frames it the same way.
 
 Failures on the wire. Every failure the engine answers carries a code too. What
 the client cannot fix — a database or NATS fault, a transaction that would not
@@ -826,9 +829,15 @@ session lives on the pod that holds its socket, a page request must be issued
 **over that session's own connection** (a mutation over the same WebSocket lands
 on the same pod); a page for a session this pod does not hold — or one held for a
 different principal — is refused with `EngineError::NoLiveSession`, so knowing
-another session's id buys an attacker nothing. The client correlates the two by
-supplying its own `SessionId`: `attach_with_session` (kit) / a `session` argument
-on the subscription pins the id the `page` mutation then names. The
+another session's id buys an attacker nothing. Through the gateway there is no
+such connection: the session rides an event stream (see *Subscription
+transports*) and the `page` mutation is a separate `POST` the gateway may route
+to another replica, where it is refused the same way. Paging a gateway (SSE)
+session requires the session's pod (one replica) until 0.4.0 moves paging to
+subscription arguments.
+The client correlates the two by supplying its own `SessionId`:
+`attach_with_session` (kit) / a `session` argument on the subscription pins the
+id the `page` mutation then names. The
 reference `card` slice demonstrates the pair — `cardPageDeltas(session, boardId,
 size)` opens the head window and `pageCards(session, boardId, before, size)`
 appends an older page behind it. A page renders its appended keys **outside the
@@ -1130,7 +1139,13 @@ whichever mode it lives:
   replay the chunks, verify the hash, commit the record and deliver it, read back
   over GraphQL (`bb05`); and the `graphql-transport-ws` socket is closed by the
   binary at `session_max_age` measured from the handshake, so a client that holds
-  it open must reconnect with a fresh passport (`bb06`); and `main`'s one call to
+  it open must reconnect with a fresh passport (`bb06`); the gateway's subscription
+  transport — `POST /graphql` with `Accept: text/event-stream`, graphql-sse — carries
+  the same `Reset` then `Upsert` on a contiguous revision (read with
+  `br-test-harness`'s `SseSubscription`, the client service e2e suites use), refuses a
+  passport that is absent, undecodable or not a passport with the very `401` a JSON
+  request gets, before a byte of the body is read, and completes the stream at
+  `session_max_age` then ends it, a new request attaching afresh (`bb16`); and `main`'s one call to
   the boot kit runs `migrate` then `serve`, installs logging, and answers the
   `/livez` + `/metrics` + `/sdl` + `schema` surface (`bb07`); `serve` refuses an
   unmigrated store by name (`bb12`), `migrate` waits for the app role before it
@@ -1180,7 +1195,12 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb08_reconcile_relay_cross_pod \
     --test bb09_rolling_roll_reconnect \
     --test bb10_outbox_published_once_across_pods \
-    --test bb11_mirror_leader_standby_failover
+    --test bb11_mirror_leader_standby_failover \
+    --test bb12_serve_refuses_an_unmigrated_store \
+    --test bb13_migrate_waits_for_the_app_role \
+    --test bb14_migrate_needs_only_the_owner_env \
+    --test bb15_migrate_refuses_an_owner_subject_to_rls \
+    --test bb16_gateway_sse_subscription
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1265,7 +1285,7 @@ GitOps and the NATS fabric.
 | Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled`, plus `S3_PUBLIC_ENDPOINT` from `objectStore.publicEndpoint` when set (chart 1.1) |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
-| HTTP | one port: `/graphql`, `/ws`, `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
+| HTTP | one port: `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
 | NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing separator stripped (`typed/v1/` → `typed/v1_manifest`, `typed.v1.` → `typed.v1_manifest`), a sibling outside the data prefix; a single consumed key has no manifest |
@@ -1302,6 +1322,29 @@ chart's own `values.yaml` lands under `.Values.br-engine-service` of the thin
 chart, never at the top level the named templates read, so the library's
 `values.yaml` documents the interface and every default is coded in the
 templates: a thin chart leaves a key out to get the default.
+
+### Subscription transports
+
+A subscription reaches a pod over one of two transports, both served by `app` on
+the one port, both authenticated and bounded the same way:
+
+| Transport | Who uses it | Wire |
+|---|---|---|
+| `POST /graphql` with `Accept: text/event-stream` | the gateway: its only subscription transport to a subgraph (client ↔ gateway is a WebSocket; gateway ↔ subgraph is HTTP POST + SSE) | graphql-sse, distinct connections: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, one `event: next` per GraphQL response (`data:` the response JSON on one line), one `event: complete` (`data:` empty) at the end, a `:` comment after 15 s without a frame |
+| `GET /graphql/ws` | a client that reaches the pod directly (tests, tools) | `graphql-transport-ws` |
+
+The event stream answers the same request as JSON would: the passport is resolved
+from the headers first (`401` with the body never read, exactly as for JSON), then
+the body is read within its bounds; only the answer differs. Any operation may be
+sent this way — a query or a mutation answers one `next`, then `complete`. A
+subscription opened on either transport attaches the same engine session, so the
+`Reset`/`Upsert`/`Remove` wire, its revision, cohorts and the principal-facts
+refresh are identical. Each is bounded by `session_max_age` (from the handshake /
+the request) and by the engine's shutdown: the WebSocket is closed `1001`, the
+event stream sends `complete` and ends, and the client — the gateway, on the SSE
+leg — re-subscribes with a fresh `X-Passport`. A client that goes away releases
+the session with its connection. Paging a gateway (SSE) session requires the
+session's pod (one replica) until 0.4.0 moves paging to subscription arguments.
 
 ### Hardened pod and neutral fields (chart 1.1)
 
@@ -1409,7 +1452,11 @@ recognises as a reconnect. A revoked scope therefore cannot keep an affordance
 allowed by keeping the socket open and re-subscribing, and a mutation over the
 socket runs under a principal no older than the bound. The client opens a new
 upgrade on which the gateway re-injects the resolved `X-Passport`, so the fresh
-socket carries the current passport.
+socket carries the current passport. An event stream on `POST /graphql` — the
+gateway's subscription leg — is bounded the same way: its principal is resolved
+once for the request, and at `session_max_age` measured from the request (or when
+the engine shuts down) it sends `complete` and ends, so the gateway re-subscribes
+and re-injects a fresh `X-Passport`.
 
 The listening connection is drained by a task that does nothing else: it
 forwards notifications into a bounded in-process channel (`listener_channel_capacity`)

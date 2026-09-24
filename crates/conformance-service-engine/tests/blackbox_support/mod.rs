@@ -4,6 +4,7 @@
 pub mod bin;
 pub mod pg;
 pub mod scopes;
+pub mod sse;
 
 #[path = "../graphql_support/mod.rs"]
 pub mod graphql_support;
@@ -167,6 +168,11 @@ impl World {
 }
 
 pub fn passport(user: Uuid, org: Uuid, scopes: &[&str], super_admin: bool) -> String {
+    human(user, org, scopes, super_admin).to_header()
+}
+
+/// The human [`passport`] as the trusted `Passport` itself, for a client that encodes it.
+pub fn human(user: Uuid, org: Uuid, scopes: &[&str], super_admin: bool) -> Passport {
     let mut map = serde_json::Map::new();
     map.insert(
         "org".to_string(),
@@ -189,7 +195,6 @@ pub fn passport(user: Uuid, org: Uuid, scopes: &[&str], super_admin: bool) -> St
         None,
         PassportClaims::from_map(map),
     )
-    .to_header()
 }
 
 pub fn ok(response: &serde_json::Value) -> &serde_json::Value {

@@ -444,4 +444,5 @@ jobs:
             --test bb13_migrate_waits_for_the_app_role \
             --test bb14_migrate_needs_only_the_owner_env \
             --test bb15_migrate_refuses_an_owner_subject_to_rls \
+            --test bb16_gateway_sse_subscription \
             --test s202_serve_derives_message_retention
