@@ -7,7 +7,6 @@ use crate::error::EngineError;
 use crate::impact::{Dims, ForeignKey, Impact};
 use crate::wire::Noun;
 
-use super::bind::Column;
 use super::consumed::Consumed;
 use super::known::{self, KnownRow, Written};
 use super::row_scope::RowScope;
@@ -60,36 +59,6 @@ impl<'a> Projection<'a> {
         Ok(())
     }
 
-    pub async fn replace_one<R: Known>(&mut self, row: R) -> Result<(), EngineError> {
-        row.upsert(self.conn).await?;
-        self.impact_foreign(R::NAMESPACE, &row.foreign_key())
-    }
-
-    pub async fn upsert<R: KnownRow>(&mut self, row: R) -> Result<Written, EngineError> {
-        let key = known::rendered(&row.key());
-        let written = known::upsert(self.conn, &row).await?;
-        if written.is_effective() {
-            self.stage::<R>(&key)?;
-        }
-        Ok(written)
-    }
-
-    pub async fn retire<R: KnownRow>(&mut self, key: Vec<Column>) -> Result<(), EngineError> {
-        let rendered = known::rendered(&key);
-        if known::delete_by_key::<R>(self.conn, key).await? {
-            self.stage::<R>(&rendered)?;
-        }
-        Ok(())
-    }
-
-    pub async fn remove<S: KnownScope>(&mut self, scope: S) -> Result<(), EngineError> {
-        let touched = scope.delete(self.conn).await?;
-        for key in touched {
-            self.impact_foreign(S::NAMESPACE, &key)?;
-        }
-        Ok(())
-    }
-
     pub async fn replace_rows<R, I>(
         &mut self,
         scope: RowScope,
@@ -99,10 +68,9 @@ impl<'a> Projection<'a> {
         R: KnownRow,
         I: IntoIterator<Item = R>,
     {
-        let changed =
-            rows::replace_rows::<R>(self.conn, scope.columns(), rows.into_iter().collect()).await?;
+        let changed = rows::replace_rows::<R>(self.conn, scope, rows.into_iter().collect()).await?;
         for key in &changed {
-            self.stage::<R>(key)?;
+            self.impacts.extend(known::impacts_of::<R>(key)?);
         }
         Ok(if changed.is_empty() {
             Written::Unchanged
@@ -110,32 +78,14 @@ impl<'a> Projection<'a> {
             Written::Changed
         })
     }
-
-    fn stage<R: KnownRow>(&mut self, key: &[String]) -> Result<(), EngineError> {
-        self.impacts.extend(known::impacts_of::<R>(key)?);
-        Ok(())
-    }
-}
-
-pub trait Known: Send + Sync + 'static {
-    const NAMESPACE: &'static str;
-
-    fn foreign_key(&self) -> String;
-
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>>;
-}
-
-pub trait KnownScope: Send + Sync {
-    const NAMESPACE: &'static str;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>>;
 }
 
 pub trait Project<K>: Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
 
-    fn project<'a>(&'a self, cx: Projection<'a>, key: K) -> BoxFuture<'a, Result<(), Self::Error>>;
+    fn project<'a>(
+        &'a self,
+        cx: Projection<'a>,
+        keys: Vec<K>,
+    ) -> BoxFuture<'a, Result<(), Self::Error>>;
 }

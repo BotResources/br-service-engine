@@ -5,8 +5,9 @@ use sqlx::{PgConnection, Postgres, QueryBuilder, Row};
 
 use crate::error::EngineError;
 
-use super::bind::{Bind, Column};
+use super::bind::Column;
 use super::known::{KnownRow, foreign_key_of, keyed};
+use super::row_scope::{RowScope, ScopeFilter};
 
 const BINDS_PER_STATEMENT: usize = 30_000;
 
@@ -21,11 +22,15 @@ struct Incoming {
 
 pub(super) async fn replace_rows<R: KnownRow>(
     conn: &mut PgConnection,
-    scope: &[Column],
+    scope: RowScope,
     rows: Vec<R>,
 ) -> Result<BTreeSet<Vec<String>>, EngineError> {
-    let rows = admit::<R>(scope, rows)?;
+    let scope = scope.into_filters().map_err(refusal::<R>)?;
+    let rows = admit::<R>(&scope, rows)?;
     let mut changed = BTreeSet::new();
+    if scope.iter().any(ScopeFilter::matches_nothing) {
+        return Ok(changed);
+    }
     let per_row = rows
         .first()
         .map_or(1, |row| row.key.len() + row.values.len());
@@ -42,19 +47,13 @@ pub(super) async fn replace_rows<R: KnownRow>(
         let written = upsert.build().fetch_all(&mut *conn).await?;
         changed.extend(returned_keys(&written)?);
     }
-    let mut retire = retire_stale::<R>(scope, &kept);
+    let mut retire = retire_stale::<R>(&scope, &kept);
     let retired = retire.build().fetch_all(&mut *conn).await?;
     changed.extend(returned_keys(&retired)?);
     Ok(changed)
 }
 
-fn admit<R: KnownRow>(scope: &[Column], rows: Vec<R>) -> Result<Vec<Incoming>, EngineError> {
-    if let Some(column) = scope.iter().find(|c| matches!(c.value, Bind::Null)) {
-        return Err(refusal::<R>(format!(
-            "scope column {} is null, so it would match no row",
-            column.name
-        )));
-    }
+fn admit<R: KnownRow>(scope: &[ScopeFilter], rows: Vec<R>) -> Result<Vec<Incoming>, EngineError> {
     let mut admitted: BTreeMap<TypedKey, (Fingerprint, Incoming)> = BTreeMap::new();
     let mut value_names: Option<Vec<&'static str>> = None;
     for row in rows {
@@ -76,11 +75,11 @@ fn admit<R: KnownRow>(scope: &[Column], rows: Vec<R>) -> Result<Vec<Incoming>, E
             Some(_) => {}
             None => value_names = Some(names),
         }
-        if let Some(outside) = scope.iter().find(|s| !carries(&key, &values, s)) {
+        if let Some(outside) = scope.iter().find(|s| !s.carried_by(&key, &values)) {
             return Err(refusal::<R>(format!(
                 "row {} lies outside the replaced scope on column {}",
                 foreign_key_of(&key),
-                outside.name
+                outside.name()
             )));
         }
         let typed_key: TypedKey = key.iter().map(|c| c.value.fingerprint()).collect();
@@ -102,12 +101,6 @@ fn admit<R: KnownRow>(scope: &[Column], rows: Vec<R>) -> Result<Vec<Incoming>, E
         }
     }
     Ok(admitted.into_values().map(|(_, row)| row).collect())
-}
-
-fn carries(key: &[Column], values: &[Column], scope: &Column) -> bool {
-    key.iter()
-        .chain(values)
-        .any(|c| c.name == scope.name && c.value.fingerprint() == scope.value.fingerprint())
 }
 
 fn refusal<R: KnownRow>(detail: String) -> EngineError {
@@ -169,17 +162,14 @@ fn upsert_chunk<R: KnownRow>(chunk: Vec<Incoming>) -> QueryBuilder<'static, Post
 }
 
 fn retire_stale<'q, R: KnownRow>(
-    scope: &[Column],
+    scope: &[ScopeFilter],
     kept: &[Vec<String>],
 ) -> QueryBuilder<'q, Postgres> {
     let mut qb = QueryBuilder::<Postgres>::new("DELETE FROM ");
     qb.push(R::TABLE);
     qb.push(" AS stale WHERE TRUE");
-    for column in scope {
-        qb.push(" AND stale.");
-        qb.push(column.name);
-        qb.push(" = ");
-        column.value.clone().push_bind_to(&mut qb);
+    for filter in scope {
+        filter.push_to(&mut qb, "stale");
     }
     if kept.first().is_some_and(|column| !column.is_empty()) {
         qb.push(" AND NOT EXISTS (SELECT 1 FROM unnest(");

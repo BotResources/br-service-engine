@@ -55,7 +55,7 @@ impl Project<()> for KeptPairs {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        _key: (),
+        _keys: Vec<()>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
             let rows: Vec<PairRow> = (0..KEPT).map(PairRow).collect();

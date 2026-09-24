@@ -158,13 +158,12 @@ where
         keys: Vec<K>,
         impacts: &mut Vec<Impact>,
     ) -> Result<(), EngineError> {
-        for key in keys {
-            let cx = Projection::new(conn, shadows, impacts);
-            self.project
-                .project(cx, key)
-                .await
-                .map_err(|error| EngineError::Service(Box::new(error)))?;
+        if keys.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        self.project
+            .project(Projection::new(conn, shadows, impacts), keys)
+            .await
+            .map_err(|error| EngineError::Service(Box::new(error)))
     }
 }

@@ -17,7 +17,7 @@ impl Project<()> for NoProject {
     fn project<'a>(
         &'a self,
         _cx: Projection<'a>,
-        _key: (),
+        _keys: Vec<()>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async { Ok(()) })
     }

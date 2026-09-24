@@ -1,19 +1,19 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use service_engine::Shadows;
 use service_engine::error::EngineError;
 use service_engine::mirror::{
-    Change, Known, KnownScope, Mirror, MirrorHandle, MirrorReady, MirrorRun, Project, Projection,
+    Change, Mirror, MirrorHandle, MirrorReady, MirrorRun, Project, Projection,
 };
 use service_engine::nats::Nats;
 use service_engine::transport::ImpactTransport;
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use super::{
-    DIRECTORY_MIRROR, REQUIRED_USER_KEY, SamplePublishedUser, USER_NAMESPACE, id_of, user_key,
-};
+use super::known_user::replace_known_users;
+use super::{DIRECTORY_MIRROR, REQUIRED_USER_KEY, SamplePublishedUser, id_of, user_key};
 
 pub fn required_key_mirror() -> MirrorReady<Uuid, impl Project<Uuid>> {
     Mirror::new(DIRECTORY_MIRROR)
@@ -33,52 +33,6 @@ pub fn required_key_mirror() -> MirrorReady<Uuid, impl Project<Uuid>> {
         })
 }
 
-struct KnownUser {
-    id: Uuid,
-    email: String,
-}
-
-impl Known for KnownUser {
-    const NAMESPACE: &'static str = USER_NAMESPACE;
-
-    fn foreign_key(&self) -> String {
-        self.id.to_string()
-    }
-
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO known_users (user_id, email) VALUES ($1, $2) \
-                 ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email",
-            )
-            .bind(self.id)
-            .bind(&self.email)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
-    }
-}
-
-struct ByUser(Uuid);
-
-impl KnownScope for ByUser {
-    const NAMESPACE: &'static str = USER_NAMESPACE;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
-        Box::pin(async move {
-            sqlx::query("DELETE FROM known_users WHERE user_id = $1")
-                .bind(self.0)
-                .execute(conn)
-                .await?;
-            Ok(vec![self.0.to_string()])
-        })
-    }
-}
-
 struct DirectoryProjection;
 
 impl Project<Uuid> for DirectoryProjection {
@@ -87,23 +41,20 @@ impl Project<Uuid> for DirectoryProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let user = cx
-                .shadow::<SamplePublishedUser>()
-                .get(&user_key(id))
-                .cloned();
-            match user {
-                Some(user) => {
-                    cx.replace_one(KnownUser {
-                        id,
-                        email: user.email,
+            let emails: HashMap<Uuid, String> = {
+                let users = cx.shadow::<SamplePublishedUser>();
+                ids.iter()
+                    .filter_map(|id| {
+                        users
+                            .get(&user_key(*id))
+                            .map(|user| (*id, user.email.clone()))
                     })
-                    .await
-                }
-                None => cx.remove(ByUser(id)).await,
-            }
+                    .collect()
+            };
+            replace_known_users(&mut cx, ids, &emails).await
         })
     }
 }

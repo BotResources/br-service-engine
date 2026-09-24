@@ -66,25 +66,32 @@ impl Project<Uuid> for MembersProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        project_id: Uuid,
+        project_ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let rows: Vec<MemberRow> = cx
-                .shadow::<PublishedProject>()
-                .values()
-                .filter(|project| project.id == project_id)
-                .flat_map(|project| project.members.clone())
-                .map(|(user_id, is_admin)| MemberRow {
-                    project_id,
-                    user_id,
-                    is_admin,
-                })
-                .collect();
-            cx.replace_rows(RowScope::by(col("project_id", project_id)), rows)
+            let rows: Vec<MemberRow> = {
+                let projects = cx.shadow::<PublishedProject>();
+                project_ids
+                    .iter()
+                    .filter_map(|id| projects.get(&project_key(*id)))
+                    .flat_map(|project| {
+                        project.members.iter().map(|(user_id, is_admin)| MemberRow {
+                            project_id: project.id,
+                            user_id: *user_id,
+                            is_admin: *is_admin,
+                        })
+                    })
+                    .collect()
+            };
+            cx.replace_rows(RowScope::any_of("project_id", project_ids), rows)
                 .await
                 .map(|_| ())
         })
     }
+}
+
+fn project_key(id: Uuid) -> KvKey {
+    KvKey::new(format!("{PREFIX}{id}")).expect("a valid project key")
 }
 
 fn members_mirror() -> MirrorReady<Uuid, MembersProjection> {
@@ -113,10 +120,7 @@ async fn publish(nats: &Nats, project: &PublishedProject) {
     nats.published_language::<PublishedProject>()
         .await
         .expect("bind the published-language bucket")
-        .put(
-            &KvKey::new(format!("{PREFIX}{}", project.id)).expect("a valid project key"),
-            project,
-        )
+        .put(&project_key(project.id), project)
         .await
         .expect("publish a project the way a producer would");
 }

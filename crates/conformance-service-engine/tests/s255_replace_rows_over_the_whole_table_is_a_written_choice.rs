@@ -57,7 +57,7 @@ impl Project<()> for TagsProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        _key: (),
+        _keys: Vec<()>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
             let rows: Vec<TagRow> = cx

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use conformance_service_engine::TestDb;
@@ -78,35 +79,36 @@ impl Project<Uuid> for RosterProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let roster = cx
-                .shadow::<Roster>()
-                .values()
-                .find(|entry| entry.id == id)
-                .cloned();
-            match roster {
-                Some(roster) => {
-                    cx.upsert(GroupRow {
-                        id,
-                        name: roster.label,
-                    })
-                    .await?;
-                    let members = roster.members.iter().map(|user_id| MemberRow {
-                        group_id: id,
-                        user_id: *user_id,
+            let batch: HashSet<Uuid> = ids.iter().copied().collect();
+            let mut present = Vec::new();
+            let mut groups = Vec::new();
+            let mut members = Vec::new();
+            {
+                let rosters = cx.shadow::<Roster>();
+                for roster in rosters.values().filter(|roster| batch.contains(&roster.id)) {
+                    present.push(roster.id);
+                    groups.push(GroupRow {
+                        id: roster.id,
+                        name: roster.label.clone(),
                     });
-                    cx.replace_rows(RowScope::by(col("group_id", id)), members)
-                        .await?;
-                    Ok(())
-                }
-                None => {
-                    cx.replace_rows(RowScope::by(col("group_id", id)), Vec::<MemberRow>::new())
-                        .await?;
-                    cx.retire::<GroupRow>(vec![col("group_id", id)]).await
+                    members.extend(roster.members.iter().map(|user_id| MemberRow {
+                        group_id: roster.id,
+                        user_id: *user_id,
+                    }));
                 }
             }
+            let found: HashSet<Uuid> = present.iter().copied().collect();
+            let absent: Vec<Uuid> = batch.difference(&found).copied().collect();
+            cx.replace_rows(RowScope::any_of("group_id", present), groups)
+                .await?;
+            cx.replace_rows(RowScope::any_of("group_id", ids), members)
+                .await?;
+            cx.replace_rows(RowScope::any_of("group_id", absent), Vec::<GroupRow>::new())
+                .await
+                .map(|_| ())
         })
     }
 }

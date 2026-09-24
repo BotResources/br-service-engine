@@ -125,43 +125,48 @@ impl Project<Uuid> for StaffingProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        group_id: Uuid,
+        group_ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let group = cx
-                .shadow::<SamplePublishedGroup>()
-                .get(&group_key(group_id))
-                .cloned();
-            let members: Vec<KnownMemberRow> = match &group {
-                None => Vec::new(),
-                Some(group) => {
-                    let users = cx.shadow::<SamplePublishedUser>();
-                    group
-                        .members
-                        .iter()
-                        .filter(|id| users.get(&user_key(**id)).is_some())
-                        .map(|id| KnownMemberRow {
-                            group_id,
-                            user_id: *id,
-                        })
-                        .collect()
+            let mut present = Vec::new();
+            let mut absent = Vec::new();
+            let mut groups = Vec::new();
+            let mut members = Vec::new();
+            {
+                let published = cx.shadow::<SamplePublishedGroup>();
+                let users = cx.shadow::<SamplePublishedUser>();
+                for group_id in &group_ids {
+                    let Some(group) = published.get(&group_key(*group_id)) else {
+                        absent.push(*group_id);
+                        continue;
+                    };
+                    present.push(*group_id);
+                    groups.push(KnownGroupRow {
+                        id: *group_id,
+                        name: group.name.clone(),
+                    });
+                    members.extend(
+                        group
+                            .members
+                            .iter()
+                            .filter(|id| users.get(&user_key(**id)).is_some())
+                            .map(|id| KnownMemberRow {
+                                group_id: *group_id,
+                                user_id: *id,
+                            }),
+                    );
                 }
-            };
-            let Some(group) = group else {
-                cx.replace_rows(RowScope::by(col("group_id", group_id)), members)
-                    .await?;
-                return cx
-                    .retire::<KnownGroupRow>(vec![col("group_id", group_id)])
-                    .await;
-            };
-            cx.upsert(KnownGroupRow {
-                id: group_id,
-                name: group.name,
-            })
-            .await?;
-            cx.replace_rows(RowScope::by(col("group_id", group_id)), members)
-                .await
-                .map(|_| ())
+            }
+            cx.replace_rows(RowScope::any_of("group_id", present), groups)
+                .await?;
+            cx.replace_rows(RowScope::any_of("group_id", group_ids), members)
+                .await?;
+            cx.replace_rows(
+                RowScope::any_of("group_id", absent),
+                Vec::<KnownGroupRow>::new(),
+            )
+            .await
+            .map(|_| ())
         })
     }
 }

@@ -1,3 +1,4 @@
+mod known_user;
 mod projection;
 mod publish;
 
@@ -9,6 +10,7 @@ use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use uuid::Uuid;
 
+pub use known_user::{KnownUserRow, replace_known_users};
 pub use projection::{
     backfills, directory_mirror, directory_mirror_handle, known_users, required_key_mirror,
 };

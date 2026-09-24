@@ -1,7 +1,8 @@
 use futures_util::future::BoxFuture;
 use service_engine::error::EngineError;
 use service_engine::mirror::{
-    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, col,
+    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, RowScope,
+    col,
 };
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
@@ -84,43 +85,46 @@ impl Project<DeclKey> for DeclarativeProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        key: DeclKey,
+        keys: Vec<DeclKey>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            match key {
-                DeclKey::User(id) => {
-                    match cx
-                        .shadow::<SamplePublishedUser>()
-                        .get(&user_key(id))
-                        .cloned()
-                    {
-                        Some(user) => cx
-                            .upsert(KnownUserRow {
-                                id,
-                                email: user.email,
-                            })
-                            .await
-                            .map(|_| ()),
-                        None => cx.retire::<KnownUserRow>(vec![col("user_id", id)]).await,
-                    }
-                }
-                DeclKey::Group(id) => {
-                    match cx
-                        .shadow::<SamplePublishedGroup>()
-                        .get(&group_key(id))
-                        .cloned()
-                    {
-                        Some(group) => cx
-                            .upsert(KnownGroupRow {
-                                id,
-                                name: group.name,
-                            })
-                            .await
-                            .map(|_| ()),
-                        None => cx.retire::<KnownGroupRow>(vec![col("group_id", id)]).await,
-                    }
+            let mut user_ids = Vec::new();
+            let mut group_ids = Vec::new();
+            for key in keys {
+                match key {
+                    DeclKey::User(id) => user_ids.push(id),
+                    DeclKey::Group(id) => group_ids.push(id),
                 }
             }
+            let users: Vec<KnownUserRow> = {
+                let published = cx.shadow::<SamplePublishedUser>();
+                user_ids
+                    .iter()
+                    .filter_map(|id| {
+                        published.get(&user_key(*id)).map(|user| KnownUserRow {
+                            id: *id,
+                            email: user.email.clone(),
+                        })
+                    })
+                    .collect()
+            };
+            let groups: Vec<KnownGroupRow> = {
+                let published = cx.shadow::<SamplePublishedGroup>();
+                group_ids
+                    .iter()
+                    .filter_map(|id| {
+                        published.get(&group_key(*id)).map(|group| KnownGroupRow {
+                            id: *id,
+                            name: group.name.clone(),
+                        })
+                    })
+                    .collect()
+            };
+            cx.replace_rows(RowScope::any_of("user_id", user_ids), users)
+                .await?;
+            cx.replace_rows(RowScope::any_of("group_id", group_ids), groups)
+                .await
+                .map(|_| ())
         })
     }
 }
