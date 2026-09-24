@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::cohort::CohortKey;
-use crate::dyn_compat::ErasedPopulation;
+use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::AttachError;
 use crate::page::KeyCeiling;
 use crate::principal::Principal;
@@ -19,8 +20,9 @@ pub(super) struct WindowSnapshot {
     pub(super) views: Rendered,
 }
 
-struct AdmittedWindow<'s> {
+struct AdmittedWindow<'s, P: Principal> {
     spec: &'s WindowSpec,
+    projector: &'s Arc<dyn ErasedProjector<P>>,
     members: BTreeSet<KeyBytes>,
     shape: WindowShape,
 }
@@ -36,10 +38,10 @@ impl<P: Principal> SessionRuntime<P> {
     }
 
     async fn admit_windows<'s>(
-        &self,
+        &'s self,
         principal: &P,
         specs: &'s [WindowSpec],
-    ) -> Result<Vec<AdmittedWindow<'s>>, AttachError> {
+    ) -> Result<Vec<AdmittedWindow<'s, P>>, AttachError> {
         let mut admitted = Vec::with_capacity(specs.len());
         for spec in specs {
             let projector = self
@@ -70,6 +72,7 @@ impl<P: Principal> SessionRuntime<P> {
             admit(&spec.projector, members.len(), self.config.window_capacity)?;
             admitted.push(AdmittedWindow {
                 spec,
+                projector,
                 members,
                 shape: WindowShape::of(&population),
             });
@@ -80,7 +83,7 @@ impl<P: Principal> SessionRuntime<P> {
     async fn render_windows(
         &self,
         principal: &P,
-        admitted: Vec<AdmittedWindow<'_>>,
+        admitted: Vec<AdmittedWindow<'_, P>>,
     ) -> Result<Vec<WindowSnapshot>, AttachError> {
         let dead_letters = self.dead_letters();
         let renderer = Renderer {
@@ -92,14 +95,11 @@ impl<P: Principal> SessionRuntime<P> {
         let mut snapshots = Vec::with_capacity(admitted.len());
         for AdmittedWindow {
             spec,
+            projector,
             members,
             shape,
         } in admitted
         {
-            let projector = self
-                .registry
-                .projector(&spec.projector)
-                .ok_or_else(|| AttachError::UnknownProjector(spec.projector.clone()))?;
             let under_rls = projector.renders_under_rls();
             let cohort = if under_rls {
                 CohortKey::principal(principal.id())
