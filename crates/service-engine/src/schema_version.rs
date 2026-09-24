@@ -1,12 +1,16 @@
+mod handover;
+
 use std::time::Duration;
 
 use sqlx::PgPool;
 
 use crate::error::EngineError;
 
+pub(crate) use handover::claim_with_handover;
+
 const SCHEMA_VERSION_LOCK: i64 = 9_113_000_015;
 
-pub async fn claim_schema_version(
+pub(crate) async fn claim_schema_version(
     pool: &PgPool,
     engine_version: &str,
     service_version: &str,
@@ -56,7 +60,7 @@ pub async fn claim_schema_version(
     Ok(())
 }
 
-pub async fn refresh_schema_version(
+pub(crate) async fn refresh_schema_version(
     pool: &PgPool,
     engine_version: &str,
     service_version: &str,
@@ -73,16 +77,33 @@ pub async fn refresh_schema_version(
     Ok(affected)
 }
 
-pub fn version_conflict_reason(
+pub(crate) fn version_conflict_reason(
     live_engine: &str,
     live_service: &str,
     engine_version: &str,
     service_version: &str,
 ) -> String {
     format!(
+        "another pod is live on service schema version {live_service} (engine {live_engine}) \
+         and kept its heartbeat fresh through the whole handover wait; this pod is service \
+         schema version {service_version} (engine {engine_version}); refusing to go UP so a \
+         rolling deploy configured by mistake fails loud instead of two versions sharing the \
+         store"
+    )
+}
+
+pub(crate) fn handover_wait_reason(
+    live_engine: &str,
+    live_service: &str,
+    engine_version: &str,
+    service_version: &str,
+    left: Duration,
+) -> String {
+    format!(
         "another pod is live on service schema version {live_service} (engine {live_engine}); \
          this pod is service schema version {service_version} (engine {engine_version}); \
-         refusing to go UP so a rolling deploy configured by mistake fails loud instead of two \
-         versions sharing the store"
+         waiting up to {} ms for that heartbeat to lapse, as it does once the old pod of a \
+         Recreate rollout has stopped, before refusing to go UP",
+        left.as_millis()
     )
 }

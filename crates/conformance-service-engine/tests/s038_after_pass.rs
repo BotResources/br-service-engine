@@ -31,7 +31,8 @@ async fn s038_a_row_staged_with_an_impact_is_drained_after_the_render_pass_befor
 
     let config = engine_config(CHANNEL, "pod-after-pass")
         .with_beat(Duration::from_secs(30))
-        .with_lease(Duration::from_secs(45));
+        .with_lease(Duration::from_secs(45))
+        .with_schema_version_liveness(Duration::from_secs(60));
     let mut engine =
         Engine::<SamplePrincipal>::boot(config, pool.clone(), fabric, ReadinessHandle::ready())
             .await

@@ -69,7 +69,8 @@ async fn s041_the_leader_slot_metric_counts_a_relay_win_not_only_a_cron_win() {
         PodId::from_static("se-relay-metric"),
     )
     .with_beat(ONE_SLOT)
-    .with_lease(Duration::from_secs(7200));
+    .with_lease(Duration::from_secs(7200))
+    .with_schema_version_liveness(Duration::from_secs(7200));
     let mut beat = Beat::from_config(&config).expect("the beat assembles");
     beat.relays()
         .register(LeaderRunSampleRelay::new(RelayName::from_static(
