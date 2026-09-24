@@ -13,7 +13,7 @@ macro_rules! roster_slice {
                     id: ::uuid::Uuid,
                 ) -> ::async_graphql::Result<::core::option::Option<$crate::RosterView>> {
                     ::service_engine::Query::<$p>::new(ctx)?
-                        .fetch::<$crate::RosterUsers<$p>>(&id)
+                        .fetch_view::<$crate::RosterUsers<$p>>(&id)
                         .await
                 }
             }
@@ -50,7 +50,7 @@ macro_rules! roster_slice {
             pub fn register(
                 engine: &mut ::service_engine::Engine<$p>,
             ) -> ::core::result::Result<(), ::service_engine::error::EngineError> {
-                engine.register_projector($crate::RosterUsers::<$p>::default())?;
+                engine.register_view($crate::RosterUsers::<$p>::default())?;
                 engine.register_schema_slice(
                     ::service_engine::graphql::SliceFragment::derive::<
                         RosterQuery,

@@ -72,6 +72,16 @@ impl MutationError {
     }
 
     pub fn internal(detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        tracing::error!(
+            %detail,
+            "a mutation failed on an internal fault; the client receives INTERNAL while the \
+             cause is kept here"
+        );
+        Self::failed(detail)
+    }
+
+    pub(crate) fn failed(detail: impl Into<String>) -> Self {
         Self(Outcome::Failed(InternalCause(detail.into())))
     }
 
@@ -91,14 +101,6 @@ impl MutationError {
             Outcome::Refused { detail, .. } => Some(detail),
             Outcome::Failed(_) => None,
         }
-    }
-
-    pub(crate) fn fault(detail: String) -> Self {
-        tracing::error!(
-            %detail,
-            "the mutation pipeline failed on an internal fault; the client receives INTERNAL"
-        );
-        Self::internal(detail)
     }
 }
 

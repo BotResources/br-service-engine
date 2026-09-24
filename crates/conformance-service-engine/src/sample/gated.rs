@@ -9,18 +9,16 @@ use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gate, Gated, Reason};
 use service_engine::impact::{Deps, Dims, ForeignKey, Impact};
 use service_engine::name::{NounName, ProjectorName};
+use service_engine::persistence::CohortIndex;
 use service_engine::population::{Interest, Inverse, Population, WindowQuery};
 use service_engine::projector::{LoadScope, Projector};
 use service_engine::session::WindowParams;
-use service_engine::view::{Populate, Projector as ViewProjectorTrait};
 use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::sample::assignment::{
-    Assignment, AssignmentFacts, AssignmentRow, AssignmentStore, AssignmentView,
-};
+use crate::sample::assignment::{Assignment, AssignmentFacts, AssignmentRow, AssignmentStore};
 use crate::sample::principal::SamplePrincipal;
 
 pub const DEP_MEMBERSHIP: u8 = 0;
@@ -117,12 +115,24 @@ impl GatedAssignmentProjector {
         }
     }
 
-    async fn all_keys(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
-        let rows = sqlx::query("SELECT id FROM sample_assignment")
-            .fetch_all(pg)
-            .await?;
-        Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
+    async fn tenant_keys(
+        pg: &PgPool,
+        principal: &SamplePrincipal,
+        ceiling: KeyCeiling,
+    ) -> Result<BTreeSet<Uuid>, EngineError> {
+        let mut conn = pg.acquire().await?;
+        let memberships = AssignmentVisibility::memberships(principal);
+        let keys = AssignmentStore::keys_in_cohorts(&mut conn, &memberships, ceiling).await?;
+        Ok(keys.into_iter().collect())
     }
+}
+
+pub async fn all_assignment_keys(pg: &PgPool, limit: i64) -> Result<BTreeSet<Uuid>, EngineError> {
+    let rows = sqlx::query("SELECT id FROM sample_assignment LIMIT $1")
+        .bind(limit)
+        .fetch_all(pg)
+        .await?;
+    Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
 }
 
 pub async fn load_candidates(pg: &PgPool) -> Result<Vec<(Uuid, AssignmentRow)>, EngineError> {
@@ -169,22 +179,19 @@ impl Projector for GatedAssignmentProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
             match self.mode {
-                Mode::Keys => {
-                    let candidates = load_candidates(pg).await?;
-                    Ok(AssignmentVisibility::window(candidates, principal))
-                }
-                Mode::All => {
-                    let keys = Self::all_keys(pg).await?;
-                    Ok(Population::Keys(keys.into_iter().collect::<BTreeSet<_>>()))
-                }
+                Mode::Keys => Ok(Population::Keys(
+                    Self::tenant_keys(pg, principal, ceiling).await?,
+                )),
+                Mode::All => Ok(Population::Keys(
+                    all_assignment_keys(pg, ceiling.limit()).await?,
+                )),
                 Mode::Membership => {
-                    let candidates = load_candidates(pg).await?;
-                    let keys = AssignmentVisibility::visible_keys(candidates, principal);
+                    let keys = Self::tenant_keys(pg, principal, ceiling).await?;
                     let interest = Interest::new()
                         .on_noun(Assignment::NAME, Dims::EMPTY)
                         .on_deps(membership_dep());
@@ -254,43 +261,5 @@ impl Projector for GatedAssignmentProjector {
             closed: row.closed,
             affordances: row.affordances(principal),
         }))
-    }
-}
-
-#[derive(Default)]
-pub struct VisibleAssignments;
-
-impl VisibleAssignments {
-    pub const NAME: ProjectorName = ProjectorName::from_static("visible_assignments");
-}
-
-impl ViewProjectorTrait for VisibleAssignments {
-    type Principal = SamplePrincipal;
-    type Noun = Assignment;
-    type Store = AssignmentStore;
-    type Query = ();
-    type Out = AssignmentView;
-    type Visibility = AssignmentVisibility;
-
-    const NAME: ProjectorName = Self::NAME;
-
-    async fn populate(
-        cx: &Populate<'_, SamplePrincipal>,
-        _query: &(),
-    ) -> Result<Population<Uuid>, EngineError> {
-        let candidates = load_candidates(cx.pool()).await?;
-        Ok(AssignmentVisibility::window(candidates, cx.principal()))
-    }
-
-    fn project(
-        row: &AssignmentRow,
-        _principal: &SamplePrincipal,
-    ) -> Result<AssignmentView, EngineError> {
-        Ok(AssignmentView {
-            id: row.id,
-            title: row.title.clone(),
-            closed: row.closed,
-            can_close: !row.closed,
-        })
     }
 }

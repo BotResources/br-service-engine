@@ -71,9 +71,13 @@ impl<'a, P: Principal> Query<'a, P> {
     ) -> Result<Option<V::Out>, Error>
     where
         V: crate::view::Projector<Principal = P>,
-        V::Out: DeserializeOwned,
     {
-        self.fetch::<crate::view::ViewProjector<V>>(key).await
+        match self.load_visible::<V>(key).await? {
+            Some(row) => Ok(Some(
+                V::project(&row, self.principal).or_internal("project a query view")?,
+            )),
+            None => Ok(None),
+        }
     }
 
     pub async fn fetch_view_window<V>(&self, query: &V::Query) -> Result<Vec<V::Out>, Error>
@@ -151,16 +155,10 @@ impl<'a, P: Principal> Query<'a, P> {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
         let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
-        let population = erased
-            .populate(
-                self.state.pg(),
-                &WindowParams::none(),
-                KeyCeiling::NONE,
-                self.principal,
-            )
-            .await
-            .or_internal("populate a query")?;
-        if !is_member(&population, &key_bytes) {
+        let members = self
+            .admitted_members(&projector, &erased, &WindowParams::none())
+            .await?;
+        if !members.contains(&key_bytes) {
             return Ok(None);
         }
         let mut rendered = self
@@ -180,18 +178,7 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
-        let capacity = self.state.runtime().config().window_capacity;
-        let population = erased
-            .populate(
-                self.state.pg(),
-                &params,
-                KeyCeiling::admission(capacity),
-                self.principal,
-            )
-            .await
-            .or_internal("populate a query window")?;
-        let keys = member_keys(&population);
-        admit(&projector.name(), keys.len(), capacity)?;
+        let keys = self.admitted_members(&projector, &erased, &params).await?;
         let rendered = self
             .render(&erased, erased.renders_under_rls(), &keys)
             .await
@@ -200,6 +187,30 @@ impl<'a, P: Principal> Query<'a, P> {
             .iter()
             .filter_map(|key| rendered.get(key).cloned().flatten())
             .collect())
+    }
+
+    async fn admitted_members<Pr>(
+        &self,
+        projector: &Pr,
+        erased: &Arc<dyn ErasedProjector<P>>,
+        params: &WindowParams,
+    ) -> Result<Vec<KeyBytes>, Error>
+    where
+        Pr: Projector<Principal = P>,
+    {
+        let capacity = self.state.runtime().config().window_capacity;
+        let population = erased
+            .populate(
+                self.state.pg(),
+                params,
+                KeyCeiling::admission(capacity),
+                self.principal,
+            )
+            .await
+            .or_internal("populate a query window")?;
+        let keys = member_keys(&population);
+        admit(&projector.name(), keys.len(), capacity)?;
+        Ok(keys)
     }
 
     fn erased<Pr>(&self, projector: &Pr) -> Result<Arc<dyn ErasedProjector<P>>, Error>
@@ -233,14 +244,6 @@ impl<'a, P: Principal> Query<'a, P> {
             .render(erased, rls, cohort, self.principal, keys)
             .await?;
         Ok(rendered)
-    }
-}
-
-fn is_member(population: &ErasedPopulation, key: &KeyBytes) -> bool {
-    match population {
-        ErasedPopulation::Keys(keys) => keys.contains(key),
-        ErasedPopulation::Ordered { keys, .. } => keys.contains(key),
-        ErasedPopulation::Query(query) => query.authoritative() && query.keys().contains(key),
     }
 }
 

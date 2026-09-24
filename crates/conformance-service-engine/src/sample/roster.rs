@@ -53,11 +53,12 @@ impl Projector for RosterUsers {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         _principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT user_id FROM known_users")
+            let rows = sqlx::query("SELECT user_id FROM known_users LIMIT $1")
+                .bind(ceiling.limit())
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(

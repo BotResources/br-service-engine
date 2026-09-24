@@ -47,11 +47,12 @@ impl Projector for RlsAssignmentProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         _principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_assignment")
+            let rows = sqlx::query("SELECT id FROM sample_assignment LIMIT $1")
+                .bind(ceiling.limit())
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(

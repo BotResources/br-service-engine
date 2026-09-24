@@ -5,7 +5,7 @@ use service_engine::{MutationAck, OrInternal, Query};
 use uuid::Uuid;
 
 use super::mutations::{ArchiveBoard, CreateBoard, MintBoardInvite, SetBoardMembership};
-use super::view::{BoardFilter, BoardView, BoardsView, OrgBoardsRls};
+use super::view::{BoardView, BoardsView, OrgBoardsRls};
 use crate::kernel::AppPrincipal;
 
 service_engine::subscription_union! {
@@ -33,7 +33,7 @@ impl BoardQuery {
 
     async fn example_boards(&self, ctx: &Context<'_>) -> Result<Vec<BoardView>> {
         Query::<AppPrincipal>::new(ctx)?
-            .fetch_view_window::<BoardsView>(&BoardFilter::default())
+            .fetch_view_window::<BoardsView>(&())
             .await
     }
 

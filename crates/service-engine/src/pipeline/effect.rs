@@ -59,7 +59,7 @@ fn internal_engine_failure(context: &'static str, error: EngineError) -> Mutatio
         "the mutation pipeline aborted on an internal engine error; the client receives \
          INTERNAL while the whole cause chain is kept here"
     );
-    MutationError::internal(format!("{context} failed"))
+    MutationError::failed(format!("{context} failed"))
 }
 
 fn handler_failure(mutation: &'static str, fault: &impl MutationFault) -> MutationError {
@@ -74,7 +74,7 @@ fn handler_failure(mutation: &'static str, fault: &impl MutationFault) -> Mutati
                  the whole cause chain is kept here and as the source of the executor's \
                  MutationError"
             );
-            MutationError::internal(cause)
+            MutationError::failed(cause)
         }
     }
 }
@@ -137,7 +137,7 @@ where
     };
     if !staged.is_within(services.impacts_per_commit) {
         let _ = tx.rollback().await;
-        return Err(MutationError::fault(format!(
+        return Err(MutationError::internal(format!(
             "the mutation dirtied {} keys, over impacts_per_commit={}; a change this large must \
              go through the bulk path",
             staged.impacts.len(),
@@ -223,6 +223,7 @@ mod tests {
     use crate::error::EngineError;
     use crate::gate::Reason;
     use crate::pipeline::{MutationError, MutationFault};
+    use crate::test_log::logged;
 
     #[derive(Debug, thiserror::Error)]
     enum BoardFault {
@@ -245,13 +246,18 @@ mod tests {
     fn a_fault_without_a_reason_fails_internal_with_its_whole_source_chain_as_detail() {
         let fault = BoardFault::Load(EngineError::Config("the board table is absent".into()));
 
-        let failure = handler_failure("board.close", &fault);
+        let (failure, lines) = logged(|| handler_failure("board.close", &fault));
 
         assert_eq!(
             failure,
-            MutationError::internal(
+            MutationError::failed(
                 "loading the board: invalid configuration: the board table is absent"
             )
+        );
+        assert_eq!(
+            lines.len(),
+            1,
+            "the pipeline logs a handler failure once, not again in the constructor: {lines:?}"
         );
     }
 

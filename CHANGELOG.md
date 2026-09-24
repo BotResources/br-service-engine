@@ -18,11 +18,13 @@ fault can never answer `401`. The rough edges of the 0.3.1–0.3.4 rollouts are
 fixed: a `Recreate` rollout that changes versions no longer restarts the new pod,
 and an error chain renders each cause once. Good practice is built into the
 primitives: a batched read is required, one aggregate, a parent's children and
-hand SQL are read behind the view's gate or under RLS, and a mirror detects a
-change on any column. No engine service is in production; every break has one
-migration line below. It ships with chart `br-engine-service` 1.1.1 (next
-section); the compatibility entry for this release is chart 1.1.1 ↔ engine
-0.4.0.
+hand SQL are read behind the view's gate or under RLS, a cohort window is read
+through the store's cohort index and bounded, never loaded and filtered in
+memory, a one-key view fetch reads its one row, a failure a service builds is
+logged, and a mirror detects a change on any column. No engine service is in
+production; every break has one migration line below. It ships with chart
+`br-engine-service` 1.1.1 (next section); the compatibility entry for this
+release is chart 1.1.1 ↔ engine 0.4.0.
 
 ### Changed (breaking)
 
@@ -47,7 +49,16 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   `fetch_window_json` and `fetch_view_window` populate under the attach ceiling
   (`window_capacity + 1`) and refuse a window above `window_capacity` with
   `WINDOW_TOO_LARGE` before any row is loaded or rendered; through 0.3.4 they read
-  and rendered the whole window, however large.
+  and rendered the whole window, however large. The read before the refusal is
+  bounded when `populate` binds its ceiling (`cohort_window`, `full_eda::keys`,
+  `cx.limit_all()`, `cx.limit(&page)`, `ceiling.limit()`); a `populate` that
+  ignores it still reads its whole population before it is refused.
+- **A raw one-key fetch is bounded like a window fetch.** `Query::fetch` and
+  `fetch_json` decide membership from the projector's default window populated
+  under the same ceiling, and refuse with `WINDOW_TOO_LARGE` when that window
+  holds more than `window_capacity` keys, since a truncated window cannot decide
+  membership. Through 0.3.4 they read the whole default population
+  (`KeyCeiling::NONE`) on every one-key call.
 - **`CohortIndex::keys_in_cohorts(conn, cohorts, ceiling: KeyCeiling)`** takes the
   read bound and binds `ceiling.limit()` as its `LIMIT`. `view::cohort_window`
   passes the populate's ceiling, so a whole-collection cohort attach reads at most
@@ -79,8 +90,11 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   `type Error = Reason` still works.
 - **`MutationError` is a refusal or a failure, with no public field.**
   `MutationError::refused(reason, detail)` takes a `Reason`;
-  `MutationError::internal(detail)` is the failure. `reason()`, `code()` and
-  `refusal_detail()` answer `Some` for a refusal only. A failure writes only
+  `MutationError::internal(detail)` is the failure, and it logs `detail` at
+  `error` when it builds it, so a failure a service builds and forwards with `?`
+  keeps its cause in the log; the engine's own failures are logged once where
+  they occur. `reason()`, `code()` and `refusal_detail()` answer `Some` for a
+  refusal only. A failure writes only
   `mutation failed` and keeps its internal text as its `source()`, which no
   accessor hands out: a resolver that forwards it with `?` answers `INTERNAL`
   with no database or engine text, and `describe(&error)` renders the chain for a
@@ -122,7 +136,10 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   exactly the rows inserted, changed or deleted. Rows compare by typed key
   values. `Projection::replace`, `upsert`, `retire`, `replace_one`, `remove`, the
   `Known` and `KnownScope` traits and `Written::Inserted` are removed; hand SQL
-  goes through `Projection::conn` plus `impact_*`.
+  goes through `Projection::conn` plus `impact_*`. The change test is
+  `IS DISTINCT FROM` on every value column, so a value column needs an equality
+  operator: a document column is `jsonb`, never `json` (a `json` column fails
+  every write, as the 0.3.4 upsert did).
 - **`KnownRow` declares `KEY` and `PRINCIPAL`.** `KEY` names the key columns
   `key()` returns, in order; a write whose key names other columns is refused, and
   the impact key is the key columns joined by `/` (`foreign_key` is no longer a
@@ -135,6 +152,24 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
 - **`Query::download` gates on the row's visibility** (`load_visible`: the
   view's `visible`, under RLS when the view declares it) instead of membership of
   the view's default window, so a row on any page of a paged view downloads.
+- **`Query::fetch_view::<View>(key)` reads one row.** It is `load_visible` then
+  the view's `project`, so it no longer runs the view's `populate` for its default
+  window under `KeyCeiling::NONE` to decide membership: a one-key fetch costs one
+  row read on any collection size, and a visible row outside the default window
+  (on a later page, or outside a default `Query` filter) is answered.
+  `View::Out` no longer needs `DeserializeOwned` for it. The raw projector's
+  `Query::fetch` / `fetch_json` keep the membership test, under the attach
+  ceiling (above).
+- **`Visibility` has no in-memory window builder.** `Visibility::window` and
+  `Visibility::visible_keys` are removed: a cohort view populates through
+  `view::cohort_window` over its store's `CohortIndex`, which reads only the
+  caller's keys with the ceiling as its `LIMIT`, so no engine primitive loads a
+  table to filter it in memory. The window is live by default
+  (`Visibility::LIVE`), and a live window repopulates on a principal-fact change
+  only when `Visibility::DEPS` names the fact's bit; the `Keys` window
+  `Visibility::window` returned repopulated on every principal change.
+  `check_window_matches_visibility` compares a window with the declaration's
+  `visible`, so it follows an overridden `visible` (`Unrestricted` included).
 - **`Projector::populate` / `ErasedProjector::populate` take a `KeyCeiling`**
   after the window arguments (the attach read bound, below).
 - **`EngineError` is split by capability.** The chunk and seal variants move to
@@ -284,6 +319,10 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   `fetch_window_json` or `fetch_view_window` on a window that can outgrow
   `window_capacity` bounds it with its arguments; the refusal already reaches the
   client as `WINDOW_TOO_LARGE`.
+- **Raw one-key fetch:** a resolver that calls `Query::fetch` or `fetch_json` on
+  a projector whose default window can outgrow `window_capacity` moves to a
+  `view::Projector` and `fetch_view`, which reads the one row (a read-only table
+  gets a store whose `save` and `create` refuse, as the roster library does).
 - **`keys_in_cohorts`:** add the `ceiling: KeyCeiling` parameter and bind
   `ceiling.limit()` as the `LIMIT` of the query (`… WHERE tenant_id = ANY($1)
   LIMIT $2`).
@@ -294,9 +333,9 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   (`engine.register_principal_fact(..)`); a rejection derived from database data
   becomes `FORBIDDEN` or an affordance `reasonCode`, not a `401`.
 - **Body bounds:** replace `MultipartConfig::with_max_body_bytes(n)` with
-  `EngineConfig::with_max_body_bytes(n)` and `config::DEFAULT_MULTIPART_MAX_BODY_BYTES`
-  with `config::DEFAULT_MAX_BODY_BYTES`; drop any call to
-  `MultipartConfig::validate`.
+  `EngineConfig::with_max_body_bytes(n)` and
+  `config::DEFAULT_MULTIPART_MAX_BODY_BYTES` with
+  `config::DEFAULT_MAX_BODY_BYTES`; drop any call to `MultipartConfig::validate`.
 - **`max_file_bytes`:** a read of `MultipartConfig::max_file_bytes` gets an
   `Option`; a service that lowered the part bound only so a lower body bound could
   boot removes its `with_max_file_bytes` call.
@@ -307,9 +346,9 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   and delete any `as_error` override.
 - **`MutationError`:** build it with `MutationError::refused(reason, detail)` (a
   `Reason`, no longer an `Option`) or `MutationError::internal(detail)`; read
-  `reason()`, `code()` and `refusal_detail()` instead of the fields; log it with
-  `error::describe(&error)`; return it from a resolver with `?` (or through
-  `execute` / `ack`).
+  `reason()`, `code()` and `refusal_detail()` instead of the fields; return it
+  from a resolver with `?` (or through `execute` / `ack`). Delete a log written
+  just before `MutationError::internal`: the constructor logs the detail.
 - **`?` in resolvers:** keep `?` on a `Reason`, a `MutationError`, an
   `AttachError`, a `WindowSizeOutOfRange` or an `async_graphql::Error`. Where
   `?` no longer compiles (an `EngineError` from `WindowSpec::view` or
@@ -347,6 +386,22 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   through a view, `Query::load_visible`, `Query::behind` or
   `Query::read_under_rls`; accumulated state is read through
   `ChunkReader::state::<A>(key)`, never a raw pool.
+- **`Visibility::window` / `visible_keys`:** implement
+  `CohortIndex::keys_in_cohorts` on the view's store (one query on the cohort
+  columns, `ceiling.limit()` as its `LIMIT`) and return
+  `view::cohort_window::<Self>(cx)` from `populate`; a `Visibility` with
+  `LIVE = false` keeps a closed `Keys` window. A live `Visibility` whose
+  `memberships` read a principal fact declares that fact's bit in `DEPS` (the
+  bit its mutation passes to `impact_principal_facts`), or a membership change no
+  longer repopulates an open window. A filter that is not a cohort goes in that
+  SQL or in a view of its own. A test that compared a window with the
+  declaration keeps `check_window_matches_visibility`.
+- **`fetch_view`:** none for a view whose `populate` derives from its
+  `Visibility`; a view whose default `populate` is narrower than its `visible`
+  moves that rule into `visible` (or its RLS policy) before a one-key fetch relies
+  on it.
+- **Mirror columns:** a `json` value column of a `KnownRow` table becomes
+  `jsonb`.
 - **Downloads:** none for a view whose `populate` derives from its `Visibility`;
   a view that declares `Unrestricted` but filters by principal in `populate` moves
   that filter into its `Visibility` or RLS policy first.
@@ -366,8 +421,24 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   whose `last_seq` is above `i64::MAX` is the new `ReactionFault::Malformed`,
   dead-lettered on its first delivery instead of retried as a store fault.
   `CardStore` no longer overrides `load`. The ledger and `OrgBoardsRls` windows
-  and the roster library view read at most the populate's ceiling. Its
-  subscription resolvers name the window-encoding fault with `or_internal`.
+  and the roster library view read at most the populate's ceiling. The boards and
+  replies views populate through `cohort_window`: `BoardStore` (on `org_id`, `id`
+  and `is_public`, with a partial index on public boards) and `ReplyStore` (on
+  `org_id`) implement `CohortIndex`, the unused `BoardFilter` `Query` is removed,
+  and both windows are live (a new row in the caller's cohorts reaches an open
+  session); the board `Visibility` declares its membership fact in `DEPS`, so a
+  granted or revoked membership still reaches a live session. `exampleBoard`,
+  `exampleCard`, `exampleLedger` and `exampleReply` read one row. A scenario
+  proves that `exampleBoards` lists exactly the org, public and member cohorts.
+  Its subscription resolvers name the window-encoding fault with `or_internal`.
+- example-lib-roster: `RosterUsers<P>` is a `view::Projector` over the new
+  `RosterStore` (the read of `roster.known_persons`; `save` and `create` refuse,
+  the host's directory mirror being the only writer), `Unrestricted` with the new
+  `RosterIsOpen` reason, so `<prefix>_person` reads its one row through
+  `fetch_view` on a roster of any size; the subscription union names
+  `ViewProjector<RosterUsers<P>>` and the slice registers it with
+  `register_view`. A scenario fetches a person from a roster over
+  `window_capacity`.
 - Battery: `s162`, `s163`, `s167` and `s183` are retired (their 0.3 paging
   meanings are gone). New: `s243` (a fact-loader fault answers `500` `INTERNAL`
   on `POST /graphql` and the `/graphql/ws` upgrade, a rejected passport keeps its
@@ -387,22 +458,38 @@ section); the compatibility entry for this release is chart 1.1.1 ↔ engine
   The multipart scenario that shared `s241` with the migrate scenario is renumbered
   `s248`. `s259` covers a whole-collection cohort attach and a one-shot window
   fetch over `window_capacity`: each asks the store for `window_capacity + 1` keys
-  and is refused before any row is read. `s252` and `s254` prove that the
-  statements of `read_under_rls`, and the gate and the closure of
-  `behind(..).read(..)`, read one snapshot: a row committed between them is not
-  seen. `s115` proves that a `Gate::require()?` refusal answers its reason code
-  on a query and on a subscription open.
+  and is refused before any row is read. `s260` proves that a one-key
+  `fetch_view` on a collection over `window_capacity` reads its one row and asks
+  the store for no population, and answers a row outside the caller's cohorts
+  like an absent key; and that a raw `fetch` / `fetch_json` asks the store for
+  `window_capacity + 1` keys, is refused with `WINDOW_TOO_LARGE` above the
+  capacity before any row is read, and answers a member at the capacity. `s252`
+  and `s254` prove that the statements of `read_under_rls`, and the gate and the
+  closure of `behind(..).read(..)`, read one snapshot: a row committed between
+  them is not seen. `s115` proves that a `Gate::require()?` refusal answers its
+  reason code on a query and on a subscription open.
 - Conformance crate: `sample::graphql::base_config` is public,
   `boot_graphql_service_with`, `boot_counted_service` (with `sample::counted`, a
   cohort view whose store records the ceilings it is asked for and the rows it
-  reads), `sample::latch::AdvisoryLatch` and `AssignmentPage::whole()` are added;
-  the sample's whole-collection reads bind the ceiling.
+  reads, its `sampleCountedItem` one-key view fetch and its
+  `sampleCountedRawItem` / `sampleCountedRawItemJson` raw one-key fetches),
+  `sample::latch::AdvisoryLatch`,
+  `AssignmentPage::whole()`, `sample::gated::all_assignment_keys` and
+  `sample::visible` (`VisibleAssignments`, moved from `sample::gated`, and its
+  closed-window `SnapshotAssignmentVisibility`) are added. Every sample `populate`
+  that reads a table binds the ceiling (`ceiling.limit()` or `cx.limit_all()`) as
+  its `LIMIT`, and the cohort-filtered sample views read through
+  `AssignmentStore::keys_in_cohorts`, never a table filtered in memory.
   `sample::graphql::SAMPLE_REFUSED` and the `sampleRefusedPeek` /
   `sampleRefusedStream` root fields refuse with a bare `?`; the upload and
   widget sample resolvers name their faults with `or_internal`.
 
 ### CI
 
+- `rustfmt --check` runs on `crates/example-service/src/slices/*/mod.rs` beside
+  `cargo fmt --check`: the slice modules are declared inside `compose_service!`,
+  which `cargo fmt` never expands, so their files were never format-checked (they
+  are formatted in this release).
 - `cargo semver-checks` runs no check on a breaking bump (`v0.3.4` → `0.4.0` is
   major in semver terms), so its gate passes vacuously. On such a bump the job now
   also lists every break of each gated crate, report-only, as if the bump were a

@@ -3,6 +3,7 @@ use service_engine::graphql::SliceFragment;
 use service_engine::nats::Nats;
 use service_engine::session::WindowParams;
 use service_engine::{Query, ViewProjector};
+use uuid::Uuid;
 
 use crate::infra::TestDb;
 use crate::sample::assignment::AssignmentView;
@@ -30,14 +31,50 @@ impl CountedQueryRoot {
             .fetch_window_json::<ViewProjector<CountedAssignments>>(WindowParams::none())
             .await
     }
+
+    async fn sample_counted_item(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> Result<Option<AssignmentView>> {
+        Query::<SamplePrincipal>::new(ctx)?
+            .fetch_view::<CountedAssignments>(&id)
+            .await
+    }
+
+    async fn sample_counted_raw_item(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> Result<Option<AssignmentView>> {
+        Query::<SamplePrincipal>::new(ctx)?
+            .fetch::<ViewProjector<CountedAssignments>>(&id)
+            .await
+    }
+
+    async fn sample_counted_raw_item_json(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> Result<Option<Json<serde_json::Value>>> {
+        Query::<SamplePrincipal>::new(ctx)?
+            .fetch_json::<ViewProjector<CountedAssignments>>(&id)
+            .await
+    }
 }
 
 fn counted_slice() -> SliceFragment {
     SliceFragment::from_claims(
         "counted",
-        ["sampleCountedWindow", "sampleCountedWindowJson"]
-            .map(str::to_string)
-            .into(),
+        [
+            "sampleCountedWindow",
+            "sampleCountedWindowJson",
+            "sampleCountedItem",
+            "sampleCountedRawItem",
+            "sampleCountedRawItemJson",
+        ]
+        .map(str::to_string)
+        .into(),
         vec!["AssignmentView".to_string()],
     )
 }

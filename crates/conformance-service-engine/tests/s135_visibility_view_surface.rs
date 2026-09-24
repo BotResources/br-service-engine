@@ -38,7 +38,7 @@ async fn s135_a_row_that_leaves_the_cohort_is_removed_on_the_documented_view_sur
     assert_eq!(
         assignment_ids(reset_views(&reset)),
         vec![subject],
-        "the Fixed window populated by Visibility::window holds the visible row"
+        "the Keys window that cohort_window populates holds the visible row"
     );
 
     reassign(&pool, subject, foreign).await;

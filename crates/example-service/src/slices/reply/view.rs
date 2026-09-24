@@ -5,11 +5,10 @@ use service_engine::impact::Impact;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
-use service_engine::view::{Populate, Projector};
-use service_engine::visibility::Visibility;
+use service_engine::view::{Populate, Projector, cohort_window};
 use uuid::Uuid;
 
-use super::aggregate::{Reply, ReplyRow, ReplyStore, candidate_replies};
+use super::aggregate::{Reply, ReplyRow, ReplyStore};
 use crate::kernel::AppPrincipal;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, async_graphql::SimpleObject)]
@@ -44,8 +43,7 @@ impl Projector for RepliesView {
         cx: &Populate<'_, AppPrincipal>,
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        let candidates = candidate_replies(cx.pool()).await?;
-        Ok(Reply::window(candidates, cx.principal()))
+        cohort_window::<Self>(cx).await
     }
 
     fn project(row: &ReplyRow, principal: &AppPrincipal) -> Result<ReplyView, EngineError> {

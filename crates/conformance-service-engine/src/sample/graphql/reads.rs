@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,8 +13,9 @@ use service_engine::{Engine, Query, Readiness, ReadinessHandle, engine_schema};
 use uuid::Uuid;
 
 use crate::sample::assignment::{Assignment, AssignmentRow, AssignmentStore, AssignmentView};
-use crate::sample::gated::{VisibleAssignments, load_candidates};
+use crate::sample::gated::all_assignment_keys;
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
+use crate::sample::visible::VisibleAssignments;
 
 use super::boot::{GraphqlService, base_config, free_loopback_addr, sample_prefix};
 use super::snapshot::SnapshotReads;
@@ -42,12 +42,9 @@ impl Projector for RlsOnlyAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        let keys: BTreeSet<Uuid> = load_candidates(cx.pool())
-            .await?
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect();
-        Ok(Population::Keys(keys))
+        Ok(Population::Keys(
+            all_assignment_keys(cx.pool(), cx.limit_all()).await?,
+        ))
     }
 
     fn project(

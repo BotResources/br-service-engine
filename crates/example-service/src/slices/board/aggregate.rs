@@ -1,18 +1,25 @@
 use serde::{Deserialize, Serialize};
 use service_engine::Cohort;
 use service_engine::gate::{Gate, Reason};
+use service_engine::impact::Deps;
 use service_engine::name::NounName;
 use service_engine::visibility::{Cohorts, Visibility};
 use service_engine::wire::Noun;
 use uuid::Uuid;
 
-use super::BoardMemberships;
 use super::BOARD_ARCHIVE;
+use super::BoardMemberships;
 use crate::kernel::AppPrincipal;
 
 pub const NOT_ACTIVE: Reason = Reason::new("BOARD_NOT_ACTIVE");
 pub const MISSING_SCOPE: Reason = Reason::new("MISSING_ARCHIVE_SCOPE");
 pub const NOT_A_MEMBER: Reason = Reason::new("NOT_A_BOARD_MEMBER");
+
+pub(super) const ORG: &str = "org";
+pub(super) const MEMBER: &str = "member";
+pub(super) const PUBLIC: &str = "public";
+
+pub(super) const MEMBERSHIP_DEPS: Deps = Deps::from_bits(1);
 
 pub struct Board;
 
@@ -80,25 +87,24 @@ impl Visibility for Board {
     type Row = BoardRow;
     type Principal = AppPrincipal;
 
+    const DEPS: Deps = MEMBERSHIP_DEPS;
+
     fn cohorts(row: &BoardRow) -> Cohorts {
-        let mut cohorts = vec![
-            Cohort::uuid("org", row.org_id),
-            Cohort::uuid("member", row.id),
-        ];
+        let mut cohorts = vec![Cohort::uuid(ORG, row.org_id), Cohort::uuid(MEMBER, row.id)];
         if row.is_public {
-            cohorts.push(Cohort::flag("public", true));
+            cohorts.push(Cohort::flag(PUBLIC, true));
         }
         cohorts
     }
 
     fn memberships(principal: &AppPrincipal) -> Cohorts {
         let mut cohorts = vec![
-            Cohort::uuid("org", principal.org()),
-            Cohort::flag("public", true),
+            Cohort::uuid(ORG, principal.org()),
+            Cohort::flag(PUBLIC, true),
         ];
         if let Some(BoardMemberships(boards)) = principal.facts().get::<BoardMemberships>() {
             for board in boards {
-                cohorts.push(Cohort::uuid("member", *board));
+                cohorts.push(Cohort::uuid(MEMBER, *board));
             }
         }
         cohorts

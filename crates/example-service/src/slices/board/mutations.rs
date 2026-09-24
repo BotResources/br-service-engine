@@ -1,15 +1,12 @@
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
-use service_engine::impact::Deps;
 use service_engine::pipeline::{Mutation, MutationInput, OneShot};
 use service_engine::principal::PrincipalId;
 use uuid::Uuid;
 
-use super::aggregate::{Board, BoardCause, BoardRow, BoardState};
+use super::aggregate::{Board, BoardCause, BoardRow, BoardState, MEMBERSHIP_DEPS};
 use super::store;
 use crate::kernel::{AppFault, AppPrincipal};
-
-pub const BOARD_MEMBERSHIP_DEP: u8 = 0;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBoard {
@@ -126,10 +123,7 @@ pub fn set_board_membership<'m>(
         } else {
             store::remove_member(cx.connection(), input.board_id, input.user_id).await?;
         }
-        cx.impact_principal_facts(
-            PrincipalId::from(input.user_id),
-            Deps::bit(BOARD_MEMBERSHIP_DEP).expect("a declared dependency fits the bit set"),
-        );
+        cx.impact_principal_facts(PrincipalId::from(input.user_id), MEMBERSHIP_DEPS);
         Ok(())
     })
 }

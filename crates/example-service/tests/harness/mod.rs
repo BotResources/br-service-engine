@@ -84,7 +84,7 @@ impl World {
         .await
     }
 
-    async fn start_tweaked(
+    pub async fn start_tweaked(
         pod: &str,
         options: WorldOptions,
         tweak: impl FnOnce(EngineConfig) -> EngineConfig,

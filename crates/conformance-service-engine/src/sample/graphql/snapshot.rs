@@ -4,8 +4,8 @@ use service_engine::error::EngineError;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::sample::gated::VisibleAssignments;
 use crate::sample::principal::SamplePrincipal;
+use crate::sample::visible::VisibleAssignments;
 
 #[derive(Default)]
 pub struct SnapshotReads;

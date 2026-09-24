@@ -9,7 +9,7 @@ use service_engine::LibraryMigrations;
 
 pub use delta::{RosterDelta, RosterRemove, RosterReset, RosterUpsert, RosterViewUnion};
 pub use principal::RosterPrincipal;
-pub use view::{KnownPerson, RosterUsers, RosterView};
+pub use view::{KnownPerson, RosterIsOpen, RosterStore, RosterUsers, RosterView};
 
 pub const NAME: &str = "roster";
 pub const SCHEMA: &str = "roster";

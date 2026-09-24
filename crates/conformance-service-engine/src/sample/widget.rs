@@ -193,12 +193,13 @@ impl Projector for WidgetProjector {
         &'a self,
         pg: &'a sqlx::PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_widget WHERE tenant_id = $1")
+            let rows = sqlx::query("SELECT id FROM sample_widget WHERE tenant_id = $1 LIMIT $2")
                 .bind(principal.tenant())
+                .bind(ceiling.limit())
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(

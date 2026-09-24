@@ -56,14 +56,16 @@ impl Projector for LinkedAssignments {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1")
-                .bind(principal.tenant())
-                .fetch_all(pg)
-                .await?;
+            let rows =
+                sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1 LIMIT $2")
+                    .bind(principal.tenant())
+                    .bind(ceiling.limit())
+                    .fetch_all(pg)
+                    .await?;
             Ok(Population::Keys(
                 rows.iter().map(|row| row.get::<Uuid, _>("id")).collect(),
             ))

@@ -3,6 +3,8 @@ mod chain;
 mod hex;
 mod observe;
 #[cfg(test)]
+mod test_log;
+#[cfg(test)]
 mod test_support;
 
 pub mod accumulator;

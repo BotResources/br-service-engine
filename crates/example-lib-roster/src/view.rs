@@ -1,16 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
-use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
 use service_engine::name::{NounName, ProjectorName};
+use service_engine::persistence::{Persistence, PersistenceStyle};
 use service_engine::population::{Inverse, Population};
-use service_engine::projector::{LoadScope, Projector};
-use service_engine::session::WindowParams;
+use service_engine::view::{Populate, Projector};
+use service_engine::visibility::Unrestricted;
 use service_engine::wire::Noun;
-use sqlx::{PgPool, Row};
+use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::KNOWN_PERSON_NAMESPACE;
@@ -28,6 +28,69 @@ pub struct RosterView {
     pub user_id: Uuid,
     pub email: String,
     pub display_name: String,
+}
+
+service_engine::open_access!(
+    pub RosterIsOpen = "the roster lists every known person to every principal of the host"
+);
+
+pub struct RosterStore;
+
+impl Persistence for RosterStore {
+    type Aggregate = RosterView;
+    type Key = Uuid;
+    type Event = ();
+
+    const STYLE: PersistenceStyle = PersistenceStyle::Crud;
+
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Uuid],
+    ) -> BoxFuture<'a, Result<Vec<(Uuid, RosterView)>, EngineError>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT user_id, email, display_name FROM roster.known_persons \
+                 WHERE user_id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .iter()
+                .map(|row| {
+                    let person = RosterView {
+                        user_id: row.get("user_id"),
+                        email: row.get("email"),
+                        display_name: row.get("display_name"),
+                    };
+                    (person.user_id, person)
+                })
+                .collect())
+        })
+    }
+
+    fn save<'a>(
+        _conn: &'a mut PgConnection,
+        _person: &'a RosterView,
+        _events: &'a [()],
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async { Err(mirrored_only()) })
+    }
+
+    fn create<'a>(
+        _conn: &'a mut PgConnection,
+        _person: &'a RosterView,
+        _events: &'a [()],
+    ) -> BoxFuture<'a, Result<(), EngineError>> {
+        Box::pin(async { Err(mirrored_only()) })
+    }
+}
+
+fn mirrored_only() -> EngineError {
+    EngineError::Service(
+        "roster.known_persons is written by the host's directory mirror, never by a mutation"
+            .into(),
+    )
 }
 
 pub struct RosterUsers<P>(std::marker::PhantomData<fn() -> P>);
@@ -54,83 +117,32 @@ fn invalidated(foreign: &ForeignKey) -> Inverse<Uuid> {
 
 impl<P: RosterPrincipal> Projector for RosterUsers<P> {
     type Principal = P;
-    type Key = Uuid;
-    type Facts = BTreeMap<Uuid, (String, String)>;
-    type View = RosterView;
+    type Noun = KnownPerson;
+    type Store = RosterStore;
+    type Query = ();
+    type Out = RosterView;
+    type Visibility = Unrestricted<RosterView, P, RosterIsOpen>;
 
-    fn name(&self) -> ProjectorName {
-        Self::NAME
+    const NAME: ProjectorName = Self::NAME;
+
+    async fn populate(cx: &Populate<'_, P>, _query: &()) -> Result<Population<Uuid>, EngineError> {
+        let rows = sqlx::query("SELECT user_id FROM roster.known_persons LIMIT $1")
+            .bind(cx.limit_all())
+            .fetch_all(cx.pool())
+            .await?;
+        Ok(Population::Keys(
+            rows.iter()
+                .map(|row| row.get::<Uuid, _>("user_id"))
+                .collect(),
+        ))
     }
 
-    fn nouns(&self) -> &'static [NounName] {
-        const NOUNS: &[NounName] = &[KnownPerson::NAME];
-        NOUNS
+    fn project(person: &RosterView, _principal: &P) -> Result<RosterView, EngineError> {
+        Ok(person.clone())
     }
 
-    fn populate<'a>(
-        &'a self,
-        pg: &'a PgPool,
-        _window: &'a WindowParams,
-        ceiling: KeyCeiling,
-        _principal: &'a P,
-    ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
-        Box::pin(async move {
-            let rows = sqlx::query("SELECT user_id FROM roster.known_persons LIMIT $1")
-                .bind(ceiling.limit())
-                .fetch_all(pg)
-                .await?;
-            Ok(Population::Keys(
-                rows.iter()
-                    .map(|row| row.get::<Uuid, _>("user_id"))
-                    .collect(),
-            ))
-        })
-    }
-
-    fn inverse(&self, foreign: &ForeignKey) -> Inverse<Uuid> {
+    fn inverse(foreign: &ForeignKey) -> Inverse<Uuid> {
         invalidated(foreign)
-    }
-
-    fn load<'a>(
-        &'a self,
-        scope: LoadScope<'a, Uuid, P>,
-    ) -> BoxFuture<'a, Result<BTreeMap<Uuid, (String, String)>, EngineError>> {
-        Box::pin(async move {
-            let keys = scope.keys().to_vec();
-            let sql = "SELECT user_id, email, display_name FROM roster.known_persons \
-                       WHERE user_id = ANY($1)";
-            let rows = match scope {
-                LoadScope::Bulk { pg, .. } => sqlx::query(sql).bind(&keys).fetch_all(pg).await?,
-                LoadScope::PerPrincipal { conn, .. } => {
-                    sqlx::query(sql).bind(&keys).fetch_all(&mut *conn).await?
-                }
-            };
-            Ok(rows
-                .into_iter()
-                .map(|row| {
-                    (
-                        row.get::<Uuid, _>("user_id"),
-                        (
-                            row.get::<String, _>("email"),
-                            row.get::<String, _>("display_name"),
-                        ),
-                    )
-                })
-                .collect())
-        })
-    }
-
-    fn project(
-        &self,
-        facts: &BTreeMap<Uuid, (String, String)>,
-        key: &Uuid,
-        _principal: &P,
-    ) -> Result<Option<RosterView>, EngineError> {
-        Ok(facts.get(key).map(|(email, display_name)| RosterView {
-            user_id: *key,
-            email: email.clone(),
-            display_name: display_name.clone(),
-        }))
     }
 }
 

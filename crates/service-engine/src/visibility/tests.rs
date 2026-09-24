@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use super::*;
-use crate::population::Population;
 
 #[derive(Clone)]
 struct Project {
@@ -137,32 +136,12 @@ fn scene() -> (Viewer, Project, Project) {
 }
 
 #[test]
-fn the_window_keeps_exactly_the_keys_the_visible_predicate_admits() {
+fn the_check_passes_when_the_window_holds_exactly_the_visible_keys() {
     let (viewer, mine, theirs) = scene();
     let candidates = vec![(mine.id, mine.clone()), (theirs.id, theirs.clone())];
-    let keys = ProjectVisibility::visible_keys(candidates, &viewer);
-    assert_eq!(keys, BTreeSet::from([mine.id]));
-    assert!(ProjectVisibility::visible(&mine, &viewer));
-    assert!(!ProjectVisibility::visible(&theirs, &viewer));
-}
-
-#[test]
-fn window_produces_a_key_population_of_the_visible_subset() {
-    let (viewer, mine, theirs) = scene();
-    let candidates = vec![(mine.id, mine.clone()), (theirs.id, theirs.clone())];
-    match ProjectVisibility::window(candidates, &viewer) {
-        Population::Keys(keys) => assert_eq!(keys, BTreeSet::from([mine.id])),
-        other => panic!("the derived window is a key set, got {other:?}"),
-    }
-}
-
-#[test]
-fn the_check_passes_when_the_window_is_derived_from_the_declaration() {
-    let (viewer, mine, theirs) = scene();
-    let candidates = vec![(mine.id, mine.clone()), (theirs.id, theirs.clone())];
-    let window = ProjectVisibility::visible_keys(candidates.clone(), &viewer);
+    let window = BTreeSet::from([mine.id]);
     check_window_matches_visibility::<ProjectVisibility, _, _>(&window, candidates, &viewer)
-        .expect("a window built from the declaration agrees with it");
+        .expect("a window of exactly the visible keys agrees with the declaration");
 }
 
 #[test]
@@ -225,4 +204,24 @@ fn unrestricted_surfaces_its_access_reason_and_admits_every_row() {
         public: false,
     };
     assert!(<Open as Visibility>::visible(&project, &stranger));
+}
+
+#[test]
+fn the_check_holds_an_unrestricted_window_to_every_candidate_row() {
+    type Open = Unrestricted<Project, Viewer, TestOpen>;
+    let (viewer, mine, theirs) = scene();
+    let candidates = vec![(mine.id, mine.clone()), (theirs.id, theirs.clone())];
+    check_window_matches_visibility::<Open, _, _>(
+        &BTreeSet::from([mine.id, theirs.id]),
+        candidates.clone(),
+        &viewer,
+    )
+    .expect("an open-access declaration admits every candidate row");
+    let mismatch = check_window_matches_visibility::<Open, _, _>(
+        &BTreeSet::from([mine.id]),
+        candidates,
+        &viewer,
+    )
+    .expect_err("a window that drops a row diverges from an open-access declaration");
+    assert_eq!(mismatch.only_in_declaration, vec![theirs.id]);
 }
