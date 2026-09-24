@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::time::Duration;
 
 use sqlx::{PgConnection, PgPool, Row};
@@ -99,11 +100,13 @@ pub(crate) async fn seal_upto(
     if let Some(max) = max_seq
         && max > last_seq.to_i64()
     {
-        return Err(EngineError::SealChunkBeyondLastSeq {
-            accumulator: entry.name.clone(),
-            last_seq: last_seq.get(),
-            max_seq: ChunkSeq::from_storable(max).get(),
-        });
+        return Err(EngineError::Accumulator(
+            AccumulatorError::SealChunkBeyondLastSeq {
+                accumulator: entry.name.clone(),
+                last_seq: last_seq.get(),
+                max_seq: ChunkSeq::from_storable(max).get(),
+            },
+        ));
     }
     let high_water = last_seq.to_i64().saturating_add(1);
     write_marker(entry, tx, &key_value, high_water, at).await?;
@@ -119,10 +122,10 @@ async fn hold_and_refuse_if_sealed(
     guard::hold(&mut *tx, std::slice::from_ref(&stream)).await?;
     let key_value = key.decode::<serde_json::Value>()?;
     if let Some(high_water) = existing_high_water(entry, tx, &key_value).await? {
-        return Err(EngineError::AlreadySealed {
+        return Err(EngineError::Accumulator(AccumulatorError::AlreadySealed {
             accumulator: entry.name.clone(),
             high_water: ChunkSeq::from_storable(high_water.max(0)).get(),
-        });
+        }));
     }
     Ok(key_value)
 }

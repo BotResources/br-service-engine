@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -22,11 +23,13 @@ pub(crate) async fn validate_stream(
     let stream = streaming_stream(service);
     let max_age = nats.stream_max_age(&stream).await?;
     if max_age.is_zero() || seal_retention < max_age {
-        return Err(EngineError::SealRetentionTooShort {
-            stream,
-            seal_retention,
-            max_age,
-        });
+        return Err(EngineError::Accumulator(
+            AccumulatorError::SealRetentionTooShort {
+                stream,
+                seal_retention,
+                max_age,
+            },
+        ));
     }
     Ok(())
 }

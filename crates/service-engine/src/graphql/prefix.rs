@@ -1,3 +1,4 @@
+use crate::error::CompositionError;
 use crate::error::EngineError;
 
 const MAX_PREFIX_LEN: usize = 40;
@@ -34,9 +35,11 @@ impl RootPrefix {
 }
 
 fn validate_snake(snake: &'static str) -> Result<(), EngineError> {
-    let invalid = |reason: &'static str| EngineError::RootPrefixInvalid {
-        value: snake.to_string(),
-        reason,
+    let invalid = |reason: &'static str| {
+        EngineError::Composition(CompositionError::RootPrefixInvalid {
+            value: snake.to_string(),
+            reason,
+        })
     };
     if snake.is_empty() {
         return Err(invalid("must not be empty"));
@@ -107,7 +110,9 @@ mod tests {
     fn an_empty_prefix_is_refused() {
         assert!(matches!(
             RootPrefix::from_snake(""),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 
@@ -115,7 +120,9 @@ mod tests {
     fn an_upper_first_prefix_is_refused() {
         assert!(matches!(
             RootPrefix::from_snake("Sample"),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 
@@ -123,7 +130,9 @@ mod tests {
     fn a_leading_underscore_prefix_is_refused() {
         assert!(matches!(
             RootPrefix::from_snake("_x"),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 
@@ -131,7 +140,9 @@ mod tests {
     fn a_double_underscore_prefix_is_refused() {
         assert!(matches!(
             RootPrefix::from_snake("x__y"),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 
@@ -139,7 +150,9 @@ mod tests {
     fn a_trailing_underscore_prefix_is_refused() {
         assert!(matches!(
             RootPrefix::from_snake("x_"),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 
@@ -147,7 +160,9 @@ mod tests {
     fn a_digit_first_prefix_is_refused() {
         assert!(matches!(
             RootPrefix::from_snake("9x"),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 
@@ -157,7 +172,9 @@ mod tests {
         assert_eq!(long.len(), 41);
         assert!(matches!(
             RootPrefix::from_snake(long),
-            Err(EngineError::RootPrefixInvalid { .. })
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixInvalid { .. }
+            ))
         ));
     }
 

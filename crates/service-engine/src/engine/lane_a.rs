@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -18,8 +19,12 @@ pub(crate) struct LaneATasks {
 
 pub(crate) fn ingress_reason(error: &EngineError) -> &'static str {
     match error {
-        EngineError::SealRetentionTooShort { .. } => crate::boot::REASON_SEAL_RETENTION,
-        EngineError::AccumulatorWithoutService => crate::boot::REASON_ACCUMULATOR_NO_SERVICE,
+        EngineError::Accumulator(AccumulatorError::SealRetentionTooShort { .. }) => {
+            crate::boot::REASON_SEAL_RETENTION
+        }
+        EngineError::Accumulator(AccumulatorError::AccumulatorWithoutService) => {
+            crate::boot::REASON_ACCUMULATOR_NO_SERVICE
+        }
         _ => crate::boot::REASON_STREAMING_STREAM,
     }
 }
@@ -34,7 +39,9 @@ pub(crate) async fn spawn_if_registered(
     let stop_purge = Stop::new();
     let (ingress_task, purge_task) = if accumulators.registered() > 0 {
         let Some(service) = config.service.clone() else {
-            return Err(EngineError::AccumulatorWithoutService);
+            return Err(EngineError::Accumulator(
+                AccumulatorError::AccumulatorWithoutService,
+            ));
         };
         accumulators.bind_lane_a_purge(nats.clone(), service.clone());
         let (ingress, purge) = spawn_lane_a(

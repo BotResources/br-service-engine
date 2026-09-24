@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
@@ -161,7 +162,9 @@ impl StreamingIngress {
             .push_frame(&name, &frame.key, seq, frame.chunk)
         {
             Ok(_receipt) => self.confirm(message).await,
-            Err(EngineError::ChunkBufferFull { .. }) => self.retry(message).await,
+            Err(EngineError::Accumulator(AccumulatorError::ChunkBufferFull { .. })) => {
+                self.retry(message).await
+            }
             Err(error) => {
                 tracing::warn!(reason = %describe(&error), "a lane-A chunk cannot be routed to an accumulator");
                 self.terminate(message).await;

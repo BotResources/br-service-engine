@@ -11,6 +11,7 @@ pub mod seal;
 mod seq;
 pub(crate) mod single_flight;
 
+use crate::error::AccumulatorError;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::Future;
@@ -101,8 +102,8 @@ pub(crate) fn lookup<A: Accumulator>(registry: &Registry) -> Result<Registered, 
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(&TypeId::of::<A>())
         .cloned()
-        .ok_or(EngineError::UnregisteredAccumulator(
-            std::any::type_name::<A>(),
+        .ok_or(EngineError::Accumulator(
+            AccumulatorError::UnregisteredAccumulator(std::any::type_name::<A>()),
         ))
 }
 
@@ -116,7 +117,11 @@ pub(crate) fn lookup_by_name(
         .values()
         .find(|entry| &entry.name == name)
         .cloned()
-        .ok_or_else(|| EngineError::UnregisteredAccumulatorName { name: name.clone() })
+        .ok_or_else(|| {
+            EngineError::Accumulator(AccumulatorError::UnregisteredAccumulatorName {
+                name: name.clone(),
+            })
+        })
 }
 
 pub(crate) fn registered_count(registry: &Registry) -> usize {
@@ -138,7 +143,9 @@ pub(crate) fn enroll<A: Accumulator>(
         .iter()
         .any(|(type_id, entry)| entry.name == name && *type_id != TypeId::of::<A>());
     if taken {
-        return Err(EngineError::DuplicateAccumulatorName { name });
+        return Err(EngineError::Accumulator(
+            AccumulatorError::DuplicateAccumulatorName { name },
+        ));
     }
     let entry = Registered {
         name,
@@ -200,7 +207,7 @@ mod tests {
         let miss = lookup::<Tokens>(&registry);
         assert!(matches!(
             miss,
-            Err(EngineError::UnregisteredAccumulator(name)) if name.ends_with("Tokens")
+            Err(EngineError::Accumulator(AccumulatorError::UnregisteredAccumulator(name))) if name.ends_with("Tokens")
         ));
         enroll(&registry, Tokens).expect("the first accumulator enrolls");
         let entry = lookup::<Tokens>(&registry).expect("the enrolled accumulator resolves");
@@ -232,7 +239,7 @@ mod tests {
         let collision = enroll(&registry, Impostor);
         assert!(matches!(
             collision,
-            Err(EngineError::DuplicateAccumulatorName { name }) if name.as_str() == "tokens"
+            Err(EngineError::Accumulator(AccumulatorError::DuplicateAccumulatorName { name })) if name.as_str() == "tokens"
         ));
         assert!(lookup::<Impostor>(&registry).is_err());
     }

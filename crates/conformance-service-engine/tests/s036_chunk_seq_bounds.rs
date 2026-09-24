@@ -1,3 +1,4 @@
+use service_engine::error::AccumulatorError;
 use std::time::Duration;
 
 use conformance_service_engine::TestDb;
@@ -31,7 +32,10 @@ async fn s036_a_chunk_seq_a_bigint_cannot_store_is_refused_before_it_can_ever_be
         .emit(ChunkSeq::MAX + 1, "over the storable range")
         .expect_err("a sequence a bigint cannot store faithfully never yields a Durable");
     assert!(
-        matches!(refused, EngineError::ChunkSeqOutOfRange { .. }),
+        matches!(
+            refused,
+            EngineError::Accumulator(AccumulatorError::ChunkSeqOutOfRange { .. })
+        ),
         "the boundary is refused typed at construction, not silently wrapped negative: {refused:?}"
     );
 

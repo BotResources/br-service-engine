@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
@@ -37,17 +38,20 @@ impl SealHash {
 
     pub fn from_hex(raw: &str) -> Result<Self, EngineError> {
         if raw.len() != 64 {
-            return Err(EngineError::SealHashFormat(format!(
-                "expected 64 hex characters, got {}",
-                raw.len()
+            return Err(EngineError::Accumulator(AccumulatorError::SealHashFormat(
+                format!("expected 64 hex characters, got {}", raw.len()),
             )));
         }
         let mut bytes = [0u8; 32];
         for (index, pair) in raw.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-            let hex = std::str::from_utf8(pair)
-                .map_err(|_| EngineError::SealHashFormat("non-utf8 hex".into()))?;
-            bytes[index] = u8::from_str_radix(hex, 16)
-                .map_err(|error| EngineError::SealHashFormat(crate::chain::describe(&error)))?;
+            let hex = std::str::from_utf8(pair).map_err(|_| {
+                EngineError::Accumulator(AccumulatorError::SealHashFormat("non-utf8 hex".into()))
+            })?;
+            bytes[index] = u8::from_str_radix(hex, 16).map_err(|error| {
+                EngineError::Accumulator(AccumulatorError::SealHashFormat(crate::chain::describe(
+                    &error,
+                )))
+            })?;
         }
         Ok(Self(bytes))
     }

@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -63,19 +64,25 @@ pub(crate) async fn flush_once(
                 let accumulator = pending.accumulator;
                 let _ = pending.done.send(match verdict {
                     Verdict::Durable => Ok(()),
-                    Verdict::Refused { sealed_high_water } => Err(EngineError::SealedChunk {
-                        seq: seq.get(),
-                        sealed_high_water,
-                    }),
-                    Verdict::Conflict => Err(EngineError::ChunkConflict {
-                        accumulator,
-                        key: String::from_utf8_lossy(pending.key.as_slice()).into_owned(),
-                        seq: seq.get(),
-                    }),
-                    Verdict::Unmapped => Err(EngineError::ChunkFlushAbandoned {
-                        accumulator,
-                        seq: seq.get(),
-                    }),
+                    Verdict::Refused { sealed_high_water } => {
+                        Err(EngineError::Accumulator(AccumulatorError::SealedChunk {
+                            seq: seq.get(),
+                            sealed_high_water,
+                        }))
+                    }
+                    Verdict::Conflict => {
+                        Err(EngineError::Accumulator(AccumulatorError::ChunkConflict {
+                            accumulator,
+                            key: String::from_utf8_lossy(pending.key.as_slice()).into_owned(),
+                            seq: seq.get(),
+                        }))
+                    }
+                    Verdict::Unmapped => Err(EngineError::Accumulator(
+                        AccumulatorError::ChunkFlushAbandoned {
+                            accumulator,
+                            seq: seq.get(),
+                        },
+                    )),
                 });
             }
             if !deferred.is_empty() {

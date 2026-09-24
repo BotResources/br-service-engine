@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::name::{AccumulatorName, MirrorName, NounName, ProjectorName, RelayName};
+use crate::name::{MirrorName, NounName, ProjectorName, RelayName};
 
 pub type BoxedError = Box<dyn StdError + Send + Sync>;
 
@@ -12,9 +12,13 @@ pub use crate::chain::describe;
 mod codec;
 pub use codec::{CronError, DecodeError};
 
+mod accumulator;
 mod attach;
+mod composition;
 mod transport;
+pub use accumulator::AccumulatorError;
 pub use attach::AttachError;
+pub use composition::CompositionError;
 pub use transport::{RelayError, TransportError};
 
 #[derive(Debug, Error)]
@@ -86,25 +90,6 @@ pub enum EngineError {
     )]
     EmptyInterest { projector: ProjectorName },
 
-    #[error("no accumulator of type {0} is registered")]
-    UnregisteredAccumulator(&'static str),
-
-    #[error("no accumulator named {name} is registered, so an ingress chunk cannot be routed")]
-    UnregisteredAccumulatorName { name: AccumulatorName },
-
-    #[error(
-        "seal_retention {seal_retention:?} does not cover the {stream} stream's max_age \
-         {max_age:?}, so a straggler the stream can still redeliver would meet no seal marker"
-    )]
-    SealRetentionTooShort {
-        stream: String,
-        seal_retention: Duration,
-        max_age: Duration,
-    },
-
-    #[error("accumulator name {name} is already held by another accumulator type")]
-    DuplicateAccumulatorName { name: AccumulatorName },
-
     #[error("relay name {name} is already registered, so its health board would be overwritten")]
     DuplicateRelayName { name: RelayName },
 
@@ -131,92 +116,8 @@ pub enum EngineError {
         key: &'static str,
     },
 
-    #[error("chunk sequence {seq} is above {max}, the largest a bigint column stores faithfully")]
-    ChunkSeqOutOfRange { seq: u64, max: u64 },
-
-    #[error(
-        "chunk {seq} of accumulator {accumulator} for key {key} is already durable with different \
-         content, so this submission diverges from the persisted chunk"
-    )]
-    ChunkConflict {
-        accumulator: AccumulatorName,
-        key: String,
-        seq: u64,
-    },
-
     #[error("the {worker} worker stopped before shutdown was requested")]
     WorkerStopped { worker: &'static str },
-
-    #[error(
-        "accumulator {accumulator} refuses the chunk: {limit} chunks are already waiting to be flushed"
-    )]
-    ChunkBufferFull {
-        accumulator: AccumulatorName,
-        limit: usize,
-    },
-
-    #[error("chunk {seq} of accumulator {accumulator} was abandoned before its flush committed")]
-    ChunkFlushAbandoned {
-        accumulator: AccumulatorName,
-        seq: u64,
-    },
-
-    #[error("a fold state of another accumulator was handed to {accumulator}")]
-    StateMismatch { accumulator: AccumulatorName },
-
-    #[error(
-        "chunk {seq} is refused because the key is sealed; the marker was written at high water {sealed_high_water}"
-    )]
-    SealedChunk { seq: u64, sealed_high_water: u64 },
-
-    #[error(
-        "accumulator {accumulator} cannot seal at last sequence {last_seq}: the stream holds a \
-         contiguous prefix only up to {contiguous_to}, so it is truncated or has a gap"
-    )]
-    SealTruncated {
-        accumulator: AccumulatorName,
-        last_seq: u64,
-        contiguous_to: i64,
-    },
-
-    #[error(
-        "accumulator {accumulator} refuses the seal at last sequence {last_seq}: the replayed \
-         chunks hash to {found} but the finish declared {expected}"
-    )]
-    SealHashMismatch {
-        accumulator: AccumulatorName,
-        last_seq: u64,
-        expected: String,
-        found: String,
-    },
-
-    #[error("a seal hash is not 32 lowercase-hex bytes: {0}")]
-    SealHashFormat(String),
-
-    #[error(
-        "accumulator {accumulator} for this key is already sealed at high water {high_water}, so \
-         sealing again would rewrite the sealed record"
-    )]
-    AlreadySealed {
-        accumulator: AccumulatorName,
-        high_water: u64,
-    },
-
-    #[error(
-        "accumulator {accumulator} cannot seal at last sequence {last_seq}: the stream already \
-         holds chunk {max_seq} beyond it, so a chunk was made durable that this seal would drop"
-    )]
-    SealChunkBeyondLastSeq {
-        accumulator: AccumulatorName,
-        last_seq: u64,
-        max_seq: u64,
-    },
-
-    #[error(
-        "an accumulator is registered but no service is configured, so the lane-A \
-         STREAMING_{{service}} stream cannot be bound; call EngineConfig::with_service"
-    )]
-    AccumulatorWithoutService,
 
     #[error("boot posture: {0}")]
     Posture(String),
@@ -347,25 +248,12 @@ pub enum EngineError {
     #[error("presence type `{presence}` is used but was never registered with register_presence")]
     PresenceNotRegistered { presence: String },
 
-    #[error("http server on {addr}: {source}")]
+    #[error("http server on {addr}")]
     Http {
         addr: std::net::SocketAddr,
         #[source]
         source: std::io::Error,
     },
-
-    #[error("two slices contribute the same graphql {kind} `{member}`: {first} and {second}")]
-    DuplicateSchemaMember {
-        kind: &'static str,
-        member: String,
-        first: &'static str,
-        second: &'static str,
-    },
-
-    #[error(
-        "the composed schema exposes the graphql root field `{member}` that no slice fragment declared"
-    )]
-    UndeclaredSchemaMember { member: String },
 
     #[error("a policy refused the write with reason {code}")]
     PolicyRefused { code: &'static str },
@@ -390,41 +278,6 @@ pub enum EngineError {
     UnhonouredSeam { aggregate: &'static str },
 
     #[error(
-        "the composed schema exposes the graphql object type `{ty}` that no slice fragment owns \
-         and the engine does not inject"
-    )]
-    UndeclaredSchemaType { ty: String },
-
-    #[error("the composed graphql schema could not be parsed for slice verification: {detail}")]
-    SchemaParse { detail: String },
-
-    #[error("root prefix {value:?} is invalid: it {reason}")]
-    RootPrefixInvalid { value: String, reason: &'static str },
-
-    #[error(
-        "a schema slice is registered but no root prefix is declared; compose_service! must set \
-         `prefix =`, and a service that hand-registers fragments must call declare_root_prefix \
-         before run"
-    )]
-    RootPrefixUndeclared,
-
-    #[error(
-        "the root prefix is declared as {first:?} and again as {second:?}; a service has one root \
-         prefix"
-    )]
-    RootPrefixRedeclared { first: String, second: String },
-
-    #[error(
-        "slice {slice} exposes the graphql root field `{field}`, which is not under the declared \
-         root prefix `{prefix}`; every root field of a service must be `<prefix><UpperName>`"
-    )]
-    RootFieldOutsidePrefix {
-        slice: &'static str,
-        field: String,
-        prefix: String,
-    },
-
-    #[error(
         "the store is not fully migrated (engine set pending: {engine}, pending libraries: \
          {libraries:?}, service set pending: {service}); serve refuses to run until migrate has \
          applied the engine, library and service sets to the shared ledger"
@@ -434,4 +287,10 @@ pub enum EngineError {
         libraries: Vec<&'static str>,
         service: bool,
     },
+
+    #[error(transparent)]
+    Accumulator(#[from] AccumulatorError),
+
+    #[error(transparent)]
+    Composition(#[from] CompositionError),
 }

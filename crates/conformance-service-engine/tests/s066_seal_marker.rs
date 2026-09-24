@@ -1,5 +1,6 @@
 mod accumulator_support;
 
+use service_engine::error::AccumulatorError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -71,10 +72,10 @@ async fn s066_seal_marker() {
         assert!(
             matches!(
                 refused,
-                EngineError::SealedChunk {
+                EngineError::Accumulator(AccumulatorError::SealedChunk {
                     seq: 3,
                     sealed_high_water: 3
-                }
+                })
             ),
             "{refused:?}"
         );

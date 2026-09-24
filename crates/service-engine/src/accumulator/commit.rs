@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -106,10 +107,10 @@ pub(crate) async fn commit_batch(
         accumulators.push(pending.accumulator.as_str().to_string());
         keys.push(pending.key.decode::<serde_json::Value>()?);
         seqs.push(i64::try_from(pending.seq.get()).map_err(|_| {
-            EngineError::ChunkSeqOutOfRange {
+            EngineError::Accumulator(AccumulatorError::ChunkSeqOutOfRange {
                 seq: pending.seq.get(),
                 max: ChunkSeq::MAX,
-            }
+            })
         })?);
         chunks.push(pending.chunk.clone());
         touched.insert((pending.noun.clone(), pending.key.clone()));

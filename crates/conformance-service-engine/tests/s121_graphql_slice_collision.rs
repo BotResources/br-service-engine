@@ -3,6 +3,7 @@ use conformance_service_engine::sample::graphql::{
     boot_colliding_slices, root_field_collision, type_collision,
 };
 use service_engine::EngineError;
+use service_engine::error::CompositionError;
 
 #[tokio::test]
 async fn s121_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud() {
@@ -22,12 +23,12 @@ async fn s121_two_slices_claiming_the_same_root_field_fail_the_engine_boot_loud(
     assert!(
         matches!(
             outcome,
-            Err(EngineError::DuplicateSchemaMember {
+            Err(EngineError::Composition(CompositionError::DuplicateSchemaMember {
                 kind: "root field",
                 first: "widget",
                 second: "shadow",
                 ref member,
-            }) if member == "sampleWidget"
+            })) if member == "sampleWidget"
         ),
         "a real engine that registered two slices claiming the same root field refuses to serve, \
          naming both slices, instead of standing up an ambiguous schema: {outcome:?}"
@@ -55,12 +56,12 @@ async fn s121_two_slices_claiming_the_same_type_fail_the_engine_boot_loud() {
     assert!(
         matches!(
             outcome,
-            Err(EngineError::DuplicateSchemaMember {
+            Err(EngineError::Composition(CompositionError::DuplicateSchemaMember {
                 kind: "type",
                 first: "widget",
                 second: "shadow",
                 ref member,
-            }) if member == "WidgetView"
+            })) if member == "WidgetView"
         ),
         "the same boot gate rejects two slices that claim the same GraphQL type, not only a root \
          field: {outcome:?}"

@@ -1,3 +1,4 @@
+use crate::error::AccumulatorError;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -94,11 +95,11 @@ impl ChunkReader {
         for row in &rows {
             let seq = ChunkSeq::from_storable(row.get::<i64, _>("seq"));
             if seq != expected {
-                return Err(EngineError::SealTruncated {
+                return Err(EngineError::Accumulator(AccumulatorError::SealTruncated {
                     accumulator: entry.name.clone(),
                     last_seq: last_seq.get(),
                     contiguous_to: expected.to_i64() - 1,
-                });
+                }));
             }
             let chunk = row.get::<serde_json::Value, _>("chunk");
             entry.erased.fold(&mut state, seq, &chunk)?;
@@ -106,16 +107,18 @@ impl ChunkReader {
             expected = seq.next();
         }
         if expected.to_i64() != last_seq.to_i64() + 1 {
-            return Err(EngineError::SealTruncated {
+            return Err(EngineError::Accumulator(AccumulatorError::SealTruncated {
                 accumulator: entry.name.clone(),
                 last_seq: last_seq.get(),
                 contiguous_to: expected.to_i64() - 1,
-            });
+            }));
         }
         let folded = state
             .downcast_ref::<A::State>()
-            .ok_or_else(|| EngineError::StateMismatch {
-                accumulator: entry.name.clone(),
+            .ok_or_else(|| {
+                EngineError::Accumulator(AccumulatorError::StateMismatch {
+                    accumulator: entry.name.clone(),
+                })
             })?
             .clone();
         let digest = crate::accumulator::SealHash::of_values(values.iter());
@@ -210,8 +213,10 @@ impl ChunkReader {
 
         let folded = state
             .downcast_ref::<A::State>()
-            .ok_or_else(|| EngineError::StateMismatch {
-                accumulator: entry.name.clone(),
+            .ok_or_else(|| {
+                EngineError::Accumulator(AccumulatorError::StateMismatch {
+                    accumulator: entry.name.clone(),
+                })
             })?
             .clone();
         self.store(entry.name.clone(), key, state, mark);

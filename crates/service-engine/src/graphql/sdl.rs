@@ -1,3 +1,4 @@
+use crate::error::CompositionError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -108,8 +109,10 @@ pub(crate) struct ParsedSchema {
 }
 
 pub(crate) fn parse_schema_members(sdl: &str) -> Result<ParsedSchema, EngineError> {
-    let document = parse_schema(sdl).map_err(|error| EngineError::SchemaParse {
-        detail: crate::chain::describe(&error),
+    let document = parse_schema(sdl).map_err(|error| {
+        EngineError::Composition(CompositionError::SchemaParse {
+            detail: crate::chain::describe(&error),
+        })
     })?;
 
     let mut declared_roots: Option<BTreeSet<String>> = None;

@@ -1,3 +1,4 @@
+use service_engine::error::CompositionError;
 use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
@@ -18,7 +19,12 @@ async fn s211_fragments_registered_with_no_root_prefix_declared_fail_the_boot_lo
     .expect("the prefix gate must reject an undeclared prefix, not stand the pod up and serve");
 
     assert!(
-        matches!(outcome, Err(EngineError::RootPrefixUndeclared)),
+        matches!(
+            outcome,
+            Err(EngineError::Composition(
+                CompositionError::RootPrefixUndeclared
+            ))
+        ),
         "a real engine that registered schema slices but declared no root prefix refuses to serve \
          rather than exposing unprefixed roots that could shadow another service: {outcome:?}"
     );

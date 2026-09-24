@@ -1,3 +1,4 @@
+use crate::error::CompositionError;
 use std::collections::BTreeMap;
 
 use async_graphql::{ObjectType, SubscriptionType};
@@ -68,7 +69,9 @@ impl SchemaSlices {
         prefix: Option<&RootPrefix>,
     ) -> Result<Self, EngineError> {
         if !fragments.is_empty() && prefix.is_none() {
-            return Err(EngineError::RootPrefixUndeclared);
+            return Err(EngineError::Composition(
+                CompositionError::RootPrefixUndeclared,
+            ));
         }
         let mut slices = Self::new();
         slices.prefix = prefix.cloned();
@@ -93,11 +96,13 @@ impl SchemaSlices {
         if let Some(prefix) = &self.prefix
             && !prefix.owns(field)
         {
-            return Err(EngineError::RootFieldOutsidePrefix {
-                slice,
-                field: field.to_string(),
-                prefix: prefix.as_str().to_string(),
-            });
+            return Err(EngineError::Composition(
+                CompositionError::RootFieldOutsidePrefix {
+                    slice,
+                    field: field.to_string(),
+                    prefix: prefix.as_str().to_string(),
+                },
+            ));
         }
         Ok(())
     }
@@ -110,7 +115,9 @@ impl SchemaSlices {
             }
             self.check_owned("<schema sdl>", &field)?;
             if !self.fields.contains_key(&field) {
-                return Err(EngineError::UndeclaredSchemaMember { member: field });
+                return Err(EngineError::Composition(
+                    CompositionError::UndeclaredSchemaMember { member: field },
+                ));
             }
         }
         let injected = sdl::engine_injected_object_types();
@@ -121,7 +128,9 @@ impl SchemaSlices {
             {
                 continue;
             }
-            return Err(EngineError::UndeclaredSchemaType { ty });
+            return Err(EngineError::Composition(
+                CompositionError::UndeclaredSchemaType { ty },
+            ));
         }
         Ok(())
     }
@@ -133,12 +142,14 @@ fn claim_field(
     slice: &'static str,
 ) -> Result<(), EngineError> {
     if let Some(first) = registry.get(member) {
-        return Err(EngineError::DuplicateSchemaMember {
-            kind: "root field",
-            member: member.to_string(),
-            first,
-            second: slice,
-        });
+        return Err(EngineError::Composition(
+            CompositionError::DuplicateSchemaMember {
+                kind: "root field",
+                member: member.to_string(),
+                first,
+                second: slice,
+            },
+        ));
     }
     registry.insert(member.to_string(), slice);
     Ok(())
@@ -150,12 +161,14 @@ fn claim_type(
     slice: &'static str,
 ) -> Result<(), EngineError> {
     match registry.get(member) {
-        Some(&first) if first != slice => Err(EngineError::DuplicateSchemaMember {
-            kind: "type",
-            member: member.to_string(),
-            first,
-            second: slice,
-        }),
+        Some(&first) if first != slice => Err(EngineError::Composition(
+            CompositionError::DuplicateSchemaMember {
+                kind: "type",
+                member: member.to_string(),
+                first,
+                second: slice,
+            },
+        )),
         Some(_) => Ok(()),
         None => {
             registry.insert(member.to_string(), slice);

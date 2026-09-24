@@ -1,3 +1,4 @@
+use service_engine::error::AccumulatorError;
 use example_contract::SealFailed;
 use futures_util::future::BoxFuture;
 use service_engine::SealHash;
@@ -74,7 +75,7 @@ pub fn cancel_timed_out<'r>(
         };
         let text: String = match cx.seal_current::<ReplyText>(&msg.reply_id).await {
             Ok(text) => text,
-            Err(EngineError::AlreadySealed { .. }) => return Ok(()),
+            Err(EngineError::Accumulator(AccumulatorError::AlreadySealed { .. })) => return Ok(()),
             Err(error) => return Err(error.into()),
         };
         let cause = reply.complete_cancelled(text);
@@ -91,11 +92,11 @@ fn on_seal_error(
     error: EngineError,
 ) -> Result<(), ReactionFault> {
     match error {
-        EngineError::SealHashMismatch { .. } => answer_seal_failed(cx, reply_id, board_id, error),
-        EngineError::SealChunkBeyondLastSeq { .. } => {
+        EngineError::Accumulator(AccumulatorError::SealHashMismatch { .. }) => answer_seal_failed(cx, reply_id, board_id, error),
+        EngineError::Accumulator(AccumulatorError::SealChunkBeyondLastSeq { .. }) => {
             answer_seal_failed(cx, reply_id, board_id, error)
         }
-        EngineError::SealTruncated { .. } if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS => {
+        EngineError::Accumulator(AccumulatorError::SealTruncated { .. }) if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS => {
             answer_seal_failed(cx, reply_id, board_id, error)
         }
         other => Err(other.into()),

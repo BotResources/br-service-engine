@@ -95,7 +95,10 @@ pub use delta::{Delta, ErasedView, Revision};
 pub use engine::boot::{BootPlan, LibraryMigrations, REASON_MIGRATIONS_PENDING, run_service};
 pub use engine::{BlobReader, Engine, Settle};
 pub use erase::{Erasable, Erase, EraseOutcome, Erased, Eraser, PersonId};
-pub use error::{AttachError, CronError, DecodeError, EngineError, RelayError, TransportError};
+pub use error::{
+    AccumulatorError, AttachError, CompositionError, CronError, DecodeError, EngineError,
+    RelayError, TransportError,
+};
 pub use full_eda::{EventSourced, FullEda};
 pub use gate::{
     ActionName, Affordances, Gate, GateMismatch, Gated, Reason, ReasonFormat,

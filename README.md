@@ -63,7 +63,7 @@ battery-backed.
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `RootPrefixInvalid`/`RootPrefixUndeclared`/`RootPrefixRedeclared`/`RootFieldOutsidePrefix`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a read-only transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a read-only transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -266,11 +266,12 @@ accumulator as `Engine::push_chunk`, so late joiners replay from the store, the
 verified `Ops::seal` writes the final record and a seal marker in one
 transaction, and a chunk that arrives after the seal is refused on every pod.
 The seal marker's high water is the declared `last_seq`, so a chunk that landed
-beyond it fails the seal (`SealChunkBeyondLastSeq`) rather than being dropped
+beyond it fails the seal (`AccumulatorError::SealChunkBeyondLastSeq`, carried as
+`EngineError::Accumulator`) rather than being dropped
 after the producer was told it was durable, and re-sealing a key that already
-carries a marker is refused with `AlreadySealed` instead of rewriting the sealed
+carries a marker is refused with `AccumulatorError::AlreadySealed` instead of rewriting the sealed
 record. A replay that cannot assemble a contiguous prefix up to `last_seq` fails
-with `SealTruncated`; whether that is transient fold-lag worth retrying or a
+with `AccumulatorError::SealTruncated`; whether that is transient fold-lag worth retrying or a
 permanent loss to report is the reaction's call, informed by `cx.delivered` — the
 reference reply slice retries a bounded number of deliveries and then answers the
 runner with a `SealFailed` event so it resends the finish, never nak-ing forever
@@ -280,7 +281,7 @@ sealing pod purges the key's NATS subject
 synchronously; the beat is the backstop that purges any sealed key still in the
 stream if the pod died first. Name the stream with `EngineConfig::with_service`;
 a serviceless engine that registers an accumulator fails loud at boot
-(`AccumulatorWithoutService`) rather than silently folding in process with no
+(`AccumulatorError::AccumulatorWithoutService`) rather than silently folding in process with no
 stream to bind. `register_presence` binds the
 `EPHEMERAL_{service}` bucket at
 boot (bind-only, fail-loud), every pod watches it, and put/expiry reach sessions
@@ -603,15 +604,16 @@ fragments over one aggregate (a capability file per fragment, all naming the
 same aggregate); capabilities of one aggregate legitimately share its owned
 types, while two *different* aggregates claiming one type name is a collision.
 The engine assembles the registered fragments at the start of `run` (so through
-`run_with` too) and fails boot loud with `EngineError::DuplicateSchemaMember`,
+`run_with` too) and fails boot loud with `CompositionError::DuplicateSchemaMember` (carried as
+`EngineError::Composition`),
 naming both aggregates, if two claim the same root field or object type — the pod
 never serves an ambiguous schema. The gate does not trust the fragments blindly:
 when the service feeds the composed schema's SDL with
 `Engine::set_schema_sdl(schema.sdl())` before `run`, the engine parses that SDL
 with the real GraphQL parser (so a block-string description that wraps onto a
 field-shaped line is never mistaken for a phantom root field) and fails boot with
-`EngineError::UndeclaredSchemaMember` for a root field, or
-`EngineError::UndeclaredSchemaType` for an object type, that the schema exposes
+`CompositionError::UndeclaredSchemaMember` for a root field, or
+`CompositionError::UndeclaredSchemaType` for an object type, that the schema exposes
 but no fragment claims — the seam of a capability merged into the composed roots
 yet never registered. The engine's own injected object types (the mutation ack,
 the lane payloads) are themselves derived from the engine's wrapper types and
@@ -1182,7 +1184,7 @@ service exposes must be `<prefix><UpperName>`: name each resolver method
 `<prefix>_<name>` (so `example_board` serves `exampleBoard`), never a bare
 `<prefix>` — a root method named exactly the prefix is refused. The engine
 validates the ident, derives the lowerCamel prefix once, declares it before any
-slice registers, and refuses at boot (`RootPrefixInvalid` /
+slice registers, and refuses at boot (`CompositionError::RootPrefixInvalid` /
 `RootPrefixUndeclared` / `RootFieldOutsidePrefix`, the pod never serves) any
 service that leaves a root field outside its prefix. A service that hand-registers
 `SliceFragment`s without `compose_service!` calls

@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::AccumulatorError;
 use crate::impact::{Impact, TransportEvent};
 use crate::name::{AccumulatorName, NounName};
 use crate::transport::ImpactTransport;
@@ -79,7 +80,7 @@ async fn a_source_faster_than_the_flush_is_refused_at_the_ceiling_instead_of_gro
     assert!(
         matches!(
             refused,
-            EngineError::ChunkBufferFull { limit: 2, ref accumulator } if accumulator.as_str() == "tokens"
+            EngineError::Accumulator(AccumulatorError::ChunkBufferFull { limit: 2, ref accumulator }) if accumulator.as_str() == "tokens"
         ),
         "{refused:?}"
     );

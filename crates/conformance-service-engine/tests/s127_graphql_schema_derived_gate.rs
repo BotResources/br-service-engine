@@ -1,3 +1,4 @@
+use service_engine::error::CompositionError;
 use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
@@ -22,7 +23,7 @@ async fn s127_a_root_field_the_composed_schema_exposes_but_no_slice_declared_fai
     assert!(
         matches!(
             outcome,
-            Err(EngineError::UndeclaredSchemaMember { ref member }) if member == "sampleAssignment"
+            Err(EngineError::Composition(CompositionError::UndeclaredSchemaMember { ref member })) if member == "sampleAssignment"
         ),
         "the boot gate derives the root fields from the composed async-graphql schema and refuses \
          to serve when a real root field (`sampleAssignment`, exposed by the merged query root) is not \

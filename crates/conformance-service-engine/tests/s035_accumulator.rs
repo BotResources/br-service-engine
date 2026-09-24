@@ -1,5 +1,6 @@
 mod accumulator_support;
 
+use service_engine::error::AccumulatorError;
 use std::time::Duration;
 
 use accumulator_support::{rows, state};
@@ -148,7 +149,10 @@ async fn s035_accumulator() {
         .await
         .expect_err("a chunk at an already-durable seq with different content is a typed conflict");
     assert!(
-        matches!(conflict, EngineError::ChunkConflict { seq: 3, .. }),
+        matches!(
+            conflict,
+            EngineError::Accumulator(AccumulatorError::ChunkConflict { seq: 3, .. })
+        ),
         "Durable means this payload is durable, not that some payload occupies the sequence: \
          {conflict:?}"
     );
@@ -216,10 +220,10 @@ async fn s035_accumulator() {
     assert!(
         matches!(
             refused,
-            EngineError::SealedChunk {
+            EngineError::Accumulator(AccumulatorError::SealedChunk {
                 seq: 11,
                 sealed_high_water: 11
-            }
+            })
         ),
         "{refused:?}"
     );
