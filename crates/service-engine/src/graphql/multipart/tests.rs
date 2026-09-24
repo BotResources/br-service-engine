@@ -5,6 +5,7 @@ use futures_util::{Stream, StreamExt, stream};
 
 use super::refusal::MultipartRefusal;
 use super::{MultipartConfig, MultipartPolicy, receive};
+use crate::config::DEFAULT_MAX_BODY_BYTES;
 
 const BOUNDARY: &str = "engine-boundary";
 const CONTENT_TYPE: &str = "multipart/form-data; boundary=engine-boundary";
@@ -33,7 +34,6 @@ fn chunks(body: Vec<u8>) -> impl Stream<Item = Result<Bytes, std::io::Error>> + 
     stream::iter([Ok(Bytes::from(body))])
 }
 
-/// The body as a network delivers it: many small reads, so a bound trips mid-part.
 fn trickle(body: Vec<u8>) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
     let pieces: Vec<_> = body
         .chunks(37)
@@ -56,7 +56,16 @@ async fn refusal(
     declared: Option<u64>,
     policy: &MultipartPolicy,
 ) -> MultipartRefusal {
-    receive(CONTENT_TYPE, declared, body, policy)
+    refusal_within(DEFAULT_MAX_BODY_BYTES, body, declared, policy).await
+}
+
+async fn refusal_within(
+    max_body_bytes: u64,
+    body: impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+    declared: Option<u64>,
+    policy: &MultipartPolicy,
+) -> MultipartRefusal {
+    receive(CONTENT_TYPE, declared, body, max_body_bytes, policy)
         .await
         .expect_err("the request is refused")
 }
@@ -74,9 +83,15 @@ async fn a_well_formed_request_binds_each_file_to_its_variable_paths() {
         part("0", Some("a.txt"), b"alpha"),
         part("1", Some("b.txt"), b"bravo!"),
     ]);
-    let request = receive(CONTENT_TYPE, None, chunks(body), &policy(config))
-        .await
-        .expect("a request within every bound is received");
+    let request = receive(
+        CONTENT_TYPE,
+        None,
+        chunks(body),
+        DEFAULT_MAX_BODY_BYTES,
+        &policy(config),
+    )
+    .await
+    .expect("a request within every bound is received");
     assert_eq!(request.uploads.len(), 2);
     let mut contents = Vec::new();
     for upload in &request.uploads {
@@ -113,6 +128,7 @@ async fn a_request_without_files_is_received_even_when_the_schema_takes_no_uploa
         CONTENT_TYPE,
         None,
         chunks(body),
+        DEFAULT_MAX_BODY_BYTES,
         &MultipartPolicy::new(&MultipartConfig::default(), false),
     )
     .await
@@ -128,12 +144,8 @@ async fn a_declared_length_over_the_body_limit_is_refused_before_the_body_is_pol
             panic!("the body of an over-long declared request was polled")
         },
     );
-    let policy = policy(
-        MultipartConfig::default()
-            .with_max_body_bytes(1024)
-            .with_max_file_bytes(512),
-    );
-    match refusal(never_polled, Some(1025), &policy).await {
+    let policy = policy(MultipartConfig::default().with_max_file_bytes(512));
+    match refusal_within(1024, never_polled, Some(1025), &policy).await {
         MultipartRefusal::TooLarge { limit } => assert_eq!(limit, 1024),
         other => panic!("expected TooLarge, got {other:?}"),
     }
@@ -141,16 +153,13 @@ async fn a_declared_length_over_the_body_limit_is_refused_before_the_body_is_pol
 
 #[tokio::test]
 async fn a_streamed_body_crossing_the_body_limit_is_cut_mid_file() {
-    let config = MultipartConfig::default()
-        .with_max_body_bytes(400)
-        .with_max_file_bytes(400);
-    let (config, _dir) = spooled(config);
+    let (config, _dir) = spooled(MultipartConfig::default().with_max_file_bytes(400));
     let body = body(&[
         part("operations", None, OPERATIONS.as_bytes()),
         part("map", None, br#"{"0":["variables.files.0"]}"#),
         part("0", Some("a.bin"), &[b'x'; 300]),
     ]);
-    match refusal(trickle(body), None, &policy(config)).await {
+    match refusal_within(400, trickle(body), None, &policy(config)).await {
         MultipartRefusal::TooLarge { limit } => assert_eq!(limit, 400),
         other => panic!("expected TooLarge, got {other:?}"),
     }
@@ -183,12 +192,11 @@ async fn a_map_binding_too_many_uploads_is_refused_without_waiting_for_a_file_pa
     ]
     .concat();
     head.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
-    // The file part never arrives: a verdict that needed its bytes would hang here.
-    let body = stream::iter([Ok(Bytes::from(head))]).chain(stream::pending());
+    let file_part_never_arrives = stream::iter([Ok(Bytes::from(head))]).chain(stream::pending());
     let policy = policy(MultipartConfig::default().with_max_files(1));
     let verdict = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        refusal(body, None, &policy),
+        refusal(file_part_never_arrives, None, &policy),
     )
     .await
     .expect("the upload count is judged on `map`, never on the file parts that follow it");
@@ -267,7 +275,14 @@ async fn a_request_that_breaks_the_spec_order_or_mapping_is_malformed() {
             other => panic!("{case}: expected Malformed, got {other:?}"),
         }
     }
-    let unbounded = receive("multipart/form-data", None, chunks(Vec::new()), &policy).await;
+    let unbounded = receive(
+        "multipart/form-data",
+        None,
+        chunks(Vec::new()),
+        DEFAULT_MAX_BODY_BYTES,
+        &policy,
+    )
+    .await;
     assert!(matches!(unbounded, Err(MultipartRefusal::Malformed(_))));
 }
 

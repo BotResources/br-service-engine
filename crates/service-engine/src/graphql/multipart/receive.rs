@@ -12,23 +12,15 @@ use super::refusal::MultipartRefusal;
 
 const OPERATIONS: &str = "operations";
 const MAP: &str = "map";
-/// What `map` may weigh per upload it is allowed to bind (one file name and one variable
-/// path), plus one such allowance for the braces: a `map` past it binds more uploads than
-/// allowed or a path no schema has, and parsing it would cost far more memory than its bytes.
 const MAP_BYTES_PER_UPLOAD: u64 = 1024;
 
 type UploadMap = HashMap<String, Vec<String>>;
 
-/// Reads one GraphQL multipart request under `policy`.
-///
-/// The spec's order is enforced — `operations`, then `map`, then the file parts `map`
-/// names — so every bound is known before a file is spooled: the declared length, the
-/// upload count, and whether each file part is one the request binds. A part that breaks
-/// the order, or that `map` does not name, is refused before anything of it is spooled.
 pub(crate) async fn receive<S, E>(
     content_type: &str,
     declared_length: Option<u64>,
     body: S,
+    max_body_bytes: u64,
     policy: &MultipartPolicy,
 ) -> Result<Request, MultipartRefusal>
 where
@@ -39,17 +31,17 @@ where
         MultipartRefusal::Malformed("the content type is not multipart/form-data with a boundary")
     })?;
     if let Some(length) = declared_length
-        && length > policy.max_body_bytes()
+        && length > max_body_bytes
     {
         return Err(MultipartRefusal::TooLarge {
-            limit: policy.max_body_bytes(),
+            limit: max_body_bytes,
         });
     }
     let map_bytes = MAP_BYTES_PER_UPLOAD
         .saturating_mul(policy.max_files() as u64 + 1)
         .min(policy.max_file_bytes());
     let limits = SizeLimit::new()
-        .whole_stream(policy.max_body_bytes())
+        .whole_stream(max_body_bytes)
         .per_field(policy.max_file_bytes())
         .for_field(MAP, map_bytes);
     let mut multipart =
@@ -136,9 +128,6 @@ async fn named_part<'r>(
     }
 }
 
-/// Streams one file part into an anonymous temporary file in `dir`, rewound for the
-/// resolver. The file has no name to leak: its space is freed when the last handle drops,
-/// whether the request completes, is refused mid-part, or the pod dies.
 async fn spool(mut field: Field<'_>, dir: &Path) -> Result<std::fs::File, MultipartRefusal> {
     let dir = dir.to_path_buf();
     let file = tokio::task::spawn_blocking(move || tempfile::tempfile_in(dir))

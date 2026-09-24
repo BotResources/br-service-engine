@@ -13,21 +13,28 @@ use futures_util::{Stream, StreamExt, TryStreamExt};
 use crate::graphql::multipart::{self, MultipartPolicy, MultipartRefusal};
 use crate::graphql::refusal::{BODY_READ_TIMEOUT_CODE, BODY_TOO_LARGE_CODE, coded_refusal};
 
-/// How an authenticated `POST /graphql` body is read: the multipart bounds, whose
-/// `max_body_bytes` caps every body whatever its content type, and the deadline the whole
-/// body must arrive within.
 #[derive(Debug, Clone)]
 pub(crate) struct BodyPolicy {
-    multipart: MultipartPolicy,
+    max_body_bytes: u64,
     read_timeout: Duration,
+    multipart: MultipartPolicy,
 }
 
 impl BodyPolicy {
-    pub(crate) fn new(multipart: MultipartPolicy, read_timeout: Duration) -> Self {
+    pub(crate) fn new(
+        max_body_bytes: u64,
+        read_timeout: Duration,
+        multipart: MultipartPolicy,
+    ) -> Self {
         Self {
-            multipart,
+            max_body_bytes,
             read_timeout,
+            multipart,
         }
+    }
+
+    pub(crate) fn max_body_bytes(&self) -> u64 {
+        self.max_body_bytes
     }
 
     pub(crate) fn multipart(&self) -> &MultipartPolicy {
@@ -39,9 +46,6 @@ impl BodyPolicy {
     }
 }
 
-/// Why a body yields no GraphQL request: a bound the engine enforces, a multipart shape it
-/// refuses, or a parse error async-graphql reports, rendered exactly as its axum extractor
-/// renders it.
 pub(crate) enum BodyRefusal {
     TooLarge { limit: u64 },
     ReadTimeout { after: Duration },
@@ -83,23 +87,13 @@ impl IntoResponse for BodyRefusal {
     }
 }
 
-/// Reads the GraphQL request out of an authenticated `POST /graphql` body, under `policy`.
-///
-/// The whole read — every content type — must finish within `policy.read_timeout()`, or it
-/// is abandoned and whatever was received (buffered bytes, spooled files) is dropped with
-/// it. A `multipart/*` body goes through the engine's bounded receiver. Every other body is
-/// bounded by `max_body_bytes` (a declared `Content-Length` above it is refused unread, a
-/// chunked body is cut as it crosses it) and handed, as a lazily read stream, to the
-/// function async-graphql-axum's `GraphQLRequest` extractor calls — same content-type
-/// dispatch (an unparseable type is refused before the body is read), same single-request
-/// rule, same rejection — so a JSON client within the bounds sees no change.
 pub(crate) async fn receive(
     headers: &HeaderMap,
     body: Body,
     policy: &BodyPolicy,
 ) -> Result<async_graphql::Request, BodyRefusal> {
     let after = policy.read_timeout();
-    tokio::time::timeout(after, read(headers, body, policy.multipart()))
+    tokio::time::timeout(after, read(headers, body, policy))
         .await
         .unwrap_or(Err(BodyRefusal::ReadTimeout { after }))
 }
@@ -107,7 +101,7 @@ pub(crate) async fn receive(
 async fn read(
     headers: &HeaderMap,
     body: Body,
-    policy: &MultipartPolicy,
+    policy: &BodyPolicy,
 ) -> Result<async_graphql::Request, BodyRefusal> {
     let content_type = headers
         .get(CONTENT_TYPE)
@@ -116,17 +110,20 @@ async fn read(
         .get(CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
-    if let Some(content_type) = content_type.filter(|value| is_multipart(value)) {
+    let limit = policy.max_body_bytes();
+    if let Some(content_type) =
+        content_type.filter(|value| async_graphql_parses_as_multipart(value))
+    {
         return multipart::receive(
             content_type,
             declared_length,
             body.into_data_stream(),
-            policy,
+            limit,
+            policy.multipart(),
         )
         .await
         .map_err(BodyRefusal::Multipart);
     }
-    let limit = policy.max_body_bytes();
     if declared_length.is_some_and(|length| length > limit) {
         return Err(BodyRefusal::TooLarge { limit });
     }
@@ -136,8 +133,6 @@ async fn read(
         .map_err(|error| refusal(error, limit))
 }
 
-/// The body as a stream of chunks that fails with [`BodyLimitExceeded`] on the chunk that
-/// takes it past `limit`: nothing after that chunk is pulled from the connection.
 fn bounded(body: Body, limit: u64) -> impl Stream<Item = std::io::Result<Bytes>> + Unpin {
     let mut received: u64 = 0;
     body.into_data_stream().map(move |chunk| {
@@ -161,16 +156,12 @@ impl std::fmt::Display for BodyLimitExceeded {
 
 impl std::error::Error for BodyLimitExceeded {}
 
-/// The same test async-graphql applies before it hands a body to its own multipart parser,
-/// so no multipart body can reach that unbounded path.
-fn is_multipart(content_type: &str) -> bool {
+fn async_graphql_parses_as_multipart(content_type: &str) -> bool {
     content_type
         .parse::<mime::Mime>()
         .is_ok_and(|mime| mime.type_() == mime::MULTIPART)
 }
 
-/// async-graphql reads the body with `read_to_end` and hands its I/O error back unchanged,
-/// so the limit's own error is recognised under [`ParseRequestError::Io`].
 fn refusal(error: ParseRequestError, limit: u64) -> BodyRefusal {
     match error {
         ParseRequestError::Io(io)

@@ -95,7 +95,7 @@ impl EngineConfig {
                     .into(),
             ));
         }
-        self.multipart.validate()
+        self.validate_body_bounds()
     }
 }
 

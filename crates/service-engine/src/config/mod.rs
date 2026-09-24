@@ -1,3 +1,4 @@
+mod body;
 mod builder;
 mod validate;
 
@@ -35,7 +36,7 @@ pub const DEFAULT_BLOB_REAPER_INTERVAL: Duration = Duration::from_secs(60);
 pub const DEFAULT_SCHEMA_VERSION_LIVENESS: Duration = Duration::from_secs(30);
 pub const DEFAULT_HTTP_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8080);
 pub const DEFAULT_MIGRATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
-pub const DEFAULT_MULTIPART_MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
+pub const DEFAULT_MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
 pub const DEFAULT_MULTIPART_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 pub const DEFAULT_MULTIPART_MAX_FILES: usize = 4;
 pub const DEFAULT_BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -79,6 +80,7 @@ pub struct EngineConfig {
     pub service: Option<String>,
     pub service_version: Option<String>,
     pub blob: Option<BlobConfig>,
+    pub max_body_bytes: u64,
     pub multipart: MultipartConfig,
     pub body_read_timeout: Duration,
 }
@@ -122,6 +124,7 @@ impl EngineConfig {
             service: None,
             service_version: None,
             blob: None,
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             multipart: MultipartConfig::default(),
             body_read_timeout: DEFAULT_BODY_READ_TIMEOUT,
         }
