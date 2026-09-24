@@ -174,17 +174,15 @@ fn retire_stale<'q, R: KnownRow>(
 ) -> QueryBuilder<'q, Postgres> {
     let mut qb = QueryBuilder::<Postgres>::new("DELETE FROM ");
     qb.push(R::TABLE);
-    qb.push(" WHERE TRUE");
+    qb.push(" AS stale WHERE TRUE");
     for column in scope {
-        qb.push(" AND ");
+        qb.push(" AND stale.");
         qb.push(column.name);
         qb.push(" = ");
         column.value.clone().push_bind_to(&mut qb);
     }
     if kept.first().is_some_and(|column| !column.is_empty()) {
-        qb.push(" AND (");
-        qb.push(text_key::<R>());
-        qb.push(") NOT IN (SELECT * FROM unnest(");
+        qb.push(" AND NOT EXISTS (SELECT 1 FROM unnest(");
         for (at, column) in kept.iter().enumerate() {
             if at > 0 {
                 qb.push(", ");
@@ -192,7 +190,23 @@ fn retire_stale<'q, R: KnownRow>(
             qb.push_bind(column.clone());
             qb.push("::text[]");
         }
-        qb.push("))");
+        qb.push(") AS kept(");
+        qb.push(
+            (0..R::KEY.len())
+                .map(|at| format!("k{at}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        qb.push(") WHERE ");
+        qb.push(
+            R::KEY
+                .iter()
+                .enumerate()
+                .map(|(at, name)| format!("kept.k{at} = stale.{name}::text"))
+                .collect::<Vec<_>>()
+                .join(" AND "),
+        );
+        qb.push(")");
     }
     push_returning_key::<R>(&mut qb);
     qb

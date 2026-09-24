@@ -340,7 +340,9 @@ out as `RowScope::whole_table()`; a `RowScope` has no empty form, so a call can
 never widen to the whole table by mistake. The replace is one multi-row upsert per
 ~30,000 bound values that writes a row only when
 a value column differs (`IS DISTINCT FROM`), then one delete of the scoped rows
-the call did not name, each returning the keys it touched — so it stages exactly
+the call did not name (a `NOT EXISTS` anti-join against the named keys, never a
+per-row rescan of them, so a whole-table replace of 100k rows stays in the
+second range), each returning the keys it touched — so it stages exactly
 the rows inserted, changed on any column, or deleted, and nothing for an
 unchanged set. It refuses (`EngineError::Config`) a row outside the scope, a null
 scope column, two rows with one key and different values (keys compare by typed
