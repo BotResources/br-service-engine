@@ -740,15 +740,18 @@ require `std::error::Error`, a mutation fault without a reason is logged as
 `describe(&fault)`. So a fault keeps the error it wraps as its `source()`
 (`#[from]` or `#[source]` with thiserror) and writes only its own context in
 `Display`; it never pre-renders its cause into a `String`. `MutationError`, what
-`MutationExecutor::run` / `run_bulk` return, follows the same rule. A failure
-without a reason (`MutationError::internal`) writes only `mutation failed` and
-keeps its internal text (`describe(&fault)` for a handler fault) as its
-`source()` and its `detail`, which is never client text: `describe(&error)`
-renders `mutation failed: <chain>` for a log, and a resolver that forwards the
-error with `?` into `async_graphql::Error` answers `mutation failed` and nothing
-more. A refusal writes `mutation refused (<CODE>): <detail>`, its `detail` being
-the fault's own `Display`, the only detail a client reads. `?` drops a
-refusal's code extension, so a resolver maps the executor's error with
+`MutationExecutor::run` / `run_bulk` return, follows the same rule and has two
+states and no public field. A failure without a reason
+(`MutationError::internal`) writes only `mutation failed` and keeps its internal
+text (`describe(&fault)` for a handler fault) as its `source()` only:
+`describe(&error)` renders `mutation failed: <chain>` for a log, no accessor
+hands that text out, and a resolver that forwards the error with `?` into
+`async_graphql::Error` answers `mutation failed` and nothing more. A refusal
+(`MutationError::refused(reason, detail)`) writes
+`mutation refused (<CODE>): <detail>`, its detail being the fault's own
+`Display`; `reason()`, `code()` and `refusal_detail()` answer `Some` for a
+refusal only, and `refusal_detail()` is the only detail a client reads. `?`
+drops a refusal's code extension, so a resolver maps the executor's error with
 `graphql::mutation_error`, or runs through `execute` / `ack`. `gate::Reason` is an
 error too (its `Display` is its code), so a mutation that can only refuse
 declares `type Error = Reason`. A service that logs an engine error, or keeps

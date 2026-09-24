@@ -64,8 +64,10 @@ fn internal_engine_failure(context: &'static str, error: EngineError) -> Mutatio
 }
 
 fn handler_failure(mutation: &'static str, fault: &impl MutationFault) -> MutationError {
-    match internal_cause(fault) {
-        Some(cause) => {
+    match fault.reason() {
+        Some(reason) => MutationError::refused(reason, fault.to_string()),
+        None => {
+            let cause = crate::chain::describe(fault);
             tracing::error!(
                 mutation,
                 %cause,
@@ -75,15 +77,7 @@ fn handler_failure(mutation: &'static str, fault: &impl MutationFault) -> Mutati
             );
             MutationError::internal(cause)
         }
-        None => MutationError::refused(fault.reason(), fault.to_string()),
     }
-}
-
-fn internal_cause(fault: &impl MutationFault) -> Option<String> {
-    fault
-        .reason()
-        .is_none()
-        .then(|| crate::chain::describe(fault))
 }
 
 fn mutation_outbound<P: Principal>(
@@ -131,7 +125,7 @@ where
     if let Some(refusal) = staged.policy_refusal {
         let _ = tx.rollback().await;
         return Err(MutationError::refused(
-            Some(refusal.reason),
+            refusal.reason,
             refusal.origin.detail(),
         ));
     }
@@ -203,7 +197,7 @@ where
     if let Some(refusal) = staged.policy_refusal {
         let _ = tx.rollback().await;
         return Err(MutationError::refused(
-            Some(refusal.reason),
+            refusal.reason,
             refusal.origin.detail(),
         ));
     }
@@ -268,7 +262,7 @@ mod tests {
 
         assert_eq!(
             failure,
-            MutationError::refused(Some(Reason::new("BOARD_CLOSED")), "the board is closed")
+            MutationError::refused(Reason::new("BOARD_CLOSED"), "the board is closed")
         );
     }
 }

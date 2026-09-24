@@ -42,9 +42,9 @@ fn internal() -> Error {
 }
 
 pub fn mutation_error(error: MutationError) -> Error {
-    match error.code() {
-        Some(code) => coded_error(code, format!("mutation refused: {}", error.detail)),
-        None => internal(),
+    match (error.code(), error.refusal_detail()) {
+        (Some(code), Some(detail)) => coded_error(code, format!("mutation refused: {detail}")),
+        _ => internal(),
     }
 }
 
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn a_refusal_keeps_its_reason_code_and_detail() {
         let error = mutation_error(MutationError::refused(
-            Some(Reason::new("NOT_OWNER")),
+            Reason::new("NOT_OWNER"),
             "the caller does not own the board",
         ));
         assert_eq!(code(&error), Some(Value::from("NOT_OWNER")));

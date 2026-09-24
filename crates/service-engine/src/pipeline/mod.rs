@@ -51,10 +51,12 @@ impl MutationFault for Reason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MutationError {
-    pub reason: Option<Reason>,
-    pub detail: String,
-    cause: Option<InternalCause>,
+pub struct MutationError(Outcome);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Outcome {
+    Refused { reason: Reason, detail: String },
+    Failed(InternalCause),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -62,21 +64,33 @@ pub struct MutationError {
 struct InternalCause(String);
 
 impl MutationError {
-    pub fn refused(reason: Option<Reason>, detail: impl Into<String>) -> Self {
-        let detail = detail.into();
-        Self {
-            cause: reason.is_none().then(|| InternalCause(detail.clone())),
+    pub fn refused(reason: Reason, detail: impl Into<String>) -> Self {
+        Self(Outcome::Refused {
             reason,
-            detail,
-        }
+            detail: detail.into(),
+        })
     }
 
     pub fn internal(detail: impl Into<String>) -> Self {
-        Self::refused(None, detail)
+        Self(Outcome::Failed(InternalCause(detail.into())))
+    }
+
+    pub fn reason(&self) -> Option<Reason> {
+        match &self.0 {
+            Outcome::Refused { reason, .. } => Some(*reason),
+            Outcome::Failed(_) => None,
+        }
     }
 
     pub fn code(&self) -> Option<&'static str> {
-        self.reason.map(|reason| reason.code())
+        self.reason().map(|reason| reason.code())
+    }
+
+    pub fn refusal_detail(&self) -> Option<&str> {
+        match &self.0 {
+            Outcome::Refused { detail, .. } => Some(detail),
+            Outcome::Failed(_) => None,
+        }
     }
 
     pub(crate) fn fault(detail: String) -> Self {
@@ -90,18 +104,21 @@ impl MutationError {
 
 impl std::fmt::Display for MutationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.reason {
-            Some(reason) => write!(f, "mutation refused ({}): {}", reason.code(), self.detail),
-            None => f.write_str("mutation failed"),
+        match &self.0 {
+            Outcome::Refused { reason, detail } => {
+                write!(f, "mutation refused ({}): {detail}", reason.code())
+            }
+            Outcome::Failed(_) => f.write_str("mutation failed"),
         }
     }
 }
 
 impl std::error::Error for MutationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.cause
-            .as_ref()
-            .map(|cause| cause as &(dyn std::error::Error + 'static))
+        match &self.0 {
+            Outcome::Refused { .. } => None,
+            Outcome::Failed(cause) => Some(cause),
+        }
     }
 }
 

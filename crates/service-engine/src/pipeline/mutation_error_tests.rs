@@ -29,12 +29,12 @@ fn a_reasonless_failure_keeps_its_cause_chain_for_describe() {
     let described = describe(&failure);
 
     assert_eq!(described, format!("mutation failed: {CHAIN}"));
-    assert_eq!(failure.detail, CHAIN);
+    assert_eq!(failure.refusal_detail(), None);
 }
 
 #[test]
 fn a_refusal_writes_its_code_and_detail_and_has_no_hidden_cause() {
-    let refusal = MutationError::refused(Some(Reason::new("BOARD_CLOSED")), "the board is closed");
+    let refusal = MutationError::refused(Reason::new("BOARD_CLOSED"), "the board is closed");
 
     let rendered = refusal.to_string();
 
@@ -43,12 +43,4 @@ fn a_refusal_writes_its_code_and_detail_and_has_no_hidden_cause() {
         "mutation refused (BOARD_CLOSED): the board is closed"
     );
     assert_eq!(describe(&refusal), rendered);
-}
-
-#[test]
-fn a_refusal_without_a_reason_is_a_failure_that_keeps_its_detail_as_cause() {
-    let failure = MutationError::refused(None, CHAIN);
-
-    assert_eq!(failure.to_string(), "mutation failed");
-    assert_eq!(describe(&failure), format!("mutation failed: {CHAIN}"));
 }
