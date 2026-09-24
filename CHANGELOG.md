@@ -4,9 +4,310 @@ All notable changes to `br-service-engine` are documented here. The whole
 workspace ships **one version**: every crate inherits `version.workspace = true`,
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
-The library chart `br-engine-service` has its own version line (major = ops
-contract version) and its own tag `chart/br-engine-service/v{version}`; a
-chart-only release is a `## chart br-engine-service {version}` section.
+The library chart `br-engine-service` has its own version line, independent of
+the crate version (a compatibility matrix kept by the deploying platform pairs
+chart and engine versions), and its own tag `chart/br-engine-service/v{version}`;
+a chart-only release is a `## chart br-engine-service {version}` section.
+
+## 0.4.0 - 2026-09-24
+
+The breaking release after 0.3.4. Paging, the last gesture bound to one pod,
+becomes subscription arguments, so any replica serves any subscription.
+`PassportPrincipal::from_passport` no longer sees the database, so a database
+fault can never answer `401`. The rough edges of the 0.3.1–0.3.4 rollouts are
+fixed: a `Recreate` rollout that changes versions no longer restarts the new pod,
+and an error chain renders each cause once. Good practice is built into the
+primitives: a batched read is required, one aggregate, a parent's children and
+hand SQL are read behind the view's gate or under RLS, and a mirror detects a
+change on any column. No engine service is in production; every break has one
+migration line below.
+
+### Changed (breaking)
+
+- **Paging is subscription arguments.** The window a session renders is what
+  the projector's `populate` returns for the subscription's arguments (`size`, a
+  `before` cursor, a filter), carried in the view's typed `Query`. A window change
+  is a new subscription and a new session: its `Reset` at revision 1 carries the
+  whole new window, including a write committed during the switch. The engine
+  mints every `SessionId`, and nothing ties a window to a pod: no session
+  affinity, no cross-pod relay, any replica count. The `page` mutation, the
+  paging runtime and the client-chosen session are removed.
+- **`window_capacity` bounds a window at attach, never after.** An attach whose
+  population holds more than `window_capacity` keys (default 10,000,
+  `EngineConfig::with_window_capacity`) is refused before the render with the new
+  `AttachError::WindowTooLarge`, answered as `WINDOW_TOO_LARGE`
+  (`WINDOW_TOO_LARGE_CODE`); the message names the capacity only. A
+  whole-collection view (`type Query = ()`) is refused once its collection
+  outgrows the capacity. Through 0.3.4 the capacity bounded the pages one session
+  held and evicted the oldest page.
+- **`PassportPrincipal::from_passport(passport) -> Result<Self, PrincipalRejected>`
+  is pure and synchronous**: no `PgPool`, no `BoxFuture`. The passport alone
+  decides the one `401` a principal can cause, with its exact message. Every
+  database fact goes through a `register_principal_fact` loader, run on every
+  `POST /graphql` and `/graphql/ws` upgrade and again at each principal refresh
+  (the refresh never called `from_passport`, so a fact read there went stale on a
+  live session). A loader fault answers the coded `500` `INTERNAL` with no detail.
+  A loader has no rejecting outcome: a denial read from local data is `FORBIDDEN`
+  or an affordance `reasonCode`, never a `401`.
+- **`max_body_bytes` moves to `EngineConfig`** (`with_max_body_bytes`,
+  `config::DEFAULT_MAX_BODY_BYTES`, same 16 MiB default, still fed by no
+  environment variable). It bounds every authenticated `POST /graphql` body.
+  `EngineConfig::validate` is the one judge of the body bounds;
+  `MultipartConfig::validate` is removed. `MultipartConfig::max_file_bytes` is an
+  `Option<u64>`: unset, the part bound is 8 MiB or `max_body_bytes` when lower;
+  set above `max_body_bytes`, boot refuses it and names both settings.
+- **Faults are errors.** `MutationFault` and `ReactionError` require
+  `std::error::Error + Send + 'static`, and `MutationFault::as_error` is removed.
+  A mutation fault without a reason is logged as `error::describe(&fault)`; a
+  reaction fault's dispatch and dead-letter reason is `describe(&fault)`, source
+  chain included. `gate::Reason` is an error whose `Display` is its code, so
+  `type Error = Reason` still works.
+- **`MutationError` is a refusal or a failure, with no public field.**
+  `MutationError::refused(reason, detail)` takes a `Reason`;
+  `MutationError::internal(detail)` is the failure. `reason()`, `code()` and
+  `refusal_detail()` answer `Some` for a refusal only. A failure writes only
+  `mutation failed` and keeps its internal text as its `source()`, which no
+  accessor hands out: a resolver that forwards it with `?` sends no database or
+  engine text to the client, and `describe(&error)` renders the chain for a log.
+- **The schema-version claim is internal.** The `schema_version` module is
+  crate-private (`claim_schema_version`, `refresh_schema_version`,
+  `version_conflict_reason` leave the API); the claim and its handover run only
+  inside `Engine::boot`, the refresh only in the beat. `EngineConfig::validate`
+  refuses a `beat` that is not below `schema_version_liveness`, and
+  `establish_transport` validates its config before any database work.
+- **One batched read per store, one way to read a row.**
+  `Persistence::read_many` is required and has no per-key default, so a store
+  without a batched read does not compile. `load` leaves the trait: it is
+  `PersistenceExt::load`, implemented once for every store as the one-key
+  `read_many`, so the mutation path, render and the gated reads cannot read a row
+  two ways.
+- **A mirror projection receives its whole batch:**
+  `Project::project(cx, keys: Vec<K>)` gets every key its lead transaction
+  touches, one live change's keys or every key of a rescan (boot, periodic
+  reconcile, leader takeover), so a rescan of N keys costs the statements a
+  rescan of one costs.
+- **`Projection::replace_rows(RowScope, rows)` over `KnownRow` rows is the mirror
+  kit's one row write.** It detects a change on any column: one multi-row upsert
+  per ~30,000 bound values writes a row only when a value column differs, one
+  `NOT EXISTS` delete removes the scoped rows the call did not name, and it stages
+  exactly the rows inserted, changed or deleted. Rows compare by typed key
+  values. `Projection::replace`, `upsert`, `retire`, `replace_one`, `remove`, the
+  `Known` and `KnownScope` traits and `Written::Inserted` are removed; hand SQL
+  goes through `Projection::conn` plus `impact_*`.
+- **`KnownRow` declares `KEY` and `PRINCIPAL`.** `KEY` names the key columns
+  `key()` returns, in order; a write whose key names other columns is refused, and
+  the impact key is the key columns joined by `/` (`foreign_key` is no longer a
+  trait method). `PRINCIPAL` is required: `Some(PrincipalColumn { column, deps })`
+  for a table a principal fact loader reads, and every row the kit stages then
+  also stages `PrincipalFactsChanged` for exactly that principal.
+- **A resolver gets no raw pool.** `GraphqlState::pg()` and `ChunkReader::pool()`
+  are crate-private: a resolver reads through a view, `Query::load_visible`,
+  `Query::behind`, or `Query::read_under_rls`.
+- **`Query::download` gates on the row's visibility** (`load_visible`: the
+  view's `visible`, under RLS when the view declares it) instead of membership of
+  the view's default window, so a row on any page of a paged view downloads.
+- **`Projector::populate` / `ErasedProjector::populate` take a `KeyCeiling`**
+  after the window arguments (the attach read bound, below).
+- **`EngineError` is split by capability.** The chunk and seal variants move to
+  `AccumulatorError` (carried as `EngineError::Accumulator`), the GraphQL schema
+  composition and root-prefix variants to `CompositionError`
+  (`EngineError::Composition`); both convert with `From`. `Config`, `Db`,
+  `Service`, `Encode`, `Decode`, `Blob` and the other variants stay flat.
+
+### Added
+
+- **`Query::load_visible::<View>(key)`**: one aggregate, loaded under RLS when the
+  view declares `RLS`, kept only if the view's `visible` gate (its `Visibility` by
+  default) admits it. A hidden row and an absent key both answer `None`, so a
+  caller cannot probe which keys exist.
+- **`Query::read_under_rls(|conn| …)`**: hand SQL in a read-only transaction with
+  the principal's RLS context applied through the registered `RlsApplier`, rolled
+  back at the end. A write fails; a fault answers `INTERNAL` with the cause in the
+  log; with no `RlsApplier` the read is refused, never run without the context.
+- **`Query::behind::<View>(&key).read(|parent, conn| …)`** (`Behind`): one
+  read-only transaction (under RLS when the view declares it) loads the parent
+  and runs the closure only when the view's `visible` admits it. A hidden parent
+  and an absent key both answer `None` and the closure never runs. The view is
+  the one type argument; the closure's types are inferred.
+- **`RowScope`**: `RowScope::any_of(column, keys)` for a batch (a typed
+  `= ANY($1)`; an empty list matches no row and costs no statement),
+  `RowScope::by(col(..))` with `.and(col(..))`, and the written-out
+  `RowScope::whole_table()`. No scope widens to the whole table by mistake.
+- **`WindowSize`, `Page<K>`, `KeyCeiling` and `Populate::limit(&page)`.** A paged
+  view takes `size: WindowSize` (a GraphQL `Int`; below 1 it is refused with
+  `WINDOW_SIZE_INVALID` / `WINDOW_SIZE_INVALID_CODE` before the resolver runs) and
+  carries a `Page<K>` (a `before` cursor and a size) in its `Query`;
+  `page.population(keys)` gives an open head without a cursor and a fixed ordered
+  page behind one. `populate` binds `cx.limit(&page)`: at attach the page size
+  clamped to `window_capacity + 1`, so an over-capacity attach reads at most one
+  key past the capacity; a repopulation, a repair and a one-shot `fetch_window`
+  run under `KeyCeiling::NONE`.
+- **Windows over capacity are counted:**
+  `service_engine_windows_over_capacity_total{projector, outcome}` counts a
+  refused attach (`refused`, not logged: the client can fix it) and a live window
+  that grew past the capacity (`kept`, one `warn` naming the session, the
+  projector, the size and the capacity). New alert `ServiceEngineWindowOverCapacity`
+  in `observability/service-engine-alerts.yaml`.
+- `PersistenceExt`, `AccumulatorError`, `CompositionError` and `Behind`
+  re-exported at the crate root; `gate::Reason` implements `Display` (its code)
+  and `std::error::Error`; `SessionRuntime::pending_sessions()` (test-support).
+- README section **Adopter SQL and reads**: bound parameters only; one primitive
+  per engine requirement; one mirror per table set with a sum-type key; per-row
+  keys written as one batch; no clock reads in a projection.
+
+### Changed
+
+- **Schema-version handover on a `Recreate` rollout.** A pod that finds another
+  (engine, service) version with a fresh heartbeat no longer exits at once. It
+  re-checks once per `beat` and claims as soon as that heartbeat is older than
+  `schema_version_liveness`; it refuses with `EngineError::SchemaVersionConflict`
+  (loud, both versions named) only if the heartbeat is still fresh at first
+  conflict + `schema_version_liveness` + one `beat` (31 s by default, inside the
+  chart's 150 s startup budget). Each re-check logs a `warn` with both versions
+  and the time left and sets that reason on readiness. Ages use the database
+  `now()`, and booting pods still claim one at a time under the advisory lock. A
+  stopping pod does not expire its own heartbeat.
+- **`error::describe` writes a repeated cause once and is the engine's only
+  renderer.** A `source()` segment is skipped when its parent's text equals it or
+  ends with `: ` followed by it, so sqlx's `error returned from database: <text>`
+  and an async-nats `kind: source` error render their cause once; a mid-phrase
+  match (`cannot open config` over `config`) keeps both. Every engine log site and
+  every failure text the engine keeps goes through it. `EngineError::Http` no
+  longer repeats its source in `Display`.
+- **A live window is never ended for its size**; crossing `window_capacity`
+  after attach is logged and counted (above). Ending it would make a busy view
+  flap: end, re-subscribe, a large `Reset`, grow, end again.
+- An attach's stream exists from the start of the attach, so an attach the
+  client abandons mid-snapshot (a burst of window changes) is dropped at the next
+  render pass or `gc`; `session_ttl` now bounds only an attach that is still not
+  live.
+- `FullEda<T>::read_many` reads every requested snapshot and every later event
+  in two statements and replays each key; a read of keys with no snapshot stops
+  before the event log, so the key-reuse check before a full-EDA create costs one
+  statement.
+
+### Fixed
+
+- Failure texts keep their cause: the dead-letter ops-view staging text keeps
+  the sqlx cause of a staging failure, and a published-language relay failure
+  keeps its NATS error's source.
+- The full-EDA row reads (`read_many`, `keys`, `erase`) return a decode fault as
+  an error instead of panicking.
+
+### Removed
+
+- The 0.3.4 known limitation (one replica per paging service): paging no longer
+  needs the session's pod.
+- `service_engine::page`, `attach_with_session`, `PageReport`,
+  `AttachRequest::session` / `with_session`, `SessionRuntime::page`,
+  `impl From<Uuid> for SessionId`, `EngineError::{NoLiveSession, NoSuchWindow}`,
+  `AttachError::DuplicateSession`, `CONFLICT_CODE`, `NOT_FOUND_CODE` (no engine or
+  known adopter use left). No SDL root field takes a session argument.
+
+### Adopter migration
+
+- **Paging:** a paged view takes `size: WindowSize` and a `before` cursor on its
+  delta subscription, carries them in its `Query` as a `Page<K>`
+  (`WindowSpec::view::<V>(&query, rls)`), binds `cx.limit(&page)` and
+  `page.cursor()` in `populate` and returns `page.population(keys)`. Delete the
+  `page` mutation, every `page` / `attach_with_session` call and every `session`
+  argument, and the matches on `AttachError::DuplicateSession`,
+  `EngineError::NoLiveSession` / `NoSuchWindow`, `CONFLICT_CODE` and
+  `NOT_FOUND_CODE`. A client changes its window by re-subscribing with new
+  variables, keeps its list on screen until the new `Reset`, and does not refetch.
+- **Capacity:** map `AttachError::WindowTooLarge` / `WINDOW_TOO_LARGE`. A
+  whole-collection view (`type Query = ()`) is refused at attach above
+  `window_capacity`: bound it with a `size` or a narrower filter argument, or
+  raise `EngineConfig::with_window_capacity`.
+- **`populate`:** a raw `projector::Projector::populate` or
+  `ErasedProjector::populate` takes a `KeyCeiling` after the window arguments; an
+  implementation that does not page ignores it, a direct caller passes
+  `KeyCeiling::NONE`.
+- **`from_passport`:** delete the `_pg` argument and the
+  `Box::pin(async move { … })` wrapper; move any database read into a fact loader
+  (`engine.register_principal_fact(..)`); a rejection derived from database data
+  becomes `FORBIDDEN` or an affordance `reasonCode`, not a `401`.
+- **Body bounds:** replace `MultipartConfig::with_max_body_bytes(n)` with
+  `EngineConfig::with_max_body_bytes(n)` and `config::DEFAULT_MULTIPART_MAX_BODY_BYTES`
+  with `config::DEFAULT_MAX_BODY_BYTES`; drop any call to
+  `MultipartConfig::validate`.
+- **`max_file_bytes`:** a read of `MultipartConfig::max_file_bytes` gets an
+  `Option`; a service that lowered the part bound only so a lower body bound could
+  boot removes its `with_max_file_bytes` call.
+- **Faults:** derive `thiserror::Error` on every `MutationFault` and
+  `ReactionError` type (or implement `std::error::Error`), keep the wrapped error
+  as `#[from]` / `#[source]` instead of a pre-rendered `String`, write only your
+  own context in `Display`, and delete any `as_error` override.
+- **`MutationError`:** build it with `MutationError::refused(reason, detail)` (a
+  `Reason`, no longer an `Option`) or `MutationError::internal(detail)`; read
+  `reason()`, `code()` and `refusal_detail()` instead of the fields; log it with
+  `error::describe(&error)`; return it from a resolver through
+  `graphql::mutation_error` (or `execute` / `ack`), since a bare `?` drops a
+  refusal's code.
+- **Schema version:** remove any import of `service_engine::schema_version`; boot
+  the engine instead. Keep `ENGINE_BEAT_MS` below `schema_version_liveness`
+  (defaults 1 s and 30 s), or raise `with_schema_version_liveness`. A test that
+  expects `SchemaVersionConflict` keeps the first version beating for the whole
+  wait (a short `with_schema_version_liveness` / `with_beat` keeps it fast).
+- **Persistence:** write `read_many` for every store as one statement per call
+  (`WHERE id = ANY($1)`), never one per key; delete any `load` override (it no
+  longer compiles); bring `PersistenceExt` into scope to call `Store::load`.
+- **Mirror batch:** `fn project<'a>(&'a self, cx: Projection<'a>, keys: Vec<K>)`;
+  build the rows for every key, then write each table once with
+  `cx.replace_rows(RowScope::any_of("<key column>", keys), rows)`. A `Project<()>`
+  takes `_keys: Vec<()>`; a sum-type key splits the batch by variant. For tables
+  linked by a cascading foreign key: upsert the present parents, replace the
+  children over every key, then retire the absent parents.
+- **Mirror writes:** replace `Projection::replace` / `upsert` / `retire` /
+  `replace_one` / `remove` and the `Known` / `KnownScope` impls with `KnownRow`
+  rows written through `replace_rows`, or with set-based hand SQL on `cx.conn()`
+  plus `cx.impact_foreign(..)`. Match `Written::Changed` / `Written::Unchanged`
+  (or call `is_effective`).
+- **`KnownRow`:** add `const KEY` (the key column names, in `key()` order) and
+  `const PRINCIPAL` (`None`, or `Some(PrincipalColumn { column, deps })` for a
+  table a principal fact loader reads); delete `foreign_key` and any hand-written
+  refresh of every principal in scope.
+- **Resolver reads:** a resolver that read through `GraphqlState::pg()` reads
+  through a view, `Query::load_visible`, `Query::behind` or
+  `Query::read_under_rls`; accumulated state is read through
+  `ChunkReader::state::<A>(key)`, never a raw pool.
+- **Downloads:** none for a view whose `populate` derives from its `Visibility`;
+  a view that declares `Unrestricted` but filters by principal in `populate` moves
+  that filter into its `Visibility` or RLS policy first.
+- **Errors:** match `EngineError::Accumulator(AccumulatorError::…)` and
+  `EngineError::Composition(CompositionError::…)` where a match named a chunk,
+  seal, schema-composition or root-prefix variant.
+- A service that kept its own de-duplicating chain renderer drops it for
+  `error::describe`.
+
+### Reference service and battery
+
+- example-service: `examplePageCards`, `CardPage` and
+  `exampleCardPageDeltas(session, …)` are removed; `exampleCardDeltas(boardId,
+  size: Int!, before: UUID)` pages by arguments. Its principal builds from the
+  passport alone. `AppFault` and `ReactionFault` derive `thiserror::Error` and
+  keep their source (so they are no longer `UnwindSafe`); a reply finish or cancel
+  whose `last_seq` is above `i64::MAX` is the new `ReactionFault::Malformed`,
+  dead-lettered on its first delivery instead of retried as a store fault.
+  `CardStore` no longer overrides `load`.
+- Battery: `s162`, `s163`, `s167` and `s183` are retired (their 0.3 paging
+  meanings are gone). New: `s243` (a fact-loader fault answers `500` `INTERNAL`
+  on `POST /graphql` and the `/graphql/ws` upgrade, a rejected passport keeps its
+  `401`), `s244`–`s247` (a wider window is a new session, a page behind the head,
+  the capacity refusal at attach only and the attach read ceiling, a burst of
+  window changes, a write during a switch), `s250`–`s257` (the batched full-EDA
+  read, `load_visible`, `read_under_rls`, `replace_rows` change detection and
+  whole-table choice, the gated read of a parent's children, a whole-table
+  replace within a statement timeout, a rescan written in as many statements for
+  many keys as for one), and `bb17` (two replicas: window changes on either pod,
+  a write through one reaching a subscriber on the other, the dropped session on
+  the pod the client left, `WINDOW_SIZE_INVALID`, no root field naming a
+  session). `s136` and `s187` cover the handover wait and the refusal of a
+  version that keeps beating; `s006` covers the abandoned and the stuck attach.
+  The multipart scenario that shared `s241` with the migrate scenario is renumbered
+  `s248`.
+- Conformance crate: `sample::graphql::base_config` is public,
+  `boot_graphql_service_with` and `AssignmentPage::whole()` are added.
 
 ## 0.3.4 - 2026-09-24
 
@@ -73,17 +374,6 @@ dev for every engine service. Additive: no adopter code changes.
   configuration and no environment variable, and a service's schema and SDL are
   unchanged. Its subscriptions become reachable through the gateway as soon as
   the new image rolls.
-
-### Known limitation
-
-- **Paging a gateway (SSE) session requires the session's pod.** The `page`
-  gesture serves only a live session this pod holds. Through the gateway the
-  session rides an event stream and the `page` mutation is a separate `POST`
-  that may reach another replica, where it is refused
-  (`EngineError::NoLiveSession`, `NOT_FOUND`). Paging a gateway (SSE) session
-  requires the session's pod (one replica) until 0.4.0 moves paging to
-  subscription arguments.
-  Engine services run one replica today.
 
 ## 0.3.3 - 2026-09-23
 
