@@ -1,8 +1,8 @@
-use service_engine::error::AccumulatorError;
 use example_contract::SealFailed;
 use futures_util::future::BoxFuture;
 use service_engine::SealHash;
 use service_engine::accumulator::ChunkSeq;
+use service_engine::error::AccumulatorError;
 use service_engine::error::EngineError;
 use service_engine::pipeline::Reaction;
 
@@ -20,8 +20,7 @@ pub fn reply_finished<'r>(
     Box::pin(async move {
         let cmd = msg.0;
         let last_seq = ChunkSeq::new(cmd.last_seq).map_err(ReactionFault::Malformed)?;
-        let hash = SealHash::from_hex(&cmd.hash)
-            .map_err(ReactionFault::Malformed)?;
+        let hash = SealHash::from_hex(&cmd.hash).map_err(ReactionFault::Malformed)?;
         let text: String = match cx.seal::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
             Ok(text) => text,
             Err(error) => return on_seal_error(cx, cmd.reply_id, cmd.board_id, error),
@@ -44,8 +43,7 @@ pub fn reply_cancelled<'r>(
     Box::pin(async move {
         let cmd = msg.0;
         let last_seq = ChunkSeq::new(cmd.last_seq).map_err(ReactionFault::Malformed)?;
-        let hash = SealHash::from_hex(&cmd.hash)
-            .map_err(ReactionFault::Malformed)?;
+        let hash = SealHash::from_hex(&cmd.hash).map_err(ReactionFault::Malformed)?;
         let text: String = match cx
             .seal_partial::<ReplyText>(&cmd.reply_id, last_seq, hash)
             .await
@@ -92,11 +90,15 @@ fn on_seal_error(
     error: EngineError,
 ) -> Result<(), ReactionFault> {
     match error {
-        EngineError::Accumulator(AccumulatorError::SealHashMismatch { .. }) => answer_seal_failed(cx, reply_id, board_id, error),
+        EngineError::Accumulator(AccumulatorError::SealHashMismatch { .. }) => {
+            answer_seal_failed(cx, reply_id, board_id, error)
+        }
         EngineError::Accumulator(AccumulatorError::SealChunkBeyondLastSeq { .. }) => {
             answer_seal_failed(cx, reply_id, board_id, error)
         }
-        EngineError::Accumulator(AccumulatorError::SealTruncated { .. }) if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS => {
+        EngineError::Accumulator(AccumulatorError::SealTruncated { .. })
+            if cx.delivered() >= SEAL_TRUNCATION_ATTEMPTS =>
+        {
             answer_seal_failed(cx, reply_id, board_id, error)
         }
         other => Err(other.into()),

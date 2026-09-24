@@ -47,7 +47,10 @@ impl Projector for LedgersView {
         ))
     }
 
-    fn project(ledger: &LedgerAggregate, _principal: &AppPrincipal) -> Result<LedgerView, EngineError> {
+    fn project(
+        ledger: &LedgerAggregate,
+        _principal: &AppPrincipal,
+    ) -> Result<LedgerView, EngineError> {
         let state = &ledger.0;
         Ok(LedgerView {
             id: state.id,

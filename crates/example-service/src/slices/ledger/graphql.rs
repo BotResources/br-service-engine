@@ -31,7 +31,12 @@ pub struct LedgerMutation;
 
 #[Object]
 impl LedgerMutation {
-    async fn example_record_entry(&self, ctx: &Context<'_>, id: Uuid, amount: i64) -> Result<MutationAck> {
+    async fn example_record_entry(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+        amount: i64,
+    ) -> Result<MutationAck> {
         service_engine::ack::<AppPrincipal, RecordEntry>(ctx, RecordEntry { id, amount }).await
     }
 }

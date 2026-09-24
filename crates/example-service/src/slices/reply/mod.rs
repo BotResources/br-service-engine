@@ -48,12 +48,10 @@ pub fn register(engine: &mut Engine<AppPrincipal>) -> Result<(), EngineError> {
         engine.register_post_upload_policy::<blob::Attachment, _>(blob::impact_reply_on_upload)?;
         engine.require_post_upload_policy::<blob::Attachment>()?;
     }
-    engine.register_schema_slice(
-        service_engine::graphql::SliceFragment::derive::<
-            graphql::ReplyQuery,
-            graphql::ReplyMutation,
-            graphql::ReplySubscription,
-        >("reply"),
-    )?;
+    engine.register_schema_slice(service_engine::graphql::SliceFragment::derive::<
+        graphql::ReplyQuery,
+        graphql::ReplyMutation,
+        graphql::ReplySubscription,
+    >("reply"))?;
     Ok(())
 }
