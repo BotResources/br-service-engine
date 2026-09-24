@@ -1516,17 +1516,22 @@ it once again owns the row.
 
 The engine publishes the shared deployment topology as a Helm **library** chart,
 `br-engine-service` (`charts/br-engine-service/`), on its own version line that
-starts at `1.0.0`. Chart major 1 **is** ops contract v1; the crate version
+starts at `1.0.0` and moves freely, independent of the crate version, which
 appears nowhere in the chart. A per-service **thin** chart depends on the library
 and supplies only values — no hand-written topology; the fixture
 `charts/br-engine-service/ci/thin-example/` pins that shape. The named templates
 (`br-engine-service.deployment`, `.service`, `.serviceaccount`, `.pdb`,
 `.networkpolicy`) render the topology from those values, and a thin chart invokes
-them from one include-only template. A change to any row in the table below is a
-chart **major** shipped under a **new chart name** (`br-engine-service-v2`); the
-old chart keeps serving old images. `check-chart-version.sh` refuses a `charts/**`
-change without a `Chart.yaml` `version` bump, but it cannot tell a minor from a
-contract-breaking major — that rule is the reviewer's to enforce.
+them from one include-only template. Which chart versions serve which engine
+versions is a compatibility matrix the deploying platform keeps outside this
+repository: an image is paired only with a chart version the matrix declares
+compatible with the engine compiled into it. A change to the
+chart's rendering of a row below is a new chart version and a new matrix entry;
+a row whose text changes with the engine's behaviour alone (the 0.4 `Roll` and
+`Replicas` rows) changes no chart. `check-chart-version.sh` refuses a `charts/**`
+change without a `Chart.yaml` `version` bump. The `Chart.yaml` description still
+says a contract change ships under a new chart name: that text predates the
+matrix and is corrected with the next chart release.
 
 Only names the engine reads belong in the contract: `EngineConfig::from_env`
 reads the app group in one place, `migrate` reads the owner group, and the rest
