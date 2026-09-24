@@ -92,11 +92,11 @@ mod tests {
         );
         assert_eq!(Page::before(1_u32, size(40)).size(), size(40));
         assert_eq!(
-            Page::<u32>::head(size(40)).limit_under(KeyCeiling::attach(100)),
+            Page::<u32>::head(size(40)).limit_under(KeyCeiling::admission(100)),
             40
         );
         assert_eq!(
-            Page::<u32>::head(size(WindowSize::MAX)).limit_under(KeyCeiling::attach(4)),
+            Page::<u32>::head(size(WindowSize::MAX)).limit_under(KeyCeiling::admission(4)),
             5
         );
     }

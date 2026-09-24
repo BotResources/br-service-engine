@@ -55,7 +55,7 @@ impl<P: Principal, Pr: Presence> Projector for PresenceProjector<P, Pr> {
         &'a self,
         _pg: &'a sqlx::PgPool,
         window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         _principal: &'a P,
     ) -> BoxFuture<'a, Result<Population<Self::Key>, EngineError>> {
         Box::pin(async move {
@@ -64,6 +64,7 @@ impl<P: Principal, Pr: Presence> Projector for PresenceProjector<P, Pr> {
                 .keys()
                 .into_iter()
                 .filter(|key| Pr::in_window(key, window))
+                .take(ceiling.get())
                 .collect();
             let interest = Interest::new().on_noun(<Pr::Noun as Noun>::NAME, Dims::EMPTY);
             let predicate: WindowPredicate<Self::Key> = Arc::new(|_key, _impact| false);

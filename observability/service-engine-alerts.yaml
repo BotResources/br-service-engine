@@ -81,30 +81,3 @@ spec:
               the engine runs, labelled by source; service_engine_outbox_pending and
               service_engine_outbox_oldest_age_seconds show a backlog that is still draining before
               any of it is parked.
-        - alert: ServiceEngineWindowOverCapacity
-          expr: >-
-            sum by (service, projector, outcome) (
-              (service_engine_windows_over_capacity_total
-                unless service_engine_windows_over_capacity_total offset 15m)
-              or increase(service_engine_windows_over_capacity_total[15m])
-            ) > 0
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: A view's windows are meeting window_capacity
-            description: >-
-              service_engine_windows_over_capacity_total on {{ $labels.service }} for projector
-              {{ $labels.projector }} counted outcome {{ $labels.outcome }} within the last 15
-              minutes (a series born in that span counts too, since increase() cannot see its
-              first increment). refused is an attach refused with WINDOW_TOO_LARGE because its
-              window held more keys than window_capacity. kept is a live window that grew past
-              window_capacity after its attach: it stays open and keeps delivering, but an attach
-              of that window is refused while it stays that large. Only a window that grows after
-              attach can count kept (an open head, a query window, a window repopulated by a
-              principal-facts refresh or a projector-wide impact), so refused can be the first
-              signal of a whole-collection view outgrowing the bound: bound it with a size or a
-              narrower filter argument on its delta subscription, or raise window_capacity for
-              this service. On a view that already takes a size argument, refused alone means a
-              client asked for a window above window_capacity and was answered
-              WINDOW_TOO_LARGE; the service needs no change.

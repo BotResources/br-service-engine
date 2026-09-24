@@ -3,10 +3,11 @@ use service_engine::error::EngineError;
 use service_engine::full_eda::{self, EventSourced, FullEda};
 use service_engine::name::NounName;
 use service_engine::persistence::Aggregate;
-use sqlx::PgPool;
+use service_engine::view::Populate;
 use uuid::Uuid;
 
 use super::aggregate::{EVENT_VERSION, LedgerEvent, LedgerState, upcast};
+use crate::kernel::AppPrincipal;
 
 #[derive(Clone)]
 pub struct LedgerAggregate(pub LedgerState);
@@ -96,6 +97,6 @@ impl Aggregate for LedgerAggregate {
     }
 }
 
-pub async fn all_ledger_ids(pg: &PgPool) -> Result<Vec<Uuid>, EngineError> {
-    full_eda::keys::<LedgerAggregate>(pg).await
+pub async fn all_ledger_ids(cx: &Populate<'_, AppPrincipal>) -> Result<Vec<Uuid>, EngineError> {
+    full_eda::keys::<LedgerAggregate, _>(cx).await
 }

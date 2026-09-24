@@ -2,10 +2,11 @@ use std::hash::Hash;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sqlx::PgPool;
 
 use crate::error::EngineError;
 use crate::name::NounName;
+use crate::principal::Principal;
+use crate::view::Populate;
 
 mod erase;
 mod read;
@@ -38,8 +39,10 @@ pub trait EventSourced: Send + Sync + Sized + 'static {
     fn upcast(version: i32, payload: &serde_json::Value) -> Result<Self::Event, EngineError>;
 }
 
-pub async fn keys<T: EventSourced>(pool: &PgPool) -> Result<Vec<T::Key>, EngineError> {
-    store::snapshot_keys::<T>(pool).await
+pub async fn keys<T: EventSourced, P: Principal>(
+    cx: &Populate<'_, P>,
+) -> Result<Vec<T::Key>, EngineError> {
+    store::snapshot_keys::<T>(cx.pool(), cx.limit_all()).await
 }
 
 pub(crate) fn encode_key_text<K: Serialize>(key: &K) -> Result<String, EngineError> {

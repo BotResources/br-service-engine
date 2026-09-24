@@ -65,10 +65,10 @@ impl<'a, P: Principal> Query<'a, P> {
             .begin()
             .await
             .or_internal("begin a gated read")?;
-        sqlx::query("SET TRANSACTION READ ONLY")
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             .execute(&mut *tx)
             .await
-            .or_internal("make a gated read read-only")?;
+            .or_internal("make a gated read one read-only snapshot")?;
         if let Some(applier) = applier {
             applier
                 .apply(&mut tx, self.principal)

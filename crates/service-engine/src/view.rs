@@ -123,7 +123,14 @@ where
 {
     let cohorts = <V::Visibility as Visibility>::memberships(cx.principal());
     let mut conn = cx.pool().acquire().await.map_err(EngineError::from)?;
-    let keys = V::Store::keys_in_cohorts(&mut conn, &cohorts).await?;
+    let keys = V::Store::keys_in_cohorts(&mut conn, &cohorts, cx.ceiling).await?;
+    debug_assert!(
+        keys.len() <= cx.ceiling.get(),
+        "keys_in_cohorts returned {} keys under a ceiling of {}: bind ceiling.limit() as the \
+         LIMIT of its query",
+        keys.len(),
+        cx.ceiling.get()
+    );
     Ok(windowed::<V>(keys.into_iter().collect()))
 }
 

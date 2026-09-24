@@ -41,6 +41,18 @@ migration line below.
   whole-collection view (`type Query = ()`) is refused once its collection
   outgrows the capacity. Through 0.3.4 the capacity bounded the pages one session
   held and evicted the oldest page.
+- **A one-shot window fetch is bounded like an attach.** `Query::fetch_window`,
+  `fetch_window_json` and `fetch_view_window` populate under the attach ceiling
+  (`window_capacity + 1`) and refuse a window above `window_capacity` with
+  `WINDOW_TOO_LARGE` before any row is loaded or rendered; through 0.3.4 they read
+  and rendered the whole window, however large.
+- **`CohortIndex::keys_in_cohorts(conn, cohorts, ceiling: KeyCeiling)`** takes the
+  read bound and binds `ceiling.limit()` as its `LIMIT`. `view::cohort_window`
+  passes the populate's ceiling, so a whole-collection cohort attach reads at most
+  `window_capacity + 1` keys before it is refused; in a debug build
+  `cohort_window` panics when a store returns more keys than the ceiling.
+- **`full_eda::keys::<T, P>(cx: &Populate<'_, P>)`** takes the populate context
+  instead of a pool and reads at most `cx.limit_all()` keys.
 - **`PassportPrincipal::from_passport(passport) -> Result<Self, PrincipalRejected>`
   is pure and synchronous**: no `PgPool`, no `BoxFuture`. The passport alone
   decides the one `401` a principal can cause, with its exact message. Every
@@ -121,15 +133,17 @@ migration line below.
   view declares `RLS`, kept only if the view's `visible` gate (its `Visibility` by
   default) admits it. A hidden row and an absent key both answer `None`, so a
   caller cannot probe which keys exist.
-- **`Query::read_under_rls(|conn| …)`**: hand SQL in a read-only transaction with
-  the principal's RLS context applied through the registered `RlsApplier`, rolled
-  back at the end. A write fails; a fault answers `INTERNAL` with the cause in the
+- **`Query::read_under_rls(|conn| …)`**: hand SQL in a `REPEATABLE READ READ
+  ONLY` transaction with the principal's RLS context applied through the
+  registered `RlsApplier`, rolled back at the end; every statement reads one
+  snapshot. A write fails; a fault answers `INTERNAL` with the cause in the
   log; with no `RlsApplier` the read is refused, never run without the context.
 - **`Query::behind::<View>(&key).read(|parent, conn| …)`** (`Behind`): one
-  read-only transaction (under RLS when the view declares it) loads the parent
-  and runs the closure only when the view's `visible` admits it. A hidden parent
-  and an absent key both answer `None` and the closure never runs. The view is
-  the one type argument; the closure's types are inferred.
+  `REPEATABLE READ READ ONLY` transaction (under RLS when the view declares it)
+  loads the parent and runs the closure only when the view's `visible` admits it;
+  the gate and the closure read one snapshot. A hidden parent and an absent key
+  both answer `None` and the closure never runs. The view is the one type
+  argument; the closure's types are inferred.
 - **`RowScope`**: `RowScope::any_of(column, keys)` for a batch (a typed
   `= ANY($1)`; an empty list matches no row and costs no statement),
   `RowScope::by(col(..))` with `.and(col(..))`, and the written-out
@@ -142,21 +156,24 @@ migration line below.
   `page.population(keys)` gives an open head without a cursor and a fixed ordered
   page behind one. `populate` binds `cx.limit(&page)`: at attach the page size
   clamped to `window_capacity + 1`, so an over-capacity attach reads at most one
-  key past the capacity; a repopulation, a repair and a one-shot `fetch_window`
-  run under `KeyCeiling::NONE`. A populate with no page (a whole-collection
-  read) binds `Populate::limit_all()`, the ceiling itself, so its refused attach
-  is bounded the same way. `WindowSize::new(u32) -> Result<WindowSize,
-  WindowSizeOutOfRange>` (`WindowSizeOutOfRange` is re-exported at the crate
-  root) and `WindowSize::MAX: u32`, equal to `i32::MAX`, the largest GraphQL
-  `Int`.
+  key past the capacity; a one-shot window fetch reads under the same ceiling,
+  and a repopulation and a repair run under `KeyCeiling::NONE`. A populate with
+  no page (a whole-collection read) binds `Populate::limit_all()`, the ceiling
+  itself, so its refused attach is bounded the same way. `WindowSize::new(u32) ->
+  Result<WindowSize, WindowSizeOutOfRange>` (`WindowSizeOutOfRange` is
+  re-exported at the crate root) and `WindowSize::MAX: u32`, equal to
+  `i32::MAX`, the largest GraphQL `Int`. This shape is the contract: the size is a
+  plain GraphQL `Int`, the window arguments travel in the view's typed `Query` as
+  a `Page<K>`, and a size below 1 is `WINDOW_SIZE_INVALID`.
 - **Windows over capacity are counted:**
   `service_engine_windows_over_capacity_total{projector, outcome}`
   (`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, listed in `metrics::ALL`; the new
-  label `metrics::LABEL_PROJECTOR` beside `LABEL_OUTCOME`) counts a
-  refused attach (`refused`, not logged: the client can fix it) and a live window
-  that grew past the capacity (`kept`, one `warn` naming the session, the
-  projector, the size and the capacity). New alert `ServiceEngineWindowOverCapacity`
-  in `observability/service-engine-alerts.yaml`.
+  label `metrics::LABEL_PROJECTOR` beside `LABEL_OUTCOME`) counts a refused
+  attach or one-shot window fetch (`refused`, not logged: the client can fix it)
+  and a live window that grew past the capacity (`kept`, one `warn` naming the
+  session, the projector, the size and the capacity). No shipped alert watches
+  it: a client that asks for a `size` above the capacity counts `refused` while
+  the service is sound.
 - `PersistenceExt`, `AccumulatorError`, `CompositionError` and `Behind`
   re-exported at the crate root; `gate::Reason` implements `Display` (its code)
   and `std::error::Error`; `SessionRuntime::pending_sessions()` (test-support).
@@ -238,8 +255,18 @@ migration line below.
   key past the capacity.
 - **`populate`:** a raw `projector::Projector::populate` or
   `ErasedProjector::populate` takes a `KeyCeiling` after the window arguments; an
-  implementation that does not page ignores it, a direct caller passes
-  `KeyCeiling::NONE`.
+  implementation binds `ceiling.limit()` as the `LIMIT` of the read that has no
+  page (one whose population is not read from the database ignores it), a direct
+  caller passes `KeyCeiling::NONE`.
+- **One-shot window fetch:** a resolver that calls `fetch_window`,
+  `fetch_window_json` or `fetch_view_window` on a window that can outgrow
+  `window_capacity` bounds it with its arguments; the refusal already reaches the
+  client as `WINDOW_TOO_LARGE`.
+- **`keys_in_cohorts`:** add the `ceiling: KeyCeiling` parameter and bind
+  `ceiling.limit()` as the `LIMIT` of the query (`… WHERE tenant_id = ANY($1)
+  LIMIT $2`).
+- **`full_eda::keys`:** pass the `Populate` context instead of a pool:
+  `full_eda::keys::<T, _>(cx)`.
 - **`from_passport`:** delete the `_pg` argument and the
   `Box::pin(async move { … })` wrapper; move any database read into a fact loader
   (`engine.register_principal_fact(..)`); a rejection derived from database data
@@ -307,7 +334,8 @@ migration line below.
   keep their source (so they are no longer `UnwindSafe`); a reply finish or cancel
   whose `last_seq` is above `i64::MAX` is the new `ReactionFault::Malformed`,
   dead-lettered on its first delivery instead of retried as a store fault.
-  `CardStore` no longer overrides `load`.
+  `CardStore` no longer overrides `load`. The ledger and `OrgBoardsRls` windows
+  and the roster library view read at most the populate's ceiling.
 - Battery: `s162`, `s163`, `s167` and `s183` are retired (their 0.3 paging
   meanings are gone). New: `s243` (a fact-loader fault answers `500` `INTERNAL`
   on `POST /graphql` and the `/graphql/ws` upgrade, a rejected passport keeps its
@@ -325,9 +353,17 @@ migration line below.
   session). `s136` and `s187` cover the handover wait and the refusal of a
   version that keeps beating; `s006` covers the abandoned and the stuck attach.
   The multipart scenario that shared `s241` with the migrate scenario is renumbered
-  `s248`.
+  `s248`. `s259` covers a whole-collection cohort attach and a one-shot window
+  fetch over `window_capacity`: each asks the store for `window_capacity + 1` keys
+  and is refused before any row is read. `s252` and `s254` prove that the
+  statements of `read_under_rls`, and the gate and the closure of
+  `behind(..).read(..)`, read one snapshot: a row committed between them is not
+  seen.
 - Conformance crate: `sample::graphql::base_config` is public,
-  `boot_graphql_service_with` and `AssignmentPage::whole()` are added.
+  `boot_graphql_service_with`, `boot_counted_service` (with `sample::counted`, a
+  cohort view whose store records the ceilings it is asked for and the rows it
+  reads), `sample::latch::AdvisoryLatch` and `AssignmentPage::whole()` are added;
+  the sample's whole-collection reads bind the ceiling.
 
 ### CI
 

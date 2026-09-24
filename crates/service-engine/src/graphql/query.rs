@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use crate::blobs::{BlobRef, Disposition, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
-use crate::graphql::error::{OrInternal, engine_data, internal_fault};
+use crate::graphql::error::{OrInternal, attach_error, engine_data, internal_fault};
 use crate::graphql::state::GraphqlState;
 use crate::page::KeyCeiling;
 use crate::persistence::{Aggregate, Persistence};
@@ -14,6 +14,7 @@ use crate::principal::Principal;
 use crate::projector::Projector;
 use crate::render::group::Renderer;
 use crate::session::WindowParams;
+use crate::session::capacity::admit;
 use crate::wire::{KeyBytes, ViewBytes};
 
 mod read;
@@ -179,11 +180,18 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
+        let capacity = self.state.runtime().config().window_capacity;
         let population = erased
-            .populate(self.state.pg(), &params, KeyCeiling::NONE, self.principal)
+            .populate(
+                self.state.pg(),
+                &params,
+                KeyCeiling::admission(capacity),
+                self.principal,
+            )
             .await
             .or_internal("populate a query window")?;
         let keys = member_keys(&population);
+        admit(&projector.name(), keys.len(), capacity).map_err(attach_error)?;
         let rendered = self
             .render(&erased, erased.renders_under_rls(), &keys)
             .await

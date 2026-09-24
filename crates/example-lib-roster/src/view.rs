@@ -71,11 +71,12 @@ impl<P: RosterPrincipal> Projector for RosterUsers<P> {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         _principal: &'a P,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT user_id FROM roster.known_persons")
+            let rows = sqlx::query("SELECT user_id FROM roster.known_persons LIMIT $1")
+                .bind(ceiling.limit())
                 .fetch_all(pg)
                 .await?;
             Ok(Population::Keys(

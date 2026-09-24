@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_graphql::{Context, Object, Result};
+use async_graphql::{Context, MergedObject, Object, Result};
 use service_engine::error::EngineError;
 use service_engine::graphql::SliceFragment;
 use service_engine::name::ProjectorName;
@@ -18,6 +18,7 @@ use crate::sample::gated::{VisibleAssignments, load_candidates};
 use crate::sample::principal::{SamplePrincipal, SamplePrincipalResolver, SampleRls};
 
 use super::boot::{GraphqlService, base_config, free_loopback_addr, sample_prefix};
+use super::snapshot::SnapshotReads;
 
 service_engine::open_access!(
     pub TenantPolicy = "sample_assignment rows are filtered by the tenant RLS policy"
@@ -66,11 +67,14 @@ fn view_of(row: &AssignmentRow) -> AssignmentView {
     }
 }
 
+#[derive(MergedObject, Default)]
+pub struct ReadsQueryRoot(GatedReads, SnapshotReads);
+
 #[derive(Default)]
-pub struct ReadsQueryRoot;
+pub struct GatedReads;
 
 #[Object]
-impl ReadsQueryRoot {
+impl GatedReads {
     async fn sample_visible_assignment(
         &self,
         ctx: &Context<'_>,
@@ -177,6 +181,8 @@ fn reads_slice() -> SliceFragment {
             "sampleJournalWriteAttempt",
             "sampleAssignmentNotes",
             "sampleNoteWriteAttempt",
+            "sampleNotesAcrossLatch",
+            "sampleJournalAcrossLatch",
         ]
         .map(str::to_string)
         .into(),
@@ -219,7 +225,7 @@ pub async fn boot_reads_service(
     let engine_stop = engine.shutdown_handle();
     let state = Arc::new(engine.graphql_state());
     let schema = engine_schema(
-        ReadsQueryRoot,
+        ReadsQueryRoot::default(),
         async_graphql::EmptyMutation,
         async_graphql::EmptySubscription,
         state.clone(),

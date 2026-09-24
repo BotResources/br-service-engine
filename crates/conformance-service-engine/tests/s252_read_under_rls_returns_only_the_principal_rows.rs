@@ -1,8 +1,11 @@
 mod graphql_support;
 
+use std::time::Duration;
+
 use br_core_auth::PassportHeader;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{boot_reads_service, passport_for};
+use conformance_service_engine::sample::latch::AdvisoryLatch;
 use conformance_service_engine::sample::render::assignment;
 use graphql_support::post_json;
 use uuid::Uuid;
@@ -132,6 +135,64 @@ async fn s252_without_a_registered_applier_the_read_fails_closed() {
     assert!(
         body["data"].is_null() || body["data"]["sampleAssignmentJournal"].is_null(),
         "no row leaks out of a refused read: {body}"
+    );
+
+    service.shutdown().await;
+    drop(nats);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s252_every_statement_of_the_read_sees_one_snapshot() {
+    let db = TestDb::fresh().await;
+    let nats = TestNats::spawn().await;
+    nats.provision().await;
+    let pool = db.app_pool().clone();
+
+    let tenant = Uuid::now_v7();
+    assignment(&pool, tenant, "alpha").await;
+    assignment(&pool, tenant, "gamma").await;
+    let service = boot_reads_service(&db, nats.nats().await, "pod-s252-snapshot", true).await;
+    let passport = passport_for(Uuid::now_v7(), tenant).to_header();
+
+    let mut latch = AdvisoryLatch::hold(db.owner_pool()).await;
+    let pending = tokio::spawn({
+        let base_url = service.base_url.clone();
+        let passport = passport.clone();
+        let query = format!(
+            "query {{ sampleJournalAcrossLatch(latch: {}) }}",
+            latch.key()
+        );
+        async move { post_json(&base_url, Some(&passport), &query, serde_json::json!({})).await }
+    });
+    latch.await_waiter(Duration::from_secs(10)).await;
+    assignment(
+        db.owner_pool(),
+        tenant,
+        "committed between the two statements",
+    )
+    .await;
+    latch.release().await;
+    let (status, body) = pending.await.expect("the read answers");
+    assert_eq!(status, 200, "the read answers over HTTP: {body}");
+    assert_eq!(
+        body["data"]["sampleJournalAcrossLatch"],
+        serde_json::json!([2, 2]),
+        "a row committed between two statements of the read is seen by neither: the read is one \
+         snapshot: {body}"
+    );
+
+    let (_, later) = post_json(
+        &service.base_url,
+        Some(&passport),
+        JOURNAL,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        ids(&later).len(),
+        3,
+        "the row was committed; the next read sees it: {later}"
     );
 
     service.shutdown().await;

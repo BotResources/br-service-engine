@@ -54,8 +54,7 @@ pub(crate) fn attach_error(error: AttachError) -> Error {
         AttachError::WindowTooLarge { capacity, .. } => coded_error(
             WINDOW_TOO_LARGE_CODE,
             format!(
-                "the window holds more than {capacity} keys; narrow it with the subscription's \
-                 arguments"
+                "the window holds more than {capacity} keys; narrow it with the window's arguments"
             ),
         ),
         _ => internal_error("attach a subscription", &error),

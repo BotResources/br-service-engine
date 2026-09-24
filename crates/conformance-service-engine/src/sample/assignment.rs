@@ -137,13 +137,16 @@ impl CohortIndex for AssignmentStore {
     fn keys_in_cohorts<'a>(
         conn: &'a mut PgConnection,
         cohorts: &'a [Cohort],
+        ceiling: KeyCeiling,
     ) -> BoxFuture<'a, Result<Vec<Uuid>, EngineError>> {
         Box::pin(async move {
             let tenants = Cohort::uuids(cohorts, "tenant");
-            let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = ANY($1)")
-                .bind(&tenants)
-                .fetch_all(conn)
-                .await?;
+            let rows =
+                sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = ANY($1) LIMIT $2")
+                    .bind(&tenants)
+                    .bind(ceiling.limit())
+                    .fetch_all(conn)
+                    .await?;
             Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())
         })
     }
@@ -183,14 +186,16 @@ impl Projector for AssignmentProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
-        _ceiling: KeyCeiling,
+        ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
-            let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1")
-                .bind(principal.tenant())
-                .fetch_all(pg)
-                .await?;
+            let rows =
+                sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1 LIMIT $2")
+                    .bind(principal.tenant())
+                    .bind(ceiling.limit())
+                    .fetch_all(pg)
+                    .await?;
             Ok(Population::Keys(
                 rows.iter()
                     .map(|r| r.get::<Uuid, _>("id"))

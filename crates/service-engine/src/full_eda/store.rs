@@ -175,11 +175,13 @@ fn snapshot_value<T: EventSourced>(aggregate: &T) -> Result<serde_json::Value, E
 
 pub(crate) async fn snapshot_keys<T: EventSourced>(
     pool: &PgPool,
+    limit: i64,
 ) -> Result<Vec<T::Key>, EngineError> {
     let rows = sqlx::query(&format!(
-        "SELECT key FROM {TABLE_EVENT_SNAPSHOT} WHERE noun = $1"
+        "SELECT key FROM {TABLE_EVENT_SNAPSHOT} WHERE noun = $1 LIMIT $2"
     ))
     .bind(T::NOUN.as_str())
+    .bind(limit)
     .fetch_all(pool)
     .await?;
     rows.iter()

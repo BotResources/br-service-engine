@@ -98,7 +98,7 @@ impl Projector for OrgBoardsRls {
     ) -> Result<Population<Uuid>, EngineError> {
         let mut tx = cx.pool().begin().await?;
         AppRls.apply(&mut tx, cx.principal()).await?;
-        let ids = store::org_board_ids(&mut *tx).await?;
+        let ids = store::org_board_ids(&mut *tx, cx.limit_all()).await?;
         tx.rollback().await?;
         Ok(Population::Keys(ids.into_iter().collect()))
     }

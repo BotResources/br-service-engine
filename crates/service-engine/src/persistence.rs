@@ -8,6 +8,7 @@ use sqlx::PgConnection;
 use crate::blobs::BlobRef;
 use crate::cohort::Cohort;
 use crate::error::EngineError;
+use crate::page::KeyCeiling;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceStyle {
@@ -108,6 +109,7 @@ pub trait CohortIndex: Persistence {
     fn keys_in_cohorts<'a>(
         conn: &'a mut PgConnection,
         cohorts: &'a [Cohort],
+        ceiling: KeyCeiling,
     ) -> BoxFuture<'a, Result<Vec<Self::Key>, EngineError>>;
 }
 

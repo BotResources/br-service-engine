@@ -137,11 +137,12 @@ where
         .collect())
 }
 
-pub async fn org_board_ids<'e, E>(exec: E) -> Result<Vec<Uuid>, EngineError>
+pub async fn org_board_ids<'e, E>(exec: E, limit: i64) -> Result<Vec<Uuid>, EngineError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let rows = sqlx::query("SELECT id FROM org_board")
+    let rows = sqlx::query("SELECT id FROM org_board LIMIT $1")
+        .bind(limit)
         .fetch_all(exec)
         .await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())

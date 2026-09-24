@@ -8,7 +8,7 @@ use service_engine::population::Population;
 use service_engine::projector::Emission;
 use service_engine::view::{Populate, Projector as ViewProjector, cohort_window};
 use service_engine::{Cohort, CohortKey, Page, WindowSize};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::sample::assignment::{Assignment, AssignmentRow, AssignmentStore, AssignmentView};
@@ -48,10 +48,11 @@ async fn newest_keys(
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
 }
 
-async fn tenant_keys(pg: &PgPool, tenant: Uuid) -> Result<BTreeSet<Uuid>, EngineError> {
-    let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1")
-        .bind(tenant)
-        .fetch_all(pg)
+async fn tenant_keys(cx: &Populate<'_, SamplePrincipal>) -> Result<BTreeSet<Uuid>, EngineError> {
+    let rows = sqlx::query("SELECT id FROM sample_assignment WHERE tenant_id = $1 LIMIT $2")
+        .bind(cx.principal().tenant())
+        .bind(cx.limit_all())
+        .fetch_all(cx.pool())
         .await?;
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
 }
@@ -125,9 +126,7 @@ impl ViewProjector for CohortAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        Ok(Population::Keys(
-            tenant_keys(cx.pool(), cx.principal().tenant()).await?,
-        ))
+        Ok(Population::Keys(tenant_keys(cx).await?))
     }
 
     fn project(
@@ -197,9 +196,7 @@ impl ViewProjector for ThresholdAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        Ok(Population::Keys(
-            tenant_keys(cx.pool(), cx.principal().tenant()).await?,
-        ))
+        Ok(Population::Keys(tenant_keys(cx).await?))
     }
 
     fn project(
@@ -231,9 +228,7 @@ impl ViewProjector for PerImpactAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
-        Ok(Population::Keys(
-            tenant_keys(cx.pool(), cx.principal().tenant()).await?,
-        ))
+        Ok(Population::Keys(tenant_keys(cx).await?))
     }
 
     fn project(

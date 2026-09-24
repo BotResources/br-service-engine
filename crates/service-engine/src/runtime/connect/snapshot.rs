@@ -52,7 +52,7 @@ impl<P: Principal> SessionRuntime<P> {
                 .populate(
                     &self.pg,
                     &spec.params,
-                    KeyCeiling::attach(self.config.window_capacity),
+                    KeyCeiling::admission(self.config.window_capacity),
                     principal,
                 )
                 .await

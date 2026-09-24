@@ -43,10 +43,7 @@ impl Projector for LedgersView {
         _query: &(),
     ) -> Result<Population<Uuid>, EngineError> {
         Ok(Population::Keys(
-            store::all_ledger_ids(cx.pool())
-                .await?
-                .into_iter()
-                .collect(),
+            store::all_ledger_ids(cx).await?.into_iter().collect(),
         ))
     }
 

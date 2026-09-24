@@ -50,8 +50,8 @@ battery-backed.
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
 | `persistence` | `Persistence` trait + `Aggregate` (`Clone`); CRUD, soft-EDA and full-EDA behind one trait; a **required** non-locking `read_many` (one batched read per call — `WHERE id = ANY($1)` for a row store; there is no per-key default, so a store must write `read_many` to compile, and its contract is set-based: one statement per call, never one per key — the compiler checks that it exists, not how many statements it issues) with `load` on the blanket `PersistenceExt` as the one-key `read_many` (not overridable, so the mutation path, render and the gated reads read a row one way), `save`/`create`, a `lock` the write pipeline calls before `load` (default no-op; the reference stores implement it as `Self::row_lock(conn, table, key)`, the defaulted `SELECT … FOR UPDATE` helper (which locks the row by its `id` column), as an optimisation — the engine already takes a per-key transaction advisory lock in the pipeline's `cx.load` / `cx.load_many` (`Ops`), never in `PersistenceExt::load`, so a lock-less store still serialises its writers while a direct `Store::load` call serialises nothing), and a `delete` the pipeline calls from `cx.delete` (default refuses with `EngineError::DeleteUnsupported`, so a store that never deletes writes nothing); log-style events reach `save` via `Aggregate::pending_events` |
 | `error` | `EngineError`, flat for the faults a service meets (`Config`, `Db`, `Service`, `Encode`, `Decode`, `Blob`, …), with capability groups carried as variants: `AccumulatorError` (chunks and seals, `EngineError::Accumulator`) and `CompositionError` (graphql schema composition and root prefix, `EngineError::Composition`); `AttachError`, `TransportError` / `RelayError`, `DecodeError` / `CronError`; `describe`, the one renderer of an error and its `source()` chain, each cause written once |
-| `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys` lists a noun's keys for a window `populate`. A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
-| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
+| `full_eda` | the full-EDA kit: `EventSourced` (a slice's aggregate declares `NOUN`, `EVENT_VERSION`, a `SNAPSHOT_EVERY` cadence, `to_snapshot`/`from_snapshot`, `genesis`, `apply`, `check_hydrated`, `upcast`) and `FullEda<T>` — a `Persistence` implementation over the engine's own generic `event_log` + `event_snapshot` tables (keyed by noun). Generic append with seq arithmetic and per-key uniqueness, replay from the snapshot with the hydration barrier, a configurable snapshot cadence (not on every save), the upcasting hook, and `full_eda::erase` (rewrite a person's events in place, then re-snapshot from a genesis replay of the rewritten log in the same transaction). `full_eda::keys::<T, _>(cx)` lists a noun's keys for a window `populate`, at most the populate's ceiling (`cx.limit_all()`). A slice sets `type Store = FullEda<Self>` and writes no persistence SQL |
+| `gate`, `visibility` | `Gate`/`Reason` (a reason code is `SCREAMING_SNAKE_CASE` matching `^[A-Z][A-Z0-9_]+$`, validated in `Reason::new` — a mistyped literal is a compile error — and `Reason::parse` for a code decoded from the wire), `Affordances`, the `gated!` macro and `check_gates_match_affordances` (affordance == mutation check, one function); `Visibility` cohorts/memberships deriving the `visible` filter and the `window` membership from one declaration, with `check_window_matches_visibility`; the derived window shape (`LIVE`/`DEPS`), the `CohortIndex` read seam (`keys_in_cohorts(conn, cohorts, ceiling)`, which binds `ceiling.limit()` as its `LIMIT`) plus `view::cohort_window`/`windowed`, and `Unrestricted<_, _, Why>` carrying an `open_access!` `AccessReason` |
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait (`VERSION`), `register_offer`, `register_offer_trigger::<O, T>` (a `T: OfferTrigger<O>` in the offer's own slice re-publishes the offer when it changes; its `row_key()` names the offer row's store key and its `key_from()` the offer's KvKey), leader-drained dirty keys, versioned watermark, boot + periodic reconcile, `OfferManifest` published at reconcile |
@@ -61,11 +61,11 @@ battery-backed.
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
-| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode; built in Rust with `WindowSize::new(u32) -> Result<_, WindowSizeOutOfRange>`, which refuses 0 and anything above `WindowSize::MAX`, `i32::MAX`, the largest GraphQL `Int`) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, `KeyCeiling::NONE` elsewhere); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling, and a populate with no page binds `cx.limit_all()`, the ceiling itself |
+| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode; built in Rust with `WindowSize::new(u32) -> Result<_, WindowSizeOutOfRange>`, which refuses 0 and anything above `WindowSize::MAX`, `i32::MAX`, the largest GraphQL `Int`) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach and at a one-shot window fetch, `KeyCeiling::NONE` elsewhere); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling, and a populate with no page binds `cx.limit_all()`, the ceiling itself |
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a read-only transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`, a window above `window_capacity` refused with `WINDOW_TOO_LARGE` as at attach; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see, in the parent's snapshot (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a `REPEATABLE READ READ ONLY` transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -721,8 +721,9 @@ begin or commit, an engine wiring fault, a handler error whose
 `error` with its whole `source()` chain where it converts the error. A handler
 fault is in that chain by construction: `MutationFault` requires
 `std::error::Error`, and the engine logs the fault with `error::describe`. The
-few failures a client can act on keep a specific code: attaching a window whose
-population exceeds `window_capacity` is `WINDOW_TOO_LARGE`
+few failures a client can act on keep a specific code: attaching a window, or
+fetching one once (`fetch_window`, `fetch_window_json`, `fetch_view_window`),
+whose population exceeds `window_capacity` is `WINDOW_TOO_LARGE`
 (`graphql::WINDOW_TOO_LARGE_CODE`; the message names the capacity, never the
 projector nor the population size, which may count rows the caller cannot see),
 a `WindowSize` argument below 1 is `WINDOW_SIZE_INVALID`
@@ -851,8 +852,11 @@ member) and a membership change repopulates the window. `LIVE = false` is the
 explicit override for a closed `Keys` snapshot; returning a `Population` from
 `populate` directly bypasses inference. A cohort view reads **only the caller's
 rows** through the store's `CohortIndex` seam
-(`keys_in_cohorts(conn, &memberships)`) — one indexed query on the cohort
-columns, never a table scan filtered in memory. A cohort is a `(dimension,
+(`keys_in_cohorts(conn, &memberships, ceiling)`) — one indexed query on the
+cohort columns, never a table scan filtered in memory, and bounded: it binds
+`ceiling.limit()` as its `LIMIT`, so a whole-collection cohort attach reads at
+most `window_capacity + 1` keys before it is refused (a debug build panics when
+a store returns more keys than the ceiling). A cohort is a `(dimension,
 value)` the service names — `Cohort::uuid("manager", id)`, `Cohort::flag("public",
 true)`, `Cohort::text`, `Cohort::int`; the engine hashes it to a `CohortKey` for
 routing, and the store never stores the hash. `keys_in_cohorts` binds against the
@@ -936,7 +940,11 @@ is refused before the resolver runs with `WINDOW_SIZE_INVALID`
 (`service_engine::WINDOW_SIZE_INVALID_CODE`), and a stored window argument
 cannot carry one either, because `WindowSize` refuses it on decode, so a zero or
 negative bound never reaches the database as a `LIMIT`. Declaring a `WindowSize`
-argument leaves every other `Int` argument of the schema as it was.
+argument leaves every other `Int` argument of the schema as it was. This shape is
+the contract: the size is a plain GraphQL `Int` (no custom scalar reaches the
+SDL), the window arguments travel in the view's typed `Query` (a `Page<K>` there,
+never state the engine keeps between subscriptions), and a size below 1 is
+`WINDOW_SIZE_INVALID`.
 `Page<K>` (`Page::head(size)`, `Page::before(cursor, size)`, `Page::new`) is
 what `populate` reads: its SQL binds `page.cursor()` and `cx.limit(&page)`
 (`… AND ($2::uuid IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`) — the page
@@ -982,21 +990,25 @@ rendered, with `AttachError::WindowTooLarge` answered as `WINDOW_TOO_LARGE`, and
 leaves no session behind; the client narrows the window with its arguments. An
 attach of several windows populates and admits every window before it renders
 any, so a refusal of its last window costs no load and no projection of the
-others. The read behind the refusal is bounded for a view that binds the attach
-bound as its `LIMIT`: at attach `cx.limit(&page)` is the page size clamped to
-`window_capacity + 1`, the one key past the capacity that proves the refusal, so
+others. A query resolver's one-shot `fetch_window` / `fetch_window_json` (and
+`fetch_view_window`, built on it) is judged the same way: it populates under the
+attach ceiling, and a window above `window_capacity` is refused with
+`WINDOW_TOO_LARGE` before any row is loaded or rendered. The read behind a
+refusal is bounded for a view that binds the attach bound as its `LIMIT`: at
+attach `cx.limit(&page)` is the page size clamped to `window_capacity + 1`, the
+one key past the capacity that proves the refusal, so
 a `size: 2147483647` reads at most `window_capacity + 1` keys before it is
 refused, and the refusal reports that size. A populate with no page (a
 whole-collection read, a filter without a `size`) binds `cx.limit_all()`:
 `window_capacity + 1` at attach and no limit elsewhere, so a client retrying a
-refused attach in a loop never reads the whole collection. A populate that binds
-neither reads its whole population before it is refused. A raw
-`projector::Projector` receives the same bound as `populate`'s `KeyCeiling`
-argument. A repopulation after attach runs under `KeyCeiling::NONE` and binds the
-page size as asked, so the ceiling never trims a live window; a query resolver's
-one-shot `cx.fetch_window` is no attach, runs under `KeyCeiling::NONE` too, and
-is bounded only by the arguments its resolver passes. The
-refusal is counted as
+refused attach in a loop never reads the whole collection. The engine's own
+population sources take the same bound: `view::cohort_window` passes it to
+`CohortIndex::keys_in_cohorts`, and `full_eda::keys` reads at most
+`cx.limit_all()` keys. A populate that binds neither reads its whole population
+before it is refused. A raw `projector::Projector` receives the same bound as
+`populate`'s `KeyCeiling` argument. A repopulation after attach runs under
+`KeyCeiling::NONE` and binds the page size as asked, so the ceiling never trims
+a live window. The refusal is counted as
 `service_engine_windows_over_capacity_total{projector, outcome="refused"}` and
 not logged: the client can fix it, and a client that retries in a loop would
 flood the log. A live window is never ended for its size: one that grows past
@@ -1012,11 +1024,12 @@ so per-session memory is not the limit. A whole-collection view (`type Query =
 outgrows the capacity every new attach is refused. A `kept` count comes only
 from a window that grows after attach; a `Population::Keys` whole-collection
 window grows only when it is repopulated, so for such a view the first signal
-can be `refused`. The `ServiceEngineWindowOverCapacity` alert fires on either
-outcome: a whole-collection view that trips it needs a `size` or a narrower
-filter among its arguments; on a view that already takes a `size`, a `refused`
-alone is a client that asked for more than the capacity, and the alert cannot
-tell the two apart (the counter carries no argument label).
+can be `refused`. No shipped alert watches the counter: a client that asks for
+a `size` above the capacity counts `refused` while the service is sound, so an
+alert on it would page on a client's request. Read it on a dashboard: `refused`
+on a view that takes no `size` is a whole collection outgrowing the bound (give
+the view a `size` or a narrower filter argument, or raise the capacity), and
+each `kept` also has its `warn` line.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
@@ -1410,8 +1423,8 @@ primitive that makes each one the easy path:
 | A read over many keys is one statement, never one per key | `Persistence::read_many` is required and has no per-key default, so a store must write it; its contract is one statement per call (two for `FullEda<T>`), never one per key — the compiler checks that it exists, not that it is set-based; `load` is its one-key case on `PersistenceExt` and cannot be overridden |
 | A resolver reads only through a gate | `GraphqlState` exposes no pool: a resolver reads through a view, `load_visible`, `behind(..).read(..)` or `read_under_rls`, never through a raw connection that would skip both enforcement layers |
 | A read of one aggregate for a principal honours the view's declaration | `Query::load_visible::<View>(key)`: the row is loaded under RLS when the view declares `RLS`, then kept only if the view's `visible` (its `Visibility` by default) admits it; a hidden row and an absent key both answer `None`, so a caller cannot probe which keys exist. `Query::download` is built on it. A list is a view (`fetch_view_window`, a subscription) |
-| Hand SQL over a parent's children honours the parent's declaration | `Query::behind::<View>(&key).read(\|parent, conn\| Box::pin(async move { … }))`: one read-only transaction (under RLS when the view declares `RLS`) loads the parent, and the closure runs with the parent and the connection only when the view's `visible` admits the parent; a hidden parent and an absent key both answer `None` and the closure never runs. A write inside it fails, and the transaction is rolled back at the end |
-| Hand SQL outside a view runs under the second enforcement layer | `Query::read_under_rls(\|conn\| Box::pin(async move { … }))`: a read-only transaction with the principal's RLS context applied through the registered `RlsApplier`, rolled back at the end. A write inside it fails; a fault answers `INTERNAL` with the cause in the log, never the database text; with no `RlsApplier` registered the read is refused (`INTERNAL`), never run without the context |
+| Hand SQL over a parent's children honours the parent's declaration | `Query::behind::<View>(&key).read(\|parent, conn\| Box::pin(async move { … }))`: one `REPEATABLE READ READ ONLY` transaction (under RLS when the view declares `RLS`) loads the parent, and the closure runs with the parent and the connection only when the view's `visible` admits the parent; the gate and every statement of the closure read one snapshot, so a child committed after the gate is not read behind it. A hidden parent and an absent key both answer `None` and the closure never runs. A write inside it fails, and the transaction is rolled back at the end |
+| Hand SQL outside a view runs under the second enforcement layer | `Query::read_under_rls(\|conn\| Box::pin(async move { … }))`: a `REPEATABLE READ READ ONLY` transaction with the principal's RLS context applied through the registered `RlsApplier`, rolled back at the end; every statement of the closure reads one snapshot. A write inside it fails; a fault answers `INTERNAL` with the cause in the log, never the database text; with no `RlsApplier` registered the read is refused (`INTERNAL`), never run without the context |
 | A mirror stages only what changed, in statements that do not grow with its keys | `Project::project(cx, keys)` receives every key its transaction touches at once, and `Projection::replace_rows(RowScope::any_of(column, keys), rows)` over `KnownRow` rows writes the batch in one upsert and one delete per table, with full-row change detection inside the declared scope (the whole table only as the written-out `RowScope::whole_table()`); the kit has no single-row write, so a statement per key can only be a loop the service writes itself; a row whose table a principal fact loader reads declares `KnownRow::PRINCIPAL`, and the kit refreshes the facts of exactly the principals whose rows changed (see the mirror kit) |
 
 A keyset page over an append-only journal (`seq > $2 ORDER BY seq LIMIT $3`) or a
@@ -1823,11 +1836,12 @@ transactions only, recorded after the commit, never a rolled-back mutation.
 `service_engine_windows_over_capacity_total{projector, outcome}`
 (`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, labels `metrics::LABEL_PROJECTOR` and
 `LABEL_OUTCOME`) counts the windows that met `window_capacity`: `refused` at attach, `kept` for a live window
-that grew past it. The six shipped alerts are in
+that grew past it; no shipped alert watches it (see the capacity section). The
+five shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
 a filling notification queue, the per-cluster notify budget nearing its ceiling,
-a sustained reset rate, an aging outbox backlog, dead-lettered work waiting on
-a human, and a view whose windows meet `window_capacity`.
+a sustained reset rate, an aging outbox backlog, and dead-lettered work waiting
+on a human.
 
 ## AI disclosure
 

@@ -1,17 +1,21 @@
 mod boot;
+mod counted;
 mod facts;
 mod forbidden;
 mod negative;
 mod passport;
+mod query_service;
 mod reads;
 mod rls;
 mod roots;
+mod snapshot;
 mod upload;
 
 pub use boot::{
     GraphqlService, base_config, boot_graphql_service, boot_graphql_service_with,
     boot_rls_query_service, root_field_collision, type_collision,
 };
+pub use counted::{CountedQueryRoot, boot_counted_service};
 pub use facts::boot_fact_service;
 pub use forbidden::boot_forbidden_service;
 pub use negative::{

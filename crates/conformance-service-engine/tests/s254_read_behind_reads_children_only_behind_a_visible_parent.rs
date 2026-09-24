@@ -1,8 +1,11 @@
 mod graphql_support;
 
+use std::time::Duration;
+
 use br_core_auth::PassportHeader;
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{boot_reads_service, passport_for};
+use conformance_service_engine::sample::latch::AdvisoryLatch;
 use conformance_service_engine::sample::render::{assignment, note};
 use graphql_support::post_json;
 use uuid::Uuid;
@@ -91,6 +94,52 @@ async fn s254_a_write_behind_a_visible_parent_is_refused_and_leaves_nothing_behi
             .await
             .expect("count the smuggled note");
     assert_eq!(written, 0, "nothing the read attempted to write persists");
+
+    service.shutdown().await;
+    drop(nats);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s254_the_read_behind_a_parent_sees_the_snapshot_its_gate_saw() {
+    let db = TestDb::fresh().await;
+    let nats = TestNats::spawn().await;
+    nats.provision().await;
+    let pool = db.app_pool().clone();
+
+    let tenant = Uuid::now_v7();
+    let mine = assignment(&pool, tenant, "alpha").await;
+    note(&pool, mine, 1, "before the gate").await;
+    let service = boot_reads_service(&db, nats.nats().await, "pod-s254-snapshot", false).await;
+    let passport = passport_for(Uuid::now_v7(), tenant).to_header();
+
+    let mut latch = AdvisoryLatch::hold(db.owner_pool()).await;
+    let pending = tokio::spawn({
+        let base_url = service.base_url.clone();
+        let passport = passport.clone();
+        let query = format!(
+            "query {{ sampleNotesAcrossLatch(id: \"{mine}\", latch: {}) }}",
+            latch.key()
+        );
+        async move { ask(&base_url, &passport, &query).await }
+    });
+    latch.await_waiter(Duration::from_secs(10)).await;
+    note(db.owner_pool(), mine, 2, "after the gate").await;
+    latch.release().await;
+    let body = pending.await.expect("the read answers");
+    assert_eq!(
+        body["data"]["sampleNotesAcrossLatch"],
+        serde_json::json!(["before the gate"]),
+        "a child committed after the gate loaded its parent is not read behind it: the gate and \
+         the read are one snapshot: {body}"
+    );
+
+    let later = ask(&service.base_url, &passport, &notes_of(mine)).await;
+    assert_eq!(
+        later["data"]["sampleAssignmentNotes"],
+        serde_json::json!(["before the gate", "after the gate"]),
+        "the child was committed; the next read sees it: {later}"
+    );
 
     service.shutdown().await;
     drop(nats);
