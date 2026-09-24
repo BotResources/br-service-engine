@@ -8,6 +8,84 @@ The library chart `br-engine-service` has its own version line (major = ops
 contract version) and its own tag `chart/br-engine-service/v{version}`; a
 chart-only release is a `## chart br-engine-service {version}` section.
 
+## 0.3.4 - 2026-09-24
+
+Engine services become reachable for subscriptions through the gateway. The
+gateway reaches a subgraph for a subscription only as `POST /graphql` with
+`Accept: text/event-stream` (graphql-sse over HTTP), never over a WebSocket;
+through 0.3.3 the engine served subscriptions on `GET /graphql/ws` alone and
+answered that request with the JSON error "Subscriptions are not supported on
+this transport.", which the gateway reports as `SUBGRAPH_REQUEST_ERROR` — seen on
+dev for every engine service. Additive: no adopter code changes.
+
+### Added
+
+- **The gateway's subscription transport on `POST /graphql`.** A request whose
+  `Accept` names `text/event-stream` is authenticated and its body read exactly as
+  before — the passport from the headers first (`401` with the body never read,
+  the same status and body a JSON request gets), then the bounded body — and is
+  then answered as a graphql-sse "distinct connections" stream (`graphql/sse.rs`):
+  `Content-Type: text/event-stream`, `Cache-Control: no-cache`, one `event: next`
+  per GraphQL response (`data:` the response JSON on one line), one
+  `event: complete` (`data:` empty) at the end, and a `:` comment after 15 s
+  without a frame. Any operation may be sent this way: a query or a mutation
+  answers one `next`, then `complete`; a coded refusal rides a `next`, then
+  `complete`, as on the WebSocket. A response that cannot be serialized is logged
+  and sent as a coded `INTERNAL` response, never as an empty frame. A request
+  without `text/event-stream` in `Accept` (a wildcard does not count) is answered
+  as before.
+- **Bounded like a WebSocket session, on the same session machinery.** The stream
+  runs the same schema, so a subscription attaches the same engine session as on
+  `/graphql/ws`: same `Reset`/`Upsert`/`Remove` wire and revision, same cohorts,
+  same principal-facts refresh. At `session_max_age`, measured from the request,
+  and when the engine shuts down (the signal that closes the WebSockets), it sends
+  `complete` and ends, so the gateway re-subscribes with a fresh `X-Passport` and
+  an open stream never holds graceful shutdown; a stream requested during shutdown
+  answers `complete` without executing. A client that goes away drops the
+  response, and with it the operation and its session.
+- Conformance: `bb16` (black-box, the real `example-service` binary) — over the
+  gateway's transport a subscriber gets the `Reset` then the `Upsert` on a
+  contiguous revision, read with `br-test-harness`'s `SseSubscription` (the client
+  service e2e suites use); a passport that is absent, undecodable or not a
+  passport is refused with the very `401` a JSON request gets, before a byte of
+  the body is read (a body the client never finishes sending is answered at once,
+  while an authenticated control is waited for); and past `session_max_age` the
+  stream sends `complete`, ends, and a new request attaches afresh. The `Reset`
+  and max-age scenarios fail on 0.3.3 with the dev error; the `401` scenario
+  pins that the refusal still precedes the transport choice. Unit tests pin the
+  framing, a query over the stream, a refusal as a `next`, the keep-alive
+  cadence, the max-age and shutdown completions, the refusal to start during
+  shutdown, the release of the operation when the response is dropped, and which
+  `Accept` values ask for a stream.
+
+### Changed
+
+- `conformance-service-engine` dev-depends on `br-test-harness` 1.2.0 (the
+  `br-e2e-harness` repository, `sse` feature only); `deny.toml` allows that git
+  source.
+- README: the ops contract names the WebSocket route `/graphql/ws` (it read
+  `/ws`) and documents both subscription transports; the black-box command list
+  names `bb12` to `bb16`.
+
+### Adopter migration
+
+- None. Move the pin to `v0.3.4`: `app` serves the event stream with no new
+  configuration and no environment variable, and a service's schema and SDL are
+  unchanged. Its subscriptions become reachable through the gateway as soon as
+  the new image rolls.
+
+### Known limitation
+
+- **Paging a gateway (SSE) session requires the session's pod.** The `page`
+  gesture serves only a live session this pod holds. Through the gateway the
+  session rides an event stream and the `page` mutation is a separate `POST`
+  that may reach another replica, where it is refused
+  (`EngineError::NoLiveSession`, `NOT_FOUND`). Paging a gateway (SSE) session
+  requires the session's pod (one replica) until 0.4.0 moves paging to
+  subscription arguments
+  ([#130](https://github.com/BotResources/ws-cc-platform.botresources.ai/issues/130)).
+  Engine services run one replica today.
+
 ## 0.3.3 - 2026-09-23
 
 A security patch over 0.3.2. `POST /graphql` now resolves the passport before it
