@@ -198,7 +198,8 @@ migration line below.
 
 - The 0.3.4 known limitation (one replica per paging service): paging no longer
   needs the session's pod.
-- `service_engine::page`, `attach_with_session`, `PageReport`,
+- The `page` function (`service_engine::page` now names the module of the window
+  arguments), `attach_with_session`, `PageReport`,
   `AttachRequest::session` / `with_session`, `SessionRuntime::page`,
   `impl From<Uuid> for SessionId`, `EngineError::{NoLiveSession, NoSuchWindow}`,
   `AttachError::DuplicateSession`, `CONFLICT_CODE`, `NOT_FOUND_CODE` (no engine or
