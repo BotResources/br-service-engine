@@ -1,5 +1,7 @@
 mod builder;
 mod validate;
+#[cfg(test)]
+mod validate_tests;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
