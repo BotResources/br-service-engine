@@ -6,14 +6,18 @@ use conformance_service_engine::sample::engine_config;
 use conformance_service_engine::sample::principal::SamplePrincipalResolver;
 use service_engine::housekeeping::ready::REASON_SCHEMA_VERSION_DISPLACED;
 use service_engine::{Engine, Readiness, ReadinessHandle};
+use sqlx::PgPool;
 
-const BEAT: Duration = Duration::from_millis(100);
+const STALLED_BEAT: Duration = Duration::from_secs(2);
+const NEXT_LIVENESS: Duration = Duration::from_millis(500);
+const NEXT_BEAT: Duration = Duration::from_millis(100);
 const READY_WITHIN: Duration = Duration::from_secs(20);
 const DOWN_WITHIN: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn s187_a_displaced_pod_goes_down_when_its_heartbeat_updates_no_row() {
+async fn s187_a_running_pod_whose_heartbeat_lapsed_is_displaced_by_the_next_version_and_goes_down()
+{
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -21,7 +25,9 @@ async fn s187_a_displaced_pod_goes_down_when_its_heartbeat_updates_no_row() {
 
     let readiness = ReadinessHandle::not_ready("boot");
     let mut engine = Engine::<SamplePrincipal>::boot(
-        engine_config("se_s187", "pod-s187").with_beat(BEAT),
+        engine_config("se_s187_a", "pod-s187-a")
+            .with_service_version("1.0.0")
+            .with_beat(STALLED_BEAT),
         pool.clone(),
         nats.nats().await,
         readiness.clone(),
@@ -35,23 +41,34 @@ async fn s187_a_displaced_pod_goes_down_when_its_heartbeat_updates_no_row() {
     let running = tokio::spawn(engine.run());
     await_ready(&readiness).await;
 
-    sqlx::query(
-        "UPDATE service_engine.schema_version \
-           SET engine_version = 'displaced-engine', service_version = 'displaced-service', \
-               heartbeat = now() \
-         WHERE singleton",
+    let next = Engine::<SamplePrincipal>::boot(
+        engine_config("se_s187_b", "pod-s187-b")
+            .with_service_version("2.0.0")
+            .with_beat(NEXT_BEAT)
+            .with_schema_version_liveness(NEXT_LIVENESS),
+        pool.clone(),
+        nats.nats().await,
+        ReadinessHandle::not_ready("boot"),
     )
-    .execute(&pool)
     .await
-    .expect("simulate another version claiming the singleton while this pod runs");
+    .expect(
+        "the next version claims the singleton once the running pod's heartbeat is older than \
+         its liveness, as a stalled beat leaves it",
+    );
+    assert_eq!(
+        owner(&pool).await,
+        ("2.0.0".to_string(), "pod-s187-b".to_string()),
+        "the next version owns the schema version singleton",
+    );
 
     let reason = await_not_ready(&readiness).await;
     assert_eq!(
         reason, REASON_SCHEMA_VERSION_DISPLACED,
-        "the beat's heartbeat now updates no row, so the pod recognises it was displaced and goes \
-         DOWN rather than keep serving over a store another version owns",
+        "the running pod's next heartbeat updates no row, so it recognises it was displaced and \
+         goes DOWN rather than keep serving over a store another version owns",
     );
 
+    drop(next);
     shutdown.notify_one();
     running
         .await
@@ -59,6 +76,13 @@ async fn s187_a_displaced_pod_goes_down_when_its_heartbeat_updates_no_row() {
         .expect("the pod run returns Ok");
     drop(nats);
     db.cleanup().await;
+}
+
+async fn owner(pool: &PgPool) -> (String, String) {
+    sqlx::query_as("SELECT service_version, pod FROM service_engine.schema_version WHERE singleton")
+        .fetch_one(pool)
+        .await
+        .expect("read the schema version singleton")
 }
 
 async fn await_ready(readiness: &ReadinessHandle) {

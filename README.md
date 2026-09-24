@@ -1243,18 +1243,47 @@ Recreate, never a rolling deploy: two versions must never share the store, since
 the engine schema and the service migrations move with the version. Boot enforces
 this after the posture check — it claims a single-row `service_engine.schema_version`
 (engine version, service version, pod, heartbeat) under a per-service advisory
-lock. A pod that finds a **different** version whose row is still live (its
-heartbeat inside `schema_version_liveness`, default 30s, refreshed by the beat)
-refuses to go UP: `Engine::boot` returns `EngineError::SchemaVersionConflict` and
-readiness stays DOWN with both versions named in the reason, turning a
-mis-configured rolling deploy into a loud failure instead of two versions quietly
-sharing one store. A stale row (a pod that died more than `schema_version_liveness`
-ago, so its heartbeat lapsed) never blocks — the booting pod claims the row. The
-service version comes from `EngineConfig::with_service_version`; the engine version
-is the engine crate's own version. If the beat's heartbeat later updates **no**
-row — another version has claimed the singleton while this pod ran, so it has been
-displaced — the pod lowers readiness to DOWN rather than keep serving over a store
-it no longer owns; it recovers when it once again owns the row.
+lock, so booting pods claim one at a time. The claim writes the heartbeat and
+every beat refreshes it; a row is live while its heartbeat is younger than
+`schema_version_liveness` (default 30 s). The write and the age both use the
+database's `now()`, so no pod clock enters the comparison. A pod of the **same**
+version (engine and service) claims at once, and a stale row (its heartbeat older
+than `schema_version_liveness`) never blocks. The service version comes from
+`EngineConfig::with_service_version`; the engine version is the engine crate's own
+version.
+
+**Schema-version handover.** Nothing clears a heartbeat when a pod stops, so right
+after a `Recreate` rollout stops the old pod, its heartbeat is still fresh. A pod
+that finds a **different** version whose row is still live therefore waits instead
+of exiting: it re-checks once per `beat` and claims as soon as that heartbeat is
+older than `schema_version_liveness`. The wait ends at a deadline — the time of the
+first conflict + `schema_version_liveness` + one `beat`. The extra beat covers an
+old pod that wrote one last heartbeat just after the first check: that heartbeat
+still ages out before the deadline, so one observed heartbeat change never ends the
+wait early. Only when the other heartbeat is still fresh at the deadline — the
+other version kept beating, as in a rolling deploy configured by mistake — does
+`Engine::boot` return `EngineError::SchemaVersionConflict`, with readiness DOWN and
+both versions named in the reason: a loud failure instead of two versions sharing
+one store. At each re-check the pod logs a `warn` that names both versions and the
+time left, and sets that reason on readiness; `serve` binds its listener last, so
+during boot the log is the operator's view (`/readyz` does not answer yet). A claim
+after a wait logs at `info`. The wait lasts at most `schema_version_liveness` + one
+`beat` (31 s with the defaults), inside the chart's 150 s startup budget (see
+*startupProbe*), so a `Recreate` rollout that changes the engine or service version
+starts the new pod once, without a restart. `EngineConfig::validate` refuses a
+`beat` that is not below `schema_version_liveness` (`ENGINE_BEAT_MS` comes from the
+environment): a live pod's heartbeat must never lapse between two of its own beats.
+
+A stopping pod does not expire its own heartbeat. Between such an expiry and a
+same-version sibling's next beat, another version could claim the row; the
+displaced sibling would only lower readiness while its relays, cron and mirrors
+keep writing — two versions on one store.
+
+If the beat's heartbeat later updates **no** row — another version claimed the
+singleton while this pod ran, because its beat stalled past that version's
+`schema_version_liveness` — the pod has been displaced: it lowers readiness to
+DOWN rather than keep serving over a store it no longer owns, and it recovers when
+it once again owns the row.
 
 ## Ops contract v1 — chart `br-engine-service` 1.x
 
@@ -1286,7 +1315,7 @@ GitOps and the NATS fabric.
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
 | HTTP | one port: `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
-| Roll | `Recreate`; `service_engine.schema_version` singleton refuses a second live version |
+| Roll | `Recreate`; the `service_engine.schema_version` singleton waits out a stopped version's heartbeat (at most `schema_version_liveness` + one beat, see *Schema-version handover*) and refuses a version that keeps beating |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
 | NATS | `PUBLISHED_LANGUAGE` KV, `STREAMING_{service}` stream, `EPHEMERAL_*` presence buckets; the manifest key per engine offer is `{prefix}_manifest` with the prefix's trailing separator stripped (`typed/v1/` → `typed/v1_manifest`, `typed.v1.` → `typed.v1_manifest`), a sibling outside the data prefix; a single consumed key has no manifest |
 | Readiness reasons | the `REASON_*` constants of `engine/boot` and `housekeeping/ready/verdict.rs`, plus `REASON_MIGRATIONS_PENDING` and `REASON_REQUIRED_KEYS` |
@@ -1391,9 +1420,10 @@ The library therefore mounts no `emptyDir` — a writable `/tmp` would only give
 that pre-authentication spool somewhere to write.
 
 **startupProbe.** `serve` binds its listener last — after the app pool, the
-migration check, the NATS connect, `Engine::boot`, registration and the
-retention derivation — so `GET /livez` answering is the end of boot. The probe
-suspends liveness until then: 5 s × 30 = a 150 s boot budget (`migrate` runs in
+migration check, the NATS connect, `Engine::boot` (with its schema-version
+handover wait, at most 31 s by default), registration and the retention
+derivation — so `GET /livez` answering is the end of boot. The probe suspends
+liveness until then: 5 s × 30 = a 150 s boot budget (`migrate` runs in
 the init container, outside it). `/readyz` never gates startup: a healthy pod
 can hold it DOWN for long (the Identity scope handshake, a mirror converging),
 and a failed startupProbe restarts the container.
@@ -1437,7 +1467,7 @@ GitOps repository, sequenced after this release.
 
 `EngineConfig` carries one clock and a handful of bounds, every one validated
 at `Engine::boot`: durations and capacities are non-zero,
-`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
+`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` and `schema_version_liveness` outlast the
 `beat`, `session_max_age` outlasts the idle `session_ttl`, the multipart
 bounds are non-zero with `max_file_bytes` within `max_body_bytes`, and
 `body_read_timeout` is non-zero. A session lives at most `session_max_age`; when it does

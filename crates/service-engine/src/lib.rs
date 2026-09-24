@@ -40,7 +40,7 @@ pub mod projector;
 pub mod readiness;
 pub mod render;
 pub mod schema;
-pub mod schema_version;
+mod schema_version;
 pub mod scopes;
 pub mod session;
 pub mod stop;

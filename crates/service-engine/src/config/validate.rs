@@ -80,6 +80,13 @@ impl EngineConfig {
                     .into(),
             ));
         }
+        if self.schema_version_liveness <= self.beat {
+            return Err(EngineError::Config(
+                "schema_version_liveness must outlast beat, otherwise a live pod's heartbeat lapses \
+                 between two of its own beats and a pod of another version claims the store beside it"
+                    .into(),
+            ));
+        }
         if self.session_max_age <= self.session_ttl {
             return Err(EngineError::Config(
                 "session_max_age must outlast session_ttl, otherwise a live session is force-ended \
@@ -291,6 +298,21 @@ mod tests {
                 .validate()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_schema_version_liveness_that_does_not_outlast_the_beat_is_refused() {
+        let beat = Duration::from_millis(500);
+        for liveness in [Duration::ZERO, beat - Duration::from_millis(1), beat] {
+            let refused = config()
+                .with_beat(beat)
+                .with_schema_version_liveness(liveness);
+            assert!(refused.validate().is_err(), "liveness {liveness:?}");
+        }
+        let accepted = config()
+            .with_beat(beat)
+            .with_schema_version_liveness(beat * 2);
+        assert!(accepted.validate().is_ok());
     }
 
     #[test]
