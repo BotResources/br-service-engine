@@ -1,8 +1,8 @@
 apiVersion: v2
 name: br-engine-service
-description: Shared deployment topology for a br-service-engine service — ops contract v1 written once, consumed by a thin per-service chart. Chart major 1 is ops contract v1; a contract change ships under a new chart name.
+description: Shared deployment topology for a br-service-engine service — ops contract v1 written once, consumed by a thin per-service chart. The chart versions its ops contract on its own version line, independent of the engine version; a compatibility matrix kept by the deploying platform pairs each chart version with the engine versions it serves.
 type: library
-version: 1.1.0
+version: 1.1.1
 home: https://github.com/BotResources/br-service-engine
 sources:
   - https://github.com/BotResources/br-service-engine

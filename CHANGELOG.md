@@ -20,7 +20,9 @@ and an error chain renders each cause once. Good practice is built into the
 primitives: a batched read is required, one aggregate, a parent's children and
 hand SQL are read behind the view's gate or under RLS, and a mirror detects a
 change on any column. No engine service is in production; every break has one
-migration line below.
+migration line below. It ships with chart `br-engine-service` 1.1.1 (next
+section); the compatibility entry for this release is chart 1.1.1 ↔ engine
+0.4.0.
 
 ### Changed (breaking)
 
@@ -409,6 +411,34 @@ migration line below.
   migration*, and 3 on `example-service`, named under *Reference service and
   battery*. The listing does not see a changed parameter or return type, so a
   break of that kind is found by review, not by the job.
+
+## chart br-engine-service 1.1.1 - 2026-09-24
+
+A patch released with engine 0.4.0. Ops contract v1 is unchanged (entry points,
+env names, probe paths, `Recreate`), and the chart renders exactly what 1.1.0
+renders, from the default values and from `ci/thin-example/values-all-fields.yaml`
+alike. Engine 0.4.0 reads no new environment variable and no new argv, so the
+compatibility entry is chart 1.1.1 ↔ engine 0.4.0.
+
+### Fixed
+
+- The `Chart.yaml` description stated a retired rule: a contract change ships
+  under a new chart name. It now states the rule in force: the chart versions its
+  ops contract on its own version line, independent of the engine version, and a
+  compatibility matrix kept by the deploying platform pairs each chart version
+  with the engine versions it serves. The error of `check-chart-version.sh` says
+  the same.
+
+### Adopter impact
+
+A thin chart that bumps its `br-engine-service` dependency from 1.1.0 to 1.1.1
+renders the same manifests; the CI fixture thin chart pins 1.1.1.
+
+### Release
+
+`chart-release.yml` packages and pushes
+`oci://ghcr.io/botresources/charts/br-engine-service:1.1.1` and tags
+`chart/br-engine-service/v1.1.1` on the merge to `main`.
 
 ## 0.3.4 - 2026-09-24
 

@@ -1576,9 +1576,11 @@ compatible with the engine compiled into it. A change to the
 chart's rendering of a row below is a new chart version and a new matrix entry;
 a row whose text changes with the engine's behaviour alone (the 0.4 `Roll` and
 `Replicas` rows) changes no chart. `check-chart-version.sh` refuses a `charts/**`
-change without a `Chart.yaml` `version` bump. The `Chart.yaml` description still
-says a contract change ships under a new chart name: that text predates the
-matrix and is corrected with the next chart release.
+change without a `Chart.yaml` `version` bump. Engine 0.4.0 ships with chart
+**1.1.1**: its `Chart.yaml` description now states this versioning rule (1.1.0's
+said a contract change ships under a new chart name), and it renders exactly
+what 1.1.0 renders, so the matrix entry for this release is chart 1.1.1 ↔
+engine 0.4.0.
 
 Only names the engine reads belong in the contract: `EngineConfig::from_env`
 reads the app group in one place, `migrate` reads the owner group, and the rest

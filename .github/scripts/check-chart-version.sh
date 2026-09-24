@@ -38,7 +38,7 @@ fi
 baseline=$(git show "${merge_base}:${chart_yaml}" | grep -m1 '^version:' | sed -E 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
 if [ "$current" = "$baseline" ]; then
-  echo "::error file=${chart_yaml}::charts/ changed but Chart.yaml version is still ${current}. A chart change is a chart release — bump ${chart_yaml} version. A contract change is a chart major under a new chart name." >&2
+  echo "::error file=${chart_yaml}::charts/ changed but Chart.yaml version is still ${current}. A chart change is a chart release — bump ${chart_yaml} version; the deploying platform's compatibility matrix then pairs the new version with the engine versions it serves." >&2
   exit 1
 fi
 
