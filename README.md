@@ -594,7 +594,7 @@ client only, and reads it under `EngineConfig::max_body_bytes` (below) and
 | Bound | Default | Refusal |
 |---|---|---|
 | `EngineConfig::max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
-| `max_file_bytes` — any single part: a file, `operations`, `map` | 8 MiB | `413` `MULTIPART_FILE_TOO_LARGE` |
+| `max_file_bytes` — any single part: a file, `operations`, `map`. Unset, it follows a lower `max_body_bytes` down, so lowering the body bound alone is enough; set, it must not exceed `max_body_bytes` (refused at boot) | 8 MiB, or `max_body_bytes` when that is lower | `413` `MULTIPART_FILE_TOO_LARGE` |
 | `max_files` — the uploads `map` binds (every path counts, so one file bound to two variables counts twice); judged on `map`, before any file part is spooled — and `map` itself may weigh at most 1 KiB per allowed upload plus 1 KiB, so a padded `map` is refused before it is parsed | 4 | `413` `MULTIPART_TOO_MANY_FILES` |
 
 A body that breaks the spec's order, carries a part `map` does not name, or misses
@@ -1460,9 +1460,10 @@ GitOps repository, sequenced after this release.
 `EngineConfig` carries one clock and a handful of bounds, every one validated
 at `Engine::boot`: durations and capacities are non-zero,
 `listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
-`beat`, `session_max_age` outlasts the idle `session_ttl`, `max_body_bytes`
-and the multipart `max_file_bytes` are non-zero with `max_file_bytes` within
-`max_body_bytes`, and `body_read_timeout` is non-zero. A session lives at most
+`beat`, `session_max_age` outlasts the idle `session_ttl`, `max_body_bytes` is
+non-zero, a multipart `max_file_bytes` the service sets is non-zero and within
+`max_body_bytes` (unset, it follows a lower `max_body_bytes` down), and
+`body_read_timeout` is non-zero. A session lives at most
 `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which

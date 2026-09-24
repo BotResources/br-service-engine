@@ -43,7 +43,7 @@ fn trickle(body: Vec<u8>) -> impl Stream<Item = Result<Bytes, std::io::Error>> +
 }
 
 fn policy(config: MultipartConfig) -> MultipartPolicy {
-    MultipartPolicy::new(&config, true)
+    MultipartPolicy::new(&config, DEFAULT_MAX_BODY_BYTES, true)
 }
 
 fn spooled(config: MultipartConfig) -> (MultipartConfig, tempfile::TempDir) {
@@ -129,7 +129,7 @@ async fn a_request_without_files_is_received_even_when_the_schema_takes_no_uploa
         None,
         chunks(body),
         DEFAULT_MAX_BODY_BYTES,
-        &MultipartPolicy::new(&MultipartConfig::default(), false),
+        &MultipartPolicy::new(&MultipartConfig::default(), DEFAULT_MAX_BODY_BYTES, false),
     )
     .await
     .expect("multipart stays accepted without files");
@@ -213,7 +213,7 @@ async fn a_schema_without_upload_accepts_no_file() {
         part("map", None, br#"{"0":["variables.files.0"]}"#),
         part("0", Some("a.bin"), b"payload"),
     ]);
-    let policy = MultipartPolicy::new(&MultipartConfig::default(), false);
+    let policy = MultipartPolicy::new(&MultipartConfig::default(), DEFAULT_MAX_BODY_BYTES, false);
     match refusal(chunks(body), None, &policy).await {
         MultipartRefusal::TooManyFiles { limit } => assert_eq!(limit, 0),
         other => panic!("expected TooManyFiles, got {other:?}"),

@@ -31,7 +31,7 @@ fn bounded_to(max_body_bytes: u64, read_timeout: Duration) -> BodyPolicy {
     BodyPolicy::new(
         max_body_bytes,
         read_timeout,
-        MultipartPolicy::new(&MultipartConfig::default(), false),
+        MultipartPolicy::new(&MultipartConfig::default(), max_body_bytes, false),
     )
 }
 

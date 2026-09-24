@@ -20,7 +20,7 @@ pub use refusal::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MultipartConfig {
-    pub max_file_bytes: u64,
+    pub max_file_bytes: Option<u64>,
     pub max_files: usize,
     pub spool_dir: Option<PathBuf>,
 }
@@ -28,7 +28,7 @@ pub struct MultipartConfig {
 impl Default for MultipartConfig {
     fn default() -> Self {
         Self {
-            max_file_bytes: DEFAULT_MULTIPART_MAX_FILE_BYTES,
+            max_file_bytes: None,
             max_files: DEFAULT_MULTIPART_MAX_FILES,
             spool_dir: None,
         }
@@ -37,8 +37,15 @@ impl Default for MultipartConfig {
 
 impl MultipartConfig {
     pub fn with_max_file_bytes(mut self, max_file_bytes: u64) -> Self {
-        self.max_file_bytes = max_file_bytes;
+        self.max_file_bytes = Some(max_file_bytes);
         self
+    }
+
+    pub(crate) fn part_bound(&self, max_body_bytes: u64) -> u64 {
+        match self.max_file_bytes {
+            Some(explicit) => explicit,
+            None => DEFAULT_MULTIPART_MAX_FILE_BYTES.min(max_body_bytes),
+        }
     }
 
     pub fn with_max_files(mut self, max_files: usize) -> Self {
@@ -69,9 +76,13 @@ pub(crate) struct MultipartPolicy {
 }
 
 impl MultipartPolicy {
-    pub(crate) fn new(config: &MultipartConfig, schema_declares_upload: bool) -> Self {
+    pub(crate) fn new(
+        config: &MultipartConfig,
+        max_body_bytes: u64,
+        schema_declares_upload: bool,
+    ) -> Self {
         Self {
-            max_file_bytes: config.max_file_bytes,
+            max_file_bytes: config.part_bound(max_body_bytes),
             max_files: if schema_declares_upload {
                 config.max_files
             } else {

@@ -45,9 +45,7 @@ async fn s242_an_authenticated_json_body_over_max_body_bytes_is_refused_with_its
     nats.provision().await;
     let service =
         boot_upload_service_with(&db, nats.nats().await, "se_s242a", "pod-s242a", |config| {
-            config
-                .with_max_body_bytes(MAX_BODY_BYTES)
-                .with_multipart(MultipartConfig::default().with_max_file_bytes(8 * 1024))
+            config.with_max_body_bytes(MAX_BODY_BYTES)
         })
         .await;
     let passport = valid_passport();
@@ -63,8 +61,7 @@ async fn s242_an_authenticated_json_body_over_max_body_bytes_is_refused_with_its
     assert_eq!(
         (status, code(&body)),
         (413, &serde_json::json!(BODY_TOO_LARGE_CODE)),
-        "a JSON body over max_body_bytes is refused with its code, the multipart bound now \
-         bounding every body: {body}"
+        "a JSON body over EngineConfig::max_body_bytes is refused with its code: {body}"
     );
 
     let answer = stalled_request(

@@ -51,7 +51,11 @@ where
 {
     let schema_declares_upload = declares_upload_scalar(&schema.sdl());
     let config = engine.runtime().config();
-    let multipart = MultipartPolicy::new(&config.multipart, schema_declares_upload);
+    let multipart = MultipartPolicy::new(
+        &config.multipart,
+        config.max_body_bytes,
+        schema_declares_upload,
+    );
     tracing::debug!(
         schema_declares_upload,
         max_body_bytes = config.max_body_bytes,

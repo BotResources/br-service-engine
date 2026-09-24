@@ -9,20 +9,20 @@ impl EngineConfig {
                     .into(),
             ));
         }
-        if self.multipart.max_file_bytes == 0 {
-            return Err(EngineError::Config(
+        match self.multipart.max_file_bytes {
+            Some(0) => Err(EngineError::Config(
                 "multipart max_file_bytes must be non-zero, or no multipart request could carry \
                  even its `operations` part"
                     .into(),
-            ));
+            )),
+            Some(part) if part > self.max_body_bytes => Err(EngineError::Config(format!(
+                "multipart max_file_bytes ({part}) must not exceed max_body_bytes ({}): a part is \
+                 part of the body; lower MultipartConfig::max_file_bytes, or leave it unset to \
+                 follow max_body_bytes",
+                self.max_body_bytes
+            ))),
+            _ => Ok(()),
         }
-        if self.multipart.max_file_bytes > self.max_body_bytes {
-            return Err(EngineError::Config(
-                "multipart max_file_bytes must not exceed max_body_bytes: a part is part of the body"
-                    .into(),
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -59,12 +59,22 @@ mod tests {
     }
 
     #[test]
-    fn a_multipart_part_bound_above_the_body_bound_is_refused() {
-        let under_the_default_part_bound = config().with_max_body_bytes(MIB);
-        assert!(under_the_default_part_bound.validate().is_err());
+    fn a_body_bound_below_the_default_part_bound_is_set_alone() {
+        config()
+            .with_max_body_bytes(MIB)
+            .validate()
+            .expect("an unset part bound follows the body bound down");
+    }
 
+    #[test]
+    fn an_explicit_part_bound_above_the_body_bound_is_refused() {
         let raised_part_bound = config().with_multipart(with_file_bound(16 * MIB + 1));
         assert!(raised_part_bound.validate().is_err());
+
+        let lowered_body_bound = config()
+            .with_max_body_bytes(MIB)
+            .with_multipart(with_file_bound(2 * MIB));
+        assert!(lowered_body_bound.validate().is_err());
     }
 
     #[test]
