@@ -120,6 +120,14 @@ jobs:
             echo "::notice::no prior unified v* tag, skipping semver-checks (first lockstep release)"
             exit 0
           fi
+          current=$(awk -F'"' '/^\[workspace.package\]/{p=1; next} /^\[/{p=0} p && /^version *=/{print $2; exit}' Cargo.toml)
+          IFS=. read -r base_major base_minor _ <<<"${baseline#v}"
+          IFS=. read -r cur_major cur_minor _ <<<"${current}"
+          breaking=0
+          if [ "$cur_major" != "$base_major" ] || { [ "$cur_major" = 0 ] && [ "$cur_minor" != "$base_minor" ]; }; then
+            breaking=1
+            echo "::notice::${baseline} -> v${current} is a breaking bump: the gate runs no check, so each crate also lists its breaks (report-only); every one needs its CHANGELOG adopter-migration line"
+          fi
           shopt -s nullglob
           base_wt="$(mktemp -d)/baseline"
           git worktree add --detach "$base_wt" "$baseline"
@@ -156,6 +164,12 @@ jobs:
               --baseline-rustdoc "$base_wt/target/semver-baseline/doc/${lib}.json" \
               --current-rustdoc "$PWD/target/semver-current/doc/${lib}.json"; then
               fail=1
+            fi
+            if [ "$breaking" = 1 ]; then
+              echo "breaks ${crate} carries since ${baseline} (listed as if v${current} were a minor bump, report-only):"
+              cargo semver-checks -p "${crate}" --release-type minor \
+                --baseline-rustdoc "$base_wt/target/semver-baseline/doc/${lib}.json" \
+                --current-rustdoc "$PWD/target/semver-current/doc/${lib}.json" || true
             fi
             echo "::endgroup::"
           done

@@ -328,6 +328,17 @@ migration line below.
 - Conformance crate: `sample::graphql::base_config` is public,
   `boot_graphql_service_with` and `AssignmentPage::whole()` are added.
 
+### CI
+
+- `cargo semver-checks` runs no check on a breaking bump (`v0.3.4` → `0.4.0` is
+  major in semver terms), so its gate passes vacuously. On such a bump the job now
+  also lists every break of each gated crate, report-only, as if the bump were a
+  minor one. For this release it reports 14 lint classes on `service-engine`, each
+  break named under *Changed (breaking)* or *Removed* with its line in *Adopter
+  migration*, and 3 on `example-service`, named under *Reference service and
+  battery*. The listing does not see a changed parameter or return type, so a
+  break of that kind is found by review, not by the job.
+
 ## 0.3.4 - 2026-09-24
 
 Engine services become reachable for subscriptions through the gateway. The
