@@ -33,7 +33,7 @@ impl<P: Principal> GraphqlState<P> {
         }
     }
 
-    pub fn pg(&self) -> &PgPool {
+    pub(crate) fn pg(&self) -> &PgPool {
         &self.pg
     }
 
