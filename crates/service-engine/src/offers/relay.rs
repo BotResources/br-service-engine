@@ -10,7 +10,7 @@ use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
 use crate::mirror::OfferManifest;
 use crate::name::RelayName;
-use crate::nats::{KvBucket, Nats, NatsError, Revision};
+use crate::nats::{KvBucket, Nats, Revision};
 use crate::offer::Offer;
 use crate::offers::apply::{self, KvOutcome, Write};
 use crate::offers::leader::OfferLeader;
@@ -39,8 +39,13 @@ impl<O: Offer> OfferRelay<O> {
         reconcile_period: Duration,
     ) -> Result<Self, RelayError> {
         Ok(Self {
-            name: RelayName::new(O::NAME)
-                .map_err(|error| RelayError::Publish(format!("offer name {}: {error}", O::NAME)))?,
+            name: RelayName::new(O::NAME).map_err(|error| {
+                RelayError::Publish(format!(
+                    "offer name {}: {}",
+                    O::NAME,
+                    crate::chain::describe(&error)
+                ))
+            })?,
             nats,
             leader,
             bucket: OnceCell::new(),
@@ -75,7 +80,7 @@ impl<O: Offer> OfferRelay<O> {
                 self.nats
                     .published_language::<O::Published>()
                     .await
-                    .map_err(published_language)
+                    .map_err(RelayError::published_language)
             })
             .await
     }
@@ -86,7 +91,7 @@ impl<O: Offer> OfferRelay<O> {
                 self.nats
                     .published_language::<OfferManifest>()
                     .await
-                    .map_err(published_language)
+                    .map_err(RelayError::published_language)
             })
             .await
     }
@@ -182,7 +187,7 @@ impl<O: Offer> OfferRelay<O> {
                 bucket
                     .get_with_revision(&marker.kv_key)
                     .await
-                    .map_err(published_language)?,
+                    .map_err(RelayError::published_language)?,
             );
         }
 
@@ -257,8 +262,4 @@ impl<O: Offer> Relay for OfferRelay<O> {
     ) -> Option<BoxFuture<'a, Result<Drained, RelayError>>> {
         Some(Box::pin(self.hosted_run(pg, claim.batch())))
     }
-}
-
-fn published_language(error: NatsError) -> RelayError {
-    RelayError::Publish(format!("published language: {error}"))
 }

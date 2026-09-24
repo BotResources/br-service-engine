@@ -1,19 +1,9 @@
-//! A GraphQL multipart request (`operations` + `map` + file parts) is read only once the
-//! trusted `X-Passport` has resolved a principal, and then only within explicit bounds.
-//!
-//! Before 0.3.2 async-graphql-axum's extractor parsed the body — spooling every file part to
-//! a temporary file — before the handler looked at the passport, so an unauthenticated
-//! client could make the pod write to disk. An anonymous temporary file leaves no name to
-//! observe afterwards, so absence is proven by behaviour: a body the client never finishes
-//! sending is answered at once (an authenticated control shows the same stalled body is
-//! waited for, as any pod that read before judging would wait), and a spool directory that
-//! cannot be written is never reached (an authenticated control shows the same request
-//! would reach it).
-
 mod multipart_support;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
-use conformance_service_engine::sample::graphql::{boot_graphql_service, boot_upload_service};
+use conformance_service_engine::sample::graphql::{
+    boot_graphql_service, boot_upload_service, boot_upload_service_with,
+};
 use multipart_support::{
     chunked_multipart, code, expected, map, operations, post_multipart, raw_upload_body,
     spool_holds_no_named_file, stalled_body, upload_form, valid_passport,
@@ -166,18 +156,16 @@ async fn s241_an_authenticated_multipart_request_over_a_bound_is_refused_with_it
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let spool = tempfile::tempdir().expect("a spool directory");
-    let service = boot_upload_service(
-        &db,
-        nats.nats().await,
-        "se_s241d",
-        "pod-s241d",
-        MultipartConfig::default()
-            .with_spool_dir(spool.path())
-            .with_max_body_bytes(16 * 1024)
-            .with_max_file_bytes(8 * 1024)
-            .with_max_files(2),
-    )
-    .await;
+    let service =
+        boot_upload_service_with(&db, nats.nats().await, "se_s241d", "pod-s241d", |config| {
+            config.with_max_body_bytes(16 * 1024).with_multipart(
+                MultipartConfig::default()
+                    .with_spool_dir(spool.path())
+                    .with_max_file_bytes(8 * 1024)
+                    .with_max_files(2),
+            )
+        })
+        .await;
     let passport = valid_passport();
 
     let cases = [

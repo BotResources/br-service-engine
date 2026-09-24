@@ -8,7 +8,7 @@ use bytes::Bytes;
 use futures_util::{StreamExt, stream};
 
 use super::{BodyPolicy, BodyRefusal, receive};
-use crate::config::DEFAULT_BODY_READ_TIMEOUT;
+use crate::config::{DEFAULT_BODY_READ_TIMEOUT, DEFAULT_MAX_BODY_BYTES};
 use crate::graphql::multipart::{MultipartConfig, MultipartPolicy, MultipartRefusal};
 use crate::graphql::{BODY_READ_TIMEOUT_CODE, BODY_TOO_LARGE_CODE};
 
@@ -24,17 +24,15 @@ fn headers(content_type: &str) -> HeaderMap {
 }
 
 fn no_upload() -> BodyPolicy {
-    BodyPolicy::new(
-        MultipartPolicy::new(&MultipartConfig::default(), false),
-        DEFAULT_BODY_READ_TIMEOUT,
-    )
+    bounded_to(DEFAULT_MAX_BODY_BYTES, DEFAULT_BODY_READ_TIMEOUT)
 }
 
 fn bounded_to(max_body_bytes: u64, read_timeout: Duration) -> BodyPolicy {
-    let config = MultipartConfig::default()
-        .with_max_body_bytes(max_body_bytes)
-        .with_max_file_bytes(max_body_bytes);
-    BodyPolicy::new(MultipartPolicy::new(&config, false), read_timeout)
+    BodyPolicy::new(
+        max_body_bytes,
+        read_timeout,
+        MultipartPolicy::new(&MultipartConfig::default(), max_body_bytes, false),
+    )
 }
 
 fn declaring(content_type: &str, length: usize) -> HeaderMap {
@@ -43,7 +41,6 @@ fn declaring(content_type: &str, length: usize) -> HeaderMap {
     headers
 }
 
-/// `chunks` one after the other, then a body that panics if it is polled again.
 fn chunks_then_never(chunks: &[&'static str]) -> Body {
     let sent = stream::iter(
         chunks
@@ -59,7 +56,6 @@ fn chunks_then_never(chunks: &[&'static str]) -> Body {
     Body::from_stream(sent.chain(never))
 }
 
-/// `head`, then nothing more: the client never finishes sending.
 fn stalls_after(head: &'static str) -> Body {
     let head =
         stream::once(async move { Ok::<_, std::io::Error>(Bytes::from_static(head.as_bytes())) });

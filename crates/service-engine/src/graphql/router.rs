@@ -51,16 +51,24 @@ where
 {
     let schema_declares_upload = declares_upload_scalar(&schema.sdl());
     let config = engine.runtime().config();
-    let multipart = MultipartPolicy::new(&config.multipart, schema_declares_upload);
+    let multipart = MultipartPolicy::new(
+        &config.multipart,
+        config.max_body_bytes,
+        schema_declares_upload,
+    );
     tracing::debug!(
         schema_declares_upload,
-        max_body_bytes = multipart.max_body_bytes(),
+        max_body_bytes = config.max_body_bytes,
         max_files = multipart.max_files(),
         spool_dir = %multipart.spool_dir().display(),
         body_read_timeout_ms = %config.body_read_timeout.as_millis(),
         "graphql request body bounds"
     );
-    let body = Arc::new(BodyPolicy::new(multipart, config.body_read_timeout));
+    let body = Arc::new(BodyPolicy::new(
+        config.max_body_bytes,
+        config.body_read_timeout,
+        multipart,
+    ));
     Router::new()
         .route("/graphql", post(graphql_post::<P, Q, M, S>))
         .route("/graphql/ws", get(graphql_ws::<P, Q, M, S>))
@@ -119,8 +127,6 @@ where
     S: SubscriptionType + 'static,
 {
     let (parts, body) = request.into_parts();
-    // The principal is resolved from the headers alone, before a byte of the body is read:
-    // a client without a trusted passport makes the pod neither buffer nor spool anything.
     let principal = match authenticate(&state.engine, &parts.headers).await {
         Ok(principal) => principal,
         Err(denied) => return denied.into_response(),
@@ -129,8 +135,6 @@ where
         Ok(request) => request.data(principal),
         Err(refusal) => return refusal.into_response(),
     };
-    // The gateway's subscription leg: the same authenticated request, answered as a
-    // graphql-sse stream bounded like a WebSocket session.
     if sse::wants_event_stream(&parts.headers) {
         return sse::respond(&state.schema, request, stream_bounds(&state.engine));
     }
@@ -174,8 +178,6 @@ where
         })
 }
 
-/// Why a request gets no principal: a passport that is absent, undecodable or rejected
-/// (`401`), or facts the pod could not load (`500` `INTERNAL`).
 enum Denied {
     Unauthenticated(AuthReject),
     FactsUnavailable(Box<EngineError>),
@@ -190,7 +192,6 @@ impl IntoResponse for Denied {
     }
 }
 
-/// The principal, from the headers alone: nothing of the body is read here.
 async fn authenticate<P: PassportPrincipal>(
     engine: &GraphqlState<P>,
     headers: &HeaderMap,
@@ -213,9 +214,6 @@ fn passport_header(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-/// The principal's facts could not be loaded: an infrastructure fault, not a
-/// rejected passport. The cause is logged with its chain; the client receives
-/// `INTERNAL` in the GraphQL error shape and no detail.
 fn facts_unavailable(error: &EngineError) -> Response {
     tracing::error!(
         cause = %crate::chain::describe(error),

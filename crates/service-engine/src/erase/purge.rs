@@ -107,9 +107,7 @@ async fn purge_manifest<P: Principal>(
     let presence_keys = manifest
         .presence
         .iter()
-        .map(|raw| {
-            KvKey::new(raw.clone()).map_err(|error| EngineError::Service(error.to_string().into()))
-        })
+        .map(|raw| KvKey::new(raw.clone()).map_err(|error| EngineError::Service(Box::new(error))))
         .collect::<Result<Vec<_>, _>>()?;
     presence.purge(&presence_keys).await?;
     let blob_refs: Vec<BlobRef> = manifest.blobs.iter().copied().map(BlobRef).collect();

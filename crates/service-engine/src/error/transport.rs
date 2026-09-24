@@ -39,3 +39,37 @@ pub enum RelayError {
     #[error(transparent)]
     Relay(BoxedError),
 }
+
+impl RelayError {
+    pub(crate) fn published_language(error: crate::nats::NatsError) -> Self {
+        Self::Publish(format!(
+            "published language: {}",
+            crate::chain::describe(&error)
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RelayError;
+    use crate::nats::NatsError;
+
+    #[test]
+    fn a_published_language_failure_keeps_the_cause_its_nats_error_holds_as_a_source() {
+        let decoding = serde_json::from_str::<u8>("").expect_err("an empty document is no u8");
+        let decoding_text = decoding.to_string();
+        let nats = NatsError::Decode {
+            key: "offers/v1/a".to_string(),
+            source: decoding,
+        };
+
+        let relayed = RelayError::published_language(nats);
+
+        assert_eq!(
+            relayed.to_string(),
+            format!(
+                "publishing a claimed row: published language: decoding kv key offers/v1/a: {decoding_text}"
+            )
+        );
+    }
+}

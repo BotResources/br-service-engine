@@ -101,7 +101,7 @@ impl Ops<'_> {
         if let Err(EngineError::Db(db)) = outcome
             && crate::inbound::sqlx_is_terminal(db)
         {
-            self.staged.terminal_violation = Some(db.to_string());
+            self.staged.terminal_violation = Some(crate::chain::describe(db));
         }
     }
 }

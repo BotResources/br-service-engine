@@ -68,37 +68,15 @@ impl OutboundEvent for WidgetCreated {
     }
 }
 
-#[derive(Debug)]
-pub enum SampleReactionFault {
-    Store(String),
-    Terminal(String),
-}
-
-impl std::fmt::Display for SampleReactionFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Store(detail) => write!(f, "store: {detail}"),
-            Self::Terminal(detail) => write!(f, "terminal: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for SampleReactionFault {}
+#[derive(Debug, thiserror::Error)]
+#[error("the store failed")]
+pub struct SampleReactionFault(#[from] EngineError);
 
 impl ReactionError for SampleReactionFault {
     fn disposition(&self) -> Disposition {
-        match self {
-            Self::Store(_) => Disposition::Retry,
-            Self::Terminal(_) => Disposition::Terminal,
-        }
-    }
-}
-
-impl From<EngineError> for SampleReactionFault {
-    fn from(error: EngineError) -> Self {
-        match &error {
-            EngineError::Db(db) if sqlx_is_terminal(db) => Self::Terminal(error.to_string()),
-            _ => Self::Store(error.to_string()),
+        match &self.0 {
+            EngineError::Db(db) if sqlx_is_terminal(db) => Disposition::Terminal,
+            _ => Disposition::Retry,
         }
     }
 }
@@ -159,7 +137,7 @@ pub fn lock_widget<'r>(
             .bind(&cmd.label)
             .execute(cx.connection())
             .await
-            .map_err(|error| SampleReactionFault::from(EngineError::from(error)))?;
+            .map_err(EngineError::from)?;
         cx.impact_caused::<Widget, _>(&cmd.id, "relabelled")?;
         Ok(())
     })

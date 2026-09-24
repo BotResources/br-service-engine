@@ -18,9 +18,9 @@ pub fn reply_finished<'r>(
 ) -> BoxFuture<'r, Result<(), ReactionFault>> {
     Box::pin(async move {
         let cmd = msg.0;
-        let last_seq = ChunkSeq::new(cmd.last_seq)?;
+        let last_seq = ChunkSeq::new(cmd.last_seq).map_err(ReactionFault::Malformed)?;
         let hash = SealHash::from_hex(&cmd.hash)
-            .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
+            .map_err(ReactionFault::Malformed)?;
         let text: String = match cx.seal::<ReplyText>(&cmd.reply_id, last_seq, hash).await {
             Ok(text) => text,
             Err(error) => return on_seal_error(cx, cmd.reply_id, cmd.board_id, error),
@@ -42,9 +42,9 @@ pub fn reply_cancelled<'r>(
 ) -> BoxFuture<'r, Result<(), ReactionFault>> {
     Box::pin(async move {
         let cmd = msg.0;
-        let last_seq = ChunkSeq::new(cmd.last_seq)?;
+        let last_seq = ChunkSeq::new(cmd.last_seq).map_err(ReactionFault::Malformed)?;
         let hash = SealHash::from_hex(&cmd.hash)
-            .map_err(|error| ReactionFault::Terminal(error.to_string()))?;
+            .map_err(ReactionFault::Malformed)?;
         let text: String = match cx
             .seal_partial::<ReplyText>(&cmd.reply_id, last_seq, hash)
             .await

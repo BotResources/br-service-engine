@@ -37,8 +37,7 @@ pub fn attach_verified_doc<'m>(
     input: AttachVerifiedDoc,
 ) -> BoxFuture<'m, Result<OneShot<UploadUrl>, SampleFault>> {
     Box::pin(async move {
-        let sha256 = Sha256Digest::from_hex(&input.sha256_hex)
-            .map_err(|error| SampleFault::Store(error.to_string()))?;
+        let sha256 = Sha256Digest::from_hex(&input.sha256_hex)?;
         let blob = cx.blob_verified::<Attachment>(
             input.name.clone(),
             input.content_type,

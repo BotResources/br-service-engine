@@ -122,7 +122,11 @@ impl InboundConsumer {
         delay: std::time::Duration,
     ) {
         if let Err(ack) = message.ack_with(AckKind::Nak(Some(delay))).await {
-            tracing::warn!(reaction = %incoming.reaction, %ack, "nak failed");
+            tracing::warn!(
+                reaction = %incoming.reaction,
+                error = %crate::chain::describe(&*ack),
+                "nak failed"
+            );
         }
     }
 

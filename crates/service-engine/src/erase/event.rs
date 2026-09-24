@@ -17,7 +17,8 @@ impl PersonErased {
     pub(crate) fn new(service: &str, person: PersonId) -> Result<Self, EngineError> {
         let producer = Bc::new(service).map_err(|error| {
             EngineError::Config(format!(
-                "the configured service {service:?} is not a valid integration producer: {error}"
+                "the configured service {service:?} is not a valid integration producer: {}",
+                crate::chain::describe(&error)
             ))
         })?;
         Ok(Self {

@@ -23,19 +23,12 @@ pub struct Bump {
     pub author: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CounterFault {
+    #[error("refused: {}", .0.code())]
     Refused(Reason),
-    Store(String),
-}
-
-impl std::fmt::Display for CounterFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Refused(reason) => write!(f, "refused: {}", reason.code()),
-            Self::Store(detail) => write!(f, "store: {detail}"),
-        }
-    }
+    #[error("the store failed")]
+    Store(#[from] EngineError),
 }
 
 impl MutationFault for CounterFault {
@@ -50,12 +43,6 @@ impl MutationFault for CounterFault {
 impl From<Reason> for CounterFault {
     fn from(reason: Reason) -> Self {
         Self::Refused(reason)
-    }
-}
-
-impl From<EngineError> for CounterFault {
-    fn from(error: EngineError) -> Self {
-        Self::Store(error.to_string())
     }
 }
 
@@ -226,33 +213,13 @@ impl ReactionMessage for BumpFullCmd {
     }
 }
 
-#[derive(Debug)]
-pub enum CoarseCounterFault {
-    Store(String),
-}
-
-impl std::fmt::Display for CoarseCounterFault {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Store(detail) => write!(f, "store: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for CoarseCounterFault {}
+#[derive(Debug, thiserror::Error)]
+#[error("the bump failed")]
+pub struct CoarseCounterFault(#[from] CounterFault);
 
 impl ReactionError for CoarseCounterFault {
     fn disposition(&self) -> Disposition {
         Disposition::Retry
-    }
-}
-
-impl From<CounterFault> for CoarseCounterFault {
-    fn from(fault: CounterFault) -> Self {
-        match fault {
-            CounterFault::Refused(reason) => Self::Store(reason.code().to_string()),
-            CounterFault::Store(detail) => Self::Store(detail),
-        }
     }
 }
 

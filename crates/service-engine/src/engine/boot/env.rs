@@ -36,7 +36,8 @@ impl EngineConfig {
         let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
         let http_addr: SocketAddr = format!("{host}:{port}").parse().map_err(|error| {
             EngineError::Config(format!(
-                "HOST `{host}` and PORT `{port}` do not form a socket address: {error}"
+                "HOST `{host}` and PORT `{port}` do not form a socket address: {}",
+                crate::chain::describe(&error)
             ))
         })?;
 
@@ -72,7 +73,8 @@ fn millis(key: &str) -> Result<Option<Duration>, EngineError> {
             .map(|ms| Some(Duration::from_millis(ms)))
             .map_err(|error| {
                 EngineError::Config(format!(
-                    "{key} is not a whole number of milliseconds: {error}"
+                    "{key} is not a whole number of milliseconds: {}",
+                    crate::chain::describe(&error)
                 ))
             }),
         Err(_) => Ok(None),

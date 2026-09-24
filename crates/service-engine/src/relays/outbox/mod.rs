@@ -152,7 +152,7 @@ impl OutboxRelay {
             Err(error) => error,
         };
 
-        let detail = outcome.to_string();
+        let detail = crate::chain::describe(&outcome);
         if classify_failure(&outcome) == FailureClass::Structural {
             self.store
                 .apply_transition(
@@ -232,7 +232,10 @@ impl OutboxRelay {
             return Ok(());
         };
         let payload = serde_json::to_vec(&record.payload).map_err(|error| {
-            sqlx::Error::Protocol(format!("encoding a dead-lettered outbox payload: {error}"))
+            sqlx::Error::Protocol(format!(
+                "encoding a dead-lettered outbox payload: {}",
+                crate::chain::describe(&error)
+            ))
         })?;
         let entry = StagedDeadLetter {
             source: DeadLetterSource::Outbox,

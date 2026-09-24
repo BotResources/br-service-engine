@@ -588,13 +588,13 @@ rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNA
 
 Multipart requests. `POST /graphql` accepts the GraphQL multipart request
 (`operations`, then `map`, then the file parts `map` names) from an authenticated
-client only, and reads it under `EngineConfig::multipart` (`MultipartConfig`,
-validated at boot):
+client only, and reads it under `EngineConfig::max_body_bytes` (below) and
+`EngineConfig::multipart` (`MultipartConfig`, validated at boot):
 
 | Bound | Default | Refusal |
 |---|---|---|
-| `max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
-| `max_file_bytes` — any single part: a file, `operations`, `map` | 8 MiB | `413` `MULTIPART_FILE_TOO_LARGE` |
+| `EngineConfig::max_body_bytes` — the whole body; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut when it crosses it | 16 MiB | `413` `MULTIPART_TOO_LARGE` |
+| `max_file_bytes` — any single part: a file, `operations`, `map`. Unset, it follows a lower `max_body_bytes` down, so lowering the body bound alone is enough; set, it must not exceed `max_body_bytes` (refused at boot) | 8 MiB, or `max_body_bytes` when that is lower | `413` `MULTIPART_FILE_TOO_LARGE` |
 | `max_files` — the uploads `map` binds (every path counts, so one file bound to two variables counts twice); judged on `map`, before any file part is spooled — and `map` itself may weigh at most 1 KiB per allowed upload plus 1 KiB, so a padded `map` is refused before it is parsed | 4 | `413` `MULTIPART_TOO_MANY_FILES` |
 
 A body that breaks the spec's order, carries a part `map` does not name, or misses
@@ -617,7 +617,7 @@ Every authenticated body. Two bounds hold for every content type, JSON included:
 
 | Bound | Default | Refusal |
 |---|---|---|
-| `MultipartConfig::max_body_bytes` — the whole body, JSON as well as multipart (the name predates its reach); a declared `Content-Length` above it is refused before the body is read, a chunked body is cut on the chunk that crosses it | 16 MiB | `413` `BODY_TOO_LARGE` (`MULTIPART_TOO_LARGE` for a multipart body) |
+| `EngineConfig::max_body_bytes` (`with_max_body_bytes`, `config::DEFAULT_MAX_BODY_BYTES`) — the whole body, JSON as well as multipart; a declared `Content-Length` above it is refused before the body is read, a chunked body is cut on the chunk that crosses it. No environment variable feeds it | 16 MiB | `413` `BODY_TOO_LARGE` (`MULTIPART_TOO_LARGE` for a multipart body) |
 | `EngineConfig::body_read_timeout` (`with_body_read_timeout`) — from the passport resolving to the last byte of the body; past it the read is abandoned and what was received (buffered bytes, spooled files) is dropped | 30 s | `408` `BODY_READ_TIMEOUT` |
 
 Both refusals are GraphQL-shaped like the multipart ones (`graphql::BODY_TOO_LARGE_CODE`,
@@ -643,8 +643,8 @@ begin or commit, an engine wiring fault, a handler error whose
 (`graphql::INTERNAL_CODE`) with the fixed message `internal error`
 (`graphql::INTERNAL_MESSAGE`) and no detail; the engine logs the cause at
 `error` with its whole `source()` chain where it converts the error. A handler
-fault joins its own chain to that log by returning `Some(self)` from
-`MutationFault::as_error` (the default logs its `Display` alone). The few
+fault is in that chain by construction: `MutationFault` requires
+`std::error::Error`, and the engine logs the fault with `error::describe`. The few
 failures a client can act on keep a specific code: paging a session the caller
 does not hold or a window it never attached is `NOT_FOUND`, attaching under a
 session id a live session holds is `CONFLICT`, attaching for a principal that no
@@ -654,6 +654,38 @@ refusal that carries a reason is unchanged: its code and its `mutation refused:`
 message. `graphql::internal_error(context, &cause)` gives a service's own
 resolver the same shape; the codes, the message and both helpers are
 re-exported at `service_engine::` like `coded_error`.
+
+Errors as text. `error::describe(&error)` renders an error and its whole
+`source()` chain, outermost first, joined by `: `. It is the engine's one
+renderer: every engine log site uses it, and so does every failure text the
+engine keeps (dispatch and dead-letter reasons, render faults, relay, cron and
+mirror health, NATS, object-storage and published-language details). A service's
+own faults reach it by construction: `MutationFault` and `ReactionError` both
+require `std::error::Error`, a mutation fault without a reason is logged as
+`describe(&fault)`, and a reaction fault's dispatch and dead-letter reason is
+`describe(&fault)`. So a fault keeps the error it wraps as its `source()`
+(`#[from]` or `#[source]` with thiserror) and writes only its own context in
+`Display`; it never pre-renders its cause into a `String`. `MutationError`, what
+`MutationExecutor::run` / `run_bulk` return, follows the same rule. A failure
+without a reason (`MutationError::internal`) writes only `mutation failed` and
+keeps its internal text (`describe(&fault)` for a handler fault) as its
+`source()` and its `detail`, which is never client text: `describe(&error)`
+renders `mutation failed: <chain>` for a log, and a resolver that forwards the
+error with `?` into `async_graphql::Error` answers `mutation failed` and nothing
+more. A refusal writes `mutation refused (<CODE>): <detail>`, its `detail` being
+the fault's own `Display`, the only detail a client reads. `?` drops a
+refusal's code extension, so a resolver maps the executor's error with
+`graphql::mutation_error`, or runs through `execute` / `ack`. `gate::Reason` is an
+error too (its `Display` is its code), so a mutation that can only refuse
+declares `type Error = Reason`. A service that logs an engine error, or keeps
+one as text, calls the same function. A
+segment is written once: it is skipped when its parent's text equals it or ends
+with `: ` followed by it. So sqlx's `error returned from database: <text>`,
+whose `source()` is the database error `<text>` again, renders the database
+text once, and so do an async-nats `kind: source` error and a wrapper that
+repeats its source verbatim. The match is at a segment boundary only: a parent
+`cannot open config` over a cause `config` keeps both. A skipped segment is
+still the parent of its own cause, which is kept when distinct.
 
 `register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
@@ -1438,9 +1470,11 @@ GitOps repository, sequenced after this release.
 `EngineConfig` carries one clock and a handful of bounds, every one validated
 at `Engine::boot`: durations and capacities are non-zero,
 `listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` outlasts the
-`beat`, `session_max_age` outlasts the idle `session_ttl`, the multipart
-bounds are non-zero with `max_file_bytes` within `max_body_bytes`, and
-`body_read_timeout` is non-zero. A session lives at most `session_max_age`; when it does
+`beat`, `session_max_age` outlasts the idle `session_ttl`, `max_body_bytes` is
+non-zero, a multipart `max_file_bytes` the service sets is non-zero and within
+`max_body_bytes` (unset, it follows a lower `max_body_bytes` down), and
+`body_read_timeout` is non-zero. A session lives at most
+`session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
 reaps a session that has lost its consumer. The bound is on the connection, not

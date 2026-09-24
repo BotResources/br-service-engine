@@ -123,7 +123,9 @@ impl StubDispatch {
         let payload: StubPayload = match serde_json::from_slice(&msg.body) {
             Ok(payload) => payload,
             Err(error) => {
-                return DispatchOutcome::Failed(DispatchError::terminal(error.to_string()));
+                return DispatchOutcome::Failed(DispatchError::terminal(crate::chain::describe(
+                    &error,
+                )));
             }
         };
         match payload.verdict {
@@ -145,7 +147,11 @@ impl StubDispatch {
     async fn transact(&self, msg: &Incoming, verdict: StubVerdict) -> DispatchOutcome {
         let mut tx = match self.pool.begin().await {
             Ok(tx) => tx,
-            Err(error) => return DispatchOutcome::Failed(DispatchError::retry(error.to_string())),
+            Err(error) => {
+                return DispatchOutcome::Failed(DispatchError::retry(crate::chain::describe(
+                    &error,
+                )));
+            }
         };
         match claim(&mut tx, msg.message_id, &msg.reaction).await {
             Ok(Claimed::Duplicate) => {
@@ -207,11 +213,12 @@ impl StubDispatch {
             Ok(_) => None,
             Err(error) if sqlx_is_terminal(&error) => {
                 Some(DispatchOutcome::Failed(DispatchError::terminal(format!(
-                    "integrity violation classified terminal: {error}"
+                    "integrity violation classified terminal: {}",
+                    crate::chain::describe(&error)
                 ))))
             }
             Err(error) => Some(DispatchOutcome::Failed(DispatchError::retry(
-                error.to_string(),
+                crate::chain::describe(&error),
             ))),
         }
     }
@@ -219,9 +226,9 @@ impl StubDispatch {
 
 fn classify(error: sqlx::Error) -> DispatchError {
     if sqlx_is_terminal(&error) {
-        DispatchError::terminal(error.to_string())
+        DispatchError::terminal(crate::chain::describe(&error))
     } else {
-        DispatchError::retry(error.to_string())
+        DispatchError::retry(crate::chain::describe(&error))
     }
 }
 
