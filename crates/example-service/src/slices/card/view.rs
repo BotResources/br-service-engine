@@ -73,7 +73,9 @@ impl Projector for CardsView {
         let pg = cx.pool();
         Ok(match (query.board_id, &query.page) {
             (Some(board), Some(page)) => {
-                page.population(store::cards_of_board_page(pg, board, page).await?)
+                let keys =
+                    store::cards_of_board_page(pg, board, page.cursor(), cx.limit(page)).await?;
+                page.population(keys)
             }
             (Some(board), None) => keyed(store::cards_of_board(pg, board).await?),
             (None, _) => keyed(store::all_card_ids(pg).await?),

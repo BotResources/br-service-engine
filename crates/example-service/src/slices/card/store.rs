@@ -1,5 +1,4 @@
 use futures_util::future::BoxFuture;
-use service_engine::Page;
 use service_engine::error::EngineError;
 use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
 use sqlx::{PgConnection, PgPool, Row};
@@ -159,15 +158,16 @@ pub async fn cards_of_board(pg: &PgPool, board: Uuid) -> Result<Vec<Uuid>, Engin
 pub async fn cards_of_board_page(
     pg: &PgPool,
     board: Uuid,
-    page: &Page<Uuid>,
+    before: Option<&Uuid>,
+    limit: i64,
 ) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query(
         "SELECT id FROM card WHERE board_id = $1 AND ($2::uuid IS NULL OR id < $2) \
          ORDER BY id DESC LIMIT $3",
     )
     .bind(board)
-    .bind(page.cursor())
-    .bind(page.limit())
+    .bind(before)
+    .bind(limit)
     .fetch_all(pg)
     .await?;
     Ok(rows.iter().map(|row| row.get::<Uuid, _>("id")).collect())

@@ -1,9 +1,11 @@
+mod ceiling;
 mod size;
 
 use serde::{Deserialize, Serialize};
 
 use crate::population::Population;
 
+pub use ceiling::KeyCeiling;
 pub use size::{WINDOW_SIZE_INVALID_CODE, WindowSize, WindowSizeOutOfRange};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,15 +35,15 @@ impl<K> Page<K> {
         self.size
     }
 
-    pub fn limit(&self) -> i64 {
-        self.size.limit()
+    pub(crate) fn limit_under(&self, ceiling: KeyCeiling) -> i64 {
+        self.size.limit().min(ceiling.limit())
     }
 
     pub fn population(&self, keys: Vec<K>) -> Population<K> {
         debug_assert!(
             self.size.holds(keys.len()),
-            "populate returned {} keys for a page of {}: bind page.limit() as the LIMIT of the \
-             page's query",
+            "populate returned {} keys for a page of {}: bind cx.limit(&page) as the LIMIT of \
+             the page's query",
             keys.len(),
             self.size.get()
         );
@@ -83,9 +85,20 @@ mod tests {
     }
 
     #[test]
-    fn the_limit_a_populate_binds_is_the_page_size() {
-        assert_eq!(Page::<u32>::head(size(40)).limit(), 40);
+    fn the_limit_a_populate_binds_is_the_page_size_under_the_ceiling() {
+        assert_eq!(
+            Page::<u32>::head(size(40)).limit_under(KeyCeiling::NONE),
+            40
+        );
         assert_eq!(Page::before(1_u32, size(40)).size(), size(40));
+        assert_eq!(
+            Page::<u32>::head(size(40)).limit_under(KeyCeiling::attach(100)),
+            40
+        );
+        assert_eq!(
+            Page::<u32>::head(size(WindowSize::MAX)).limit_under(KeyCeiling::attach(4)),
+            5
+        );
     }
 
     #[test]
@@ -100,7 +113,7 @@ mod tests {
 
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "bind page.limit()")]
+    #[should_panic(expected = "bind cx.limit(&page)")]
     fn a_populate_that_ignores_the_page_size_fails_in_a_debug_build() {
         let _ = Page::<u32>::head(size(2)).population(vec![3, 2, 1]);
     }

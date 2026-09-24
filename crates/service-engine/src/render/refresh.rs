@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::dyn_compat::ErasedPopulation;
 use crate::error::EngineError;
 use crate::impact::Impact;
+use crate::page::KeyCeiling;
 use crate::principal::{Principal, PrincipalId};
 use crate::render::fault::Faults;
 use crate::render::pass::{PassContext, PassReport, Vanished};
@@ -111,7 +112,10 @@ pub(crate) async fn repopulate<P: Principal>(
         next.extend(discovered.iter().cloned());
         let mut shape = None;
         if entry.repopulate {
-            let population = match projector.populate(ctx.pg, &params, &principal).await {
+            let population = match projector
+                .populate(ctx.pg, &params, KeyCeiling::NONE, &principal)
+                .await
+            {
                 Ok(population) => population,
                 Err(error) => {
                     faults.record(id, &error);

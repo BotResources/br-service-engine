@@ -35,7 +35,7 @@ impl WindowSize {
         self.0
     }
 
-    pub fn limit(self) -> i64 {
+    pub(crate) fn limit(self) -> i64 {
         i64::from(self.0)
     }
 

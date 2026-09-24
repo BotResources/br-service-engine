@@ -4,6 +4,7 @@ use crate::cohort::CohortKey;
 use crate::dyn_compat::ErasedPopulation;
 use crate::error::EngineError;
 use crate::name::ProjectorName;
+use crate::page::KeyCeiling;
 use crate::principal::Principal;
 use crate::render::group::{Rendered, Renderer};
 use crate::render::pass::PassContext;
@@ -66,7 +67,9 @@ pub(crate) async fn resnapshot<P: Principal>(
             .registry
             .projector(name)
             .ok_or_else(|| EngineError::UnboundProjector(name.clone()))?;
-        let population = projector.populate(ctx.pg, &spec.params, &principal).await?;
+        let population = projector
+            .populate(ctx.pg, &spec.params, KeyCeiling::NONE, &principal)
+            .await?;
         cost.populates += 1;
         if let ErasedPopulation::Query(query) = &population
             && query.interest().is_empty()

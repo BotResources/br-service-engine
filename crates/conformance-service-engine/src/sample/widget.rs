@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::gate::{Affordances, Gate, Gated, Reason};
 use service_engine::impact::ForeignKey;
@@ -211,6 +212,7 @@ impl Projector for WidgetProjector {
         &'a self,
         pg: &'a sqlx::PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {

@@ -68,10 +68,11 @@ impl<Pr: Projector> ErasedProjector<Pr::Principal> for ProjectorAdapter<Pr> {
         &'a self,
         pg: &'a PgPool,
         window: &'a WindowParams,
+        ceiling: KeyCeiling,
         principal: &'a Pr::Principal,
     ) -> BoxFuture<'a, Result<ErasedPopulation, EngineError>> {
         Box::pin(async move {
-            match self.0.populate(pg, window, principal).await? {
+            match self.0.populate(pg, window, ceiling, principal).await? {
                 Population::Keys(keys) => Ok(ErasedPopulation::Keys(erase_keys::<Pr>(keys)?)),
                 Population::Ordered { keys, open_head } => {
                     let keys = keys

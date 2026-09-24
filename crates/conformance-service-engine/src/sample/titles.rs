@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+use service_engine::KeyCeiling;
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
 use service_engine::name::{NounName, ProjectorName};
@@ -59,6 +60,7 @@ impl Projector for TitleProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {
@@ -137,6 +139,7 @@ impl Projector for MiskeyedProjector {
         &'a self,
         _pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<String>, EngineError>> {
         Box::pin(async move { Ok(Population::Keys(BTreeSet::new())) })

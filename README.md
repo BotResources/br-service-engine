@@ -59,7 +59,7 @@ battery-backed.
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
-| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `limit()` for the `LIMIT` its `populate` binds, `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one) |
+| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, `KeyCeiling::NONE` elsewhere); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling |
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
@@ -827,8 +827,9 @@ cannot carry one either, because `WindowSize` refuses it on decode, so a zero or
 negative bound never reaches the database as a `LIMIT`. Declaring a `WindowSize`
 argument leaves every other `Int` argument of the schema as it was.
 `Page<K>` (`Page::head(size)`, `Page::before(cursor, size)`, `Page::new`) is
-what `populate` reads: its SQL binds `page.cursor()` and `page.limit()`
-(`… AND ($2::uuid IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`), and it
+what `populate` reads: its SQL binds `page.cursor()` and `cx.limit(&page)`
+(`… AND ($2::uuid IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`) — the page
+has no limit of its own, so the only `LIMIT` at hand is the bounded one — and it
 returns `page.population(keys)`, which picks the shape so the author never does:
 a page with no cursor is an open head (`Population::Ordered { open_head: true }`
 — a new row enters it and the oldest leaves), a page behind a cursor is fixed
@@ -868,6 +869,15 @@ population holds more than `window_capacity` keys (default 10,000,
 `EngineConfig::with_window_capacity`, no env var) is refused before anything is
 rendered, with `AttachError::WindowTooLarge` answered as `WINDOW_TOO_LARGE`, and
 leaves no session behind; the client narrows the window with its arguments. The
+read behind the refusal is bounded too: at attach `cx.limit(&page)` is the page
+size clamped to `window_capacity + 1`, the one key past the capacity that proves
+the refusal, so a `size: 2147483647` reads at most `window_capacity + 1` keys
+before it is refused, and the refusal reports that size. A raw
+`projector::Projector` receives the same bound as `populate`'s `KeyCeiling`
+argument. A repopulation after attach runs under `KeyCeiling::NONE` and binds the
+page size as asked, so the ceiling never trims a live window; a query resolver's
+one-shot `cx.fetch_window` is no attach, runs under `KeyCeiling::NONE` too, and
+is bounded only by the arguments its resolver passes. The
 refusal is counted as
 `service_engine_windows_over_capacity_total{projector, outcome="refused"}` and
 not logged: the client can fix it, and a client that retries in a loop would

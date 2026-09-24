@@ -3,6 +3,7 @@ mod spike_support;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize, Serializer};
 use service_engine::ChunkSeq;
+use service_engine::KeyCeiling;
 use service_engine::cohort::CohortKey;
 use service_engine::dyn_compat::{
     ErasedAccumulator, ErasedInverse, ErasedLoadScope, ErasedPopulation, erase_accumulator,
@@ -111,7 +112,7 @@ async fn facts_loaded_for_one_projector_are_refused_by_another() {
         ..
     } = fixture();
     let keys = match projectors[0]
-        .populate(&pg, &WindowParams::none(), &viewer)
+        .populate(&pg, &WindowParams::none(), KeyCeiling::NONE, &viewer)
         .await
         .unwrap()
     {
@@ -196,6 +197,7 @@ impl Projector for Ghosts {
         &'a self,
         _pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a Viewer,
     ) -> BoxFuture<'a, Result<Population<UnencodableKey>, EngineError>> {
         Box::pin(async move {
@@ -252,7 +254,7 @@ async fn a_query_predicate_given_a_key_it_cannot_decode_reports_the_error_instea
     let pg = PgPool::connect_lazy("postgresql://engine:engine@127.0.0.1:1/engine").unwrap();
 
     let ErasedPopulation::Query(query) = ghosts
-        .populate(&pg, &WindowParams::none(), &viewer)
+        .populate(&pg, &WindowParams::none(), KeyCeiling::NONE, &viewer)
         .await
         .expect("the ghost window is a query")
     else {

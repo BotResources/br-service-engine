@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 use crate::cohort::CohortKey;
 use crate::dyn_compat::ErasedPopulation;
 use crate::error::{AttachError, EngineError};
+use crate::page::KeyCeiling;
 use crate::principal::Principal;
 use crate::render::group::{Rendered, Renderer};
 use crate::render::pass::PassContext;
@@ -242,7 +243,12 @@ impl<P: Principal> SessionRuntime<P> {
                 source,
             };
             let population = projector
-                .populate(&self.pg, &spec.params, principal)
+                .populate(
+                    &self.pg,
+                    &spec.params,
+                    KeyCeiling::attach(self.config.window_capacity),
+                    principal,
+                )
                 .await
                 .map_err(refuse)?;
             if let ErasedPopulation::Query(query) = &population

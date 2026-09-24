@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use async_graphql::{Context, Object, Result};
 use futures_util::future::BoxFuture;
+use service_engine::KeyCeiling;
 use service_engine::Query;
 use service_engine::error::EngineError;
 use service_engine::impact::ForeignKey;
@@ -46,6 +47,7 @@ impl Projector for RlsAssignmentProjector {
         &'a self,
         pg: &'a PgPool,
         _window: &'a WindowParams,
+        _ceiling: KeyCeiling,
         _principal: &'a SamplePrincipal,
     ) -> BoxFuture<'a, Result<Population<Uuid>, EngineError>> {
         Box::pin(async move {

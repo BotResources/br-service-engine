@@ -142,7 +142,7 @@ pub use nats::{
 pub use offer::{Offer, OfferTrigger};
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
-pub use page::{Page, WINDOW_SIZE_INVALID_CODE, WindowSize, WindowSizeOutOfRange};
+pub use page::{KeyCeiling, Page, WINDOW_SIZE_INVALID_CODE, WindowSize, WindowSizeOutOfRange};
 pub use pastey;
 pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 pub use pipeline::{

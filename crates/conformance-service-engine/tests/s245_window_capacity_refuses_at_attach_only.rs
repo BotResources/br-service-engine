@@ -74,8 +74,7 @@ async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
         "a refused attach leaves no session behind"
     );
 
-    let capacity_size = WindowSize::new(u32::try_from(CAPACITY).expect("a small capacity"))
-        .expect("a positive capacity");
+    let capacity_size = page_size(CAPACITY);
     let mut narrowed = engine
         .attach(attach_request(
             &principal,
@@ -85,6 +84,54 @@ async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
         .expect("the same view narrowed by its arguments to window_capacity attaches");
     let reset = next_delta(&mut narrowed, SOON).await.expect("a Reset");
     assert_eq!(reset_views(&reset).len(), CAPACITY);
+
+    db.cleanup().await;
+}
+
+fn page_size(size: usize) -> WindowSize {
+    WindowSize::new(u32::try_from(size).expect("a small window")).expect("a positive window")
+}
+
+#[tokio::test]
+async fn s245_a_size_far_above_capacity_is_refused_after_reading_one_key_past_it() {
+    let db = TestDb::fresh().await;
+    let pool = db.app_pool().clone();
+    let home = Uuid::now_v7();
+    let principal = member(&pool, Uuid::now_v7(), home).await;
+    for n in 0..CAPACITY + 3 {
+        assignment(&pool, home, &format!("m{n}")).await;
+    }
+    let engine = runtime(
+        &pool,
+        render_config("pod-capacity-ceiling").with_window_capacity(CAPACITY),
+        paged_registry(),
+    );
+
+    let widest = WindowSize::new(WindowSize::MAX).expect("the largest window size");
+    let refused = engine
+        .attach(attach_request(
+            &principal,
+            vec![window(AssignmentPage::head(widest))],
+        ))
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(AttachError::WindowTooLarge {
+                size,
+                capacity: CAPACITY,
+                ..
+            }) if size == CAPACITY + 1
+        ),
+        "a page far wider than window_capacity is refused, and its populate read {} of the {} \
+         matching rows, one past the capacity, got {refused:?}",
+        CAPACITY + 1,
+        CAPACITY + 3
+    );
+    assert_eq!(
+        engine.live_sessions().await + engine.pending_sessions().await,
+        0
+    );
 
     db.cleanup().await;
 }
@@ -108,10 +155,10 @@ async fn s245_a_live_window_that_grows_past_capacity_stays_open_and_is_counted_o
     let mut stream = engine
         .attach(attach_request(
             &principal,
-            vec![window(AssignmentPage::whole())],
+            vec![window(AssignmentPage::head(page_size(CAPACITY + 5)))],
         ))
         .await
-        .expect("a window exactly at window_capacity attaches");
+        .expect("a page wider than window_capacity attaches while its rows fit the capacity");
     let reset = next_delta(&mut stream, SOON).await.expect("a Reset");
     assert_eq!(reset_views(&reset).len(), CAPACITY);
     let kept_before = probe.labelled_total(WINDOWS_OVER_CAPACITY_TOTAL, LABEL_OUTCOME, "kept");
@@ -131,6 +178,14 @@ async fn s245_a_live_window_that_grows_past_capacity_stays_open_and_is_counted_o
         );
         assert_eq!(delta.revision().get(), revision);
         assert_eq!(assignment_ids(&[upserted(&delta).clone()]), vec![grown]);
+        let rest = drain(&mut stream).await;
+        assert!(
+            rest.is_empty(),
+            "the page holds {} rows under a size of {}: none leaves, because a live window \
+             repopulates by its size and never by the attach read, got {rest:?}",
+            n + 1,
+            CAPACITY + 5
+        );
         assert_eq!(engine.live_sessions().await, 1, "the session stays live");
     }
     assert_eq!(

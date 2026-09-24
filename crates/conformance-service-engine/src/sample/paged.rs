@@ -33,18 +33,17 @@ impl AssignmentPage {
 }
 
 async fn newest_keys(
-    pg: &PgPool,
-    tenant: Uuid,
+    cx: &Populate<'_, SamplePrincipal>,
     page: Option<&Page<Uuid>>,
 ) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query(
         "SELECT id FROM sample_assignment WHERE tenant_id = $1 AND ($2::uuid IS NULL OR id < $2) \
          ORDER BY id DESC LIMIT $3",
     )
-    .bind(tenant)
+    .bind(cx.principal().tenant())
     .bind(page.and_then(Page::cursor))
-    .bind(page.map(Page::limit))
-    .fetch_all(pg)
+    .bind(page.map(|page| cx.limit(page)))
+    .fetch_all(cx.pool())
     .await?;
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
 }
@@ -87,7 +86,7 @@ impl ViewProjector for PagedAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         query: &AssignmentPage,
     ) -> Result<Population<Uuid>, EngineError> {
-        let keys = newest_keys(cx.pool(), cx.principal().tenant(), query.0.as_ref()).await?;
+        let keys = newest_keys(cx, query.0.as_ref()).await?;
         Ok(match &query.0 {
             Some(page) => page.population(keys),
             None => Population::Ordered {
