@@ -9,6 +9,7 @@ mod known;
 mod leader;
 mod projection;
 mod required;
+mod row_scope;
 mod rows;
 mod runtime;
 mod scope;
@@ -26,6 +27,7 @@ pub use handle::{MirrorHandle, MirrorRun};
 pub use known::{KnownRow, PrincipalColumn, Written};
 pub use leader::MirrorLeader;
 pub use projection::{Known, KnownScope, Project, Projection};
+pub use row_scope::RowScope;
 pub use shadow::{Shadow, Shadows};
 
 pub(crate) use scope::KeyScope;

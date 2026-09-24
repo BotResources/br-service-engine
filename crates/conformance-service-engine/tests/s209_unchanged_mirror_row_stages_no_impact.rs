@@ -6,7 +6,9 @@ use conformance_service_engine::sample::RecordingTransport;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Column, KnownRow, PrincipalColumn, Project, Projection, col};
+use service_engine::mirror::{
+    Column, KnownRow, PrincipalColumn, Project, Projection, RowScope, col,
+};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Mirror};
@@ -95,11 +97,12 @@ impl Project<Uuid> for RosterProjection {
                         group_id: id,
                         user_id: *user_id,
                     });
-                    cx.replace_rows(vec![col("group_id", id)], members).await?;
+                    cx.replace_rows(RowScope::by(col("group_id", id)), members)
+                        .await?;
                     Ok(())
                 }
                 None => {
-                    cx.replace_rows(vec![col("group_id", id)], Vec::<MemberRow>::new())
+                    cx.replace_rows(RowScope::by(col("group_id", id)), Vec::<MemberRow>::new())
                         .await?;
                     cx.retire::<GroupRow>(vec![col("group_id", id)]).await
                 }

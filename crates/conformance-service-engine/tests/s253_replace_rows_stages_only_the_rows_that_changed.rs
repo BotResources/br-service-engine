@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::impact::{Deps, Impact};
 use service_engine::mirror::{
-    Column, KnownRow, MirrorReady, PrincipalColumn, Project, Projection, col,
+    Column, KnownRow, MirrorReady, PrincipalColumn, Project, Projection, RowScope, col,
 };
 use service_engine::name::MirrorName;
 use service_engine::nats::{KvKey, Nats};
@@ -80,7 +80,7 @@ impl Project<Uuid> for MembersProjection {
                     is_admin,
                 })
                 .collect();
-            cx.replace_rows(vec![col("project_id", project_id)], rows)
+            cx.replace_rows(RowScope::by(col("project_id", project_id)), rows)
                 .await
                 .map(|_| ())
         })

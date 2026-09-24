@@ -10,6 +10,7 @@ use crate::wire::Noun;
 use super::bind::Column;
 use super::consumed::Consumed;
 use super::known::{self, KnownRow, Written};
+use super::row_scope::RowScope;
 use super::rows;
 use super::shadow::{Shadow, Shadows};
 
@@ -91,7 +92,7 @@ impl<'a> Projection<'a> {
 
     pub async fn replace_rows<R, I>(
         &mut self,
-        scope: Vec<Column>,
+        scope: RowScope,
         rows: I,
     ) -> Result<Written, EngineError>
     where
@@ -99,7 +100,7 @@ impl<'a> Projection<'a> {
         I: IntoIterator<Item = R>,
     {
         let changed =
-            rows::replace_rows::<R>(self.conn, &scope, rows.into_iter().collect()).await?;
+            rows::replace_rows::<R>(self.conn, scope.columns(), rows.into_iter().collect()).await?;
         for key in &changed {
             self.stage::<R>(key)?;
         }

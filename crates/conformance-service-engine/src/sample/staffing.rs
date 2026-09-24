@@ -2,7 +2,8 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::mirror::{
-    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, col,
+    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, RowScope,
+    col,
 };
 use service_engine::name::MirrorName;
 use service_engine::nats::{KvKey, Nats};
@@ -147,7 +148,7 @@ impl Project<Uuid> for StaffingProjection {
                 }
             };
             let Some(group) = group else {
-                cx.replace_rows(vec![col("group_id", group_id)], members)
+                cx.replace_rows(RowScope::by(col("group_id", group_id)), members)
                     .await?;
                 return cx
                     .retire::<KnownGroupRow>(vec![col("group_id", group_id)])
@@ -158,7 +159,7 @@ impl Project<Uuid> for StaffingProjection {
                 name: group.name,
             })
             .await?;
-            cx.replace_rows(vec![col("group_id", group_id)], members)
+            cx.replace_rows(RowScope::by(col("group_id", group_id)), members)
                 .await
                 .map(|_| ())
         })
