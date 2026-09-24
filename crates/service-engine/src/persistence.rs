@@ -25,6 +25,7 @@ pub trait Persistence: Send + Sync + 'static {
 
     const STYLE: PersistenceStyle;
 
+    #[allow(clippy::type_complexity)] // the RowBatch alias here reads as a sealed trait to semver-checks
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Self::Key],
