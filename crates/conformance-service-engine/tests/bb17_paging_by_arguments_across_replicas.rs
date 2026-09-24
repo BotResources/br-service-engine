@@ -3,8 +3,7 @@ mod blackbox_support;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use async_graphql::parser::parse_schema;
-use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
+use blackbox_support::sdl::assert_no_session_argument;
 use blackbox_support::{GraphqlWs, World, error_code, ok, passport};
 use conformance_service_engine::TestDb;
 use conformance_service_engine::infra::TestNats;
@@ -226,68 +225,6 @@ async fn bb17_a_window_size_below_one_is_refused_before_any_session() {
     assert!(payload["data"].is_null(), "{payload}");
     ws.expect_complete(RECV).await;
     world.cleanup().await;
-}
-
-fn root_fields(sdl: &str) -> BTreeMap<String, Vec<String>> {
-    let document = parse_schema(sdl).expect("the SDL parses");
-    let mut roots = vec![
-        "Query".to_string(),
-        "Mutation".to_string(),
-        "Subscription".to_string(),
-    ];
-    for definition in &document.definitions {
-        if let TypeSystemDefinition::Schema(schema) = definition {
-            let schema = &schema.node;
-            for root in [&schema.query, &schema.mutation, &schema.subscription]
-                .into_iter()
-                .flatten()
-            {
-                roots.push(root.node.to_string());
-            }
-        }
-    }
-    let mut fields = BTreeMap::new();
-    for definition in &document.definitions {
-        let TypeSystemDefinition::Type(ty) = definition else {
-            continue;
-        };
-        let TypeKind::Object(object) = &ty.node.kind else {
-            continue;
-        };
-        if !roots.contains(&ty.node.name.node.to_string()) {
-            continue;
-        }
-        for field in &object.fields {
-            fields.insert(
-                field.node.name.node.to_string(),
-                field
-                    .node
-                    .arguments
-                    .iter()
-                    .map(|argument| argument.node.name.node.to_string())
-                    .collect(),
-            );
-        }
-    }
-    fields
-}
-
-fn assert_no_session_argument(sdl: &str, service: &str, subscription: &str) {
-    let fields = root_fields(sdl);
-    assert!(
-        fields.contains_key(subscription),
-        "the walk reached the subscription root of {service}: {fields:?}"
-    );
-    let naming_a_session: Vec<(&String, &String)> = fields
-        .iter()
-        .flat_map(|(field, arguments)| arguments.iter().map(move |argument| (field, argument)))
-        .filter(|(_, argument)| argument.to_ascii_lowercase().contains("session"))
-        .collect();
-    assert!(
-        naming_a_session.is_empty(),
-        "no root field of {service} lets a client name a session; the engine mints every one: \
-         {naming_a_session:?}"
-    );
 }
 
 #[tokio::test]

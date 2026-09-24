@@ -4,6 +4,7 @@
 pub mod bin;
 pub mod pg;
 pub mod scopes;
+pub mod sdl;
 pub mod sse;
 
 #[path = "../graphql_support/mod.rs"]
