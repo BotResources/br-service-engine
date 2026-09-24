@@ -65,7 +65,7 @@ battery-backed.
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
-| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`, a window above `window_capacity` refused with `WINDOW_TOO_LARGE` as at attach; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see, in the parent's snapshot (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a `REPEATABLE READ READ ONLY` transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; `coded_error`/`forbidden` for a coded refusal on a query or subscription; each slice's SDL fragment is emitted as a committed `schema.graphql` |
+| `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view` / `fetch_view_window` over a typed `Query`, a window above `window_capacity` refused with `WINDOW_TOO_LARGE` as at attach; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see, in the parent's snapshot (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a `REPEATABLE READ READ ONLY` transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; async-graphql's `custom-error-conversion` on, so `?` converts an engine refusal (`Reason`, `MutationError`, `AttachError`, `WindowSizeOutOfRange`) to its coded error and refuses to compile on any other error; `OrInternal::or_internal(context)` for a fault (`INTERNAL`, cause logged); `coded_error`/`forbidden` for a refusal the engine has no type for; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
 author-facing surface is implemented.
@@ -703,11 +703,32 @@ the first one that does adds a concurrent-upload limit (a spool semaphore) sized
 with its `emptyDir`.
 
 Refusals on the wire. A refusal is a coded GraphQL error, never a transport
-error. A mutation refusal is `mutation_error(reason)`; a query or subscription
-refusal is `graphql::coded_error(code, message)`, or `graphql::forbidden()` for
-the `FORBIDDEN` case — both re-exported at `service_engine::` and carrying the
-code in the `code` extension the frontend reads. On a query the client sees HTTP
-`200` with `errors[].extensions.code` and a null datum; on a subscription open
+error, and a resolver writes it with a bare `?`. The engine turns on
+async-graphql's `custom-error-conversion`, so `?` into `async_graphql::Error`
+converts only an error that says what the client gets:
+
+| `?` on | The client gets |
+|---|---|
+| `gate::Reason` (what `Gate::require` returns) | its code, with the code as message |
+| `MutationError` (what `MutationExecutor::run` / `run_bulk` return) | a refusal: its reason's code, message `mutation refused: <detail>`; a failure: `INTERNAL` |
+| `AttachError` (what `Engine::attach` returns) | `WindowTooLarge`: `WINDOW_TOO_LARGE`; `PrincipalRevoked`: `UNAUTHENTICATED`; any other: `INTERNAL`, cause logged |
+| `WindowSizeOutOfRange` (what `WindowSize::new` returns) | `WINDOW_SIZE_INVALID` |
+| any other error (`EngineError`, `sqlx::Error`, `serde_json::Error`, `std::io::Error`, …) | does not compile |
+
+The rule for a resolver: `?` a refusal, name a fault. A fault goes through
+`OrInternal::or_internal(context)` (`use service_engine::OrInternal`), which logs
+the context and the whole cause chain and answers `INTERNAL`. A refusal the
+engine has no type for is `graphql::coded_error(code, message)`, or
+`graphql::forbidden()` for the `FORBIDDEN` case; a service whose own refusal type
+recurs writes one `impl From<ItsRefusal> for async_graphql::Error` over
+`coded_error` (async-graphql's blanket `From<T: Display>` conflicted with it
+before). All of these are re-exported at `service_engine::` and carry the code
+in the `code` extension the frontend reads. The switch holds for the whole
+build: the engine's own conversions conflict with that blanket conversion, so
+the engine does not compile without the feature, and Cargo's feature
+unification turns it on for every crate of the build that uses async-graphql.
+On a query the client sees HTTP `200` with `errors[].extensions.code` and a
+null datum; on a subscription open
 the client sees a `next` payload carrying that same error then `complete`, never
 a transport-level `error` frame — on the WebSocket the framing is async-graphql's
 own, on the event stream the engine frames it the same way.
@@ -733,8 +754,9 @@ faults while the attach connects is `INTERNAL`. When the principal's facts canno
 be loaded the request is answered `500` with the same `INTERNAL` error body, not
 `401`. A
 refusal that carries a reason is unchanged: its code and its `mutation refused:`
-message. `graphql::internal_error(context, &cause)` gives a service's own
-resolver the same shape; the codes, the message and both helpers are
+message. `OrInternal::or_internal(context)` on a `Result`, or
+`graphql::internal_error(context, &cause)` on an error, gives a service's own
+resolver the same shape; the codes, the message, the trait and the helpers are
 re-exported at `service_engine::` like `coded_error`.
 
 Errors as text. `error::describe(&error)` renders an error and its whole
@@ -754,13 +776,13 @@ states and no public field. A failure without a reason
 text (`describe(&fault)` for a handler fault) as its `source()` only:
 `describe(&error)` renders `mutation failed: <chain>` for a log, no accessor
 hands that text out, and a resolver that forwards the error with `?` into
-`async_graphql::Error` answers `mutation failed` and nothing more. A refusal
+`async_graphql::Error` answers `INTERNAL` and nothing more. A refusal
 (`MutationError::refused(reason, detail)`) writes
 `mutation refused (<CODE>): <detail>`, its detail being the fault's own
 `Display`; `reason()`, `code()` and `refusal_detail()` answer `Some` for a
 refusal only, and `refusal_detail()` is the only detail a client reads. `?`
-drops a refusal's code extension, so a resolver maps the executor's error with
-`graphql::mutation_error`, or runs through `execute` / `ack`. `gate::Reason` is an
+forwards a refusal with its code (see *Refusals on the wire*); `execute` / `ack`
+do the same for a registered mutation. `gate::Reason` is an
 error too (its `Display` is its code), so a mutation that can only refuse
 declares `type Error = Reason`. A service that logs an engine error, or keeps
 one as text, calls the same function. A

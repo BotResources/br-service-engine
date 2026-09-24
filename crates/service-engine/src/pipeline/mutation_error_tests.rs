@@ -5,23 +5,6 @@ use crate::pipeline::MutationError;
 const CHAIN: &str =
     "the store failed: error returned from database: permission denied for table widgets";
 
-fn resolver_forwarding_with_question_mark(
-    outcome: Result<(), MutationError>,
-) -> async_graphql::Result<()> {
-    Ok(outcome?)
-}
-
-#[test]
-fn a_reasonless_failure_forwarded_with_question_mark_reaches_the_client_without_its_cause() {
-    let failure = MutationError::internal(CHAIN);
-
-    let answered = resolver_forwarding_with_question_mark(Err(failure))
-        .expect_err("the executor failed, so the resolver fails");
-
-    assert_eq!(answered.message, "mutation failed");
-    assert!(answered.extensions.is_none());
-}
-
 #[test]
 fn a_reasonless_failure_keeps_its_cause_chain_for_describe() {
     let failure = MutationError::internal(CHAIN);

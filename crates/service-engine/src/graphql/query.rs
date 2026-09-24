@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use crate::blobs::{BlobRef, Disposition, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::EngineError;
-use crate::graphql::error::{OrInternal, attach_error, engine_data, internal_fault};
+use crate::graphql::error::{OrInternal, engine_data, internal_fault};
 use crate::graphql::state::GraphqlState;
 use crate::page::KeyCeiling;
 use crate::persistence::{Aggregate, Persistence};
@@ -191,7 +191,7 @@ impl<'a, P: Principal> Query<'a, P> {
             .await
             .or_internal("populate a query window")?;
         let keys = member_keys(&population);
-        admit(&projector.name(), keys.len(), capacity).map_err(attach_error)?;
+        admit(&projector.name(), keys.len(), capacity)?;
         let rendered = self
             .render(&erased, erased.renders_under_rls(), &keys)
             .await

@@ -1,7 +1,7 @@
 use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::session::WindowSpec;
-use service_engine::{MutationAck, Page, Query, WindowSize};
+use service_engine::{MutationAck, OrInternal, Page, Query, WindowSize};
 use uuid::Uuid;
 
 use crate::kernel::AppPrincipal;
@@ -57,7 +57,10 @@ impl CardBoardSubscription {
         let window = BoardWindow::paged(board_id, Page::new(before, size));
         let stream = service_engine::attach::<AppPrincipal>(
             ctx,
-            vec![WindowSpec::view::<CardsView>(&window, false)?],
+            vec![
+                WindowSpec::view::<CardsView>(&window, false)
+                    .or_internal("encode the card window")?,
+            ],
         )
         .await?;
         Ok(stream.map(|delta| CardDelta::from_delta(&delta)))

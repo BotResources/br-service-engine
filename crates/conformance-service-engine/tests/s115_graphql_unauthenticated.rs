@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{
-    boot_forbidden_service, boot_graphql_service, passport_for,
+    SAMPLE_REFUSED, boot_forbidden_service, boot_graphql_service, passport_for,
 };
 use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
@@ -89,6 +89,53 @@ async fn s115_a_resolver_refusal_is_a_coded_graphql_error_never_a_transport_erro
         payload["errors"][0]["extensions"]["code"],
         serde_json::json!("FORBIDDEN"),
         "the subscription-open refusal carries the same FORBIDDEN code: {payload}"
+    );
+    ws.expect_complete(Duration::from_secs(5)).await;
+
+    service.shutdown().await;
+    drop(nats);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn s115_a_refusal_forwarded_with_question_mark_answers_its_reason_code() {
+    use br_core_auth::PassportHeader;
+
+    let db = TestDb::fresh().await;
+    let nats = TestNats::spawn().await;
+    nats.provision().await;
+
+    let service = boot_forbidden_service(&db, nats.nats().await, "se_s115q", "pod-s115q").await;
+    let passport = passport_for(Uuid::now_v7(), Uuid::now_v7()).to_header();
+    let refused = serde_json::json!(SAMPLE_REFUSED.code());
+
+    let (status, body) = post_json(
+        &service.base_url,
+        Some(&passport),
+        "query { sampleRefusedPeek }",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "a refusal is a graphql error: {body}");
+    assert!(
+        body["data"].is_null() || body["data"]["sampleRefusedPeek"].is_null(),
+        "a refused query carries no datum: {body}"
+    );
+    assert_eq!(
+        body["errors"][0]["extensions"]["code"], refused,
+        "a blocked gate forwarded with a bare `?` carries its reason in the code extension: {body}"
+    );
+
+    let mut ws = GraphqlWs::connect(&service.base_url, &passport).await;
+    ws.subscribe("s115q", "subscription { sampleRefusedStream }")
+        .await;
+    let payload = ws
+        .next_payload(Duration::from_secs(5))
+        .await
+        .expect("a refused subscription open frames the error as a next payload");
+    assert_eq!(
+        payload["errors"][0]["extensions"]["code"], refused,
+        "the subscription-open refusal forwarded with `?` carries the same code: {payload}"
     );
     ws.expect_complete(Duration::from_secs(5)).await;
 

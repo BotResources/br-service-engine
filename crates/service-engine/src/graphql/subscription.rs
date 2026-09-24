@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_graphql::{Context, Error};
 use futures_util::Stream;
 
-use crate::graphql::error::{attach_error, engine_data};
+use crate::graphql::error::engine_data;
 use crate::graphql::state::GraphqlState;
 use crate::lanes::LaneNotice;
 use crate::principal::Principal;
@@ -15,11 +15,10 @@ pub async fn attach<P: Principal>(
 ) -> Result<SessionStream, Error> {
     let state = engine_data::<Arc<GraphqlState<P>>>(ctx)?;
     let principal = engine_data::<P>(ctx)?.clone();
-    state
+    Ok(state
         .runtime()
         .attach(AttachRequest::new(principal, windows))
-        .await
-        .map_err(attach_error)
+        .await?)
 }
 
 pub fn lane_notice_stream<P: Principal>(

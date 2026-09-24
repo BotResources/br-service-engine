@@ -17,7 +17,7 @@ pub use boot::{
 };
 pub use counted::{CountedQueryRoot, boot_counted_service};
 pub use facts::boot_fact_service;
-pub use forbidden::boot_forbidden_service;
+pub use forbidden::{SAMPLE_REFUSED, boot_forbidden_service};
 pub use negative::{
     boot_colliding_slices, boot_field_outside_prefix, boot_undeclared_root_field,
     boot_without_prefix,

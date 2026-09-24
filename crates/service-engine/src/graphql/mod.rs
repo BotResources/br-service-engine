@@ -1,5 +1,6 @@
 mod body;
 mod compose;
+mod convert;
 mod error;
 mod multipart;
 mod mutation;
@@ -18,8 +19,9 @@ mod union;
 mod ws;
 
 pub use error::{
-    CODE_EXTENSION, FORBIDDEN_CODE, INTERNAL_CODE, INTERNAL_MESSAGE, UNAUTHENTICATED_CODE,
-    WINDOW_TOO_LARGE_CODE, coded_error, forbidden, internal_error, internal_fault, mutation_error,
+    CODE_EXTENSION, FORBIDDEN_CODE, INTERNAL_CODE, INTERNAL_MESSAGE, OrInternal,
+    UNAUTHENTICATED_CODE, WINDOW_TOO_LARGE_CODE, coded_error, forbidden, internal_error,
+    internal_fault,
 };
 pub use multipart::{
     MULTIPART_FILE_TOO_LARGE_CODE, MULTIPART_MALFORMED_CODE, MULTIPART_SPOOL_UNAVAILABLE_CODE,

@@ -3,7 +3,7 @@ use futures_util::Stream;
 use serde::Serialize;
 use service_engine::blobs::Disposition;
 use service_engine::session::{WindowParams, WindowSpec};
-use service_engine::{JsonScalar, MutationAck, Query};
+use service_engine::{JsonScalar, MutationAck, OrInternal, Query};
 use uuid::Uuid;
 
 use super::mutations::{AttachReply, CancelReply, ExpectedUpload, SetTyping, StartReply};
@@ -151,7 +151,8 @@ impl ReplySubscription {
         ctx: &Context<'_>,
         board: Uuid,
     ) -> Result<impl Stream<Item = Result<TypingDelta>>> {
-        let params = WindowParams::encode(&TypingWindow { board })?;
+        let params = WindowParams::encode(&TypingWindow { board })
+            .or_internal("encode the typing window")?;
         let stream = service_engine::attach::<AppPrincipal>(
             ctx,
             vec![WindowSpec::new(Typing::NAME, params, false)],

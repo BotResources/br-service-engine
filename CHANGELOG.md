@@ -80,8 +80,22 @@ migration line below.
   `MutationError::internal(detail)` is the failure. `reason()`, `code()` and
   `refusal_detail()` answer `Some` for a refusal only. A failure writes only
   `mutation failed` and keeps its internal text as its `source()`, which no
-  accessor hands out: a resolver that forwards it with `?` sends no database or
-  engine text to the client, and `describe(&error)` renders the chain for a log.
+  accessor hands out: a resolver that forwards it with `?` answers `INTERNAL`
+  with no database or engine text, and `describe(&error)` renders the chain for a
+  log.
+- **`?` in a resolver converts only an error that says what the client gets.**
+  The engine turns on async-graphql's `custom-error-conversion`, and Cargo's
+  feature unification turns it on for every crate of the build, so the blanket
+  `From<T: Display>` into `async_graphql::Error` is gone. `?` on a `gate::Reason`
+  (what `Gate::require` returns) answers its code; on a `MutationError` its
+  refusal code with `mutation refused: <detail>`, or `INTERNAL` for a failure; on
+  an `AttachError` `WINDOW_TOO_LARGE`, `UNAUTHENTICATED` or `INTERNAL`; on a
+  `WindowSizeOutOfRange` `WINDOW_SIZE_INVALID`. `?` on any other error
+  (`EngineError`, `sqlx`, `serde_json`, `std::io`, …) no longer compiles: a fault
+  goes through `OrInternal::or_internal(context)`. Through 0.3.4 a bare `?` sent
+  a refusal without its code, and a fault's `Display` text (a database message
+  included) to the client uncoded. The engine does not compile without the
+  feature: its conversions conflict with the blanket one.
 - **The schema-version claim is internal.** The `schema_version` module is
   crate-private (`claim_schema_version`, `refresh_schema_version`,
   `version_conflict_reason` leave the API); the claim and its handover run only
@@ -174,6 +188,10 @@ migration line below.
   session, the projector, the size and the capacity). No shipped alert watches
   it: a client that asks for a `size` above the capacity counts `refused` while
   the service is sound.
+- **`OrInternal`** (`graphql::OrInternal`, re-exported at the crate root), until
+  now crate-private: `result.or_internal(context)` logs the context and the whole
+  cause chain and answers `INTERNAL`. `impl From<_> for async_graphql::Error`
+  for `Reason`, `MutationError`, `AttachError` and `WindowSizeOutOfRange` (above).
 - `PersistenceExt`, `AccumulatorError`, `CompositionError` and `Behind`
   re-exported at the crate root; `gate::Reason` implements `Display` (its code)
   and `std::error::Error`; `SessionRuntime::pending_sessions()` (test-support).
@@ -235,6 +253,8 @@ migration line below.
   `impl From<Uuid> for SessionId`, `EngineError::{NoLiveSession, NoSuchWindow}`,
   `AttachError::DuplicateSession`, `CONFLICT_CODE`, `NOT_FOUND_CODE` (no engine or
   known adopter use left). No SDL root field takes a session argument.
+- `graphql::mutation_error` (also re-exported at the crate root): `?` on a
+  `MutationError` gives the same coded error.
 
 ### Adopter migration
 
@@ -286,9 +306,18 @@ migration line below.
 - **`MutationError`:** build it with `MutationError::refused(reason, detail)` (a
   `Reason`, no longer an `Option`) or `MutationError::internal(detail)`; read
   `reason()`, `code()` and `refusal_detail()` instead of the fields; log it with
-  `error::describe(&error)`; return it from a resolver through
-  `graphql::mutation_error` (or `execute` / `ack`), since a bare `?` drops a
-  refusal's code.
+  `error::describe(&error)`; return it from a resolver with `?` (or through
+  `execute` / `ack`).
+- **`?` in resolvers:** keep `?` on a `Reason`, a `MutationError`, an
+  `AttachError`, a `WindowSizeOutOfRange` or an `async_graphql::Error`. Where
+  `?` no longer compiles (an `EngineError` from `WindowSpec::view` or
+  `WindowParams::encode`, a `sqlx`, `serde_json` or `std::io` error), write
+  `.or_internal("what failed")?` with `use service_engine::OrInternal`. Replace
+  `.map_err(mutation_error)` with `?`, a `coded_error(code, code)` over a
+  `Reason` with `?` on the `Reason` (`Gate::require()?`), and a hand-rolled
+  "log and answer INTERNAL" helper with `or_internal`. A service's own refusal
+  type may implement `From<ItsRefusal> for async_graphql::Error` over
+  `coded_error`.
 - **Schema version:** remove any import of `service_engine::schema_version`; boot
   the engine instead. Keep `ENGINE_BEAT_MS` below `schema_version_liveness`
   (defaults 1 s and 30 s), or raise `with_schema_version_liveness`. A test that
@@ -335,7 +364,8 @@ migration line below.
   whose `last_seq` is above `i64::MAX` is the new `ReactionFault::Malformed`,
   dead-lettered on its first delivery instead of retried as a store fault.
   `CardStore` no longer overrides `load`. The ledger and `OrgBoardsRls` windows
-  and the roster library view read at most the populate's ceiling.
+  and the roster library view read at most the populate's ceiling. Its
+  subscription resolvers name the window-encoding fault with `or_internal`.
 - Battery: `s162`, `s163`, `s167` and `s183` are retired (their 0.3 paging
   meanings are gone). New: `s243` (a fact-loader fault answers `500` `INTERNAL`
   on `POST /graphql` and the `/graphql/ws` upgrade, a rejected passport keeps its
@@ -358,19 +388,23 @@ migration line below.
   and is refused before any row is read. `s252` and `s254` prove that the
   statements of `read_under_rls`, and the gate and the closure of
   `behind(..).read(..)`, read one snapshot: a row committed between them is not
-  seen.
+  seen. `s115` proves that a `Gate::require()?` refusal answers its reason code
+  on a query and on a subscription open.
 - Conformance crate: `sample::graphql::base_config` is public,
   `boot_graphql_service_with`, `boot_counted_service` (with `sample::counted`, a
   cohort view whose store records the ceilings it is asked for and the rows it
   reads), `sample::latch::AdvisoryLatch` and `AssignmentPage::whole()` are added;
   the sample's whole-collection reads bind the ceiling.
+  `sample::graphql::SAMPLE_REFUSED` and the `sampleRefusedPeek` /
+  `sampleRefusedStream` root fields refuse with a bare `?`; the upload and
+  widget sample resolvers name their faults with `or_internal`.
 
 ### CI
 
 - `cargo semver-checks` runs no check on a breaking bump (`v0.3.4` → `0.4.0` is
   major in semver terms), so its gate passes vacuously. On such a bump the job now
   also lists every break of each gated crate, report-only, as if the bump were a
-  minor one. For this release it reports 14 lint classes on `service-engine`, each
+  minor one. For this release it reports 15 lint classes on `service-engine`, each
   break named under *Changed (breaking)* or *Removed* with its line in *Adopter
   migration*, and 3 on `example-service`, named under *Reference service and
   battery*. The listing does not see a changed parameter or return type, so a

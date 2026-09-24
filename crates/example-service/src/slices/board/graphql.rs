@@ -1,7 +1,7 @@
 use async_graphql::{Context, Object, Result, Subscription};
 use futures_util::{Stream, StreamExt};
 use service_engine::session::{WindowParams, WindowSpec};
-use service_engine::{MutationAck, Query};
+use service_engine::{MutationAck, OrInternal, Query};
 use uuid::Uuid;
 
 use super::mutations::{ArchiveBoard, CreateBoard, MintBoardInvite, SetBoardMembership};
@@ -124,7 +124,10 @@ impl BoardSubscription {
     ) -> Result<impl Stream<Item = Result<OrgBoardDelta>>> {
         let stream = service_engine::attach::<AppPrincipal>(
             ctx,
-            vec![WindowSpec::view::<OrgBoardsRls>(&(), true)?],
+            vec![
+                WindowSpec::view::<OrgBoardsRls>(&(), true)
+                    .or_internal("encode the org board window")?,
+            ],
         )
         .await?;
         Ok(stream.map(|delta| OrgBoardDelta::from_delta(&delta)))
