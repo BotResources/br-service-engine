@@ -1,8 +1,10 @@
 use sqlx::{PgConnection, Postgres, QueryBuilder, Row};
+use uuid::Uuid;
 
 use crate::error::EngineError;
+use crate::impact::{Deps, ForeignKey, Impact};
 
-use super::bind::Column;
+use super::bind::{Bind, Column};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Written {
@@ -17,20 +19,28 @@ impl Written {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrincipalColumn {
+    pub column: &'static str,
+    pub deps: Deps,
+}
+
 pub trait KnownRow: Send + Sync + 'static {
     const TABLE: &'static str;
     const NAMESPACE: &'static str;
     const KEY: &'static [&'static str];
+    const PRINCIPAL: Option<PrincipalColumn>;
 
     fn key(&self) -> Vec<Column>;
     fn values(&self) -> Vec<Column>;
 }
 
+pub(super) fn rendered(key: &[Column]) -> Vec<String> {
+    key.iter().map(|c| c.value.render()).collect()
+}
+
 pub(super) fn foreign_key_of(key: &[Column]) -> String {
-    key.iter()
-        .map(|c| c.value.render())
-        .collect::<Vec<_>>()
-        .join("/")
+    rendered(key).join("/")
 }
 
 pub(super) fn keyed<R: KnownRow>(key: Vec<Column>) -> Result<Vec<Column>, EngineError> {
@@ -42,7 +52,41 @@ pub(super) fn keyed<R: KnownRow>(key: Vec<Column>) -> Result<Vec<Column>, Engine
             R::KEY
         )));
     }
+    if let Some(principal) = R::PRINCIPAL
+        && !key
+            .iter()
+            .any(|c| c.name == principal.column && matches!(c.value, Bind::Uuid(_)))
+    {
+        return Err(EngineError::Config(format!(
+            "{} declares the principal column {}, which must be a KEY column bound to a uuid",
+            R::TABLE,
+            principal.column
+        )));
+    }
     Ok(key)
+}
+
+pub(super) fn impacts_of<R: KnownRow>(key: &[String]) -> Result<Vec<Impact>, EngineError> {
+    let mut impacts = vec![Impact::foreign(ForeignKey::new(
+        R::NAMESPACE,
+        &key.join("/"),
+    )?)];
+    if let Some(principal) = R::PRINCIPAL {
+        let id = R::KEY
+            .iter()
+            .position(|name| *name == principal.column)
+            .and_then(|at| key.get(at))
+            .and_then(|text| Uuid::parse_str(text).ok())
+            .ok_or_else(|| {
+                EngineError::Config(format!(
+                    "{} declares the principal column {}, which must be a uuid KEY column",
+                    R::TABLE,
+                    principal.column
+                ))
+            })?;
+        impacts.push(Impact::principal_facts(id.into(), principal.deps));
+    }
+    Ok(impacts)
 }
 
 pub(super) async fn upsert<R: KnownRow>(
@@ -120,7 +164,7 @@ pub(super) async fn upsert<R: KnownRow>(
 pub(super) async fn delete_by_key<R: KnownRow>(
     conn: &mut PgConnection,
     key: Vec<Column>,
-) -> Result<(), EngineError> {
+) -> Result<bool, EngineError> {
     let key = keyed::<R>(key)?;
     let mut qb = QueryBuilder::<Postgres>::new("DELETE FROM ");
     qb.push(R::TABLE);
@@ -135,67 +179,8 @@ pub(super) async fn delete_by_key<R: KnownRow>(
         qb.push(" = ");
         column.value.push_bind_to(&mut qb);
     }
-    qb.build().execute(conn).await?;
-    Ok(())
+    Ok(qb.build().execute(conn).await?.rows_affected() > 0)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::mirror::bind::{Bind, col};
-    use uuid::Uuid;
-
-    struct KnownPersonRow {
-        id: Uuid,
-        email: String,
-        note: Option<String>,
-    }
-
-    impl KnownRow for KnownPersonRow {
-        const TABLE: &'static str = "known_persons";
-        const NAMESPACE: &'static str = "example.person";
-        const KEY: &'static [&'static str] = &["user_id"];
-
-        fn key(&self) -> Vec<Column> {
-            vec![col("user_id", self.id)]
-        }
-
-        fn values(&self) -> Vec<Column> {
-            vec![
-                col("email", self.email.clone()),
-                col("note", self.note.clone()),
-            ]
-        }
-    }
-
-    #[test]
-    fn the_foreign_key_of_a_single_key_row_is_the_key_value() {
-        let id = Uuid::now_v7();
-        let row = KnownPersonRow {
-            id,
-            email: "a@example.test".to_string(),
-            note: None,
-        };
-        assert_eq!(foreign_key_of(&row.key()), id.to_string());
-    }
-
-    #[test]
-    fn a_key_that_names_other_columns_than_the_declared_key_is_refused() {
-        let refused = keyed::<KnownPersonRow>(vec![col("email", "a@example.test")]);
-        assert!(matches!(refused, Err(EngineError::Config(_))));
-        let accepted = keyed::<KnownPersonRow>(vec![col("user_id", Uuid::now_v7())]);
-        assert!(accepted.is_ok());
-    }
-
-    #[test]
-    fn a_multi_key_foreign_key_joins_its_columns() {
-        let key = vec![col("group_id", "g"), col("user_id", "u")];
-        assert_eq!(foreign_key_of(&key), "g/u");
-    }
-
-    #[test]
-    fn a_none_option_binds_null() {
-        assert!(matches!(Bind::from(Option::<String>::None), Bind::Null));
-        assert!(matches!(Bind::from(Some(4_i64)), Bind::Int(4)));
-    }
-}
+mod tests;

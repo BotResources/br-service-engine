@@ -53,7 +53,7 @@ battery-backed.
 | `accumulator` | Accumulated lane (lane A): `register_accumulator`, the `STREAMING_{service}` stream bound at boot, one ephemeral consumer per pod folding `(key, seq, chunk)` frames into Postgres, `Ops::seal*` and the seal marker |
 | `presence` | Presence lane: `EPHEMERAL_*` bucket, `register_presence`, `cx.present` |
 | `offer` | `Offer` trait (`VERSION`), `register_offer`, `register_offer_trigger::<O, T>` (a `T: OfferTrigger<O>` in the offer's own slice re-publishes the offer when it changes; its `row_key()` names the offer row's store key and its `key_from()` the offer's KvKey), leader-drained dirty keys, versioned watermark, boot + periodic reconcile, `OfferManifest` published at reconcile |
-| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `upsert` (row-diff) / `replace_rows` (full-row set diff inside a declared scope: stages exactly the rows inserted, changed on any column, or deleted) both returning `Written` and staging nothing when unchanged, plus `retire` and the `Known`/`KnownScope` escape hatch (`replace_one`/`remove`), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
+| `mirror` | `register_mirror` over the direct KV watch into `known_*`: multi-offer `keyed_by` join, `Projection` `upsert` (row-diff) / `replace_rows` (full-row set diff inside a declared scope: stages exactly the rows inserted, changed on any column, or deleted) both returning `Written` and staging nothing when unchanged, `KnownRow::PRINCIPAL` (the uuid key column whose principal's facts a staged row also refreshes), plus `retire` (stages only a deleted row) and the `Known`/`KnownScope` escape hatch (`replace_one`/`remove`), `require_key`, offer-manifest and per-value `wire_version` verdicts (dead-lettered, readiness-neutral), leader-gated projection, per-bucket stream identity + boundary watermark, watch-from-boundary, periodic reconcile |
 | `blobs` | Object-storage references, `register_blobs`, presigned URLs, reaper |
 | `scopes` | scopes assembled from the slices' `contribute_scopes` (`declare_contributed_scopes`); the `declare_scopes` handshake gates readiness |
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
@@ -318,15 +318,23 @@ documented path with no SQL in the projector — or manually through `replace_on
 / `remove` over the `Known` / `KnownScope` traits, the escape hatch for a write
 the declarative kit cannot express (`replace_one` stages its impact whether or not
 the row changed). A known row's impact key is always its key columns rendered and
-joined by `/`. `replace_rows(scope, rows)` replaces the set of rows whose `scope`
+joined by `/`. `KnownRow::PRINCIPAL` is required: `None`, or
+`Some(PrincipalColumn { column, deps })` when a principal fact loader reads the
+table — `column` names a uuid KEY column (anything else is refused,
+`EngineError::Config`) — and then every row the kit stages also stages
+`PrincipalFactsChanged { principal, deps }` for the principal in that column, so a
+change to one membership refreshes that member's facts and no other principal's.
+`upsert` stages only when it wrote the row, and `retire` only when it deleted
+one. `replace_rows(scope, rows)` replaces the set of rows whose `scope`
 columns (equalities, e.g. `vec![col("project_id", id)]`; empty = the whole table)
 match: one multi-row upsert per ~30,000 bound values that writes a row only when
 a value column differs (`IS DISTINCT FROM`), then one delete of the scoped rows
 the call did not name, each returning the keys it touched — so it stages exactly
 the rows inserted, changed on any column, or deleted, and nothing for an
 unchanged set. It refuses (`EngineError::Config`) a row outside the scope, a null
-scope column, two rows with one key and different values (an exact duplicate is
-written once), rows that name different value columns, and a key column that is
+scope column, two rows with one key and different values (keys compare by typed
+column values, never by the `/`-joined impact key, so `("a/b", "c")` and
+`("a", "b/c")` are two rows; an exact duplicate is written once), rows that name different value columns, and a key column that is
 not a uuid, text, integer or boolean (the impact key of a deleted row is the
 column's SQL text, which equals its rendering only for these). A producer that extends a shared type is consumed with
 `Extended<Core, Ext>`: the project names its own extension as the second type
@@ -1248,7 +1256,7 @@ primitive that makes each one the easy path:
 | A read over many keys is one statement, never one per key | `Persistence::read_many` is required and has no per-key default, so a store without a batched read does not compile; `load` is derived from it |
 | A read of one aggregate for a principal honours the view's declaration | `Query::load_visible::<View>(key)`: the row is loaded under RLS when the view declares `RLS`, then kept only if the view's `visible` (its `Visibility` by default) admits it; a hidden row and an absent key both answer `None`, so a caller cannot probe which keys exist. `Query::download` is built on it. A list is a view (`fetch_view_window`, a subscription) |
 | Hand SQL outside a view runs under the second enforcement layer | `Query::read_under_rls(\|conn\| Box::pin(async move { … }))`: a read-only transaction with the principal's RLS context applied through the registered `RlsApplier`, rolled back at the end. A write inside it fails; a fault answers `INTERNAL` with the cause in the log, never the database text; with no `RlsApplier` registered the read is refused (`INTERNAL`), never run without the context |
-| A mirror stages only what changed | `Projection::replace_rows(scope, rows)` over `KnownRow` rows: full-row change detection inside a declared scope (see the mirror kit) |
+| A mirror stages only what changed | `Projection::replace_rows(scope, rows)` over `KnownRow` rows: full-row change detection inside a declared scope; a row whose table a principal fact loader reads declares `KnownRow::PRINCIPAL`, and the kit refreshes the facts of exactly the principals whose rows changed (see the mirror kit) |
 
 A keyset page over an append-only journal (`seq > $2 ORDER BY seq LIMIT $3`) or a
 context read is the case `read_under_rls` exists for: the SQL filters by the

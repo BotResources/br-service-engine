@@ -65,18 +65,20 @@ impl<'a> Projection<'a> {
     }
 
     pub async fn upsert<R: KnownRow>(&mut self, row: R) -> Result<Written, EngineError> {
-        let foreign_key = known::foreign_key_of(&row.key());
+        let key = known::rendered(&row.key());
         let written = known::upsert(self.conn, &row).await?;
         if written.is_effective() {
-            self.impact_foreign(R::NAMESPACE, &foreign_key)?;
+            self.stage::<R>(&key)?;
         }
         Ok(written)
     }
 
     pub async fn retire<R: KnownRow>(&mut self, key: Vec<Column>) -> Result<(), EngineError> {
-        let foreign_key = known::foreign_key_of(&key);
-        known::delete_by_key::<R>(self.conn, key).await?;
-        self.impact_foreign(R::NAMESPACE, &foreign_key)
+        let rendered = known::rendered(&key);
+        if known::delete_by_key::<R>(self.conn, key).await? {
+            self.stage::<R>(&rendered)?;
+        }
+        Ok(())
     }
 
     pub async fn remove<S: KnownScope>(&mut self, scope: S) -> Result<(), EngineError> {
@@ -99,13 +101,18 @@ impl<'a> Projection<'a> {
         let changed =
             rows::replace_rows::<R>(self.conn, &scope, rows.into_iter().collect()).await?;
         for key in &changed {
-            self.impact_foreign(R::NAMESPACE, key)?;
+            self.stage::<R>(key)?;
         }
         Ok(if changed.is_empty() {
             Written::Unchanged
         } else {
             Written::Changed
         })
+    }
+
+    fn stage<R: KnownRow>(&mut self, key: &[String]) -> Result<(), EngineError> {
+        self.impacts.extend(known::impacts_of::<R>(key)?);
+        Ok(())
     }
 }
 

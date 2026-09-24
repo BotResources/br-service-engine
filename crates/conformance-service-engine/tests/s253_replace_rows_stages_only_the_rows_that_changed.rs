@@ -7,8 +7,10 @@ use conformance_service_engine::sample::{RecordingTransport, staged_impacts};
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::impact::Impact;
-use service_engine::mirror::{Column, KnownRow, MirrorReady, Project, Projection, col};
+use service_engine::impact::{Deps, Impact};
+use service_engine::mirror::{
+    Column, KnownRow, MirrorReady, PrincipalColumn, Project, Projection, col,
+};
 use service_engine::name::MirrorName;
 use service_engine::nats::{KvKey, Nats};
 use service_engine::{Consumed, Mirror};
@@ -17,6 +19,7 @@ use uuid::Uuid;
 
 const PREFIX: &str = "s253project/";
 const NAMESPACE: &str = "s253.project_member";
+const DEP_PROJECT_ADMIN: Deps = Deps::from_bits(1 << 3);
 
 #[derive(Clone, Serialize, Deserialize)]
 struct PublishedProject {
@@ -38,6 +41,10 @@ impl KnownRow for MemberRow {
     const TABLE: &'static str = "s253_project_member";
     const NAMESPACE: &'static str = NAMESPACE;
     const KEY: &'static [&'static str] = &["project_id", "user_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = Some(PrincipalColumn {
+        column: "user_id",
+        deps: DEP_PROJECT_ADMIN,
+    });
 
     fn key(&self) -> Vec<Column> {
         vec![
@@ -114,7 +121,13 @@ async fn publish(nats: &Nats, project: &PublishedProject) {
         .expect("publish a project the way a producer would");
 }
 
-async fn reconcile(nats: &Nats, pool: &PgPool) -> BTreeSet<String> {
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Staged {
+    rows: BTreeSet<String>,
+    principals: BTreeSet<Uuid>,
+}
+
+async fn reconcile(nats: &Nats, pool: &PgPool) -> Staged {
     sqlx::query("DELETE FROM sample_staged_impact")
         .execute(pool)
         .await
@@ -124,17 +137,24 @@ async fn reconcile(nats: &Nats, pool: &PgPool) -> BTreeSet<String> {
         .reconcile()
         .await
         .expect("the mirror reconciles");
-    staged_impacts(pool)
-        .await
-        .into_iter()
-        .map(|impact| match impact {
+    let mut staged = Staged::default();
+    for impact in staged_impacts(pool).await {
+        match impact {
             Impact::ForeignChanged { foreign } => {
                 assert_eq!(foreign.namespace().as_str(), NAMESPACE);
-                foreign.key().as_str().to_string()
+                staged.rows.insert(foreign.key().as_str().to_string());
             }
-            other => panic!("the mirror stages only foreign impacts, got {other:?}"),
-        })
-        .collect()
+            Impact::PrincipalFactsChanged { principal, deps } => {
+                assert_eq!(
+                    deps, DEP_PROJECT_ADMIN,
+                    "the row's declared deps ride along"
+                );
+                staged.principals.insert(principal.as_uuid());
+            }
+            other => panic!("the mirror stages only row and principal impacts, got {other:?}"),
+        }
+    }
+    staged
 }
 
 async fn members(pool: &PgPool, project: Uuid) -> Vec<(Uuid, bool)> {
@@ -147,15 +167,18 @@ async fn members(pool: &PgPool, project: Uuid) -> Vec<(Uuid, bool)> {
     .expect("read the mirrored members")
 }
 
-fn keys(project: Uuid, users: &[Uuid]) -> BTreeSet<String> {
-    users
-        .iter()
-        .map(|user| format!("{project}/{user}"))
-        .collect()
+fn staged(project: Uuid, users: &[Uuid]) -> Staged {
+    Staged {
+        rows: users
+            .iter()
+            .map(|user| format!("{project}/{user}"))
+            .collect(),
+        principals: users.iter().copied().collect(),
+    }
 }
 
 #[tokio::test]
-async fn s253_a_non_key_column_change_stages_exactly_that_row_and_no_other_scope_is_touched() {
+async fn s253_a_non_key_column_change_stages_exactly_that_row_and_its_principal_and_nothing_else() {
     let db = TestDb::fresh().await;
     for statement in [
         "CREATE TABLE s253_project_member (project_id uuid NOT NULL, user_id uuid NOT NULL, \
@@ -195,24 +218,28 @@ async fn s253_a_non_key_column_change_stages_exactly_that_row_and_no_other_scope
     )
     .await;
 
-    let mut first = keys(project, &[alice, bob]);
-    first.extend(keys(other, &[carol]));
+    let mut first = staged(project, &[alice, bob]);
+    let carol_staged = staged(other, &[carol]);
+    first.rows.extend(carol_staged.rows);
+    first.principals.extend(carol_staged.principals);
     assert_eq!(
         reconcile(&fabric, &pool).await,
         first,
-        "every inserted row stages its own key"
+        "every inserted row stages its own key and the principal it names"
     );
 
-    assert!(
-        reconcile(&fabric, &pool).await.is_empty(),
+    assert_eq!(
+        reconcile(&fabric, &pool).await,
+        Staged::default(),
         "a reconcile of identical rows stages nothing"
     );
 
     publish(&fabric, &staffed(true, true)).await;
     assert_eq!(
         reconcile(&fabric, &pool).await,
-        keys(project, &[alice]),
-        "a change to is_admin, a non-key column, stages that one row and nothing else"
+        staged(project, &[alice]),
+        "a change to is_admin, a non-key column, stages that one row and refreshes only alice's \
+         principal facts, never bob's"
     );
     let mut expected = vec![(alice, true), (bob, false)];
     expected.sort();
@@ -221,8 +248,8 @@ async fn s253_a_non_key_column_change_stages_exactly_that_row_and_no_other_scope
     publish(&fabric, &staffed(true, false)).await;
     assert_eq!(
         reconcile(&fabric, &pool).await,
-        keys(project, &[alice]),
-        "a row that leaves the set is deleted and stages its key"
+        staged(project, &[alice]),
+        "a row that leaves the set is deleted and stages its key and its principal"
     );
     assert_eq!(members(&pool, project).await, vec![(bob, false)]);
     assert_eq!(

@@ -6,7 +6,7 @@ use conformance_service_engine::sample::RecordingTransport;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Column, KnownRow, Project, Projection, col};
+use service_engine::mirror::{Column, KnownRow, PrincipalColumn, Project, Projection, col};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Mirror};
@@ -37,6 +37,7 @@ impl KnownRow for GroupRow {
     const TABLE: &'static str = "known_groups";
     const NAMESPACE: &'static str = GROUP_NAMESPACE;
     const KEY: &'static [&'static str] = &["group_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.id)]
@@ -56,6 +57,7 @@ impl KnownRow for MemberRow {
     const TABLE: &'static str = "known_user_group";
     const NAMESPACE: &'static str = MEMBER_NAMESPACE;
     const KEY: &'static [&'static str] = &["group_id", "user_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.group_id), col("user_id", self.user_id)]

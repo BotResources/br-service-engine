@@ -12,6 +12,8 @@ const BINDS_PER_STATEMENT: usize = 30_000;
 
 type Fingerprint = Vec<(&'static str, (u8, String))>;
 
+type TypedKey = Vec<(u8, String)>;
+
 struct Incoming {
     key: Vec<Column>,
     values: Vec<Column>,
@@ -21,14 +23,12 @@ pub(super) async fn replace_rows<R: KnownRow>(
     conn: &mut PgConnection,
     scope: &[Column],
     rows: Vec<R>,
-) -> Result<BTreeSet<String>, EngineError> {
-    let incoming = admit::<R>(scope, rows)?;
+) -> Result<BTreeSet<Vec<String>>, EngineError> {
+    let rows = admit::<R>(scope, rows)?;
     let mut changed = BTreeSet::new();
-    let per_row = incoming
-        .values()
-        .next()
+    let per_row = rows
+        .first()
         .map_or(1, |row| row.key.len() + row.values.len());
-    let rows: Vec<Incoming> = incoming.into_values().collect();
     let kept: Vec<Vec<String>> = (0..R::KEY.len())
         .map(|at| rows.iter().map(|row| row.key[at].value.render()).collect())
         .collect();
@@ -40,25 +40,22 @@ pub(super) async fn replace_rows<R: KnownRow>(
             .collect();
         let mut upsert = upsert_chunk::<R>(chunk);
         let written = upsert.build().fetch_all(&mut *conn).await?;
-        changed.extend(rendered_keys(&written)?);
+        changed.extend(returned_keys(&written)?);
     }
     let mut retire = retire_stale::<R>(scope, &kept);
     let retired = retire.build().fetch_all(&mut *conn).await?;
-    changed.extend(rendered_keys(&retired)?);
+    changed.extend(returned_keys(&retired)?);
     Ok(changed)
 }
 
-fn admit<R: KnownRow>(
-    scope: &[Column],
-    rows: Vec<R>,
-) -> Result<BTreeMap<String, Incoming>, EngineError> {
+fn admit<R: KnownRow>(scope: &[Column], rows: Vec<R>) -> Result<Vec<Incoming>, EngineError> {
     if let Some(column) = scope.iter().find(|c| matches!(c.value, Bind::Null)) {
         return Err(refusal::<R>(format!(
             "scope column {} is null, so it would match no row",
             column.name
         )));
     }
-    let mut admitted: BTreeMap<String, (Fingerprint, Incoming)> = BTreeMap::new();
+    let mut admitted: BTreeMap<TypedKey, (Fingerprint, Incoming)> = BTreeMap::new();
     let mut value_names: Option<Vec<&'static str>> = None;
     for row in rows {
         let key = keyed::<R>(row.key())?;
@@ -79,33 +76,32 @@ fn admit<R: KnownRow>(
             Some(_) => {}
             None => value_names = Some(names),
         }
-        let foreign_key = foreign_key_of(&key);
         if let Some(outside) = scope.iter().find(|s| !carries(&key, &values, s)) {
             return Err(refusal::<R>(format!(
-                "row {foreign_key} lies outside the replaced scope on column {}",
+                "row {} lies outside the replaced scope on column {}",
+                foreign_key_of(&key),
                 outside.name
             )));
         }
+        let typed_key: TypedKey = key.iter().map(|c| c.value.fingerprint()).collect();
         let fingerprint = values
             .iter()
             .map(|c| (c.name, c.value.fingerprint()))
             .collect();
-        match admitted.get(&foreign_key) {
+        match admitted.get(&typed_key) {
             Some((held, _)) if *held == fingerprint => {}
             Some(_) => {
                 return Err(refusal::<R>(format!(
-                    "two rows share the key {foreign_key} with different values"
+                    "two rows share the key {} with different values",
+                    foreign_key_of(&key)
                 )));
             }
             None => {
-                admitted.insert(foreign_key, (fingerprint, Incoming { key, values }));
+                admitted.insert(typed_key, (fingerprint, Incoming { key, values }));
             }
         }
     }
-    Ok(admitted
-        .into_iter()
-        .map(|(foreign_key, (_, row))| (foreign_key, row))
-        .collect())
+    Ok(admitted.into_values().map(|(_, row)| row).collect())
 }
 
 fn carries(key: &[Column], values: &[Column], scope: &Column) -> bool {
@@ -215,13 +211,13 @@ fn push_returning_key<R: KnownRow>(qb: &mut QueryBuilder<'_, Postgres>) {
     qb.push(text_key::<R>());
 }
 
-fn rendered_keys(rows: &[PgRow]) -> Result<Vec<String>, EngineError> {
+fn returned_keys(rows: &[PgRow]) -> Result<Vec<Vec<String>>, EngineError> {
     rows.iter()
         .map(|row| {
-            let columns = (0..row.len())
+            (0..row.len())
                 .map(|at| Ok(row.try_get::<Option<String>, _>(at)?.unwrap_or_default()))
-                .collect::<Result<Vec<_>, sqlx::Error>>()?;
-            Ok(columns.join("/"))
+                .collect::<Result<Vec<_>, sqlx::Error>>()
+                .map_err(EngineError::from)
         })
         .collect()
 }

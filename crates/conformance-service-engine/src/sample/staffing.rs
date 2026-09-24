@@ -2,7 +2,7 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::mirror::{
-    Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col,
+    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, col,
 };
 use service_engine::name::MirrorName;
 use service_engine::nats::{KvKey, Nats};
@@ -85,6 +85,7 @@ impl KnownRow for KnownGroupRow {
     const TABLE: &'static str = "known_groups";
     const NAMESPACE: &'static str = GROUP_NAMESPACE;
     const KEY: &'static [&'static str] = &["group_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.id)]
@@ -104,6 +105,7 @@ impl KnownRow for KnownMemberRow {
     const TABLE: &'static str = "known_user_group";
     const NAMESPACE: &'static str = MEMBER_NAMESPACE;
     const KEY: &'static [&'static str] = &["group_id", "user_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.group_id), col("user_id", self.user_id)]

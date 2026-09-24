@@ -23,7 +23,7 @@ pub use consumed::{
 };
 pub use extension::Extended;
 pub use handle::{MirrorHandle, MirrorRun};
-pub use known::{KnownRow, Written};
+pub use known::{KnownRow, PrincipalColumn, Written};
 pub use leader::MirrorLeader;
 pub use projection::{Known, KnownScope, Project, Projection};
 pub use shadow::{Shadow, Shadows};

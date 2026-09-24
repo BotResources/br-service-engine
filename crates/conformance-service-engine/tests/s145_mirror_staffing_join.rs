@@ -49,17 +49,17 @@ async fn s145_the_boot_join_merges_two_offers_and_retires_a_stale_group() {
     assert_eq!(
         known_group_name(&pool, group).await.as_deref(),
         Some("team"),
-        "replace_one projected the group row from the group offer"
+        "the group row is projected from the group offer"
     );
     assert_eq!(
         known_members(&pool, group).await,
         sorted(&[one, two]),
-        "replace projected the members joined from the user offer"
+        "the members joined from the user offer are projected"
     );
     assert_eq!(
         known_group_name(&pool, stale).await,
         None,
-        "remove retired the group the bucket no longer offers"
+        "the group the bucket no longer offers is retired"
     );
 
     drop(nats);

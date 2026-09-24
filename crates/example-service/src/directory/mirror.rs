@@ -4,7 +4,7 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::mirror::{
-    Change, Column, KnownRow, Mirror, MirrorReady, Project, Projection, col,
+    Change, Column, KnownRow, Mirror, MirrorReady, PrincipalColumn, Project, Projection, col,
 };
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
@@ -45,6 +45,7 @@ impl KnownRow for KnownPersonRow {
     const TABLE: &'static str = KNOWN_PERSONS_TABLE;
     const NAMESPACE: &'static str = KNOWN_PERSON_NAMESPACE;
     const KEY: &'static [&'static str] = &["user_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("user_id", self.id)]

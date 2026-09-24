@@ -127,8 +127,8 @@ pub use lanes::{Lane, LaneNotice, LanesPaused, LanesResumed};
 pub use mirror::{
     Bind, Change, ChangeOp, Column, Consumed, ConsumedGuard, ConsumedManifest, Extended, Known,
     KnownRow, KnownScope, ManifestMismatch, Mirror, MirrorHandle, MirrorKeyed, MirrorLeader,
-    MirrorReady, OfferManifest, Project, Projection, Shadow, Shadows, Written, col, is_raw_json,
-    manifest_key,
+    MirrorReady, OfferManifest, PrincipalColumn, Project, Projection, Shadow, Shadows, Written,
+    col, is_raw_json, manifest_key,
 };
 pub use name::{
     AccumulatorName, ChannelName, ForeignId, JobName, MirrorName, Namespace, NounName, PodId,
