@@ -18,7 +18,7 @@ use service_engine::impact::Dims;
 use service_engine::metrics::{LABEL_OUTCOME, WINDOWS_OVER_CAPACITY_TOTAL};
 use service_engine::registry::RenderRegistry;
 use service_engine::session::WindowSpec;
-use service_engine::{ViewProjector, WINDOW_TOO_LARGE_CODE};
+use service_engine::{ViewProjector, WINDOW_TOO_LARGE_CODE, WindowSize};
 use uuid::Uuid;
 
 const SOON: Duration = Duration::from_secs(2);
@@ -37,7 +37,7 @@ fn paged_registry() -> RenderRegistry<SamplePrincipal> {
 }
 
 #[tokio::test]
-async fn s163_an_attach_over_window_capacity_is_refused_and_one_at_capacity_attaches() {
+async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_attaches() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -74,10 +74,12 @@ async fn s163_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
         "a refused attach leaves no session behind"
     );
 
+    let capacity_size = WindowSize::new(u32::try_from(CAPACITY).expect("a small capacity"))
+        .expect("a positive capacity");
     let mut narrowed = engine
         .attach(attach_request(
             &principal,
-            vec![window(AssignmentPage::head(CAPACITY as i64))],
+            vec![window(AssignmentPage::head(capacity_size))],
         ))
         .await
         .expect("the same view narrowed by its arguments to window_capacity attaches");
@@ -88,7 +90,7 @@ async fn s163_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
 }
 
 #[tokio::test]
-async fn s163_a_live_window_that_grows_past_capacity_stays_open_and_is_counted_once() {
+async fn s245_a_live_window_that_grows_past_capacity_stays_open_and_is_counted_once() {
     let probe = metrics_probe::install();
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
@@ -141,7 +143,7 @@ async fn s163_a_live_window_that_grows_past_capacity_stays_open_and_is_counted_o
 }
 
 #[tokio::test]
-async fn s163_the_refusal_reaches_the_client_as_window_too_large() {
+async fn s245_the_refusal_reaches_the_client_as_window_too_large() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -155,7 +157,7 @@ async fn s163_the_refusal_reaches_the_client_as_window_too_large() {
     let service = boot_graphql_service_with(
         &db,
         nats.nats().await,
-        base_config("se_s163", "pod-s163").with_window_capacity(1),
+        base_config("se_s245", "pod-s245").with_window_capacity(1),
     )
     .await;
     let passport = passport_for(user, tenant).to_header();

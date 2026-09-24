@@ -5,21 +5,25 @@ use std::time::Duration;
 
 use async_graphql::parser::parse_schema;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
-use blackbox_support::{GraphqlWs, World, ok, passport};
+use blackbox_support::{GraphqlWs, World, error_code, ok, passport};
 use conformance_service_engine::TestDb;
 use conformance_service_engine::infra::TestNats;
 use conformance_service_engine::sample::graphql::boot_graphql_service;
 use example_service::slices::{MutationRoot, QueryRoot, SubscriptionRoot};
 use serde_json::{Value, json};
+use service_engine::WINDOW_SIZE_INVALID_CODE;
 use uuid::Uuid;
 
 const CARD_ADVANCE: &str = "example:card_advance";
 const RECV: Duration = Duration::from_secs(15);
 const SILENCE: Duration = Duration::from_millis(500);
 
-fn card_deltas(board: Uuid, size: usize) -> String {
+fn card_deltas(board: Uuid, size: usize, before: Option<&str>) -> String {
+    let before = before
+        .map(|card| format!(",before:\"{card}\""))
+        .unwrap_or_default();
     format!(
-        "subscription{{exampleCardDeltas(boardId:\"{board}\",size:{size}){{__typename \
+        "subscription{{exampleCardDeltas(boardId:\"{board}\",size:{size}{before}){{__typename \
          ... on CardReset{{revision views{{... on CardView{{id title status}}}}}} \
          ... on CardUpsert{{revision view{{... on CardView{{id title status}}}}}} \
          ... on CardRemove{{revision}}}}}}"
@@ -42,9 +46,15 @@ fn titles(reset: &Value) -> Vec<String> {
     titles
 }
 
-async fn open_window(base_url: &str, pass: &str, board: Uuid, size: usize) -> (GraphqlWs, Value) {
+async fn open_window(
+    base_url: &str,
+    pass: &str,
+    board: Uuid,
+    size: usize,
+    before: Option<&str>,
+) -> (GraphqlWs, Value) {
     let mut ws = GraphqlWs::connect(base_url, pass).await;
-    ws.subscribe("1", &card_deltas(board, size)).await;
+    ws.subscribe("1", &card_deltas(board, size, before)).await;
     let reset = ws
         .next_data(RECV)
         .await
@@ -118,7 +128,7 @@ async fn bb17_window_changes_land_on_either_replica_and_writes_cross_between_the
         })
         .collect();
 
-    let (mut narrow, reset) = open_window(&pod_a, &pass, board, 2).await;
+    let (mut narrow, reset) = open_window(&pod_a, &pass, board, 2, None).await;
     assert_eq!(
         titles(&reset),
         ["c2", "c3"],
@@ -126,7 +136,7 @@ async fn bb17_window_changes_land_on_either_replica_and_writes_cross_between_the
     );
 
     narrow.complete("1").await;
-    let (mut wide, reset) = open_window(pod_b.base_url(), &pass, board, 3).await;
+    let (mut wide, reset) = open_window(pod_b.base_url(), &pass, board, 3, None).await;
     assert_eq!(
         titles(&reset),
         ["c1", "c2", "c3"],
@@ -140,7 +150,7 @@ async fn bb17_window_changes_land_on_either_replica_and_writes_cross_between_the
     );
 
     wide.complete("1").await;
-    let (mut head, reset) = open_window(&pod_a, &pass, board, 1).await;
+    let (mut head, reset) = open_window(&pod_a, &pass, board, 1, None).await;
     assert_eq!(
         titles(&reset),
         ["c3"],
@@ -149,7 +159,39 @@ async fn bb17_window_changes_land_on_either_replica_and_writes_cross_between_the
     advance(&world, pod_b.base_url(), &pass, &ids["c3"]).await;
     expect_advanced(&mut head, &ids["c3"]).await;
 
+    head.complete("1").await;
+    let (mut behind, reset) =
+        open_window(pod_b.base_url(), &pass, board, 2, Some(&ids["c3"])).await;
+    assert_eq!(
+        titles(&reset),
+        ["c1", "c2"],
+        "the next page is its own subscription, the size cards behind the cursor"
+    );
+    advance(&world, &pod_a, &pass, &ids["c2"]).await;
+    expect_advanced(&mut behind, &ids["c2"]).await;
+
     pod_b.shutdown().await;
+    world.cleanup().await;
+}
+
+#[tokio::test]
+async fn bb17_a_window_size_below_one_is_refused_before_any_session() {
+    let world = World::start("bb17-size").await;
+    let pass = passport(Uuid::now_v7(), Uuid::now_v7(), &[], false);
+    let mut ws = GraphqlWs::connect(world.base_url(), &pass).await;
+    ws.subscribe("1", &card_deltas(Uuid::now_v7(), 0, None))
+        .await;
+    let payload = ws
+        .next_payload(RECV)
+        .await
+        .expect("the refused size answers the operation");
+    assert_eq!(
+        error_code(&payload),
+        WINDOW_SIZE_INVALID_CODE,
+        "a size the client can fix keeps its own code, never INTERNAL: {payload}"
+    );
+    assert!(payload["data"].is_null(), "{payload}");
+    ws.expect_complete(RECV).await;
     world.cleanup().await;
 }
 
@@ -225,8 +267,8 @@ async fn bb17_no_root_field_lets_a_client_name_a_session() {
     .finish()
     .sdl();
     assert!(
-        reference.contains("exampleCardDeltas(boardId: UUID!, size: Int)"),
-        "the reference service pages by subscription arguments"
+        reference.contains("exampleCardDeltas(boardId: UUID!, size: Int!, before: UUID)"),
+        "the reference service pages by subscription arguments, a live list always sized"
     );
     assert_no_session_argument(&reference, "the reference service", "exampleCardDeltas");
 

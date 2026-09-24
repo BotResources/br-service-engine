@@ -31,6 +31,7 @@ pub mod name;
 pub mod nats;
 pub mod offer;
 mod offers;
+pub mod page;
 pub mod persistence;
 pub mod pipeline;
 pub mod population;
@@ -141,6 +142,7 @@ pub use nats::{
 pub use offer::{Offer, OfferTrigger};
 #[cfg(feature = "test-support")]
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
+pub use page::{Page, WINDOW_SIZE_INVALID_CODE, WindowSize, WindowSizeOutOfRange};
 pub use pastey;
 pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
 pub use pipeline::{

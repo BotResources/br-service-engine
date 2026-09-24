@@ -59,6 +59,7 @@ battery-backed.
 | `erase` | `Erasable` and `engine.erase(person)` (person-erasure only) |
 | `dyn_compat` | Type-erasure wrappers behind the registries (`ErasedProjector`/`ErasedAccumulator` and their adapters) |
 | `view` | ergonomic projector surface: a `Projector` declares `type Noun`/`type Store`, a typed `Query`, `type Visibility`, `async fn populate(cx, q)` and `project(row, principal)`; the engine loads the noun's rows through `Persistence::read_many`, applies the projector's `visible` gate (defaulting to the `Visibility` declaration) before projecting so a row that leaves the principal's cohorts becomes a `Remove`, and `ViewProjector` owns `Facts`, the `LoadScope` match and derives `name`/`nouns`; a view that joins a mirror declares `fn inverse(foreign) -> Inverse` (`Keys`/`Query`/`Lookup`/`None`, default `None`). The low-level `projector::Projector` is the join escape hatch |
+| `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `limit()` for the `LIMIT` its `populate` binds, `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one) |
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
 | `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
@@ -650,7 +651,9 @@ failures a client can act on keep a specific code: attaching a window whose
 population exceeds `window_capacity` is `WINDOW_TOO_LARGE`
 (`graphql::WINDOW_TOO_LARGE_CODE`; the message names the capacity, never the
 projector nor the population size, which may count rows the caller cannot see),
-attaching for a principal that no longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
+a `WindowSize` argument below 1 is `WINDOW_SIZE_INVALID`
+(`WINDOW_SIZE_INVALID_CODE`, answered before the resolver runs), attaching for a
+principal that no longer exists is `UNAUTHENTICATED`. When the principal's facts cannot be loaded
 the request is answered `500` with the same `INTERNAL` error body, not `401`. A
 refusal that carries a reason is unchanged: its code and its `mutation refused:`
 message. `graphql::internal_error(context, &cause)` gives a service's own
@@ -813,12 +816,26 @@ and carry bulk in the view.
 
 **Paging is subscription arguments.** The window a session renders is exactly
 what the projector's `populate` returns for the subscription's arguments. A paged
-view takes its bound — a `size`, for a history a `before` cursor, a filter — as
-arguments of its delta subscription, carries them in its typed `Query`
-(`WindowSpec::view::<V>(&query, rls)` encodes them), and `populate` applies them
-(`ORDER BY … LIMIT size`); validate them at the resolver
-(`#[graphql(validator(minimum = 1))] size: Option<i64>`), so a malformed bound is
-a client error rather than a database fault. The client never names a session:
+view takes its bound as arguments of its delta subscription — `size` and, for a
+page behind the head, a `before` cursor, beside any filter — and carries them in
+its typed `Query` as a `Page<K>` (`WindowSpec::view::<V>(&query, rls)` encodes
+them). The engine gives the two pieces as primitives. `WindowSize` is the size
+argument: the client sees a plain `Int` (`Int!` when required), a value below 1
+is refused before the resolver runs with `WINDOW_SIZE_INVALID`
+(`service_engine::WINDOW_SIZE_INVALID_CODE`), and a stored window argument
+cannot carry one either, because `WindowSize` refuses it on decode, so a zero or
+negative bound never reaches the database as a `LIMIT`. Declaring a `WindowSize`
+argument leaves every other `Int` argument of the schema as it was.
+`Page<K>` (`Page::head(size)`, `Page::before(cursor, size)`, `Page::new`) is
+what `populate` reads: its SQL binds `page.cursor()` and `page.limit()`
+(`… AND ($2::uuid IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`), and it
+returns `page.population(keys)`, which picks the shape so the author never does:
+a page with no cursor is an open head (`Population::Ordered { open_head: true }`
+— a new row enters it and the oldest leaves), a page behind a cursor is fixed
+(`open_head: false` — its rows change in place and a newer row never enters). In
+a debug build `page.population` panics when it receives more keys than the page
+size, so a `populate` that forgot to bind the limit fails in test rather than
+shipping. The client never names a session:
 the engine mints every `SessionId` at attach, and no root field takes one. To
 change its window the client ends the subscription and starts a new one with new
 variables — a **new session**, opened by a `Reset` at revision 1 that carries the
@@ -834,7 +851,9 @@ and no cross-pod relay. Two patterns: **grow by re-subscribing** (a larger
 `size`; each change re-renders the whole window, so scrolling back through `n`
 pages costs O(n²) renders) and **one subscription per page** (`before` + `size`,
 one stream per page shown), the one to prefer for long histories. The reference
-`card` slice demonstrates the first: `exampleCardDeltas(boardId, size)`.
+`card` slice takes both arguments, `exampleCardDeltas(boardId, size, before)`:
+`size` is required, so its live list is always bounded, and the newest page is
+an open head while a page behind a cursor holds its rows.
 
 After attach the window follows the shape of its population, whatever its
 arguments: a `Population::Keys` window is fixed — a row outside it enters only
@@ -848,20 +867,26 @@ its predicate joins it.
 population holds more than `window_capacity` keys (default 10,000,
 `EngineConfig::with_window_capacity`, no env var) is refused before anything is
 rendered, with `AttachError::WindowTooLarge` answered as `WINDOW_TOO_LARGE`, and
-leaves no session behind; the client narrows the window with its arguments. A
-live window is never ended for its size: one that grows past the capacity (an
-open head without a `size`, a query window discovering rows) stays open on its
-contiguous revision, and the engine logs one `warn` naming the session, the
-projector, the size and the capacity when it crosses the bound, and counts
-`service_engine_windows_over_capacity_total{projector, outcome="kept"}` (a
-refusal counts `outcome="refused"`). Ending it instead would make the view flap
-under a high write rate — end, re-subscribe, a large `Reset`, grow, end again —
-and the sessions that meet the bound are few viewers of a busy view, so
-per-session memory is not the limit. A whole-collection view (`type Query = ()`)
-is therefore bounded by `window_capacity` at attach: once its collection
-outgrows the capacity every new attach is refused, and the `kept` count (the
-`ServiceEngineWindowOverCapacity` alert) is the warning that comes first: a view
-that trips it needs a `size` or a narrower filter among its arguments.
+leaves no session behind; the client narrows the window with its arguments. The
+refusal is counted as
+`service_engine_windows_over_capacity_total{projector, outcome="refused"}` and
+not logged: the client can fix it, and a client that retries in a loop would
+flood the log. A live window is never ended for its size: one that grows past
+the capacity after its attach (an open head with no size, a query window
+discovering rows, a window that a principal-facts refresh or a projector-wide
+impact repopulates) stays open on its contiguous revision, and the engine logs
+one `warn` naming the session, the projector, the size and the capacity when it
+crosses the bound, and counts `outcome="kept"`. Ending it instead would make the
+view flap under a high write rate — end, re-subscribe, a large `Reset`, grow,
+end again — and the sessions that meet the bound are few viewers of a busy view,
+so per-session memory is not the limit. A whole-collection view (`type Query =
+()`) is therefore bounded by `window_capacity` at attach: once its collection
+outgrows the capacity every new attach is refused. A `kept` count comes only
+from a window that grows after attach; a `Population::Keys` whole-collection
+window grows only when it is repopulated, so for such a view the first signal
+can be `refused`. The `ServiceEngineWindowOverCapacity` alert fires on either
+outcome; a view that trips it needs a `size` or a narrower filter among its
+arguments.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane
@@ -1183,8 +1208,10 @@ whichever mode it lives:
   through the reference binary's `ENGINE_LEASE_MS` / `ENGINE_BEAT_MS` env), and a
   client that changes its window by re-subscribing with new arguments lands on
   either pod with a `Reset` at revision 1 while a write committed through the other
-  pod reaches it, and no root field of the reference service or the battery's
-  sample lets a client name a session (`bb17`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
+  pod reaches it, the next page behind a `before` cursor is its own subscription,
+  a `size` below 1 is refused with `WINDOW_SIZE_INVALID` before any session
+  exists, and no root field of the reference service or the battery's sample lets
+  a client name a session (`bb17`). The binaries are taken from `EXAMPLE_SERVICE_BIN` /
   `EXAMPLE_TWIN_BIN` when set (the CI black-box job sets them after building),
   and built on demand otherwise, so the mode is self-sufficient locally. `bb05`
   drives the real lane-A ingress: the `example-twin` binary streams the reply's
@@ -1569,7 +1596,7 @@ that grew past it. The six shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
 a filling notification queue, the per-cluster notify budget nearing its ceiling,
 a sustained reset rate, an aging outbox backlog, dead-lettered work waiting on
-a human, and a view whose windows outgrow `window_capacity`.
+a human, and a view whose windows meet `window_capacity`.
 
 ## AI disclosure
 

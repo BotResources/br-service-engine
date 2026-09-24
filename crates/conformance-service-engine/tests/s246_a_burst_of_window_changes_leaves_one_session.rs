@@ -4,21 +4,25 @@ use conformance_service_engine::TestDb;
 use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::{AssignmentPage, PagedAssignments};
 use futures_util::FutureExt;
-use service_engine::ViewProjector;
 use service_engine::impact::Dims;
 use service_engine::session::WindowSpec;
+use service_engine::{ViewProjector, WindowSize};
 use uuid::Uuid;
 
 const SOON: Duration = Duration::from_secs(2);
 const SILENCE: Duration = Duration::from_millis(300);
 
-fn head(size: i64) -> WindowSpec {
-    WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(size), false)
+fn window_size(size: u32) -> WindowSize {
+    WindowSize::new(size).expect("a positive window size")
+}
+
+fn head(size: u32) -> WindowSpec {
+    WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(window_size(size)), false)
         .expect("the window arguments encode")
 }
 
 #[tokio::test]
-async fn s167_a_burst_of_window_changes_leaves_one_live_session_on_the_last_window() {
+async fn s246_a_burst_of_window_changes_leaves_one_live_session_on_the_last_window() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -68,7 +72,7 @@ async fn s167_a_burst_of_window_changes_leaves_one_live_session_on_the_last_wind
 }
 
 #[tokio::test]
-async fn s167_a_window_left_while_still_attaching_leaves_no_pending_session() {
+async fn s246_a_window_left_while_still_attaching_leaves_no_pending_session() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

@@ -24,7 +24,7 @@ type CardReset {
 }
 
 type CardSubscription {
-	exampleCardDeltas(boardId: UUID!, size: Int): CardDelta!
+	exampleCardDeltas(boardId: UUID!, size: Int!, before: UUID): CardDelta!
 }
 
 type CardUpsert {

@@ -3,17 +3,21 @@ use std::time::Duration;
 use conformance_service_engine::TestDb;
 use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::{AssignmentPage, PagedAssignments};
-use service_engine::ViewProjector;
 use service_engine::delta::Delta;
 use service_engine::impact::Dims;
 use service_engine::session::WindowSpec;
+use service_engine::{ViewProjector, WindowSize};
 use uuid::Uuid;
 
 const SOON: Duration = Duration::from_secs(2);
 const SILENCE: Duration = Duration::from_millis(300);
 
-fn head(size: i64) -> WindowSpec {
-    WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(size), false)
+fn window_size(size: u32) -> WindowSize {
+    WindowSize::new(size).expect("a positive window size")
+}
+
+fn head(size: u32) -> WindowSpec {
+    WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(window_size(size)), false)
         .expect("the window arguments encode")
 }
 
@@ -23,7 +27,7 @@ fn sorted(mut ids: Vec<Uuid>) -> Vec<Uuid> {
 }
 
 #[tokio::test]
-async fn s162_a_wider_window_opens_a_new_session_with_one_reset_at_revision_one() {
+async fn s244_a_wider_window_opens_a_new_session_with_one_reset_at_revision_one() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -108,7 +112,7 @@ async fn s162_a_wider_window_opens_a_new_session_with_one_reset_at_revision_one(
 }
 
 #[tokio::test]
-async fn s162_a_page_behind_the_head_is_its_own_window_beside_the_live_head() {
+async fn s244_a_page_behind_the_head_is_its_own_window_beside_the_live_head() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -133,8 +137,11 @@ async fn s162_a_page_behind_the_head_is_its_own_window_beside_the_live_head() {
         sorted(assignment_ids(reset_views(&reset))),
         vec![ids[4], ids[5]]
     );
-    let behind = WindowSpec::view::<PagedAssignments>(&AssignmentPage::before(ids[4], 2), false)
-        .expect("the page arguments encode");
+    let behind = WindowSpec::view::<PagedAssignments>(
+        &AssignmentPage::before(ids[4], window_size(2)),
+        false,
+    )
+    .expect("the page arguments encode");
     let mut page = engine
         .attach(attach_request(&principal, vec![behind]))
         .await

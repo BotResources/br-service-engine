@@ -3,16 +3,20 @@ use std::time::Duration;
 use conformance_service_engine::TestDb;
 use conformance_service_engine::sample::render::*;
 use conformance_service_engine::sample::{AssignmentPage, AssignmentView, PagedAssignments};
-use service_engine::ViewProjector;
 use service_engine::delta::{Delta, ErasedView};
 use service_engine::impact::Dims;
 use service_engine::session::WindowSpec;
+use service_engine::{ViewProjector, WindowSize};
 use uuid::Uuid;
 
 const SOON: Duration = Duration::from_secs(2);
 
-fn head(size: i64) -> WindowSpec {
-    WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(size), false)
+fn window_size(size: u32) -> WindowSize {
+    WindowSize::new(size).expect("a positive window size")
+}
+
+fn head(size: u32) -> WindowSpec {
+    WindowSpec::view::<PagedAssignments>(&AssignmentPage::head(window_size(size)), false)
         .expect("the window arguments encode")
 }
 
@@ -37,7 +41,7 @@ fn final_title(deltas: &[Delta], key: Uuid) -> Option<String> {
 }
 
 #[tokio::test]
-async fn s183_a_write_committed_between_two_windows_is_in_the_new_reset() {
+async fn s247_a_write_committed_between_two_windows_is_in_the_new_reset() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();
@@ -90,7 +94,7 @@ async fn s183_a_write_committed_between_two_windows_is_in_the_new_reset() {
 }
 
 #[tokio::test]
-async fn s183_a_write_racing_the_new_attach_settles_on_the_committed_view() {
+async fn s247_a_write_racing_the_new_attach_settles_on_the_committed_view() {
     let db = TestDb::fresh().await;
     let pool = db.app_pool().clone();
     let home = Uuid::now_v7();

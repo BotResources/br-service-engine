@@ -11,13 +11,6 @@ pub(crate) fn admit(
     if size <= capacity {
         return Ok(());
     }
-    tracing::warn!(
-        %projector,
-        size,
-        capacity,
-        "an attach was refused with WINDOW_TOO_LARGE: its window holds more keys than \
-         window_capacity; the client narrows it with the subscription's arguments"
-    );
     record_window_over_capacity(projector, WINDOW_REFUSED);
     Err(AttachError::WindowTooLarge {
         projector: projector.clone(),

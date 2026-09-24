@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use service_engine::Page;
 use service_engine::error::EngineError;
 use service_engine::name::ProjectorName;
 use service_engine::population::Population;
@@ -24,21 +25,28 @@ pub struct CardView {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BoardWindow {
-    pub board_id: Option<Uuid>,
-    pub size: Option<i64>,
+    board_id: Option<Uuid>,
+    page: Option<Page<Uuid>>,
 }
 
 impl BoardWindow {
     pub fn of(board_id: Uuid) -> Self {
         Self {
             board_id: Some(board_id),
-            size: None,
+            page: None,
         }
     }
 
-    pub fn sized(self, size: Option<i64>) -> Self {
-        Self { size, ..self }
+    pub fn paged(board_id: Uuid, page: Page<Uuid>) -> Self {
+        Self {
+            board_id: Some(board_id),
+            page: Some(page),
+        }
     }
+}
+
+fn keyed(keys: Vec<Uuid>) -> Population<Uuid> {
+    Population::Keys(keys.into_iter().collect())
 }
 
 #[derive(Default)]
@@ -62,12 +70,14 @@ impl Projector for CardsView {
         cx: &Populate<'_, AppPrincipal>,
         query: &BoardWindow,
     ) -> Result<Population<Uuid>, EngineError> {
-        let keys = match (query.board_id, query.size) {
-            (Some(board), Some(size)) => store::cards_of_board_head(cx.pool(), board, size).await?,
-            (Some(board), None) => store::cards_of_board(cx.pool(), board).await?,
-            (None, _) => store::all_card_ids(cx.pool()).await?,
-        };
-        Ok(Population::Keys(keys.into_iter().collect()))
+        let pg = cx.pool();
+        Ok(match (query.board_id, &query.page) {
+            (Some(board), Some(page)) => {
+                page.population(store::cards_of_board_page(pg, board, page).await?)
+            }
+            (Some(board), None) => keyed(store::cards_of_board(pg, board).await?),
+            (None, _) => keyed(store::all_card_ids(pg).await?),
+        })
     }
 
     fn project(card: &CardAggregate, _principal: &AppPrincipal) -> Result<CardView, EngineError> {

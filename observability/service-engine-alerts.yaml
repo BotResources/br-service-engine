@@ -83,16 +83,26 @@ spec:
               any of it is parked.
         - alert: ServiceEngineWindowOverCapacity
           expr: >-
-            sum by (service, projector, outcome) (service_engine_windows_over_capacity_total) > 0
+            sum by (service, projector, outcome) (
+              (service_engine_windows_over_capacity_total
+                unless service_engine_windows_over_capacity_total offset 15m)
+              or increase(service_engine_windows_over_capacity_total[15m])
+            ) > 0
+          for: 5m
           labels:
             severity: warning
           annotations:
-            summary: A view's windows are outgrowing window_capacity
+            summary: A view's windows are meeting window_capacity
             description: >-
               service_engine_windows_over_capacity_total on {{ $labels.service }} for projector
-              {{ $labels.projector }} is above zero with outcome {{ $labels.outcome }} since a pod
-              started. kept is a live
-              window that grew past window_capacity: it stays open and keeps delivering, but the
-              next attach of that window is refused with WINDOW_TOO_LARGE. refused is clients
-              being refused now. Bound the view with a size or a narrower filter argument on its
-              delta subscription, or raise window_capacity for this service.
+              {{ $labels.projector }} counted outcome {{ $labels.outcome }} within the last 15
+              minutes (a series born in that span counts too, since increase() cannot see its
+              first increment). refused is an attach refused with WINDOW_TOO_LARGE because its
+              window held more keys than window_capacity. kept is a live window that grew past
+              window_capacity after its attach: it stays open and keeps delivering, but an attach
+              of that window is refused while it stays that large. Only a window that grows after
+              attach can count kept (an open head, a query window, a window repopulated by a
+              principal-facts refresh or a projector-wide impact), so refused can be the first
+              signal of a view outgrowing the bound. Bound the view with a size or a narrower
+              filter argument on its delta subscription, or raise window_capacity for this
+              service.

@@ -7,7 +7,7 @@ use service_engine::name::ProjectorName;
 use service_engine::population::Population;
 use service_engine::projector::Emission;
 use service_engine::view::{Populate, Projector as ViewProjector, cohort_window};
-use service_engine::{Cohort, CohortKey};
+use service_engine::{Cohort, CohortKey, Page, WindowSize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -16,43 +16,34 @@ use crate::sample::gated::AssignmentVisibility;
 use crate::sample::principal::SamplePrincipal;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AssignmentPage {
-    pub before: Option<Uuid>,
-    pub size: Option<i64>,
-}
+pub struct AssignmentPage(Option<Page<Uuid>>);
 
 impl AssignmentPage {
-    pub fn head(size: i64) -> Self {
-        Self {
-            before: None,
-            size: Some(size),
-        }
+    pub fn head(size: WindowSize) -> Self {
+        Self(Some(Page::head(size)))
     }
 
-    pub fn before(before: Uuid, size: i64) -> Self {
-        Self {
-            before: Some(before),
-            size: Some(size),
-        }
+    pub fn before(before: Uuid, size: WindowSize) -> Self {
+        Self(Some(Page::before(before, size)))
     }
 
     pub fn whole() -> Self {
-        Self::default()
+        Self(None)
     }
 }
 
 async fn newest_keys(
     pg: &PgPool,
     tenant: Uuid,
-    page: &AssignmentPage,
+    page: Option<&Page<Uuid>>,
 ) -> Result<Vec<Uuid>, EngineError> {
     let rows = sqlx::query(
         "SELECT id FROM sample_assignment WHERE tenant_id = $1 AND ($2::uuid IS NULL OR id < $2) \
          ORDER BY id DESC LIMIT $3",
     )
     .bind(tenant)
-    .bind(page.before)
-    .bind(page.size)
+    .bind(page.and_then(Page::cursor))
+    .bind(page.map(Page::limit))
     .fetch_all(pg)
     .await?;
     Ok(rows.iter().map(|r| r.get::<Uuid, _>("id")).collect())
@@ -96,9 +87,13 @@ impl ViewProjector for PagedAssignments {
         cx: &Populate<'_, SamplePrincipal>,
         query: &AssignmentPage,
     ) -> Result<Population<Uuid>, EngineError> {
-        Ok(Population::Ordered {
-            keys: newest_keys(cx.pool(), cx.principal().tenant(), query).await?,
-            open_head: query.before.is_none(),
+        let keys = newest_keys(cx.pool(), cx.principal().tenant(), query.0.as_ref()).await?;
+        Ok(match &query.0 {
+            Some(page) => page.population(keys),
+            None => Population::Ordered {
+                keys,
+                open_head: true,
+            },
         })
     }
 
