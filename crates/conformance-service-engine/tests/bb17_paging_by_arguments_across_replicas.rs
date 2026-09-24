@@ -1,7 +1,7 @@
 mod blackbox_support;
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_graphql::parser::parse_schema;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 const CARD_ADVANCE: &str = "example:card_advance";
 const RECV: Duration = Duration::from_secs(15);
-const SILENCE: Duration = Duration::from_millis(500);
+const POLL: Duration = Duration::from_millis(100);
 
 fn card_deltas(board: Uuid, size: usize, before: Option<&str>) -> String {
     let before = before
@@ -94,6 +94,35 @@ async fn expect_advanced(ws: &mut GraphqlWs, card: &str) {
     assert_eq!(delta["view"]["status"], json!("doing"), "{delta}");
 }
 
+async fn live_sessions(base_url: &str) -> Option<f64> {
+    let text = reqwest::Client::new()
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    text.lines()
+        .find(|line| {
+            line.starts_with("service_engine_sessions{")
+                || line.starts_with("service_engine_sessions ")
+        })
+        .and_then(|line| line.rsplit(' ').next())
+        .and_then(|value| value.parse::<f64>().ok())
+}
+
+async fn await_live_sessions(base_url: &str, want: f64, note: &str) {
+    let deadline = Instant::now() + RECV;
+    loop {
+        if live_sessions(base_url).await == Some(want) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{note}");
+        tokio::time::sleep(POLL).await;
+    }
+}
+
 #[tokio::test]
 async fn bb17_window_changes_land_on_either_replica_and_writes_cross_between_them() {
     let world = World::start("bb17-pod-a").await;
@@ -144,10 +173,14 @@ async fn bb17_window_changes_land_on_either_replica_and_writes_cross_between_the
     );
     advance(&world, &pod_a, &pass, &ids["c1"]).await;
     expect_advanced(&mut wide, &ids["c1"]).await;
-    assert!(
-        narrow.next_data(SILENCE).await.is_none(),
-        "the window the client completed receives nothing more"
-    );
+    await_live_sessions(
+        &pod_a,
+        0.0,
+        "the window the client completed on pod A is still a live session there while its \
+         socket stays open",
+    )
+    .await;
+    drop(narrow);
 
     wide.complete("1").await;
     let (mut head, reset) = open_window(&pod_a, &pass, board, 1, None).await;

@@ -1,11 +1,3 @@
-//! The gateway reaches a subgraph for a subscription only as `POST /graphql` with
-//! `Accept: text/event-stream` (graphql-sse, distinct connections), never over a WebSocket.
-//! Before 0.3.4 the engine answered that request with the JSON error "Subscriptions are not
-//! supported on this transport.", so no engine service could serve a subscription through
-//! the gateway. These scenarios drive the real binary on that transport: the same
-//! `Reset`/`Upsert` wire as `/graphql/ws` (`bb03`), the same 401 before a byte of the body is
-//! read (`s241`), and the same `session_max_age` bound (`bb06`), met with a `complete`.
-
 mod blackbox_support;
 
 use std::time::{Duration, Instant};
@@ -36,7 +28,6 @@ async fn create_board(world: &World, pass: &str, board: Uuid) {
         .await);
 }
 
-/// Status and body of a `SUB` request, with `accept` when given.
 async fn answer(base_url: &str, passport: Option<&str>, accept: Option<&str>) -> (u16, String) {
     let mut request = reqwest::Client::new()
         .post(format!("{base_url}/graphql"))

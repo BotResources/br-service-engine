@@ -15,7 +15,7 @@ use service_engine::graphql::{
 };
 
 #[tokio::test]
-async fn s241_an_unauthenticated_multipart_body_is_refused_before_a_byte_of_it_is_read() {
+async fn s248_an_unauthenticated_multipart_body_is_refused_before_a_byte_of_it_is_read() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -24,8 +24,8 @@ async fn s241_an_unauthenticated_multipart_body_is_refused_before_a_byte_of_it_i
     let service = boot_upload_service(
         &db,
         nats.nats().await,
-        "se_s241a",
-        "pod-s241a",
+        "se_s248a",
+        "pod-s248a",
         MultipartConfig::default().with_spool_dir(&unwritable),
     )
     .await;
@@ -87,7 +87,7 @@ async fn s241_an_unauthenticated_multipart_body_is_refused_before_a_byte_of_it_i
 }
 
 #[tokio::test]
-async fn s241_an_authenticated_multipart_request_within_its_bounds_is_served() {
+async fn s248_an_authenticated_multipart_request_within_its_bounds_is_served() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -95,12 +95,12 @@ async fn s241_an_authenticated_multipart_request_within_its_bounds_is_served() {
     let service = boot_upload_service(
         &db,
         nats.nats().await,
-        "se_s241b",
-        "pod-s241b",
+        "se_s248b",
+        "pod-s248b",
         MultipartConfig::default().with_spool_dir(spool.path()),
     )
     .await;
-    let plain = boot_graphql_service(&db, nats.nats().await, "se_s241c", "pod-s241c").await;
+    let plain = boot_graphql_service(&db, nats.nats().await, "se_s248c", "pod-s248c").await;
     let passport = valid_passport();
 
     let (status, body, _) = post_multipart(
@@ -151,13 +151,13 @@ async fn s241_an_authenticated_multipart_request_within_its_bounds_is_served() {
 }
 
 #[tokio::test]
-async fn s241_an_authenticated_multipart_request_over_a_bound_is_refused_with_its_code() {
+async fn s248_an_authenticated_multipart_request_over_a_bound_is_refused_with_its_code() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let spool = tempfile::tempdir().expect("a spool directory");
     let service =
-        boot_upload_service_with(&db, nats.nats().await, "se_s241d", "pod-s241d", |config| {
+        boot_upload_service_with(&db, nats.nats().await, "se_s248d", "pod-s248d", |config| {
             config.with_max_body_bytes(16 * 1024).with_multipart(
                 MultipartConfig::default()
                     .with_spool_dir(spool.path())

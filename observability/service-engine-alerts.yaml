@@ -103,6 +103,8 @@ spec:
               of that window is refused while it stays that large. Only a window that grows after
               attach can count kept (an open head, a query window, a window repopulated by a
               principal-facts refresh or a projector-wide impact), so refused can be the first
-              signal of a view outgrowing the bound. Bound the view with a size or a narrower
-              filter argument on its delta subscription, or raise window_capacity for this
-              service.
+              signal of a whole-collection view outgrowing the bound: bound it with a size or a
+              narrower filter argument on its delta subscription, or raise window_capacity for
+              this service. On a view that already takes a size argument, refused alone means a
+              client asked for a window above window_capacity and was answered
+              WINDOW_TOO_LARGE; the service needs no change.

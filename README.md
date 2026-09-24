@@ -1003,8 +1003,10 @@ outgrows the capacity every new attach is refused. A `kept` count comes only
 from a window that grows after attach; a `Population::Keys` whole-collection
 window grows only when it is repopulated, so for such a view the first signal
 can be `refused`. The `ServiceEngineWindowOverCapacity` alert fires on either
-outcome; a view that trips it needs a `size` or a narrower filter among its
-arguments.
+outcome: a whole-collection view that trips it needs a `size` or a narrower
+filter among its arguments; on a view that already takes a `size`, a `refused`
+alone is a client that asked for more than the capacity, and the alert cannot
+tell the two apart (the counter carries no argument label).
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
 so a service can implement the intent's "Cancel work in flight": a direct-lane

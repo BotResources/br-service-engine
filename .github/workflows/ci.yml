@@ -329,10 +329,7 @@ jobs:
       E2E_PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-      - name: free runner disk (the battery's test binaries and the MinIO fixture share it)
-        # One debug binary per scenario fills the runner; past that MinIO answers
-        # 507 Insufficient Storage to the example-service blob scenarios. The
-        # removed toolchains are preinstalled on the image and unused here.
+      - name: free runner disk (one debug binary per scenario fills it, then MinIO answers 507 to the blob scenarios; the removed toolchains are unused here)
         run: |
           set -euo pipefail
           df -h /
