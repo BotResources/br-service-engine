@@ -70,7 +70,8 @@ fn handler_failure(mutation: &'static str, fault: &impl MutationFault) -> Mutati
                 mutation,
                 %cause,
                 "a mutation handler failed without a reason; the client receives INTERNAL while \
-                 the whole cause chain is kept here and in the executor's MutationError"
+                 the whole cause chain is kept here and as the source of the executor's \
+                 MutationError"
             );
             MutationError::internal(cause)
         }
