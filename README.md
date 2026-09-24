@@ -834,8 +834,7 @@ such connection: the session rides an event stream (see *Subscription
 transports*) and the `page` mutation is a separate `POST` the gateway may route
 to another replica, where it is refused the same way. Paging a gateway (SSE)
 session requires the session's pod (one replica) until 0.4.0 moves paging to
-subscription arguments
-([#130](https://github.com/BotResources/ws-cc-platform.botresources.ai/issues/130)).
+subscription arguments.
 The client correlates the two by supplying its own `SessionId`:
 `attach_with_session` (kit) / a `session` argument on the subscription pins the
 id the `page` mutation then names. The
@@ -1345,8 +1344,7 @@ the request) and by the engine's shutdown: the WebSocket is closed `1001`, the
 event stream sends `complete` and ends, and the client — the gateway, on the SSE
 leg — re-subscribes with a fresh `X-Passport`. A client that goes away releases
 the session with its connection. Paging a gateway (SSE) session requires the
-session's pod (one replica) until 0.4.0 moves paging to subscription arguments
-([#130](https://github.com/BotResources/ws-cc-platform.botresources.ai/issues/130)).
+session's pod (one replica) until 0.4.0 moves paging to subscription arguments.
 
 ### Hardened pod and neutral fields (chart 1.1)
 

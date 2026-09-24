@@ -82,8 +82,7 @@ dev for every engine service. Additive: no adopter code changes.
   that may reach another replica, where it is refused
   (`EngineError::NoLiveSession`, `NOT_FOUND`). Paging a gateway (SSE) session
   requires the session's pod (one replica) until 0.4.0 moves paging to
-  subscription arguments
-  ([#130](https://github.com/BotResources/ws-cc-platform.botresources.ai/issues/130)).
+  subscription arguments.
   Engine services run one replica today.
 
 ## 0.3.3 - 2026-09-23
