@@ -49,8 +49,12 @@ where
     }
 
     let nats = Nats::connect(&config.nats_url).await?;
-    let metrics = init_metrics(component)
-        .map_err(|e| EngineError::Config(format!("metrics recorder install failed: {e}")))?;
+    let metrics = init_metrics(component).map_err(|error| {
+        EngineError::Config(format!(
+            "metrics recorder install failed: {}",
+            crate::chain::describe(&error)
+        ))
+    })?;
     let http_addr = config.http_addr;
 
     let mut engine = Engine::<P>::boot(config, pool, nats, readiness.clone()).await?;

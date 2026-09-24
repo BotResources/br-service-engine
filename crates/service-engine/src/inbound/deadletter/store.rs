@@ -46,7 +46,10 @@ impl DeadLetters {
             return Ok(false);
         };
         let key = KeyBytes::encode(&row_id).map_err(|error| {
-            sqlx::Error::Protocol(format!("encoding the ops-view impact key: {error}"))
+            sqlx::Error::Protocol(format!(
+                "encoding the ops-view impact key: {}",
+                crate::chain::describe(&error)
+            ))
         })?;
         let impact = Impact::ResourceChanged {
             noun: DEAD_LETTER_NOUN,
@@ -58,7 +61,10 @@ impl DeadLetters {
             .stage_in(conn, std::slice::from_ref(&impact))
             .await
             .map_err(|error| {
-                sqlx::Error::Protocol(format!("staging the ops-view impact: {error}"))
+                sqlx::Error::Protocol(format!(
+                    "staging the ops-view impact: {}",
+                    crate::chain::describe(&error)
+                ))
             })?;
         Ok(true)
     }

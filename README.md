@@ -655,6 +655,20 @@ message. `graphql::internal_error(context, &cause)` gives a service's own
 resolver the same shape; the codes, the message and both helpers are
 re-exported at `service_engine::` like `coded_error`.
 
+Errors as text. `error::describe(&error)` renders an error and its whole
+`source()` chain, outermost first, joined by `: `. It is the engine's one
+renderer: every engine log site uses it, and so does every failure text the
+engine keeps (dispatch and dead-letter reasons, render faults, relay, cron and
+mirror health, NATS, object-storage and published-language details). A service
+that logs an engine error, or keeps one as text, calls the same function. A
+segment is written once: it is skipped when its parent's text equals it or ends
+with `: ` followed by it. So sqlx's `error returned from database: <text>`,
+whose `source()` is the database error `<text>` again, renders the database
+text once, and so do an async-nats `kind: source` error and a wrapper that
+repeats its source verbatim. The match is at a segment boundary only: a parent
+`cannot open config` over a cause `config` keeps both. A skipped segment is
+still the parent of its own cause, which is kept when distinct.
+
 `register_erasable` and `Engine::erase` / `Engine::eraser` are the person-erasure surface. A
 slice that holds personal data implements `Erasable::erase(cx, person)`, using
 the `Erase` context — the same `Ops` the write pipeline gives a handler — to

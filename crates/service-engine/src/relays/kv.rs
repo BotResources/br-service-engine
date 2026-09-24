@@ -78,7 +78,7 @@ where
         let bucket = nats
             .published_language::<V>()
             .await
-            .map_err(published_language)?;
+            .map_err(RelayError::published_language)?;
         Ok(Self {
             name,
             bucket,
@@ -103,7 +103,7 @@ where
                 .bucket
                 .get_with_revision(&change.key)
                 .await
-                .map_err(published_language)?;
+                .map_err(RelayError::published_language)?;
             let published = observed.as_ref().map(|(value, _)| value.version());
             let floor = [watermark, published].into_iter().flatten().max();
             if floor.is_some_and(|floor| !supersedes(floor, change.version)) {
@@ -114,13 +114,13 @@ where
                     None => match self.bucket.create(&change.key, value).await {
                         Ok(_) => {}
                         Err(NatsError::RevisionConflict { .. }) => continue,
-                        Err(error) => return Err(published_language(error)),
+                        Err(error) => return Err(RelayError::published_language(error)),
                     },
                     Some((_, revision)) => {
                         match self.bucket.update_if(&change.key, value, revision).await {
                             Ok(_) => {}
                             Err(NatsError::RevisionConflict { .. }) => continue,
-                            Err(error) => return Err(published_language(error)),
+                            Err(error) => return Err(RelayError::published_language(error)),
                         }
                     }
                 },
@@ -130,7 +130,7 @@ where
                     {
                         Ok(()) => {}
                         Err(NatsError::RevisionConflict { .. }) => continue,
-                        Err(error) => return Err(published_language(error)),
+                        Err(error) => return Err(RelayError::published_language(error)),
                     },
                 },
             }
@@ -182,10 +182,6 @@ where
 
 fn supersedes(published: u64, desired: u64) -> bool {
     desired > published
-}
-
-fn published_language(error: NatsError) -> RelayError {
-    RelayError::Publish(format!("published language: {error}"))
 }
 
 #[cfg(test)]

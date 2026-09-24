@@ -3,16 +3,10 @@ use axum::response::{IntoResponse, Response};
 
 use crate::graphql::refusal::coded_refusal;
 
-/// The multipart body exceeds `max_body_bytes` (declared or streamed). HTTP 413.
 pub const MULTIPART_TOO_LARGE_CODE: &str = "MULTIPART_TOO_LARGE";
-/// One part — a file, or the `operations` / `map` part — exceeds `max_file_bytes`. HTTP 413.
 pub const MULTIPART_FILE_TOO_LARGE_CODE: &str = "MULTIPART_FILE_TOO_LARGE";
-/// The `map` binds more uploads than `max_files` (zero for a schema without `Upload`), or
-/// outweighs the 1 KiB per allowed upload it may carry. HTTP 413.
 pub const MULTIPART_TOO_MANY_FILES_CODE: &str = "MULTIPART_TOO_MANY_FILES";
-/// The body is not a GraphQL multipart request as the spec orders it. HTTP 400.
 pub const MULTIPART_MALFORMED_CODE: &str = "MULTIPART_MALFORMED";
-/// A file part could not be spooled (no writable spool directory, disk full). HTTP 500.
 pub const MULTIPART_SPOOL_UNAVAILABLE_CODE: &str = "MULTIPART_SPOOL_UNAVAILABLE";
 
 #[derive(Debug)]
@@ -45,8 +39,6 @@ impl MultipartRefusal {
         }
     }
 
-    /// The client-facing sentence: the violated bound, never a path, an OS error or the
-    /// parser's internals.
     fn message(&self) -> String {
         match self {
             Self::TooLarge { limit } => {
@@ -80,7 +72,7 @@ impl IntoResponse for MultipartRefusal {
         match &self {
             Self::SpoolUnavailable(error) => tracing::error!(
                 code,
-                %error,
+                error = %crate::chain::describe(error),
                 "a multipart file part could not be spooled (is the spool directory writable, \
                  with space and file handles to spare?)"
             ),

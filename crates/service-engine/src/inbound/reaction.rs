@@ -42,8 +42,12 @@ where
         payload: &'a [u8],
     ) -> BoxFuture<'a, Result<(), DispatchError>> {
         Box::pin(async move {
-            let message = M::decode(payload)
-                .map_err(|error| DispatchError::terminal(format!("payload decode: {error}")))?;
+            let message = M::decode(payload).map_err(|error| {
+                DispatchError::terminal(format!(
+                    "payload decode: {}",
+                    crate::chain::describe(&error)
+                ))
+            })?;
             (self.handler)(cx, message)
                 .await
                 .map_err(|error| DispatchError::new(error.disposition(), error.to_string()))

@@ -257,7 +257,10 @@ impl Nats {
             .filter(subject)
             .await
             .map_err(|error| NatsError::Store {
-                detail: format!("purging the sealed subject {subject}: {error}"),
+                detail: format!(
+                    "purging the sealed subject {subject}: {}",
+                    crate::chain::describe(&error)
+                ),
             })?;
         Ok(())
     }

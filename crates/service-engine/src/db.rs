@@ -96,7 +96,8 @@ fn ssl_mode(url: &str) -> Result<PgSslMode, EngineError> {
         .map(|options| options.get_ssl_mode())
         .map_err(|error| {
             config(format!(
-                "could not parse DATABASE_URL for TLS validation: {error}"
+                "could not parse DATABASE_URL for TLS validation: {}",
+                crate::chain::describe(&error)
             ))
         })
 }

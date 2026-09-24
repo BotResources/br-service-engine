@@ -53,7 +53,7 @@ where
         (Write::Put(value), None) => match bucket.create(key, value).await {
             Ok(_) => Ok(KvOutcome::Applied),
             Err(NatsError::RevisionConflict { .. }) => Ok(KvOutcome::Conflict),
-            Err(error) => Err(published_language(error)),
+            Err(error) => Err(RelayError::published_language(error)),
         },
         (Write::Put(value), Some((current, revision))) => {
             if current == *value {
@@ -62,20 +62,16 @@ where
             match bucket.update_if(key, value, revision).await {
                 Ok(_) => Ok(KvOutcome::Applied),
                 Err(NatsError::RevisionConflict { .. }) => Ok(KvOutcome::Conflict),
-                Err(error) => Err(published_language(error)),
+                Err(error) => Err(RelayError::published_language(error)),
             }
         }
         (Write::Retract, None) => Ok(KvOutcome::Applied),
         (Write::Retract, Some((_, revision))) => match bucket.delete_if(key, revision).await {
             Ok(()) => Ok(KvOutcome::Applied),
             Err(NatsError::RevisionConflict { .. }) => Ok(KvOutcome::Conflict),
-            Err(error) => Err(published_language(error)),
+            Err(error) => Err(RelayError::published_language(error)),
         },
     }
-}
-
-fn published_language(error: NatsError) -> RelayError {
-    RelayError::Publish(format!("published language: {error}"))
 }
 
 fn relay(error: crate::error::EngineError) -> RelayError {

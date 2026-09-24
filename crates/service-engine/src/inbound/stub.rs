@@ -207,7 +207,8 @@ impl StubDispatch {
             Ok(_) => None,
             Err(error) if sqlx_is_terminal(&error) => {
                 Some(DispatchOutcome::Failed(DispatchError::terminal(format!(
-                    "integrity violation classified terminal: {error}"
+                    "integrity violation classified terminal: {}",
+                    crate::chain::describe(&error)
                 ))))
             }
             Err(error) => Some(DispatchOutcome::Failed(DispatchError::retry(

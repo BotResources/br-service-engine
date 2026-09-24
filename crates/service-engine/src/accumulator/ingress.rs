@@ -65,8 +65,9 @@ impl StreamingIngress {
             .await
             .map_err(|error| {
                 EngineError::Config(format!(
-                    "the lane-A ingress consumer could not be created on {}: {error}",
-                    streaming_stream(&self.service)
+                    "the lane-A ingress consumer could not be created on {}: {}",
+                    streaming_stream(&self.service),
+                    describe(&error)
                 ))
             })
     }
@@ -78,7 +79,8 @@ impl StreamingIngress {
     ) -> Result<ServeExit, EngineError> {
         let mut messages = consumer.messages().await.map_err(|error| {
             EngineError::Config(format!(
-                "the lane-A ingress could not open its message stream: {error}"
+                "the lane-A ingress could not open its message stream: {}",
+                describe(&error)
             ))
         })?;
         let stopping = stop.stopped();
@@ -93,7 +95,8 @@ impl StreamingIngress {
                 Some(Ok(message)) => self.fold(&message).await,
                 Some(Err(error)) => {
                     return Err(EngineError::Config(format!(
-                        "the lane-A ingress lost its message stream: {error}"
+                        "the lane-A ingress lost its message stream: {}",
+                        describe(&error)
                     )));
                 }
                 None => return Ok(ServeExit::Ended),
@@ -135,7 +138,7 @@ impl StreamingIngress {
         let frame: StreamFrame = match serde_json::from_slice(&message.payload) {
             Ok(frame) => frame,
             Err(error) => {
-                tracing::warn!(error = %crate::chain::describe(&error), subject = %message.subject, "a lane-A chunk is undecodable");
+                tracing::warn!(error = %describe(&error), subject = %message.subject, "a lane-A chunk is undecodable");
                 return self.terminate(message).await;
             }
         };
@@ -168,19 +171,19 @@ impl StreamingIngress {
 
     async fn confirm(&self, message: &async_nats::jetstream::Message) {
         if let Err(error) = message.ack().await {
-            tracing::warn!(error = %crate::chain::describe(&*error), "acking a folded lane-A chunk failed; the stream still holds it for replay");
+            tracing::warn!(error = %describe(&*error), "acking a folded lane-A chunk failed; the stream still holds it for replay");
         }
     }
 
     async fn retry(&self, message: &async_nats::jetstream::Message) {
         if let Err(error) = message.ack_with(AckKind::Nak(Some(self.nak_backoff))).await {
-            tracing::warn!(error = %crate::chain::describe(&*error), "naking a lane-A chunk under back-pressure failed");
+            tracing::warn!(error = %describe(&*error), "naking a lane-A chunk under back-pressure failed");
         }
     }
 
     async fn terminate(&self, message: &async_nats::jetstream::Message) {
         if let Err(error) = message.ack_with(AckKind::Term).await {
-            tracing::warn!(error = %crate::chain::describe(&*error), "terminating a malformed lane-A chunk failed");
+            tracing::warn!(error = %describe(&*error), "terminating a malformed lane-A chunk failed");
         }
     }
 }
