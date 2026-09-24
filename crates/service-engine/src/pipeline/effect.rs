@@ -63,15 +63,8 @@ fn internal_engine_failure(context: &'static str, error: EngineError) -> Mutatio
     MutationError::internal(format!("{context} failed"))
 }
 
-/// A handler's error: a refusal keeps its reason and detail; a fault without
-/// a reason is logged here with its whole chain and reaches the client as
-/// `INTERNAL`.
 fn handler_failure<M: MutationInput>(error: M::Error) -> MutationError {
-    let reason = error.reason();
-    if reason.is_none() {
-        let cause = error
-            .as_error()
-            .map_or_else(|| error.to_string(), crate::chain::describe);
+    if let Some(cause) = internal_cause(&error) {
         tracing::error!(
             mutation = M::NAME,
             %cause,
@@ -79,7 +72,14 @@ fn handler_failure<M: MutationInput>(error: M::Error) -> MutationError {
              the whole cause chain is kept here"
         );
     }
-    MutationError::refused(reason, error.to_string())
+    MutationError::refused(error.reason(), error.to_string())
+}
+
+fn internal_cause(fault: &impl MutationFault) -> Option<String> {
+    fault
+        .reason()
+        .is_none()
+        .then(|| crate::chain::describe(fault))
 }
 
 fn mutation_outbound<P: Principal>(
@@ -218,4 +218,46 @@ where
         .purge_committed_seals(&staged.sealed_keys)
         .await;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::internal_cause;
+    use crate::error::EngineError;
+    use crate::gate::Reason;
+    use crate::pipeline::MutationFault;
+
+    #[derive(Debug, thiserror::Error)]
+    enum BoardFault {
+        #[error("the board is closed")]
+        Closed,
+        #[error("loading the board")]
+        Load(#[source] EngineError),
+    }
+
+    impl MutationFault for BoardFault {
+        fn reason(&self) -> Option<Reason> {
+            match self {
+                Self::Closed => Some(Reason::new("BOARD_CLOSED")),
+                Self::Load(_) => None,
+            }
+        }
+    }
+
+    #[test]
+    fn a_fault_without_a_reason_is_logged_with_its_whole_source_chain() {
+        let fault = BoardFault::Load(EngineError::Config("the board table is absent".into()));
+
+        let cause = internal_cause(&fault);
+
+        assert_eq!(
+            cause.as_deref(),
+            Some("loading the board: invalid configuration: the board table is absent")
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_not_logged_as_an_internal_fault() {
+        assert_eq!(internal_cause(&BoardFault::Closed), None);
+    }
 }

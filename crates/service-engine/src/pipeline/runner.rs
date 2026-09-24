@@ -41,7 +41,7 @@ impl std::fmt::Debug for PromotionStep {
         match self {
             Self::Commit => f.write_str("Commit"),
             Self::Refused(code) => write!(f, "Refused({code})"),
-            Self::Fault(error) => write!(f, "Fault({error})"),
+            Self::Fault(error) => write!(f, "Fault({})", crate::chain::describe(error)),
         }
     }
 }

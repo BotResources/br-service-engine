@@ -101,7 +101,7 @@ impl<P: Principal> Renderer<'_, P> {
             tracing::error!(
                 projector = %projector,
                 key = %key,
-                reason = %recording,
+                reason = %describe(&recording),
                 "a projection failure could not be recorded to the dead-letter table"
             );
         }

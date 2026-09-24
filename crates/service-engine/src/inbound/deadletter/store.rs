@@ -109,7 +109,7 @@ impl DeadLetters {
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| NatsError::Store {
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?;
         let Some(row) = row else {
             return Ok(RetryOutcome::Absent);
@@ -122,7 +122,7 @@ impl DeadLetters {
             .execute(&self.pool)
             .await
             .map_err(|e| NatsError::Store {
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?;
         Ok(RetryOutcome::Republished)
     }

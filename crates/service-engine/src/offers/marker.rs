@@ -31,8 +31,9 @@ pub(crate) async fn pending(
 }
 
 fn row_to_marker(row: sqlx::postgres::PgRow) -> Result<Marker, RelayError> {
-    let kv_key = KvKey::new(row.get::<String, _>("kv_key"))
-        .map_err(|error| RelayError::Publish(format!("offer kv key: {error}")))?;
+    let kv_key = KvKey::new(row.get::<String, _>("kv_key")).map_err(|error| {
+        RelayError::Publish(format!("offer kv key: {}", crate::chain::describe(&error)))
+    })?;
     let agg_key = row
         .get::<Option<Vec<u8>>, _>("agg_key")
         .map(|bytes| KeyBytes::from_json_bytes(Bytes::from(bytes)))

@@ -36,8 +36,13 @@ pub(crate) async fn reconcile<O: Offer>(
         puts.push((kv_key, agg_key));
     }
 
-    let prefix = KvPrefix::new(O::PREFIX)
-        .map_err(|error| RelayError::Publish(format!("offer prefix {}: {error}", O::PREFIX)))?;
+    let prefix = KvPrefix::new(O::PREFIX).map_err(|error| {
+        RelayError::Publish(format!(
+            "offer prefix {}: {}",
+            O::PREFIX,
+            crate::chain::describe(&error)
+        ))
+    })?;
     let mut retracts: Vec<KvKey> = Vec::new();
     for (kv_key, _) in bucket
         .entries(&prefix)

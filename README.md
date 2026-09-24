@@ -643,8 +643,8 @@ begin or commit, an engine wiring fault, a handler error whose
 (`graphql::INTERNAL_CODE`) with the fixed message `internal error`
 (`graphql::INTERNAL_MESSAGE`) and no detail; the engine logs the cause at
 `error` with its whole `source()` chain where it converts the error. A handler
-fault joins its own chain to that log by returning `Some(self)` from
-`MutationFault::as_error` (the default logs its `Display` alone). The few
+fault is in that chain by construction: `MutationFault` requires
+`std::error::Error`, and the engine logs the fault with `error::describe`. The few
 failures a client can act on keep a specific code: paging a session the caller
 does not hold or a window it never attached is `NOT_FOUND`, attaching under a
 session id a live session holds is `CONFLICT`, attaching for a principal that no
@@ -659,8 +659,16 @@ Errors as text. `error::describe(&error)` renders an error and its whole
 `source()` chain, outermost first, joined by `: `. It is the engine's one
 renderer: every engine log site uses it, and so does every failure text the
 engine keeps (dispatch and dead-letter reasons, render faults, relay, cron and
-mirror health, NATS, object-storage and published-language details). A service
-that logs an engine error, or keeps one as text, calls the same function. A
+mirror health, NATS, object-storage and published-language details). A service's
+own faults reach it by construction: `MutationFault` and `ReactionError` both
+require `std::error::Error`, a mutation fault without a reason is logged as
+`describe(&fault)`, and a reaction fault's dispatch and dead-letter reason is
+`describe(&fault)`. So a fault keeps the error it wraps as its `source()`
+(`#[from]` or `#[source]` with thiserror) and writes only its own context in
+`Display`; it never pre-renders its cause into a `String`. `gate::Reason` is an
+error too (its `Display` is its code), so a mutation that can only refuse
+declares `type Error = Reason`. A service that logs an engine error, or keeps
+one as text, calls the same function. A
 segment is written once: it is skipped when its parent's text equals it or ends
 with `: ` followed by it. So sqlx's `error returned from database: <text>`,
 whose `source()` is the database error `<text>` again, renders the database

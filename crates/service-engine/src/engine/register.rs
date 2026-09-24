@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -138,7 +137,7 @@ impl<P: Principal> Engine<P> {
     ) -> Result<(), EngineError>
     where
         M: ReactionMessage,
-        E: crate::inbound::ReactionError + Display + Send + 'static,
+        E: crate::inbound::ReactionError,
         H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
             + Send
             + Sync
@@ -155,7 +154,7 @@ impl<P: Principal> Engine<P> {
     ) -> Result<(), EngineError>
     where
         M: ReactionMessage,
-        E: crate::inbound::ReactionError + Display + Send + 'static,
+        E: crate::inbound::ReactionError,
         H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
             + Send
             + Sync

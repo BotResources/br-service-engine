@@ -20,7 +20,7 @@ use crate::transport::ImpactTransport;
 
 pub trait MutationInput: Send + 'static {
     type Output: Send + 'static;
-    type Error: crate::pipeline::MutationFault + std::fmt::Display;
+    type Error: crate::pipeline::MutationFault;
 
     const NAME: &'static str;
 }

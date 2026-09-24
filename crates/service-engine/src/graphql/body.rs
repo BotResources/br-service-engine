@@ -136,7 +136,7 @@ async fn read(
 fn bounded(body: Body, limit: u64) -> impl Stream<Item = std::io::Result<Bytes>> + Unpin {
     let mut received: u64 = 0;
     body.into_data_stream().map(move |chunk| {
-        let chunk = chunk.map_err(|error| std::io::Error::other(error.to_string()))?;
+        let chunk = chunk.map_err(std::io::Error::other)?;
         received = received.saturating_add(chunk.len() as u64);
         if received > limit {
             return Err(std::io::Error::other(BodyLimitExceeded));

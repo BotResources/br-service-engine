@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -33,7 +32,7 @@ struct ReactionFn<M, H> {
 impl<M, H, E> ReactionInvoker for ReactionFn<M, H>
 where
     M: ReactionMessage,
-    E: ReactionError + Display + Send + 'static,
+    E: ReactionError,
     H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>> + Send + Sync + 'static,
 {
     fn invoke<'a>(
@@ -50,9 +49,13 @@ where
             })?;
             (self.handler)(cx, message)
                 .await
-                .map_err(|error| DispatchError::new(error.disposition(), error.to_string()))
+                .map_err(|error| handler_fault(&error))
         })
     }
+}
+
+fn handler_fault<E: ReactionError>(error: &E) -> DispatchError {
+    DispatchError::new(error.disposition(), crate::chain::describe(error))
 }
 
 pub struct ReactionEntry {
@@ -89,7 +92,7 @@ impl ReactionRegistry {
     ) -> Result<(), EngineError>
     where
         M: ReactionMessage,
-        E: ReactionError + Display + Send + 'static,
+        E: ReactionError,
         H: for<'r> Fn(&'r mut Reaction<'r>, M) -> BoxFuture<'r, Result<(), E>>
             + Send
             + Sync
@@ -186,6 +189,32 @@ mod tests {
         _m: SampleMessage,
     ) -> BoxFuture<'r, Result<(), SampleError>> {
         Box::pin(async { Ok(()) })
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("loading the roster")]
+    struct RosterFault(#[source] EngineError);
+
+    impl ReactionError for RosterFault {
+        fn disposition(&self) -> crate::inbound::disposition::Disposition {
+            crate::inbound::disposition::Disposition::Terminal
+        }
+    }
+
+    #[test]
+    fn a_reaction_fault_reaches_its_dispatch_detail_with_its_whole_source_chain() {
+        let fault = RosterFault(EngineError::Config("the roster table is absent".into()));
+
+        let dispatched = handler_fault(&fault);
+
+        assert_eq!(
+            dispatched.detail,
+            "loading the roster: invalid configuration: the roster table is absent"
+        );
+        assert_eq!(
+            dispatched.disposition,
+            crate::inbound::disposition::Disposition::Terminal
+        );
     }
 
     #[test]

@@ -152,7 +152,7 @@ impl OutboxRelay {
             Err(error) => error,
         };
 
-        let detail = outcome.to_string();
+        let detail = crate::chain::describe(&outcome);
         if classify_failure(&outcome) == FailureClass::Structural {
             self.store
                 .apply_transition(

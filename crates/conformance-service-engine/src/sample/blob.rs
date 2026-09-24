@@ -175,9 +175,7 @@ pub fn attach_doc<'m>(
         cx.create(&doc).await?;
         cx.impact_caused::<Doc, _>(&doc.id, "attached")?;
         if input.fail {
-            return Err(SampleFault::Store(
-                "deliberate rollback after staging".into(),
-            ));
+            return Err(SampleFault::DeliberateRollback);
         }
         Ok(OneShot(blob.upload_url()))
     })

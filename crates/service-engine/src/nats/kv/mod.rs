@@ -180,14 +180,14 @@ where
             .await
             .map_err(|e| NatsError::Kv {
                 key: prefix.as_str().to_string(),
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?
             .boxed();
         let mut out = Vec::new();
         while let Some(next) = keys.next().await {
             let raw = next.map_err(|e| NatsError::Kv {
                 key: prefix.as_str().to_string(),
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?;
             if !prefix.matches(&raw) {
                 continue;
@@ -208,14 +208,14 @@ where
             .await
             .map_err(|e| NatsError::Kv {
                 key: "keys".to_string(),
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?
             .boxed();
         let mut out = Vec::new();
         while let Some(next) = keys.next().await {
             let raw = next.map_err(|e| NatsError::Kv {
                 key: "keys".to_string(),
-                detail: e.to_string(),
+                detail: crate::chain::describe(&e),
             })?;
             let Ok(key) = KvKey::new(raw) else { continue };
             if let Some((value, _)) = self.get_with_revision(&key).await? {

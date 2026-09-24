@@ -47,7 +47,7 @@ impl SealHash {
             let hex = std::str::from_utf8(pair)
                 .map_err(|_| EngineError::SealHashFormat("non-utf8 hex".into()))?;
             bytes[index] = u8::from_str_radix(hex, 16)
-                .map_err(|error| EngineError::SealHashFormat(error.to_string()))?;
+                .map_err(|error| EngineError::SealHashFormat(crate::chain::describe(&error)))?;
         }
         Ok(Self(bytes))
     }

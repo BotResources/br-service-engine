@@ -5,7 +5,7 @@ pub enum Disposition {
     Terminal,
 }
 
-pub trait ReactionError {
+pub trait ReactionError: std::error::Error + Send + 'static {
     fn disposition(&self) -> Disposition;
 }
 

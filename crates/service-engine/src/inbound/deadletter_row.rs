@@ -30,12 +30,12 @@ pub(crate) async fn republish(nats: &Nats, entry: &DeadLetter) -> Result<(), Nat
         .map_err(|e| NatsError::Publish {
             subject: entry.subject.clone(),
             kind: crate::nats::PublishFailure::Transient,
-            detail: e.to_string(),
+            detail: crate::chain::describe(&e),
         })?;
     ack.await.map_err(|e| NatsError::Publish {
         subject: entry.subject.clone(),
         kind: crate::nats::PublishFailure::Transient,
-        detail: e.to_string(),
+        detail: crate::chain::describe(&e),
     })?;
     Ok(())
 }

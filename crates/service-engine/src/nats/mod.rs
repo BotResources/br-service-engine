@@ -70,7 +70,7 @@ impl Nats {
     pub async fn connect(url: &str) -> Result<Self, NatsError> {
         let client = async_nats::connect(url)
             .await
-            .map_err(|e| NatsError::Connect(e.to_string()))?;
+            .map_err(|e| NatsError::Connect(crate::chain::describe(&e)))?;
         Ok(Self::from_context(async_nats::jetstream::new(client)))
     }
 
@@ -142,7 +142,7 @@ impl Nats {
             .client()
             .flush()
             .await
-            .map_err(|e| NatsError::Connect(e.to_string()))
+            .map_err(|e| NatsError::Connect(crate::chain::describe(&e)))
     }
 
     pub async fn publish_event<T: Serialize>(

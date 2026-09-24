@@ -39,8 +39,13 @@ impl<O: Offer> OfferRelay<O> {
         reconcile_period: Duration,
     ) -> Result<Self, RelayError> {
         Ok(Self {
-            name: RelayName::new(O::NAME)
-                .map_err(|error| RelayError::Publish(format!("offer name {}: {error}", O::NAME)))?,
+            name: RelayName::new(O::NAME).map_err(|error| {
+                RelayError::Publish(format!(
+                    "offer name {}: {}",
+                    O::NAME,
+                    crate::chain::describe(&error)
+                ))
+            })?,
             nats,
             leader,
             bucket: OnceCell::new(),
