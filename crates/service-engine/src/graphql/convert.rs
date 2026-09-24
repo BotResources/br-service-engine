@@ -39,6 +39,31 @@ impl From<AttachError> for Error {
     }
 }
 
+pub(crate) fn one_key_refusal(error: AttachError) -> Error {
+    let AttachError::WindowTooLarge {
+        projector,
+        keys_read,
+        capacity,
+    } = &error
+    else {
+        return Error::from(error);
+    };
+    tracing::warn!(
+        %projector,
+        keys_read,
+        capacity,
+        "a raw one-key fetch was refused: the projector's default window holds more than \
+         window_capacity keys, so it cannot decide membership; read the key through fetch_view"
+    );
+    coded_error(
+        WINDOW_TOO_LARGE_CODE,
+        format!(
+            "this key is looked up in a window that holds more than {capacity} keys; no argument \
+             of this field narrows it, the service must read the key by its row"
+        ),
+    )
+}
+
 impl From<WindowSizeOutOfRange> for Error {
     fn from(error: WindowSizeOutOfRange) -> Self {
         coded_error(WINDOW_SIZE_INVALID_CODE, error.to_string())

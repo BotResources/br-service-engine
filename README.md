@@ -576,8 +576,8 @@ person's blobs from storage and the reference table. Presigning uses the sans-IO
 `sha2` + `base64`) for the upload, and `reqwest` (rustls) as the thin HTTP client
 for the engine's own bucket HEAD/DELETE — no cloud SDK.
 
-The `graphql` module is the async-graphql surface kit, aligned to the intent's authoring ergonomics. A service lists its slices once with the
-`compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
+The `graphql` module is the async-graphql surface kit. A service lists its
+slices once with the `compose_service!` macro, which generates the merged `QueryRoot`/`MutationRoot`/
 `SubscriptionRoot` and the `register` function; it composes those roots into one
 schema with `engine_schema`, mounts it with `app` (`POST
 /graphql` — JSON, or a graphql-sse event stream when `Accept` names
@@ -850,8 +850,7 @@ Because it is a runtime gesture, `Engine::run` consumes the engine — capture
 `engine.eraser()` before `run` to erase while the pod is serving, exactly as
 `mutation_executor` and `blob_reader` are captured.
 
-The authoring ergonomics follow the intent. A projector is
-written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
+A projector is written as a `view::Projector` (re-exported as `service_engine::Projector`) — it
 names its `type Noun` and `type Store`, a typed `Query`, its `type Visibility`, and
 writes only a native `async fn populate(cx, q)` over a `Populate` context and
 `project(row, principal) -> Result<Out, EngineError>`. `project` is fallible: a
@@ -1037,25 +1036,32 @@ refusal is bounded for a view that binds the attach bound as its `LIMIT`: at
 attach `cx.limit(&page)` is the page size clamped to `window_capacity + 1`, the
 one key past the capacity that proves the refusal, so
 a `size: 2147483647` reads at most `window_capacity + 1` keys before it is
-refused, and the refusal reports that size. A populate with no page (a
-whole-collection read, a filter without a `size`) binds `cx.limit_all()`:
+refused, and the refusal's `keys_read` reports that count, never the size of
+the collection. A populate with no page (a whole-collection read, a filter
+without a `size`) binds `cx.limit_all()`:
 `window_capacity + 1` at attach and at a one-shot fetch, no limit on a
 repopulation after attach, so a client retrying a refused attach in a loop never
 reads the whole collection. A raw one-key `Query::fetch` / `fetch_json` decides
 membership from the default window read under the same ceiling and is refused
-above `window_capacity` (a truncated window cannot decide membership);
-`fetch_view` reads one row and never populates. The engine's own population
-sources take the same bound: `view::cohort_window` passes it to
+above `window_capacity` (a truncated window cannot decide membership). Its
+client has no window argument to narrow, so its `WINDOW_TOO_LARGE` message
+names the capacity and says that the service must read the key by its row, and
+the engine logs one `warn` per such refusal naming the projector, the keys read
+and the capacity: the fix is the service's, reading the key through
+`fetch_view`, which reads one row and never populates. The engine's own
+population sources take the same bound: `view::cohort_window` passes it to
 `CohortIndex::keys_in_cohorts`, and `full_eda::keys` reads at most
 `cx.limit_all()` keys. A populate that binds neither reads its whole population
 before it is refused. A raw `projector::Projector` receives the same bound as
 `populate`'s `KeyCeiling` argument. A repopulation after attach runs under
 `KeyCeiling::NONE` and binds the page size as asked, so the ceiling never trims
-a live window. The refusal is counted as
-`service_engine_windows_over_capacity_total{projector, outcome="refused"}` and
-not logged: the client can fix it, and a client that retries in a loop would
-flood the log. A live window is never ended for its size: one that grows past
-the capacity after its attach (an open head with no size, a query window
+a live window. Every refusal is counted as
+`service_engine_windows_over_capacity_total{projector, outcome="refused"}`. A
+window refusal (an attach or a one-shot window fetch) is not logged: its client
+can fix it with the window's arguments, and a client that retries in a loop
+would flood the log. A raw one-key refusal is logged, as above, because only
+the service can fix it. A live window is never ended for its size: one that
+grows past the capacity after its attach (an open head with no size, a query window
 discovering rows, a window that a principal-facts refresh or a projector-wide
 impact repopulates) stays open on its contiguous revision, and the engine logs
 one `warn` naming the session, the projector, the size and the capacity when it
@@ -1075,7 +1081,7 @@ the view a `size` or a narrower filter argument, or raise the capacity), and
 each `kept` also has its `warn` line.
 
 The accumulated lane gained `Ops::seal_partial` and `Ops::seal_current`
-so a service can implement the intent's "Cancel work in flight": a direct-lane
+so a service can cancel work in flight: a direct-lane
 cancel decision (with the cancel gate as its affordance, a presence signal the
 producer watches and a scheduled deadline), a reaction that seals the producer's
 verified partial as cancelled, and a deadline reaction that seals whatever the
@@ -1889,8 +1895,9 @@ counter watched at the Postgres-cluster level; it counts impacts of committed
 transactions only, recorded after the commit, never a rolled-back mutation.
 `service_engine_windows_over_capacity_total{projector, outcome}`
 (`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, labels `metrics::LABEL_PROJECTOR` and
-`LABEL_OUTCOME`) counts the windows that met `window_capacity`: `refused` at attach, `kept` for a live window
-that grew past it; no shipped alert watches it (see the capacity section). The
+`LABEL_OUTCOME`) counts the windows that met `window_capacity`: `refused` for
+an attach, a one-shot window fetch or a raw one-key fetch above the capacity,
+`kept` for a live window that grew past it; no shipped alert watches it (see the capacity section). The
 five shipped alerts are in
 [`observability/service-engine-alerts.yaml`](observability/service-engine-alerts.yaml):
 a filling notification queue, the per-cluster notify budget nearing its ceiling,

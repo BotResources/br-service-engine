@@ -39,9 +39,12 @@ release is chart 1.1.1 ↔ engine 0.4.0.
 - **`window_capacity` bounds a window at attach, never after.** An attach whose
   population holds more than `window_capacity` keys (default 10,000,
   `EngineConfig::with_window_capacity`) is refused before the render with the new
-  `AttachError::WindowTooLarge`, answered as `WINDOW_TOO_LARGE`
-  (`WINDOW_TOO_LARGE_CODE`); the message names the capacity only. An attach of
-  several windows populates and admits them all before it renders any. A
+  `AttachError::WindowTooLarge { projector, keys_read, capacity }`, answered as
+  `WINDOW_TOO_LARGE` (`WINDOW_TOO_LARGE_CODE`); the message names the capacity
+  only. `keys_read` is the count `populate` returned before the refusal:
+  `window_capacity + 1` when it binds its ceiling, never the collection's size.
+  An attach of several windows populates and admits them all before it renders
+  any. A
   whole-collection view (`type Query = ()`) is refused once its collection
   outgrows the capacity. Through 0.3.4 the capacity bounded the pages one session
   held and evicted the oldest page.
@@ -57,7 +60,10 @@ release is chart 1.1.1 ↔ engine 0.4.0.
   `fetch_json` decide membership from the projector's default window populated
   under the same ceiling, and refuse with `WINDOW_TOO_LARGE` when that window
   holds more than `window_capacity` keys, since a truncated window cannot decide
-  membership. Through 0.3.4 they read the whole default population
+  membership. The client has no window argument to narrow, so the message says
+  that the service must read the key by its row, and the engine logs one `warn`
+  per such refusal naming the projector, the keys read and the capacity (the fix
+  is `fetch_view`). Through 0.3.4 they read the whole default population
   (`KeyCeiling::NONE`) on every one-key call.
 - **`CohortIndex::keys_in_cohorts(conn, cohorts, ceiling: KeyCeiling)`** takes the
   read bound and binds `ceiling.limit()` as its `LIMIT`. `view::cohort_window`
@@ -220,11 +226,12 @@ release is chart 1.1.1 ↔ engine 0.4.0.
   `service_engine_windows_over_capacity_total{projector, outcome}`
   (`metrics::WINDOWS_OVER_CAPACITY_TOTAL`, listed in `metrics::ALL`; the new
   label `metrics::LABEL_PROJECTOR` beside `LABEL_OUTCOME`) counts a refused
-  attach or one-shot window fetch (`refused`, not logged: the client can fix it)
-  and a live window that grew past the capacity (`kept`, one `warn` naming the
-  session, the projector, the size and the capacity). No shipped alert watches
-  it: a client that asks for a `size` above the capacity counts `refused` while
-  the service is sound.
+  attach, one-shot window fetch or raw one-key fetch (`refused`; an attach or a
+  window fetch is not logged, since its client can fix it, and a raw one-key
+  fetch logs its `warn`, since only the service can) and a live window that grew
+  past the capacity (`kept`, one `warn` naming the session, the projector, the
+  size and the capacity). No shipped alert watches it: a client that asks for a
+  `size` above the capacity counts `refused` while the service is sound.
 - **`OrInternal`** (`graphql::OrInternal`, re-exported at the crate root), until
   now crate-private: `result.or_internal(context)` logs the context and the whole
   cause chain and answers `INTERNAL`. `impl From<_> for async_graphql::Error`
@@ -1540,7 +1547,7 @@ during the gate.
 
 ### H0. Mirror rework — empty is a converged state
 
-Per the amended doctrine (`docs/service-engine/intent.md`): a consumed prefix
+Per the amended doctrine: a consumed prefix
 that reads empty is a **converged** prefix with nothing in it — `known_*` follows
 the source to empty, at boot or during a run — and a replaced bucket is
 first-adoption, never a readiness failure and never an operator SQL. This
@@ -2444,7 +2451,7 @@ opt-out), and `service_engine::{Readiness, ReadinessHandle, readiness_route}` is
 its own readiness handle and `/readyz` route.
 
 **Configuration, degradation and observability.** `EngineConfig` validates every
-bound of the intent's config table at boot (`session_max_age`, `lock_timeout`,
+bound of its configuration at boot (`session_max_age`, `lock_timeout`,
 `nats_grace`, `listener_queue_threshold`, `window_capacity`, `impacts_per_commit`,
 `listener_channel_capacity`, the `lease` outlasting the `beat`, `session_max_age`
 outlasting `session_ttl`, `listener_queue_threshold` in `(0.0, 1.0]`,
@@ -2582,9 +2589,9 @@ them on demand otherwise. `infra/pg.rs` / `infra/nats.rs` are the sole
 
 **Reference service (`example-service`, `example-contract`, `example-twin`).**
 A complete, bootable service built **only** on the public authoring surface (no
-`test-support`, no `pub(crate)` reach-around), laid out as the intent's Code
-structure prescribes: a thin `kernel/` (the principal and its generic
-`PrincipalFacts` bag, the error base — and no scope registry), one folder per
+`test-support`, no `pub(crate)` reach-around), laid out as the reference
+layout of a service on the engine: a thin `kernel/` (the principal and its
+generic `PrincipalFacts` bag, the error base — and no scope registry), one folder per
 slice, a `slices/mod.rs` that lists the slices once through `compose_service!`,
 and a slice-agnostic `register.rs` and `graphql.rs`. **Every slice is removable
 by deleting its folder plus its one `compose_service!` line, with no kernel

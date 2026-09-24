@@ -62,10 +62,10 @@ async fn s245_an_attach_over_window_capacity_is_refused_and_one_at_capacity_atta
         matches!(
             refused,
             Err(AttachError::WindowTooLarge {
-                size,
+                keys_read,
                 capacity: CAPACITY,
                 ..
-            }) if size == CAPACITY + 1
+            }) if keys_read == CAPACITY + 1
         ),
         "a whole-collection window over window_capacity is refused at attach, and its populate \
          read {} of the {} matching rows, one past the capacity, got {refused:?}",
@@ -171,10 +171,10 @@ async fn s245_a_size_far_above_capacity_is_refused_after_reading_one_key_past_it
         matches!(
             refused,
             Err(AttachError::WindowTooLarge {
-                size,
+                keys_read,
                 capacity: CAPACITY,
                 ..
-            }) if size == CAPACITY + 1
+            }) if keys_read == CAPACITY + 1
         ),
         "a page far wider than window_capacity is refused, and its populate read {} of the {} \
          matching rows, one past the capacity, got {refused:?}",

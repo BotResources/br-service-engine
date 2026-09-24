@@ -5,16 +5,16 @@ use crate::session::SessionId;
 
 pub(crate) fn admit(
     projector: &ProjectorName,
-    size: usize,
+    keys_read: usize,
     capacity: usize,
 ) -> Result<(), AttachError> {
-    if size <= capacity {
+    if keys_read <= capacity {
         return Ok(());
     }
     record_window_over_capacity(projector, WINDOW_REFUSED);
     Err(AttachError::WindowTooLarge {
         projector: projector.clone(),
-        size,
+        keys_read,
         capacity,
     })
 }
@@ -52,7 +52,7 @@ mod tests {
         assert!(matches!(
             admit(&PROJECTOR, 5, 4),
             Err(AttachError::WindowTooLarge {
-                size: 5,
+                keys_read: 5,
                 capacity: 4,
                 ..
             })

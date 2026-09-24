@@ -56,12 +56,12 @@ pub enum AttachError {
     ShuttingDown,
 
     #[error(
-        "the window on {projector} holds {size} keys, more than window_capacity {capacity}; the \
-         subscription's arguments must narrow it"
+        "the window on {projector} holds more than window_capacity {capacity} keys; its populate \
+         read {keys_read} keys before the refusal"
     )]
     WindowTooLarge {
         projector: ProjectorName,
-        size: usize,
+        keys_read: usize,
         capacity: usize,
     },
 }

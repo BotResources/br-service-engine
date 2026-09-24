@@ -55,10 +55,10 @@ async fn s259_a_whole_collection_attach_over_capacity_asks_its_store_for_one_key
         matches!(
             refused,
             Err(AttachError::WindowTooLarge {
-                size,
+                keys_read,
                 capacity: CAPACITY,
                 ..
-            }) if size == CAPACITY + 1
+            }) if keys_read == CAPACITY + 1
         ),
         "a whole-collection cohort window over window_capacity is refused with the one key past \
          the capacity that proves it, got {refused:?}"

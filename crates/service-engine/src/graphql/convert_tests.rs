@@ -1,6 +1,7 @@
 use async_graphql::{EmptyMutation, EmptySubscription, Error, Object, Request, Result, Schema};
 use serde_json::{Value, json};
 
+use super::one_key_refusal;
 use crate::error::{AttachError, EngineError};
 use crate::gate::{Gate, Reason};
 use crate::graphql::error::{
@@ -10,6 +11,7 @@ use crate::graphql::error::{
 use crate::name::ProjectorName;
 use crate::page::{WINDOW_SIZE_INVALID_CODE, WindowSize};
 use crate::pipeline::MutationError;
+use crate::test_log::logged;
 
 const NOT_OWNER: Reason = Reason::new("NOT_OWNER");
 const DATABASE_TEXT: &str =
@@ -26,12 +28,23 @@ fn failed_mutation() -> Result<(), MutationError> {
     Err(MutationError::internal(DATABASE_TEXT))
 }
 
-fn oversized_window() -> Result<(), AttachError> {
-    Err(AttachError::WindowTooLarge {
+fn window_too_large() -> AttachError {
+    AttachError::WindowTooLarge {
         projector: ProjectorName::from_static("hidden_projector"),
-        size: 12_345,
+        keys_read: 12_345,
         capacity: 10,
-    })
+    }
+}
+
+fn oversized_window() -> Result<(), AttachError> {
+    Err(window_too_large())
+}
+
+fn code_of(error: &Error) -> Option<async_graphql::Value> {
+    error
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get(CODE_EXTENSION).cloned())
 }
 
 fn engine_fault() -> Result<bool, EngineError> {
@@ -150,24 +163,64 @@ async fn a_fault_named_with_or_internal_is_internal_without_its_cause() {
 
 #[test]
 fn an_attach_refusal_the_client_can_fix_keeps_a_code_and_any_other_is_internal() {
-    let code = |error: Error| {
-        error
-            .extensions
-            .and_then(|extensions| extensions.get(CODE_EXTENSION).cloned())
-    };
-
     assert_eq!(
-        code(Error::from(AttachError::PrincipalRevoked)),
+        code_of(&Error::from(AttachError::PrincipalRevoked)),
         Some(async_graphql::Value::from(UNAUTHENTICATED_CODE))
     );
     assert_eq!(
-        code(Error::from(AttachError::HeldImpacts(EngineError::Db(
+        code_of(&Error::from(AttachError::HeldImpacts(EngineError::Db(
             sqlx::Error::PoolTimedOut,
         )))),
         Some(async_graphql::Value::from(INTERNAL_CODE))
     );
     assert_eq!(
-        code(Error::from(AttachError::PrincipalRefreshFailed)),
+        code_of(&Error::from(AttachError::PrincipalRefreshFailed)),
         Some(async_graphql::Value::from(INTERNAL_CODE))
+    );
+}
+
+#[test]
+fn a_window_refusal_is_not_logged_because_its_client_narrows_the_window() {
+    let (error, lines) = logged(|| Error::from(window_too_large()));
+
+    assert_eq!(
+        code_of(&error),
+        Some(async_graphql::Value::from(WINDOW_TOO_LARGE_CODE))
+    );
+    assert!(
+        lines.is_empty(),
+        "a refusal the client fixes with the window's arguments writes no log line: {lines:?}"
+    );
+}
+
+#[test]
+fn a_raw_one_key_refusal_warns_the_operator_and_tells_the_client_no_argument_narrows_it() {
+    let window_message = Error::from(window_too_large()).message;
+    let (error, lines) = logged(|| one_key_refusal(window_too_large()));
+
+    assert_eq!(
+        code_of(&error),
+        Some(async_graphql::Value::from(WINDOW_TOO_LARGE_CODE))
+    );
+    assert_ne!(
+        error.message, window_message,
+        "a one-key fetch has no window arguments, so its client is not told to narrow them"
+    );
+    assert!(
+        error.message.contains("10")
+            && !error.message.contains("12345")
+            && !error.message.contains("hidden_projector"),
+        "the client learns the capacity, never the projector or a count of rows it may not see: \
+         {}",
+        error.message
+    );
+    assert!(
+        lines.len() == 1
+            && lines[0].contains("WARN")
+            && lines[0].contains("hidden_projector")
+            && lines[0].contains("12345")
+            && lines[0].contains("fetch_view"),
+        "the operator gets one warn naming the projector, the keys read and the fix, since no \
+         client can fix it: {lines:?}"
     );
 }
