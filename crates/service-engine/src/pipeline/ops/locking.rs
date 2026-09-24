@@ -81,10 +81,10 @@ mod lock_order_tests {
         type Event = ();
         const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-        fn load<'a>(
+        fn read_many<'a>(
             _conn: &'a mut PgConnection,
-            _key: &'a Self::Key,
-        ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>> {
+            _keys: &'a [Self::Key],
+        ) -> BoxFuture<'a, Result<Vec<(Self::Key, Self::Aggregate)>, EngineError>> {
             Box::pin(async { unimplemented!("lock_order never loads") })
         }
         fn save<'a>(

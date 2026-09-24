@@ -44,21 +44,6 @@ impl Persistence for EraseNoteStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<EraseNote>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, owner, tenant, body, blob_ref FROM sample_erase_note WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.map(row_to_note))
-        })
-    }
-
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Uuid],

@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::error::Error as StdError;
 
 use futures_util::future::BoxFuture;
@@ -9,7 +8,9 @@ use crate::impact::{Dims, ForeignKey, Impact};
 use crate::wire::Noun;
 
 use super::consumed::Consumed;
-use super::known::{self, Column, KnownRow, Written};
+use super::known::{self, KnownRow, Written};
+use super::row_scope::RowScope;
+use super::rows;
 use super::shadow::{Shadow, Shadows};
 
 pub struct Projection<'a> {
@@ -58,52 +59,20 @@ impl<'a> Projection<'a> {
         Ok(())
     }
 
-    pub async fn replace_one<R: Known>(&mut self, row: R) -> Result<(), EngineError> {
-        row.upsert(self.conn).await?;
-        self.impact_foreign(R::NAMESPACE, &row.foreign_key())
-    }
-
-    pub async fn upsert<R: KnownRow>(&mut self, row: R) -> Result<Written, EngineError> {
-        let foreign_key = row.foreign_key();
-        let written = known::upsert(self.conn, &row).await?;
-        if written.is_effective() {
-            self.impact_foreign(R::NAMESPACE, &foreign_key)?;
-        }
-        Ok(written)
-    }
-
-    pub async fn retire<R: KnownRow>(&mut self, key: Vec<Column>) -> Result<(), EngineError> {
-        let foreign_key = known::foreign_key_of(&key);
-        known::delete_by_key::<R>(self.conn, key).await?;
-        self.impact_foreign(R::NAMESPACE, &foreign_key)
-    }
-
-    pub async fn remove<S: KnownScope>(&mut self, scope: S) -> Result<(), EngineError> {
-        let touched = scope.delete(self.conn).await?;
-        for key in touched {
-            self.impact_foreign(S::NAMESPACE, &key)?;
-        }
-        Ok(())
-    }
-
-    pub async fn replace<S, R, I>(&mut self, scope: S, rows: I) -> Result<Written, EngineError>
+    pub async fn replace_rows<R, I>(
+        &mut self,
+        scope: RowScope,
+        rows: I,
+    ) -> Result<Written, EngineError>
     where
-        S: KnownScope,
-        R: Known,
+        R: KnownRow,
         I: IntoIterator<Item = R>,
     {
-        let rows: Vec<R> = rows.into_iter().collect();
-        let incoming: BTreeSet<String> = rows.iter().map(Known::foreign_key).collect();
-        let previous: BTreeSet<String> = scope.delete(self.conn).await?.into_iter().collect();
-        for row in &rows {
-            row.upsert(self.conn).await?;
+        let changed = rows::replace_rows::<R>(self.conn, scope, rows.into_iter().collect()).await?;
+        for key in &changed {
+            self.impacts.extend(known::impacts_of::<R>(key)?);
         }
-        let mut effective = 0_usize;
-        for key in previous.symmetric_difference(&incoming) {
-            self.impact_foreign(R::NAMESPACE, key)?;
-            effective += 1;
-        }
-        Ok(if effective == 0 {
+        Ok(if changed.is_empty() {
             Written::Unchanged
         } else {
             Written::Changed
@@ -111,25 +80,12 @@ impl<'a> Projection<'a> {
     }
 }
 
-pub trait Known: Send + Sync + 'static {
-    const NAMESPACE: &'static str;
-
-    fn foreign_key(&self) -> String;
-
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>>;
-}
-
-pub trait KnownScope: Send + Sync {
-    const NAMESPACE: &'static str;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>>;
-}
-
 pub trait Project<K>: Send + Sync + 'static {
     type Error: StdError + Send + Sync + 'static;
 
-    fn project<'a>(&'a self, cx: Projection<'a>, key: K) -> BoxFuture<'a, Result<(), Self::Error>>;
+    fn project<'a>(
+        &'a self,
+        cx: Projection<'a>,
+        keys: Vec<K>,
+    ) -> BoxFuture<'a, Result<(), Self::Error>>;
 }

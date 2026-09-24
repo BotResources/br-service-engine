@@ -1,10 +1,13 @@
 mod mirror_support;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use conformance_service_engine::TestDb;
 use conformance_service_engine::infra::TestNats;
-use conformance_service_engine::sample::{RecordingTransport, publish_offer_manifest};
+use conformance_service_engine::sample::{
+    RecordingTransport, publish_offer_manifest, replace_known_users,
+};
 use futures_util::future::BoxFuture;
 use mirror_support::{await_count, email_of, persisted_keys, publish, retract};
 use serde::{Deserialize, Serialize};
@@ -46,39 +49,21 @@ impl Project<Uuid> for ItemsAndSettings {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let value = cx
-                .shadow::<Item>()
-                .values()
-                .find(|item| item.id == id)
-                .map(|item| item.value.clone())
-                .or_else(|| {
-                    cx.shadow::<Settings>()
-                        .values()
-                        .find(|settings| settings.id == id)
-                        .map(|settings| settings.value.clone())
-                });
-            match value {
-                Some(value) => {
-                    sqlx::query(
-                        "INSERT INTO known_users (user_id, email) VALUES ($1, $2) \
-                         ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email",
-                    )
-                    .bind(id)
-                    .bind(value)
-                    .execute(cx.conn())
-                    .await?;
-                }
-                None => {
-                    sqlx::query("DELETE FROM known_users WHERE user_id = $1")
-                        .bind(id)
-                        .execute(cx.conn())
-                        .await?;
-                }
-            }
-            Ok(())
+            let mut values: HashMap<Uuid, String> = HashMap::new();
+            values.extend(
+                cx.shadow::<Settings>()
+                    .values()
+                    .map(|entry| (entry.id, entry.value.clone())),
+            );
+            values.extend(
+                cx.shadow::<Item>()
+                    .values()
+                    .map(|entry| (entry.id, entry.value.clone())),
+            );
+            replace_known_users(&mut cx, ids, &values).await
         })
     }
 }

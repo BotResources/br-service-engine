@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use conformance_service_engine::TestDb;
@@ -6,11 +7,13 @@ use conformance_service_engine::sample::RecordingTransport;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
-use service_engine::mirror::{Column, Known, KnownRow, KnownScope, Project, Projection, col};
+use service_engine::mirror::{
+    Column, KnownRow, PrincipalColumn, Project, Projection, RowScope, col,
+};
 use service_engine::name::MirrorName;
 use service_engine::nats::KvKey;
 use service_engine::{Consumed, Mirror};
-use sqlx::{PgConnection, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 const ROSTER_PREFIX: &str = "roster/";
@@ -36,6 +39,8 @@ struct GroupRow {
 impl KnownRow for GroupRow {
     const TABLE: &'static str = "known_groups";
     const NAMESPACE: &'static str = GROUP_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
     fn key(&self) -> Vec<Column> {
         vec![col("group_id", self.id)]
@@ -51,46 +56,18 @@ struct MemberRow {
     user_id: Uuid,
 }
 
-impl Known for MemberRow {
+impl KnownRow for MemberRow {
+    const TABLE: &'static str = "known_user_group";
     const NAMESPACE: &'static str = MEMBER_NAMESPACE;
+    const KEY: &'static [&'static str] = &["group_id", "user_id"];
+    const PRINCIPAL: Option<PrincipalColumn> = None;
 
-    fn foreign_key(&self) -> String {
-        self.user_id.to_string()
+    fn key(&self) -> Vec<Column> {
+        vec![col("group_id", self.group_id), col("user_id", self.user_id)]
     }
 
-    fn upsert<'c>(&'c self, conn: &'c mut PgConnection) -> BoxFuture<'c, Result<(), EngineError>> {
-        Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO known_user_group (group_id, user_id) VALUES ($1, $2) \
-                 ON CONFLICT (group_id, user_id) DO NOTHING",
-            )
-            .bind(self.group_id)
-            .bind(self.user_id)
-            .execute(conn)
-            .await?;
-            Ok(())
-        })
-    }
-}
-
-struct Members(Uuid);
-
-impl KnownScope for Members {
-    const NAMESPACE: &'static str = MEMBER_NAMESPACE;
-
-    fn delete<'c>(
-        &'c self,
-        conn: &'c mut PgConnection,
-    ) -> BoxFuture<'c, Result<Vec<String>, EngineError>> {
-        Box::pin(async move {
-            let removed: Vec<Uuid> = sqlx::query_scalar(
-                "DELETE FROM known_user_group WHERE group_id = $1 RETURNING user_id",
-            )
-            .bind(self.0)
-            .fetch_all(conn)
-            .await?;
-            Ok(removed.into_iter().map(|id| id.to_string()).collect())
-        })
+    fn values(&self) -> Vec<Column> {
+        Vec::new()
     }
 }
 
@@ -102,33 +79,36 @@ impl Project<Uuid> for RosterProjection {
     fn project<'a>(
         &'a self,
         mut cx: Projection<'a>,
-        id: Uuid,
+        ids: Vec<Uuid>,
     ) -> BoxFuture<'a, Result<(), EngineError>> {
         Box::pin(async move {
-            let roster = cx
-                .shadow::<Roster>()
-                .values()
-                .find(|entry| entry.id == id)
-                .cloned();
-            match roster {
-                Some(roster) => {
-                    cx.upsert(GroupRow {
-                        id,
-                        name: roster.label,
-                    })
-                    .await?;
-                    let members = roster.members.iter().map(|user_id| MemberRow {
-                        group_id: id,
-                        user_id: *user_id,
+            let batch: HashSet<Uuid> = ids.iter().copied().collect();
+            let mut present = Vec::new();
+            let mut groups = Vec::new();
+            let mut members = Vec::new();
+            {
+                let rosters = cx.shadow::<Roster>();
+                for roster in rosters.values().filter(|roster| batch.contains(&roster.id)) {
+                    present.push(roster.id);
+                    groups.push(GroupRow {
+                        id: roster.id,
+                        name: roster.label.clone(),
                     });
-                    cx.replace(Members(id), members).await?;
-                    Ok(())
-                }
-                None => {
-                    cx.remove(Members(id)).await?;
-                    cx.retire::<GroupRow>(vec![col("group_id", id)]).await
+                    members.extend(roster.members.iter().map(|user_id| MemberRow {
+                        group_id: roster.id,
+                        user_id: *user_id,
+                    }));
                 }
             }
+            let found: HashSet<Uuid> = present.iter().copied().collect();
+            let absent: Vec<Uuid> = batch.difference(&found).copied().collect();
+            cx.replace_rows(RowScope::any_of("group_id", present), groups)
+                .await?;
+            cx.replace_rows(RowScope::any_of("group_id", ids), members)
+                .await?;
+            cx.replace_rows(RowScope::any_of("group_id", absent), Vec::<GroupRow>::new())
+                .await
+                .map(|_| ())
         })
     }
 }

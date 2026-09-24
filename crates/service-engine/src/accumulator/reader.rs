@@ -52,7 +52,7 @@ impl ChunkReader {
         self.capacity = capacity.max(1);
     }
 
-    pub fn pool(&self) -> &PgPool {
+    pub(crate) fn pool(&self) -> &PgPool {
         &self.pg
     }
 

@@ -3,6 +3,7 @@ pub mod domain;
 pub mod event;
 pub mod full;
 pub mod full_erase;
+mod full_read;
 pub mod full_view;
 pub mod handler;
 pub mod lockless;

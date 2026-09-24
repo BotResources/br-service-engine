@@ -3,6 +3,7 @@ mod facts;
 mod forbidden;
 mod negative;
 mod passport;
+mod reads;
 mod rls;
 mod roots;
 mod upload;
@@ -18,6 +19,7 @@ pub use negative::{
     boot_without_prefix,
 };
 pub use passport::{TENANT_CLAIM, passport_for};
+pub use reads::{ReadsQueryRoot, RlsOnlyAssignments, boot_reads_service};
 pub use rls::{RlsAssignmentProjector, RlsQueryRoot};
 pub use roots::{
     AssignmentQueries, EngineDelta, MutationRoot, QueryRoot, SubscriptionRoot, WidgetQueries,

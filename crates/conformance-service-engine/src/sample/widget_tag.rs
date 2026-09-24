@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::nats::KvKey;
 use service_engine::offer::OfferTrigger;
-use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle};
+use service_engine::persistence::{Aggregate, Persistence, PersistenceStyle, RowBatch};
 use service_engine::pipeline::{Mutation, MutationInput};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -27,20 +27,27 @@ impl Persistence for WidgetTagStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
+    fn read_many<'a>(
         conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<WidgetTag>, EngineError>> {
+        keys: &'a [Uuid],
+    ) -> RowBatch<'a, Uuid, WidgetTag> {
         Box::pin(async move {
-            let row =
-                sqlx::query("SELECT widget_id, tag FROM sample_widget_tag WHERE widget_id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.map(|row| WidgetTag {
-                widget_id: row.get("widget_id"),
-                tag: row.get("tag"),
-            }))
+            let rows = sqlx::query(
+                "SELECT widget_id, tag FROM sample_widget_tag WHERE widget_id = ANY($1)",
+            )
+            .bind(keys)
+            .fetch_all(conn)
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| {
+                    let tag = WidgetTag {
+                        widget_id: row.get("widget_id"),
+                        tag: row.get("tag"),
+                    };
+                    (tag.widget_id, tag)
+                })
+                .collect())
         })
     }
 

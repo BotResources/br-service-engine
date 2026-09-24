@@ -56,26 +56,6 @@ impl Persistence for AssignmentStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::Crud;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<AssignmentRow>, EngineError>> {
-        Box::pin(async move {
-            let row = sqlx::query(
-                "SELECT id, tenant_id, title, closed FROM sample_assignment WHERE id = $1",
-            )
-            .bind(key)
-            .fetch_optional(conn)
-            .await?;
-            Ok(row.map(|row| AssignmentRow {
-                id: row.get("id"),
-                tenant_id: row.get("tenant_id"),
-                title: row.get("title"),
-                closed: row.get("closed"),
-            }))
-        })
-    }
-
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Uuid],

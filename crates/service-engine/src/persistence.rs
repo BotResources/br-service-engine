@@ -25,10 +25,23 @@ pub trait Persistence: Send + Sync + 'static {
 
     const STYLE: PersistenceStyle;
 
+    fn read_many<'a>(
+        conn: &'a mut PgConnection,
+        keys: &'a [Self::Key],
+    ) -> RowBatch<'a, Self::Key, Self::Aggregate>;
+
     fn load<'a>(
         conn: &'a mut PgConnection,
         key: &'a Self::Key,
-    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>>;
+    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>> {
+        Box::pin(async move {
+            let rows = Self::read_many(conn, std::slice::from_ref(key)).await?;
+            Ok(rows
+                .into_iter()
+                .find(|(found, _)| found == key)
+                .map(|(_, aggregate)| aggregate))
+        })
+    }
 
     fn lock<'a>(
         _conn: &'a mut PgConnection,
@@ -54,21 +67,6 @@ pub trait Persistence: Send + Sync + 'static {
                 .await
                 .map_err(EngineError::Db)?;
             Ok(())
-        })
-    }
-
-    fn read_many<'a>(
-        conn: &'a mut PgConnection,
-        keys: &'a [Self::Key],
-    ) -> RowBatch<'a, Self::Key, Self::Aggregate> {
-        Box::pin(async move {
-            let mut rows = Vec::with_capacity(keys.len());
-            for key in keys {
-                if let Some(aggregate) = Self::load(&mut *conn, key).await? {
-                    rows.push((key.clone(), aggregate));
-                }
-            }
-            Ok(rows)
         })
     }
 

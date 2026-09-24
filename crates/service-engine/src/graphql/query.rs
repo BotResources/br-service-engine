@@ -15,6 +15,8 @@ use crate::render::group::Renderer;
 use crate::session::WindowParams;
 use crate::wire::{KeyBytes, ViewBytes};
 
+mod read;
+
 pub struct Query<'a, P: Principal> {
     state: &'a Arc<GraphqlState<P>>,
     principal: &'a P,
@@ -90,25 +92,10 @@ impl<'a, P: Principal> Query<'a, P> {
         V: crate::view::Projector<Principal = P>,
         <V::Store as Persistence>::Aggregate: Aggregate,
     {
-        if !self.visible::<crate::view::ViewProjector<V>>(key).await? {
+        let Some(aggregate) = self.load_visible::<V>(key).await? else {
             return Ok(None);
-        }
-        let held = {
-            let mut conn = self
-                .state
-                .pg()
-                .acquire()
-                .await
-                .or_internal("acquire a connection for a download")?;
-            match <V::Store as Persistence>::load(&mut conn, key)
-                .await
-                .or_internal("load the aggregate that holds a blob")?
-            {
-                Some(aggregate) => Aggregate::blob_refs(&aggregate).contains(&reference),
-                None => false,
-            }
         };
-        if !held {
+        if !Aggregate::blob_refs(&aggregate).contains(&reference) {
             return Ok(None);
         }
         match self.state.blob_store() {
@@ -118,20 +105,6 @@ impl<'a, P: Principal> Query<'a, P> {
                 .or_internal("sign a blob download"),
             None => Ok(None),
         }
-    }
-
-    async fn visible<Pr>(&self, key: &Pr::Key) -> Result<bool, Error>
-    where
-        Pr: Projector<Principal = P> + Default,
-    {
-        let projector = Pr::default();
-        let erased = self.erased(&projector)?;
-        let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
-        let population = erased
-            .populate(self.state.pg(), &WindowParams::none(), self.principal)
-            .await
-            .or_internal("populate a query")?;
-        Ok(is_member(&population, &key_bytes))
     }
 
     pub async fn fetch_json<Pr>(

@@ -2,7 +2,9 @@ use service_engine::error::EngineError;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use crate::sample::counter::full::{replay_from_scratch, resnapshot, select_snapshot};
+use crate::sample::counter::domain::CounterState;
+use crate::sample::counter::full::resnapshot;
+use crate::sample::counter::full_read::{replay_tails, select_snapshots};
 
 pub async fn erase_author(conn: &mut PgConnection, author: &str) -> Result<Vec<Uuid>, EngineError> {
     let affected: Vec<Uuid> = sqlx::query(
@@ -28,11 +30,12 @@ pub async fn erase_author(conn: &mut PgConnection, author: &str) -> Result<Vec<U
     .execute(&mut *conn)
     .await?;
 
-    for counter in &affected {
-        let Some(state) = select_snapshot(conn, counter).await? else {
-            continue;
-        };
-        let rebuilt = replay_from_scratch(conn, counter, state.tenant).await?;
+    let origins = select_snapshots(conn, &affected)
+        .await?
+        .into_iter()
+        .map(|snapshot| CounterState::open(snapshot.key, snapshot.tenant))
+        .collect();
+    for rebuilt in replay_tails(conn, origins).await? {
         resnapshot(conn, &rebuilt).await?;
     }
 
