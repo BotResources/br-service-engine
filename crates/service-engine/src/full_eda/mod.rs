@@ -8,6 +8,7 @@ use crate::error::EngineError;
 use crate::name::NounName;
 
 mod erase;
+mod read;
 mod store;
 
 pub use erase::erase;

@@ -27,10 +27,10 @@ where
 
     let mut touched: BTreeSet<String> = BTreeSet::new();
     for row in &rows {
-        let key_text: String = row.get("key");
-        let seq: i64 = row.get("seq");
-        let version: i32 = row.get("version");
-        let payload: serde_json::Value = row.get("payload");
+        let key_text: String = row.try_get("key")?;
+        let seq: i64 = row.try_get("seq")?;
+        let version: i32 = row.try_get("version")?;
+        let payload: serde_json::Value = row.try_get("payload")?;
         let mut event = T::upcast(version, &payload)?;
         if !redact(person, &mut event) {
             continue;
