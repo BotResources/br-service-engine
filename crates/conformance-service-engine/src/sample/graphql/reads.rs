@@ -135,7 +135,8 @@ impl ReadsQueryRoot {
         id: Uuid,
     ) -> Result<Option<Vec<String>>> {
         Query::<SamplePrincipal>::new(ctx)?
-            .read_behind::<VisibleAssignments, _, _>(&id, |assignment, conn| {
+            .behind::<VisibleAssignments>(&id)
+            .read(|assignment, conn| {
                 Box::pin(async move {
                     Ok(sqlx::query_scalar(
                         "SELECT body FROM sample_note WHERE assignment_id = $1 ORDER BY seq",
@@ -150,7 +151,8 @@ impl ReadsQueryRoot {
 
     async fn sample_note_write_attempt(&self, ctx: &Context<'_>, id: Uuid) -> Result<Option<bool>> {
         Query::<SamplePrincipal>::new(ctx)?
-            .read_behind::<VisibleAssignments, _, _>(&id, |assignment, conn| {
+            .behind::<VisibleAssignments>(&id)
+            .read(|assignment, conn| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO sample_note (assignment_id, seq, body) VALUES ($1, 1, 'x')",

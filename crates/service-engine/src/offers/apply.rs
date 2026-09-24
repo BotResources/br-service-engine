@@ -6,7 +6,7 @@ use crate::error::RelayError;
 use crate::nats::{KvBucket, KvKey, NatsError, Revision};
 use crate::offer::Offer;
 use crate::offers::marker::Marker;
-use crate::persistence::{Aggregate, Persistence};
+use crate::persistence::{Aggregate, Persistence, PersistenceExt};
 
 pub(crate) enum Write<V> {
     Put(V),

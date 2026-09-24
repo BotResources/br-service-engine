@@ -30,20 +30,6 @@ impl Persistence for CardStore {
 
     const STYLE: PersistenceStyle = PersistenceStyle::SoftEda;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Uuid,
-    ) -> BoxFuture<'a, Result<Option<CardAggregate>, EngineError>> {
-        Box::pin(async move {
-            let row =
-                sqlx::query("SELECT id, board_id, title, status, version FROM card WHERE id = $1")
-                    .bind(key)
-                    .fetch_optional(conn)
-                    .await?;
-            Ok(row.as_ref().map(|row| CardAggregate(row_to_card(row))))
-        })
-    }
-
     fn lock<'a>(
         conn: &'a mut PgConnection,
         key: &'a Uuid,

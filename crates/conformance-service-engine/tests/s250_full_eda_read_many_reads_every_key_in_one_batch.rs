@@ -2,7 +2,7 @@ use conformance_service_engine::infra::TestDb;
 use serde::{Deserialize, Serialize};
 use service_engine::error::EngineError;
 use service_engine::name::NounName;
-use service_engine::persistence::Persistence;
+use service_engine::persistence::{Persistence, PersistenceExt};
 use service_engine::schema::{TABLE_EVENT_LOG, TABLE_EVENT_SNAPSHOT};
 use service_engine::{EventSourced, FullEda};
 use sqlx::PgConnection;

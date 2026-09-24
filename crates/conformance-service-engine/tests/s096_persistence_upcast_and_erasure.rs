@@ -1,7 +1,7 @@
 use conformance_service_engine::infra::TestDb;
 use conformance_service_engine::sample::counter::FullCounterStore;
 use conformance_service_engine::sample::erase_author;
-use service_engine::persistence::Persistence;
+use service_engine::persistence::PersistenceExt;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 

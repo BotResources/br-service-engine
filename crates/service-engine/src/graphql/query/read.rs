@@ -5,13 +5,13 @@ use sqlx::{PgConnection, Postgres, Transaction};
 use crate::error::EngineError;
 use crate::graphql::error::{OrInternal, internal_fault};
 use crate::graphql::query::Query;
-use crate::persistence::Persistence;
+use crate::persistence::{Persistence, PersistenceExt};
 use crate::principal::Principal;
 use crate::view::{Projector, ViewKey};
 
 type Row<V> = <<V as Projector>::Store as Persistence>::Aggregate;
 
-impl<P: Principal> Query<'_, P> {
+impl<'a, P: Principal> Query<'a, P> {
     pub async fn load_visible<V>(&self, key: &ViewKey<V>) -> Result<Option<Row<V>>, Error>
     where
         V: Projector<Principal = P>,
@@ -34,22 +34,11 @@ impl<P: Principal> Query<'_, P> {
         Ok(loaded.filter(|row| V::visible(row, self.principal)))
     }
 
-    pub async fn read_behind<V, T, F>(&self, key: &ViewKey<V>, read: F) -> Result<Option<T>, Error>
+    pub fn behind<'q, V>(&'q self, key: &'q ViewKey<V>) -> Behind<'q, 'a, P, V>
     where
         V: Projector<Principal = P>,
-        T: Send,
-        F: for<'c> FnOnce(Row<V>, &'c mut PgConnection) -> BoxFuture<'c, Result<T, EngineError>>
-            + Send,
     {
-        let mut tx = self.begin_read(V::RLS).await?;
-        let outcome = match V::Store::load(&mut tx, key).await {
-            Ok(Some(parent)) if V::visible(&parent, self.principal) => {
-                read(parent, &mut tx).await.map(Some)
-            }
-            Ok(_) => Ok(None),
-            Err(error) => Err(error),
-        };
-        finish(tx, outcome).await
+        Behind { query: self, key }
     }
 
     pub async fn read_under_rls<T, F>(&self, read: F) -> Result<T, Error>
@@ -87,6 +76,30 @@ impl<P: Principal> Query<'_, P> {
                 .or_internal("apply the principal's RLS context to a read")?;
         }
         Ok(tx)
+    }
+}
+
+pub struct Behind<'q, 'a, P: Principal, V: Projector> {
+    query: &'q Query<'a, P>,
+    key: &'q ViewKey<V>,
+}
+
+impl<P: Principal, V: Projector<Principal = P>> Behind<'_, '_, P, V> {
+    pub async fn read<T, F>(self, read: F) -> Result<Option<T>, Error>
+    where
+        T: Send,
+        F: for<'c> FnOnce(Row<V>, &'c mut PgConnection) -> BoxFuture<'c, Result<T, EngineError>>
+            + Send,
+    {
+        let mut tx = self.query.begin_read(V::RLS).await?;
+        let outcome = match V::Store::load(&mut tx, self.key).await {
+            Ok(Some(parent)) if V::visible(&parent, self.query.principal) => {
+                read(parent, &mut tx).await.map(Some)
+            }
+            Ok(_) => Ok(None),
+            Err(error) => Err(error),
+        };
+        finish(tx, outcome).await
     }
 }
 

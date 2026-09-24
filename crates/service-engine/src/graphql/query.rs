@@ -18,6 +18,8 @@ use crate::wire::{KeyBytes, ViewBytes};
 
 mod read;
 
+pub use read::Behind;
+
 pub struct Query<'a, P: Principal> {
     state: &'a Arc<GraphqlState<P>>,
     principal: &'a P,

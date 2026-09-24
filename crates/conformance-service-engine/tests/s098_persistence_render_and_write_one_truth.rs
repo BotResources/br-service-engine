@@ -11,7 +11,7 @@ use conformance_service_engine::sample::render::{
 };
 use engine_twin::{SOON, await_ready};
 use serde::Deserialize;
-use service_engine::persistence::Persistence;
+use service_engine::persistence::PersistenceExt;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]

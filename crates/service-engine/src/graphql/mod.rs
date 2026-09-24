@@ -28,7 +28,7 @@ pub use multipart::{
 pub use mutation::{MutationAck, ack, ack_bulk, execute, execute_bulk};
 pub use prefix::RootPrefix;
 pub use principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, PrincipalRejected};
-pub use query::Query;
+pub use query::{Behind, Query};
 pub use refusal::{BODY_READ_TIMEOUT_CODE, BODY_TOO_LARGE_CODE};
 pub(crate) use router::with_edge_observability;
 pub use router::{app, serve, with_sdl_route};

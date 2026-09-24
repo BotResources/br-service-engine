@@ -30,19 +30,6 @@ pub trait Persistence: Send + Sync + 'static {
         keys: &'a [Self::Key],
     ) -> RowBatch<'a, Self::Key, Self::Aggregate>;
 
-    fn load<'a>(
-        conn: &'a mut PgConnection,
-        key: &'a Self::Key,
-    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>> {
-        Box::pin(async move {
-            let rows = Self::read_many(conn, std::slice::from_ref(key)).await?;
-            Ok(rows
-                .into_iter()
-                .find(|(found, _)| found == key)
-                .map(|(_, aggregate)| aggregate))
-        })
-    }
-
     fn lock<'a>(
         _conn: &'a mut PgConnection,
         _key: &'a Self::Key,
@@ -90,6 +77,28 @@ pub trait Persistence: Send + Sync + 'static {
             Err(EngineError::DeleteUnsupported {
                 store: std::any::type_name::<Self>(),
             })
+        })
+    }
+}
+
+pub trait PersistenceExt: Persistence {
+    fn load<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>>;
+}
+
+impl<S: Persistence> PersistenceExt for S {
+    fn load<'a>(
+        conn: &'a mut PgConnection,
+        key: &'a Self::Key,
+    ) -> BoxFuture<'a, Result<Option<Self::Aggregate>, EngineError>> {
+        Box::pin(async move {
+            let rows = Self::read_many(conn, std::slice::from_ref(key)).await?;
+            Ok(rows
+                .into_iter()
+                .find(|(found, _)| found == key)
+                .map(|(_, aggregate)| aggregate))
         })
     }
 }

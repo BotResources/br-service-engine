@@ -1,6 +1,6 @@
 use crate::blobs::BlobRowOp;
 use crate::error::EngineError;
-use crate::persistence::{Aggregate, Persistence};
+use crate::persistence::{Aggregate, Persistence, PersistenceExt};
 use crate::pipeline::ops::Ops;
 use crate::pipeline::ops::locking::{
     in_locked_order, lock_aggregate, lock_order, reconcile_key, render_key,

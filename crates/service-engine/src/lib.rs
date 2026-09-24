@@ -102,8 +102,8 @@ pub use gate::{
     check_gates_match_affordances, is_reason_code,
 };
 pub use graphql::{
-    AuthReject, CODE_EXTENSION, FORBIDDEN_CODE, GraphqlState, INTERNAL_CODE, INTERNAL_MESSAGE,
-    JsonScalar, MultipartConfig, MutationAck, PASSPORT_HEADER, PassportPrincipal,
+    AuthReject, Behind, CODE_EXTENSION, FORBIDDEN_CODE, GraphqlState, INTERNAL_CODE,
+    INTERNAL_MESSAGE, JsonScalar, MultipartConfig, MutationAck, PASSPORT_HEADER, PassportPrincipal,
     PrincipalRejected, Query, RootPrefix, SchemaSlices, SliceFragment, UNAUTHENTICATED_CODE,
     WINDOW_TOO_LARGE_CODE, ack, ack_bulk, app, attach, cause_json, coded_error, engine_schema,
     execute, execute_bulk, forbidden, internal_error, internal_fault, key_json, lane_notice_stream,
@@ -144,7 +144,7 @@ pub use offer::{Offer, OfferTrigger};
 pub use offers::pause::{OfferDrainGate, arm_offer_drain, arm_offer_resolve};
 pub use page::{KeyCeiling, Page, WINDOW_SIZE_INVALID_CODE, WindowSize, WindowSizeOutOfRange};
 pub use pastey;
-pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceStyle};
+pub use persistence::{Aggregate, CohortIndex, Persistence, PersistenceExt, PersistenceStyle};
 pub use pipeline::{
     Bulk, Mutation, MutationError, MutationExecutor, MutationFault, MutationInput,
     MutationRegistry, OneShot, Ops, OutboundCommand, OutboundEvent, PostSave, ProducerSequence,
