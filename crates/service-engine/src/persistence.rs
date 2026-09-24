@@ -28,7 +28,7 @@ pub trait Persistence: Send + Sync + 'static {
     fn read_many<'a>(
         conn: &'a mut PgConnection,
         keys: &'a [Self::Key],
-    ) -> RowBatch<'a, Self::Key, Self::Aggregate>;
+    ) -> BoxFuture<'a, Result<Vec<(Self::Key, Self::Aggregate)>, EngineError>>;
 
     fn lock<'a>(
         _conn: &'a mut PgConnection,
