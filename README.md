@@ -586,6 +586,31 @@ received (`the X-Passport header is absent`, `… is malformed: …`, `the passp
 rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
 (below), also before the body is read.
 
+The principal contract. `PassportPrincipal::from_passport(passport) ->
+Result<Self, PrincipalRejected>` is pure and synchronous: it gets no pool and
+returns no future, so it decides from the passport alone, and its
+`PrincipalRejected` is the one `401` a principal can cause. Every database fact
+the principal carries is read by a loader registered with
+`register_principal_fact`; the engine runs the loaders after `from_passport` on
+every `POST /graphql` and every `/graphql/ws` upgrade, and again at each principal
+refresh. A loader that fails — a database fault, a missing grant, any error — is
+an infrastructure fault: the request or the upgrade is answered `500` with the
+`INTERNAL` error body and no detail, the whole chain is logged at `error`, and a
+rejected passport still gets its exact `401` meanwhile (`s243`). At a refresh, the
+same failure ends the principal's sessions fail-closed. A loader has no rejecting
+outcome: a denial read from local data is authorization (`FORBIDDEN`, or an
+affordance `reasonCode`), never a `401`, because authentication belongs to the
+gateway.
+
+| Thing | Why it is the way it is |
+|---|---|
+| no pool in `from_passport` | the refresh re-resolves through `PrincipalResolver` and reloads the facts but never calls `from_passport`, so a read there went stale on a live session; and a fault there could only surface as a `401` |
+| facts only through loaders | one path, read per request and at every refresh, whose fault is always the coded `500` |
+
+Migrating from 0.3: delete the `_pg` argument and the `Box::pin(async move { … })`
+wrapper from `from_passport`, and move any database read it made into a fact
+loader (`engine.register_principal_fact(..)`).
+
 Multipart requests. `POST /graphql` accepts the GraphQL multipart request
 (`operations`, then `map`, then the file parts `map` names) from an authenticated
 client only, and reads it under `EngineConfig::max_body_bytes` (below) and

@@ -196,9 +196,7 @@ async fn authenticate<P: PassportPrincipal>(
     engine: &GraphqlState<P>,
     headers: &HeaderMap,
 ) -> Result<P, Denied> {
-    let mut principal = resolve::<P>(engine.pg(), passport_header(headers))
-        .await
-        .map_err(Denied::Unauthenticated)?;
+    let mut principal = resolve::<P>(passport_header(headers)).map_err(Denied::Unauthenticated)?;
     engine
         .runtime()
         .registry()
