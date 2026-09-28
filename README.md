@@ -1625,8 +1625,9 @@ the version line forward.
 > but no new version ships under that name: `br-service-engine-chart` 2.0.0
 > continues the same version line. A thin chart migrates by renaming its
 > dependency (`name: br-service-engine-chart`, `version: 2.0.0`, same OCI
-> repository), renaming its includes from `br-engine-service.*` to
-> `br-service-engine-chart.*`, and setting `port` (*The port*, below).
+> repository) and its includes from `br-engine-service.*` to
+> `br-service-engine-chart.*`; each environment's values then set `port`
+> (*The port*, below).
 
 **Compatibility.** The pairs this repository released together. The matrix of
 record is the deploying platform's; chart 1.0.0 and 1.1.0 were released without
@@ -1634,7 +1635,7 @@ an explicit pair, so their row names the engine releases they shipped beside.
 
 | Chart | Engine | Note |
 |---|---|---|
-| `br-service-engine-chart` **2.0.0** | **0.4.0** | the rename and the required `port`; renders what 1.1.1 renders once the thin chart sets `port` and the new names |
+| `br-service-engine-chart` **2.0.0** | **0.4.0** | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
 | `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
 | `br-engine-service` 1.1.0 (deprecated) | shipped beside 0.3.1 – 0.3.4 | hardened pod, `startupProbe`, neutral fields |
 | `br-engine-service` 1.0.0 (deprecated) | shipped with 0.3.0 | ops contract v1 introduced |
@@ -1652,7 +1653,7 @@ GitOps and the NATS fabric.
 | Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled`, plus `S3_PUBLIC_ENDPOINT` from `objectStore.publicEndpoint` when set (chart 1.1) |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
-| HTTP | one port, wired by the library and numbered by the thin chart (*The port*): `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
+| HTTP | one port, wired by the library and numbered by each environment's values (*The port*): `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; the `service_engine.schema_version` singleton waits out a stopped version's heartbeat (at most `schema_version_liveness` + one beat, see *Schema-version handover*) and refuses a version that keeps beating |
 | Replicas | any count (`replicaCount`): a subscription over either transport (`/graphql/ws`, or `POST /graphql` as graphql-sse) attaches on the pod that serves it, and paging is subscription arguments, so there is no session affinity and no cross-pod relay; an attach whose window exceeds `window_capacity` is refused with `WINDOW_TOO_LARGE`, and a live window is never ended for its size |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
@@ -1695,7 +1696,7 @@ templates: a thin chart leaves a key out to get the default.
 ### The port
 
 The port **number** is the service's; the library carries only the port
-**wiring**. A thin chart sets `port`, and the library renders that one value
+**wiring**. Each environment's values set `port`: one value the library renders
 into the three places that must agree: the named container port `http` of
 `serve` (`containerPort`), the `PORT` env var the engine binds, and the Service
 port (`targetPort: http`); the probes and the Service target the port by its
@@ -1705,10 +1706,10 @@ defaulted it to `8080`). A render without `port` fails with
 `port is required: …`, and a render with anything but an integer from 1 to
 65535 fails with `port must be an integer from 1 to 65535, …`: `0`, `65536`,
 `8080.5`, a string (`"http"`, and `"8080"` too) are refused. Which number a
-service listens on is deployment configuration, set by the service chart or
-by each environment's values, never assumed by the library. The engine binary
-still falls back to `8080` when `PORT` is unset, which never happens under the
-chart.
+service listens on is deployment configuration, set by each environment's
+values in the deploying GitOps repository — never in the service chart's own
+values, never assumed by the library. The engine binary still falls back to
+`8080` when `PORT` is unset, which never happens under the chart.
 
 ### Subscription transports
 
@@ -1825,10 +1826,16 @@ on the first `main` push that changes `Chart.yaml` `version`, tagged
 A version already published is never pushed again. The deprecated
 `oci://ghcr.io/botresources/charts/br-engine-service` (1.0.0 – 1.1.1) and its
 `chart/br-engine-service/v*` tags stay as they are; nothing in this repository
-publishes that name any more. The
-downstream thin charts, the Warehouse subscriptions on the chart paths and the
-library OCI, and the `helm-update-chart` promotion steps live in the deploying
-GitOps repository, sequenced after this release.
+publishes that name any more.
+
+Each downstream thin chart ships from its service's own repository, published
+to GHCR as an OCI chart, and bumps its dependency on this library there. The
+deploying GitOps repository holds, per service, only a wrapper `Chart.yaml`
+that depends on that OCI chart, plus each environment's values (the port, the
+gateway URL, secret references, replicas, resources) — no template, and no
+value the binary defines. Its Warehouse subscribes to the thin chart beside the
+service's image, never to this library's chart, and the `helm-update-chart`
+promotion step writes the promoted chart version into the wrapper.
 
 ## Configuration, degradation and observability
 
