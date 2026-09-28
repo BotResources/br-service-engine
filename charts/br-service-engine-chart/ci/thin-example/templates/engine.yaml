@@ -1,0 +1,11 @@
+{{ include "br-service-engine-chart.serviceaccount" . }}
+---
+{{ include "br-service-engine-chart.deployment" . }}
+---
+{{ include "br-service-engine-chart.service" . }}
+---
+{{ include "br-service-engine-chart.pdb" . }}
+{{- if .Values.networkPolicy.enabled }}
+---
+{{ include "br-service-engine-chart.networkpolicy" . }}
+{{- end }}

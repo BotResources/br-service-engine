@@ -1,14 +1,14 @@
-{{- define "br-engine-service.networkpolicy" -}}
+{{- define "br-service-engine-chart.networkpolicy" -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "br-engine-service.fullname" . }}
+  name: {{ include "br-service-engine-chart.fullname" . }}
   labels:
-    {{- include "br-engine-service.labels" . | nindent 4 }}
+    {{- include "br-service-engine-chart.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "br-engine-service.selectorLabels" . | nindent 6 }}
+      {{- include "br-service-engine-chart.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
