@@ -206,15 +206,15 @@ jobs:
         with:
           fetch-depth: 0
       - name: helm lint the library chart
-        run: helm lint charts/br-engine-service
+        run: helm lint charts/br-service-engine-chart
       - name: helm dependency build the fixture
-        run: helm dependency build charts/br-engine-service/ci/thin-example
+        run: helm dependency build charts/br-service-engine-chart/ci/thin-example
       - name: helm lint the fixture
-        run: helm lint charts/br-engine-service/ci/thin-example
+        run: helm lint charts/br-service-engine-chart/ci/thin-example
       - name: helm template the fixture and assert the ops contract
         run: |
           set -euo pipefail
-          rendered=$(helm template thin-example charts/br-engine-service/ci/thin-example)
+          rendered=$(helm template thin-example charts/br-service-engine-chart/ci/thin-example)
           echo "$rendered"
           assert() {
             if ! grep -qE "$1" <<<"$rendered"; then
@@ -230,10 +230,12 @@ jobs:
           assert '^ *type: Recreate$'
           assert '^ *path: /readyz$'
           assert '^ *path: /livez$'
+      - name: helm template the fixture and assert the required port
+        run: bash .github/scripts/check-chart-port.sh
       - name: helm template the fixture and assert the secure defaults
         run: |
           set -euo pipefail
-          rendered=$(helm template thin-example charts/br-engine-service/ci/thin-example)
+          rendered=$(helm template thin-example charts/br-service-engine-chart/ci/thin-example)
           assert() {
             if ! grep -qE "$1" <<<"$rendered"; then
               echo "::error::default render is missing: $1"
@@ -272,7 +274,7 @@ jobs:
       - name: helm template the fixture with every neutral field set
         run: |
           set -euo pipefail
-          fixture=charts/br-engine-service/ci/thin-example
+          fixture=charts/br-service-engine-chart/ci/thin-example
           rendered=$(helm template thin-example "$fixture" -f "$fixture/values-all-fields.yaml")
           echo "$rendered"
           assert() {

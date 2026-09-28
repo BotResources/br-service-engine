@@ -1599,28 +1599,45 @@ singleton while this pod ran, because its beat stalled past that version's
 DOWN rather than keep serving over a store it no longer owns, and it recovers when
 it once again owns the row.
 
-## Ops contract v1 — chart `br-engine-service` 1.x
+## Ops contract v1 — chart `br-service-engine-chart` 2.x
 
 The engine publishes the shared deployment topology as a Helm **library** chart,
-`br-engine-service` (`charts/br-engine-service/`), on its own version line that
-starts at `1.0.0` and moves freely, independent of the crate version, which
-appears nowhere in the chart. A per-service **thin** chart depends on the library
-and supplies only values — no hand-written topology; the fixture
-`charts/br-engine-service/ci/thin-example/` pins that shape. The named templates
-(`br-engine-service.deployment`, `.service`, `.serviceaccount`, `.pdb`,
-`.networkpolicy`) render the topology from those values, and a thin chart invokes
-them from one include-only template. Which chart versions serve which engine
-versions is a compatibility matrix the deploying platform keeps outside this
-repository: an image is paired only with a chart version the matrix declares
-compatible with the engine compiled into it. A change to the
-chart's rendering of a row below is a new chart version and a new matrix entry;
-a row whose text changes with the engine's behaviour alone (the 0.4 `Roll` and
-`Replicas` rows) changes no chart. `check-chart-version.sh` refuses a `charts/**`
-change without a `Chart.yaml` `version` bump. Engine 0.4.0 ships with chart
-**1.1.1**: its `Chart.yaml` description now states this versioning rule (1.1.0's
-said a contract change ships under a new chart name), and it renders exactly
-what 1.1.0 renders, so the matrix entry for this release is chart 1.1.1 ↔
-engine 0.4.0.
+`br-service-engine-chart` (`charts/br-service-engine-chart/`) — a library chart
+is named `<library>-chart` — on its own version line that moves freely,
+independent of the crate version, which appears nowhere in the chart. A
+per-service **thin** chart depends on the library and supplies only values — no
+hand-written topology; the fixture `charts/br-service-engine-chart/ci/thin-example/`
+pins that shape. The named templates (`br-service-engine-chart.deployment`,
+`.service`, `.serviceaccount`, `.pdb`, `.networkpolicy`) render the topology from
+those values, and a thin chart invokes them from one include-only template.
+Which chart versions serve which engine versions is a compatibility matrix the
+deploying platform keeps outside this repository: an image is paired only with
+a chart version the matrix declares compatible with the engine compiled into
+it. A change to the chart's rendering of a row below is a new chart version and
+a new matrix entry; a row whose text changes with the engine's behaviour alone
+(the 0.4 `Roll` and `Replicas` rows) changes no chart. `check-chart-version.sh`
+refuses a `charts/**` change without a `Chart.yaml` `version` bump that moves
+the version line forward.
+
+> **`br-engine-service` is deprecated.** Up to 1.1.1 the chart was published as
+> `oci://ghcr.io/botresources/charts/br-engine-service` (tags
+> `chart/br-engine-service/v*`). Those versions stay published and untouched,
+> but no new version ships under that name: `br-service-engine-chart` 2.0.0
+> continues the same version line. A thin chart migrates by renaming its
+> dependency (`name: br-service-engine-chart`, `version: 2.0.0`, same OCI
+> repository), renaming its includes from `br-engine-service.*` to
+> `br-service-engine-chart.*`, and setting `port` (*The port*, below).
+
+**Compatibility.** The pairs this repository released together. The matrix of
+record is the deploying platform's; chart 1.0.0 and 1.1.0 were released without
+an explicit pair, so their row names the engine releases they shipped beside.
+
+| Chart | Engine | Note |
+|---|---|---|
+| `br-service-engine-chart` **2.0.0** | **0.4.0** | the rename and the required `port`; renders what 1.1.1 renders once the thin chart sets `port` and the new names |
+| `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
+| `br-engine-service` 1.1.0 (deprecated) | shipped beside 0.3.1 – 0.3.4 | hardened pod, `startupProbe`, neutral fields |
+| `br-engine-service` 1.0.0 (deprecated) | shipped with 0.3.0 | ops contract v1 introduced |
 
 Only names the engine reads belong in the contract: `EngineConfig::from_env`
 reads the app group in one place, `migrate` reads the owner group, and the rest
@@ -1631,11 +1648,11 @@ GitOps and the NATS fabric.
 |---|---|
 | Entry points | `<binary> migrate` (owner role; exits 0 when the engine, library and service sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
 | Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
-| App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (default `8080`) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
+| App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (the binary falls back to `8080` when it is unset; the chart always sets it, from the required `port` value) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
 | Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled`, plus `S3_PUBLIC_ENDPOINT` from `objectStore.publicEndpoint` when set (chart 1.1) |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
 | Not in the contract | `ENVIRONMENT`: read by nothing in the engine nor in `br-rust-common`; the library chart does not set it; a service that reads it for its own code passes it through `env: []`. `HTTP_ADDR` and `POD_ID` are gone |
-| HTTP | one port: `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
+| HTTP | one port, wired by the library and numbered by the thin chart (*The port*): `/graphql` (`POST`; JSON, or a graphql-sse stream on `Accept: text/event-stream` — see *Subscription transports*), `/graphql/ws` (`GET`, `graphql-transport-ws`), `/readyz` (200 / 503 + reason), `/livez` (200), `/metrics`, `/sdl` |
 | Roll | `Recreate`; the `service_engine.schema_version` singleton waits out a stopped version's heartbeat (at most `schema_version_liveness` + one beat, see *Schema-version handover*) and refuses a version that keeps beating |
 | Replicas | any count (`replicaCount`): a subscription over either transport (`/graphql/ws`, or `POST /graphql` as graphql-sse) attaches on the pod that serves it, and paging is subscription arguments, so there is no session affinity and no cross-pod relay; an attach whose window exceeds `window_capacity` is refused with `WINDOW_TOO_LARGE`, and a live window is never ended for its size |
 | Postgres | session mode (LISTEN probe — no transaction pooler); one owner role (`BYPASSRLS` or superuser, `migrate` only — `migrate` asserts it before the first migration and exits non-zero with `EngineError::OwnerSubjectToRls` otherwise) and one app role (runtime, named by `APP_ROLE`); one database per service; `service_engine.*` engine-owned, `integration_outbox` included; one shared `_sqlx_migrations` ledger, every migrator (engine, libraries, service) runs with `ignore_missing`; a library owns its own schema in the service database |
@@ -1663,16 +1680,35 @@ be interpolated into a DSN. The in-namespace Postgres host is opted out of
 `TRUSTED_NETWORK_HOSTS` (`postgres.trustedNetworkHosts`), a deliberate per-host
 plaintext declaration behind the default-deny NetworkPolicy.
 
-Values a thin chart supplies: `image.{repository,tag}`, `port`, `serviceKey`,
+Values a thin chart supplies: `image.{repository,tag}`, `port` (required, no
+default — *The port*), `serviceKey`,
 `postgres.{appRole,appSecret,ownerSecret,trustedNetworkHosts}`, `nats.url`,
 `engine.channel`, `objectStore.enabled` (+ the S3 config and secret ref),
 `env: []`, `resources`, `replicaCount`, `topologySpreadEnabled`,
 `networkPolicy.{enabled,ingress}`, and from chart 1.1 the neutral fields below.
 The library names no namespace; ingress selectors are values. A library
-chart's own `values.yaml` lands under `.Values.br-engine-service` of the thin
-chart, never at the top level the named templates read, so the library's
+chart's own `values.yaml` lands under `.Values.br-service-engine-chart` of the
+thin chart, never at the top level the named templates read, so the library's
 `values.yaml` documents the interface and every default is coded in the
 templates: a thin chart leaves a key out to get the default.
+
+### The port
+
+The port **number** is the service's; the library carries only the port
+**wiring**. A thin chart sets `port`, and the library renders that one value
+into the three places that must agree: the named container port `http` of
+`serve` (`containerPort`), the `PORT` env var the engine binds, and the Service
+port (`targetPort: http`); the probes and the Service target the port by its
+name, never by number. The library gives `port` **no default** — not in its
+`values.yaml`, not in its templates (chart 2.0; `br-engine-service` 1.x
+defaulted it to `8080`). A render without `port` fails with
+`port is required: …`, and a render with anything but an integer from 1 to
+65535 fails with `port must be an integer from 1 to 65535, …`: `0`, `65536`,
+`8080.5`, a string (`"http"`, and `"8080"` too) are refused. Which number a
+service listens on is deployment configuration, set by the service chart or
+by each environment's values, never assumed by the library. The engine binary
+still falls back to `8080` when `PORT` is unset, which never happens under the
+chart.
 
 ### Subscription transports
 
@@ -1727,8 +1763,8 @@ keeps the rest of the hardening. `podLabels` and `service.labels` add labels
 but never replace one of the four library labels (the selector and the chart
 identity): trying fails the render. `probes.*` accept only the timing keys
 (`initialDelaySeconds`, `periodSeconds`, `timeoutSeconds`, `successThreshold`,
-`failureThreshold`); the paths and the port are ops contract v1, and any other
-key fails the render.
+`failureThreshold`); the paths and the port wiring (the named port `http`) are
+ops contract v1, and any other key fails the render.
 
 **Read-only root filesystem — verified.** `example-service migrate` and
 `example-service serve` were run against a real Postgres and NATS under a
@@ -1757,7 +1793,7 @@ and a failed startupProbe restarts the container.
 
 **Extension point.** A service chart owns everything that is not the engine's:
 it ships its own templates beside the one include-only template, and reuses the
-library helpers (`br-engine-service.fullname`, `.labels`, `.selectorLabels`,
+library helpers (`br-service-engine-chart.fullname`, `.labels`, `.selectorLabels`,
 `.port`) so its resources select the same pods. A second, labelled Service for
 a discovery mechanism is such a template, in the service chart, never in the
 library:
@@ -1767,25 +1803,29 @@ library:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "br-engine-service.fullname" . }}-discovery
+  name: {{ include "br-service-engine-chart.fullname" . }}-discovery
   labels:
-    {{- include "br-engine-service.labels" . | nindent 4 }}
+    {{- include "br-service-engine-chart.labels" . | nindent 4 }}
     {{ .Values.discoveryLabel.key }}: {{ .Values.discoveryLabel.value | quote }}
 spec:
   selector:
-    {{- include "br-engine-service.selectorLabels" . | nindent 4 }}
+    {{- include "br-service-engine-chart.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
-      port: {{ include "br-engine-service.port" . }}
+      port: {{ include "br-service-engine-chart.port" . }}
       targetPort: http
 ```
 
 ### Release
 
 The chart itself is published to
-`oci://ghcr.io/botresources/charts/br-engine-service` by `chart-release.yml` on
-the first `main` push that changes `Chart.yaml` `version`, tagged
-`chart/br-engine-service/v<version>`, independent of the crate's `v*` tag. The
+`oci://ghcr.io/botresources/charts/br-service-engine-chart` by `chart-release.yml`
+on the first `main` push that changes `Chart.yaml` `version`, tagged
+`chart/br-service-engine-chart/v<version>`, independent of the crate's `v*` tag.
+A version already published is never pushed again. The deprecated
+`oci://ghcr.io/botresources/charts/br-engine-service` (1.0.0 – 1.1.1) and its
+`chart/br-engine-service/v*` tags stay as they are; nothing in this repository
+publishes that name any more. The
 downstream thin charts, the Warehouse subscriptions on the chart paths and the
 library OCI, and the `helm-update-chart` promotion steps live in the deploying
 GitOps repository, sequenced after this release.

@@ -4,7 +4,9 @@ image:
   repository: ghcr.io/example/br-svc-catalog
   tag: "0.1.0"
 
-port: 8080
+# Required since chart 2.0: the library has no default port. A number other
+# than 8080 proves the value, not a leftover default, reaches the manifest.
+port: 8090
 
 replicaCount: 2
 
@@ -51,4 +53,4 @@ networkPolicy:
               app.kubernetes.io/name: ingress
       ports:
         - protocol: TCP
-          port: 8080
+          port: 8090

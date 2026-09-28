@@ -1,10 +1,10 @@
-{{- define "br-engine-service.deployment" -}}
+{{- define "br-service-engine-chart.deployment" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "br-engine-service.fullname" . }}
+  name: {{ include "br-service-engine-chart.fullname" . }}
   labels:
-    {{- include "br-engine-service.labels" . | nindent 4 }}
+    {{- include "br-service-engine-chart.labels" . | nindent 4 }}
   {{- with .Values.deploymentAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -15,12 +15,12 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "br-engine-service.selectorLabels" . | nindent 6 }}
+      {{- include "br-service-engine-chart.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "br-engine-service.labels" . | nindent 8 }}
-        {{- with include "br-engine-service.extraLabels" (dict "labels" .Values.podLabels "field" "podLabels") }}
+        {{- include "br-service-engine-chart.labels" . | nindent 8 }}
+        {{- with include "br-service-engine-chart.extraLabels" (dict "labels" .Values.podLabels "field" "podLabels") }}
         {{- . | nindent 8 }}
         {{- end }}
       {{- with .Values.podAnnotations }}
@@ -28,13 +28,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: {{ include "br-engine-service.serviceAccountName" . }}
+      serviceAccountName: {{ include "br-service-engine-chart.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.automountServiceAccountToken | default false }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with include "br-engine-service.podSecurityContext" . }}
+      {{- with include "br-service-engine-chart.podSecurityContext" . }}
       securityContext:
         {{- . | nindent 8 }}
       {{- end }}
@@ -45,7 +45,7 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              {{- include "br-engine-service.selectorLabels" . | nindent 14 }}
+              {{- include "br-service-engine-chart.selectorLabels" . | nindent 14 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
@@ -75,14 +75,14 @@ spec:
                   key: {{ .Values.postgres.ownerSecret.key | default "DATABASE_URL_OWNER" }}
             - name: APP_ROLE
               value: {{ required "postgres.appRole is required" .Values.postgres.appRole | quote }}
-            {{- with include "br-engine-service.trustedNetworkEnv" . | trim }}
+            {{- with include "br-service-engine-chart.trustedNetworkEnv" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
           {{- with (.Values.migrate | default dict).resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with include "br-engine-service.containerSecurityContext" . }}
+          {{- with include "br-service-engine-chart.containerSecurityContext" . }}
           securityContext:
             {{- . | nindent 12 }}
           {{- end }}
@@ -92,7 +92,7 @@ spec:
           args: ["serve"]
           ports:
             - name: http
-              containerPort: {{ include "br-engine-service.port" . }}
+              containerPort: {{ include "br-service-engine-chart.port" . }}
           env:
             - name: DATABASE_URL
               valueFrom:
@@ -110,11 +110,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             - name: PORT
-              value: {{ include "br-engine-service.port" . | quote }}
-            {{- with include "br-engine-service.trustedNetworkEnv" . | trim }}
+              value: {{ include "br-service-engine-chart.port" . | quote }}
+            {{- with include "br-service-engine-chart.trustedNetworkEnv" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
-            {{- with include "br-engine-service.objectStoreEnv" . | trim }}
+            {{- with include "br-service-engine-chart.objectStoreEnv" . | trim }}
             {{- . | nindent 12 }}
             {{- end }}
             {{- with .Values.env }}
@@ -130,26 +130,26 @@ spec:
             httpGet:
               path: /livez
               port: http
-            {{- include "br-engine-service.probeTiming" (dict "given" $probes.startup "defaults" (dict "periodSeconds" 5 "failureThreshold" 30) "field" "probes.startup") | nindent 12 }}
+            {{- include "br-service-engine-chart.probeTiming" (dict "given" $probes.startup "defaults" (dict "periodSeconds" 5 "failureThreshold" 30) "field" "probes.startup") | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
-            {{- with include "br-engine-service.probeTiming" (dict "given" $probes.readiness "field" "probes.readiness") }}
+            {{- with include "br-service-engine-chart.probeTiming" (dict "given" $probes.readiness "field" "probes.readiness") }}
             {{- . | nindent 12 }}
             {{- end }}
           livenessProbe:
             httpGet:
               path: /livez
               port: http
-            {{- with include "br-engine-service.probeTiming" (dict "given" $probes.liveness "field" "probes.liveness") }}
+            {{- with include "br-service-engine-chart.probeTiming" (dict "given" $probes.liveness "field" "probes.liveness") }}
             {{- . | nindent 12 }}
             {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with include "br-engine-service.containerSecurityContext" . }}
+          {{- with include "br-service-engine-chart.containerSecurityContext" . }}
           securityContext:
             {{- . | nindent 12 }}
           {{- end }}

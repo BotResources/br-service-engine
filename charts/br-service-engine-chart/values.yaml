@@ -4,7 +4,10 @@ image:
   repository: ""
   tag: ""
 
-port: 8080
+# `port` is REQUIRED and has no default, here or in the templates (chart 2.0):
+# the thin chart sets the service's HTTP port, an integer from 1 to 65535, and
+# the library wires it to the `http` container port, the `PORT` env var and the
+# Service port. Leaving it out fails the render.
 
 replicaCount: 1
 
@@ -49,9 +52,10 @@ networkPolicy:
 
 # ── Neutral fields (chart 1.1) ──────────────────────────────────────────────
 # This file documents the interface; it is not where the defaults live. A
-# library chart's values.yaml lands under `.Values.br-engine-service` of the
-# thin chart, never at the top level the named templates read, so each default
-# below is coded in the templates: leave a key out and the default applies.
+# library chart's values.yaml lands under `.Values.br-service-engine-chart` of
+# the thin chart, never at the top level the named templates read, so each
+# default below is coded in the templates: leave a key out and the default
+# applies.
 # None of these fields is part of ops contract v1, and the library gives no
 # value a platform meaning — the thin chart decides what a label, an
 # annotation or a pull secret is for.

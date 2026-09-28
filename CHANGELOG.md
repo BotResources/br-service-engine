@@ -4,10 +4,106 @@ All notable changes to `br-service-engine` are documented here. The whole
 workspace ships **one version**: every crate inherits `version.workspace = true`,
 and a single git tag `v{version}` releases the set. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
-The library chart `br-engine-service` has its own version line, independent of
-the crate version (a compatibility matrix kept by the deploying platform pairs
-chart and engine versions), and its own tag `chart/br-engine-service/v{version}`;
-a chart-only release is a `## chart br-engine-service {version}` section.
+The library chart `br-service-engine-chart` has its own version line, independent
+of the crate version (a compatibility matrix kept by the deploying platform pairs
+chart and engine versions), and its own tag
+`chart/br-service-engine-chart/v{version}`; a chart-only release is a
+`## chart br-service-engine-chart {version}` section. Up to 1.1.1 the chart was
+named `br-engine-service` (tags `chart/br-engine-service/v{version}`, sections
+`## chart br-engine-service {version}`); that name is deprecated and 2.0.0
+continues its version line.
+
+## chart br-service-engine-chart 2.0.0 - 2026-09-28
+
+A chart-only major. The library chart gets a name that says whose chart it is,
+and it stops assuming a port. The engine crates do not change: the workspace
+stays 0.4.0 and no `v*` tag is cut. Ops contract v1 is unchanged — entry points,
+env names (`PORT` included), probe paths, `Recreate` — and for the same values
+2.0.0 renders exactly what `br-engine-service` 1.1.1 renders once the thin chart
+sets `port` and uses the new names. The compatibility entry for this release is
+chart `br-service-engine-chart` 2.0.0 ↔ engine 0.4.0; the 1.x entries stand
+(the README's *Compatibility* table keeps the history).
+
+### Changed (breaking)
+
+- **Renamed `br-engine-service` → `br-service-engine-chart`.** A library chart is
+  named `<library>-chart`: the old name read as a sibling of the Rust library
+  `br-service-engine` (0.4.0) rather than its chart (1.1.1). The chart directory
+  is `charts/br-service-engine-chart/`, the package
+  `oci://ghcr.io/botresources/charts/br-service-engine-chart`, the tag
+  `chart/br-service-engine-chart/v{version}`. The version line continues: 2.0.0
+  follows `br-engine-service` 1.1.1. Every named template is renamed from
+  `br-engine-service.*` to `br-service-engine-chart.*` — the resources
+  (`deployment`, `service`, `serviceaccount`, `pdb`, `networkpolicy`) and the
+  helpers a service chart reuses (`fullname`, `labels`, `selectorLabels`,
+  `port`, …). The library's own `values.yaml` now lands under
+  `.Values.br-service-engine-chart` of a thin chart (the templates still read
+  none of it). The labels do not change: `app.kubernetes.io/part-of` stays
+  `br-service-engine`.
+- **`port` is required; the library gives it no default.** 1.x rendered
+  `.Values.port | default 8080` and its `values.yaml` set `port: 8080`; 2.0.0
+  removes both. The port number is deployment configuration, the service's to
+  set; the library carries only the port wiring — the named container port
+  `http` of `serve`, the `PORT` env var the engine binds, and the Service port,
+  all three rendered from the one value. A render without `port` (or with
+  `port: null` or `""`) fails with `port is required: set the service's HTTP
+  port (an integer from 1 to 65535) in the thin chart's values;
+  br-service-engine-chart gives it no default`. Anything but an integer from 1 to
+  65535 fails with `port must be an integer from 1 to 65535, …`: `0`, `65536`,
+  `-1`, `8080.5`, `"http"`, `"8080"` (a string), `true`. An integer from a values
+  file (a YAML number) and from `--set` both render.
+
+### Deprecated
+
+- **`br-engine-service`.** Versions 1.0.0, 1.1.0 and 1.1.1 stay published at
+  `oci://ghcr.io/botresources/charts/br-engine-service`, with their
+  `chart/br-engine-service/v*` tags, untouched; a thin chart pinned to one of
+  them keeps rendering. No new version ships under that name, and nothing in
+  this repository packages it any more.
+
+### Adopter migration
+
+A thin chart on `br-engine-service` 1.x:
+
+1. In `Chart.yaml`, rename the dependency: `name: br-service-engine-chart`,
+   `version: 2.0.0`, same `repository: oci://ghcr.io/botresources/charts`; then
+   refresh `Chart.lock` (`helm dependency update`).
+2. In its templates, replace `br-engine-service.` with `br-service-engine-chart.`
+   in every `include`.
+3. Set `port`, the number the service listens on. A chart that relied on the
+   `8080` default now states it; where the number differs per environment, each
+   environment's values set it.
+4. Rename any values block keyed `br-engine-service:` to
+   `br-service-engine-chart:` (the templates read none of it; it only carries
+   the library's documented interface).
+
+For the same values, the rendered manifests are the ones 1.1.1 rendered.
+
+### CI
+
+- The `chart` job runs on the renamed paths and gains
+  `.github/scripts/check-chart-port.sh`, the render tests of the required port:
+  a port from a values file (float64) and from `--set` (int64), and the bounds
+  1 and 65535, reach the `http` `containerPort`, the `PORT` env var and the
+  Service port; a missing, `null` or empty port fails naming `port`; `0`,
+  `65536`, `-1`, `8080.5`, `"http"`, `"8080"` and `true` fail; the library's
+  `values.yaml` sets no `port`. The fixture thin chart pins 2.0.0 and sets
+  `port: 8090`, a number other than the old default.
+- `check-chart-version.sh` compares the renamed chart with
+  `charts/br-engine-service/Chart.yaml` when the base still has only the old
+  name, so the version line is checked across the rename, and it refuses a
+  version that does not move the line forward.
+
+### Release
+
+`chart-release.yml` publishes `br-service-engine-chart`: it checks that
+`Chart.yaml` `name` is the published name, then packages and pushes
+`oci://ghcr.io/botresources/charts/br-service-engine-chart:2.0.0` and tags
+`chart/br-service-engine-chart/v2.0.0` on the merge to `main` (the merge's
+`before` commit has no `Chart.yaml` at the new path, so 2.0.0 counts as a new
+version). A version already on GHCR is never pushed again: a `workflow_dispatch`
+re-run skips the push. The workflow neither packages `br-engine-service` nor
+reads its tags.
 
 ## 0.4.0 - 2026-09-24
 
