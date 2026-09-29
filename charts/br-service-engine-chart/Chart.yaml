@@ -2,7 +2,7 @@ apiVersion: v2
 name: br-service-engine-chart
 description: Shared deployment topology for a br-service-engine service — ops contract v1 written once, consumed by a thin per-service chart. Named after its library (`<library>-chart`); it continues the version line of the deprecated `br-engine-service` chart (1.x). The chart versions its ops contract on its own version line, independent of the engine version; a compatibility matrix kept by the deploying platform pairs each chart version with the engine versions it serves. The port number is the service's to set — the library wires it and gives it no default.
 type: library
-version: 2.0.0
+version: 2.1.0
 home: https://github.com/BotResources/br-service-engine
 sources:
   - https://github.com/BotResources/br-service-engine

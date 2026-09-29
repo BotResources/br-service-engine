@@ -49,6 +49,25 @@ resources: {}
 networkPolicy:
   enabled: false
   ingress: []
+  # Optional (chart 2.1): `egress`, a list of Kubernetes egress rules rendered
+  # verbatim. It has no default and is left out here on purpose, because its
+  # PRESENCE is the switch: absent, the policy governs Ingress only and renders
+  # exactly as 2.0; present, `Egress` joins `policyTypes` and the list is the
+  # egress this policy allows (an empty list allows none). The rules are the
+  # deploying environment's topology, set by the deploying repository — the
+  # library names no namespace and no selector. The shape is br-common-service's.
+  # Example (placeholders — the deploying repository names the real ones):
+  # egress:
+  #   - to:
+  #       - namespaceSelector:
+  #           matchLabels:
+  #             kubernetes.io/metadata.name: object-store
+  #         podSelector:
+  #           matchLabels:
+  #             app.kubernetes.io/name: object-store
+  #     ports:
+  #       - protocol: TCP
+  #         port: 9000
 
 # ── Neutral fields (chart 1.1) ──────────────────────────────────────────────
 # This file documents the interface; it is not where the defaults live. A

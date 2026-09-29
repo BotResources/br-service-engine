@@ -1624,7 +1624,7 @@ the version line forward.
 > `chart/br-engine-service/v*`). Those versions stay published and untouched,
 > but no new version ships under that name: `br-service-engine-chart` 2.0.0
 > continues the same version line. A thin chart migrates by renaming its
-> dependency (`name: br-service-engine-chart`, `version: 2.0.0`, same OCI
+> dependency (`name: br-service-engine-chart`, `version: 2.0.0` or later, same OCI
 > repository) and its includes from `br-engine-service.*` to
 > `br-service-engine-chart.*`; each environment's values then set `port`
 > (*The port*, below).
@@ -1635,7 +1635,8 @@ an explicit pair, so their row names the engine releases they shipped beside.
 
 | Chart | Engine | Note |
 |---|---|---|
-| `br-service-engine-chart` **2.0.0** | **0.4.0** | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
+| `br-service-engine-chart` **2.1.0** | **0.4.0** | the optional `networkPolicy.egress`; renders what 2.0.0 renders when `egress` is absent |
+| `br-service-engine-chart` 2.0.0 | 0.4.0 | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
 | `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
 | `br-engine-service` 1.1.0 (deprecated) | shipped beside 0.3.1 – 0.3.4 | hardened pod, `startupProbe`, neutral fields |
 | `br-engine-service` 1.0.0 (deprecated) | shipped with 0.3.0 | ops contract v1 introduced |
@@ -1686,8 +1687,9 @@ default — *The port*), `serviceKey`,
 `postgres.{appRole,appSecret,ownerSecret,trustedNetworkHosts}`, `nats.url`,
 `engine.channel`, `objectStore.enabled` (+ the S3 config and secret ref),
 `env: []`, `resources`, `replicaCount`, `topologySpreadEnabled`,
-`networkPolicy.{enabled,ingress}`, and from chart 1.1 the neutral fields below.
-The library names no namespace; ingress selectors are values. A library
+`networkPolicy.{enabled,ingress}` (+ `egress` from chart 2.1 — *The network
+policy*), and from chart 1.1 the neutral fields below. The library names no
+namespace; ingress and egress rules are values. A library
 chart's own `values.yaml` lands under `.Values.br-service-engine-chart` of the
 thin chart, never at the top level the named templates read, so the library's
 `values.yaml` documents the interface and every default is coded in the
@@ -1710,6 +1712,65 @@ service listens on is deployment configuration, set by each environment's
 values in the deploying GitOps repository — never in the service chart's own
 values, never assumed by the library. The engine binary still falls back to
 `8080` when `PORT` is unset, which never happens under the chart.
+
+### The network policy
+
+`br-service-engine-chart.networkpolicy` renders one NetworkPolicy on the
+service's pods; the thin chart includes it under `networkPolicy.enabled`. Its
+rules are the deploying environment's topology — where the gateway, the object
+store or the database run — so the library writes none, names no namespace and
+defaults no selector: each environment's values set them, as Kubernetes rule
+lists the library renders verbatim. NetworkPolicies are a union, so this policy
+only **adds** allows to whatever else selects the pods, a namespace default-deny
+allowlist included.
+
+- **Ingress** is always a policy type, as in 2.0: `networkPolicy.ingress` is the
+  ingress this policy allows; absent or empty, it allows none.
+- **Egress** (chart 2.1) is a policy type only when the `networkPolicy.egress`
+  key is present — its presence is the switch. Absent, the policy is the 2.0
+  policy, byte for byte. Present, `Egress` joins `policyTypes` and the list is
+  the egress this policy allows; an empty list (or a `null` the values do not
+  drop) allows none. Leaving the key out is the only way to leave egress
+  ungoverned by this policy.
+
+The value shape and the egress rule are `br-common-service`'s, so a deploying
+repository writes one shape for both libraries. The one difference is kept from
+2.0: `br-common-service` lists Ingress only when `ingress` is set and refuses a
+policy with neither key, where this library always lists Ingress.
+
+Once `Egress` is a policy type, the pods' egress is limited to what the
+policies selecting them allow. Under a namespace default-deny that already
+allows DNS and in-namespace traffic, the rules name only the extra destination —
+for example an object store in another namespace, which a default-deny that
+allows only public egress blocks (the names below are placeholders, set by the
+deploying repository):
+
+```yaml
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway
+      ports:
+        - protocol: TCP
+          port: 8090
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: object-store
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: object-store
+      ports:
+        - protocol: TCP
+          port: 9000
+```
+
+In a namespace with no such allowlist, the egress rules must also name DNS and
+every other destination the pods reach (Postgres, NATS), or the pods lose them.
 
 ### Subscription transports
 

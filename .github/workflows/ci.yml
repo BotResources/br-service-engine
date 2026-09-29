@@ -232,6 +232,8 @@ jobs:
           assert '^ *path: /livez$'
       - name: helm template the fixture and assert the required port
         run: bash .github/scripts/check-chart-port.sh
+      - name: helm template the fixture and assert the optional egress
+        run: bash .github/scripts/check-chart-egress.sh
       - name: helm template the fixture and assert the secure defaults
         run: |
           set -euo pipefail

@@ -13,6 +13,78 @@ named `br-engine-service` (tags `chart/br-engine-service/v{version}`, sections
 `## chart br-engine-service {version}`); that name is deprecated and 2.0.0
 continues its version line.
 
+## chart br-service-engine-chart 2.1.0 - 2026-09-29
+
+A chart-only minor: one optional value, backward compatible. The engine crates
+do not change: the workspace stays 0.4.0 and no `v*` tag is cut. Ops contract
+v1 is unchanged — entry points, env names, probe paths, the port wiring,
+`Recreate`. Without `networkPolicy.egress`, 2.1.0 renders exactly what 2.0.0
+renders: the fixture's default and all-fields renders, and renders with
+`networkPolicy.ingress` absent, empty and with the policy disabled, are
+byte-identical across the two versions. The compatibility entry for this
+release is chart `br-service-engine-chart` 2.1.0 ↔ engine 0.4.0; the 2.0.0
+entry stands.
+
+### Added
+
+- **`networkPolicy.egress`** — the egress rules of the service's NetworkPolicy,
+  a list of Kubernetes egress rules rendered verbatim. The key's **presence** is
+  the switch: absent, the policy governs Ingress only, as in 2.0; present,
+  `Egress` joins `policyTypes` and the list is the egress the policy allows; an
+  empty list (or a `null` the values do not drop) allows none. Ingress stays a
+  policy type in every case. The rules are the deploying environment's topology:
+  the library names no namespace and defaults no selector, and its
+  `values.yaml` documents the key in comments only, since a key there would read
+  as a default the templates never apply. The value shape and the egress rule
+  are `br-common-service`'s, so a deploying repository writes one shape for both
+  libraries; the one difference is kept from 2.0 — `br-common-service` lists
+  Ingress only when `ingress` is set, this library always.
+
+### Adopter impact
+
+A thin chart that bumps its dependency from 2.0.0 to 2.1.0 renders the same
+manifests. For its pods to reach a destination a namespace default-deny blocks —
+an object store in another namespace, when the default-deny allows only public
+egress — each environment's values set the rule beside `ingress`:
+
+```yaml
+networkPolicy:
+  enabled: true
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: <object-store namespace>
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: <object-store name>
+      ports:
+        - protocol: TCP
+          port: <object-store port>
+```
+
+NetworkPolicies are a union, so under a default-deny that already allows DNS
+and in-namespace traffic this adds the one destination. In a namespace with no
+such allowlist, `Egress` limits the pods to these rules: they must also name DNS
+and every other destination the pods reach.
+
+### CI
+
+- `.github/scripts/check-chart-egress.sh`, the render tests of the optional
+  egress: without `egress` the policy is `policyTypes: [Ingress]` with no
+  `egress` key; an egress rule to an object store renders verbatim beside the
+  fixture's ingress, with `policyTypes: [Ingress, Egress]`, and also with
+  `ingress` absent; an empty list and a `null` render `egress: []`; the
+  library's `values.yaml` sets no `networkPolicy.egress`. The `chart` job runs
+  it after the port tests.
+- The fixture thin chart pins 2.1.0.
+
+### Release
+
+`chart-release.yml` packages and pushes
+`oci://ghcr.io/botresources/charts/br-service-engine-chart:2.1.0` and tags
+`chart/br-service-engine-chart/v2.1.0` on the merge to `main`.
+
 ## chart br-service-engine-chart 2.0.0 - 2026-09-28
 
 A chart-only major. The library chart gets a name that says whose chart it is,
