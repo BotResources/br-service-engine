@@ -13,6 +13,54 @@ named `br-engine-service` (tags `chart/br-engine-service/v{version}`, sections
 `## chart br-engine-service {version}`); that name is deprecated and 2.0.0
 continues its version line.
 
+## 0.4.1 - 2026-10-08
+
+A patch of 0.4.0: two defects and one additive gap found by the first
+services running on the engine. No adopter code changes; a service bumps its
+pin. The compatibility entry for this release is chart `br-service-engine-chart`
+2.0.0 ↔ engine 0.4.1.
+
+### Fixed
+
+- **A led mirror no longer drops a KV change when it runs on two or more pods.**
+  Every pod watches the consumed bucket, and through 0.4.0 every pod took the
+  mirror's advisory lock *without waiting* before it checked the lease. A
+  standby held that lock for a moment on each event only to find it held no
+  lease; the leader, receiving the same event at the same moment, read the busy
+  lock as "not the leader", discarded the change it had already recorded as
+  seen, and the next change advanced the watermark past it. The row stayed
+  stale until the periodic reconcile (300 s by default) or a restart — a user
+  deactivated upstream stayed admitted for that long. A pod now reads the lease
+  first, without any lock: a standby answers "not me" and never touches the
+  lock; the pod the lease is open to (its own, expired, or never taken) waits for
+  the lock, then renews the lease and projects. A pod that loses the lease while
+  it waits logs a `warn`, and the new leader projects the change from its own
+  watch. Conformance `s179` holds the lock across a change and loads two pods
+  with forty changes: every change is projected from the live watch.
+- **Confirming a blob works against a signature-strict S3 store.** The `HEAD`
+  that confirms an upload (and that the blob reaper uses) sent
+  `x-amz-checksum-mode: ENABLED` outside the presigned signature; a store that
+  refuses an unsigned `x-amz-*` header on a presigned request answered `400`, so
+  every confirm failed with `INTERNAL`. The header is now part of the signed
+  headers and sent unchanged, so the store still returns
+  `x-amz-checksum-sha256` and the check against the declared digest keeps
+  working.
+
+### Added
+
+- **Full scope specs.** A host can declare each scope's label and description
+  i18n keys and its `platform_only` flag, and the service's own label and
+  description keys: `ScopeDef::new(key, label_key, description_key)` (with
+  `.platform_only()`), `Engine::contribute_scope_defs(&[ScopeDef])`,
+  `Engine::describe_scope_service(label_key, description_key)`, and
+  `ScopeManifest::of_defs` / `with_service_labels` for `declare_scopes`. Through
+  0.4.0 the engine declared every scope's key as both i18n keys and
+  `platform_only = false`. `contribute_scopes(&[..])` and `ScopeManifest::of`
+  keep that behaviour (`ScopeDef::bare`). The manifest checks apply to full specs
+  unchanged, and one key given two different specs is refused with the new
+  `ScopeError::ConflictingScope` (an identical repeat still collapses).
+  Conformance `s077` reads the declaration on the wire for both paths.
+
 ## chart br-service-engine-chart 2.0.0 - 2026-09-28
 
 A chart-only major. The library chart gets a name that says whose chart it is,

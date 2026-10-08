@@ -171,7 +171,7 @@ pub use relays::outbox::{HostedOutboxRelay, OutboxRelay};
 pub use render::{PassReport, SessionFault, Transition};
 #[cfg(feature = "test-support")]
 pub use runtime::{RenderMetrics, SessionRuntime};
-pub use scopes::{ScopeError, ScopeManifest};
+pub use scopes::{ScopeDef, ScopeError, ScopeManifest, ScopeServiceLabels};
 pub use session::{AttachRequest, SessionId, SessionStream, WindowParams, WindowSpec};
 pub use stop::Stop;
 pub use time::Timestamp;

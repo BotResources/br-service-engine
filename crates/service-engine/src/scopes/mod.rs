@@ -1,8 +1,6 @@
 mod handshake;
 mod wire;
 
-use std::collections::HashSet;
-
 use br_core_scope::{
     KeyValidationError, ScopeDeclaration, ScopeDeclarationError, ScopeKey, ScopeSpec, ServiceKey,
     ServiceManifest,
@@ -15,49 +13,134 @@ pub(crate) use handshake::run_handshake;
 pub const REASON_SCOPES_PENDING: &str = "declaring scopes to identity";
 pub const REASON_SCOPES_FAILED: &str = "the scope-declaration handshake could not reach identity";
 
+/// One scope as a host declares it to Identity: its key, the i18n keys of its
+/// label and description, and whether only the platform may hold it.
+/// `ScopeDef::bare(key)` is what a bare key declares: both i18n keys are the
+/// scope key, and `platform_only` is false.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeDef {
+    pub key: &'static str,
+    pub label_key: &'static str,
+    pub description_key: &'static str,
+    pub platform_only: bool,
+}
+
+impl ScopeDef {
+    pub const fn new(
+        key: &'static str,
+        label_key: &'static str,
+        description_key: &'static str,
+    ) -> Self {
+        Self {
+            key,
+            label_key,
+            description_key,
+            platform_only: false,
+        }
+    }
+
+    pub const fn bare(key: &'static str) -> Self {
+        Self::new(key, key, key)
+    }
+
+    pub const fn platform_only(self) -> Self {
+        Self {
+            platform_only: true,
+            ..self
+        }
+    }
+}
+
+/// The i18n keys of the declaring service's own label and description. Absent,
+/// both are the service key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeServiceLabels {
+    pub label_key: &'static str,
+    pub description_key: &'static str,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScopeManifest {
     scopes: Vec<&'static str>,
+    defs: Vec<ScopeDef>,
+    service: Option<ScopeServiceLabels>,
 }
 
 impl ScopeManifest {
     pub fn of(groups: &[&[&'static str]]) -> Self {
+        let defs: Vec<ScopeDef> = groups
+            .iter()
+            .flat_map(|group| group.iter().copied().map(ScopeDef::bare))
+            .collect();
+        Self::from_defs(defs)
+    }
+
+    pub fn of_defs(groups: &[&[ScopeDef]]) -> Self {
+        let defs: Vec<ScopeDef> = groups
+            .iter()
+            .flat_map(|group| group.iter().copied())
+            .collect();
+        Self::from_defs(defs)
+    }
+
+    fn from_defs(defs: Vec<ScopeDef>) -> Self {
         Self {
-            scopes: groups
-                .iter()
-                .flat_map(|group| group.iter().copied())
-                .collect(),
+            scopes: defs.iter().map(|def| def.key).collect(),
+            defs,
+            service: None,
         }
+    }
+
+    pub fn with_service_labels(
+        mut self,
+        label_key: &'static str,
+        description_key: &'static str,
+    ) -> Self {
+        self.service = Some(ScopeServiceLabels {
+            label_key,
+            description_key,
+        });
+        self
     }
 
     pub fn scopes(&self) -> &[&'static str] {
         &self.scopes
     }
 
+    pub fn defs(&self) -> &[ScopeDef] {
+        &self.defs
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
+        self.defs.is_empty()
     }
 
     pub(crate) fn declaration(&self) -> Result<ScopeDeclaration, ScopeError> {
-        if self.scopes.is_empty() {
+        if self.defs.is_empty() {
             return Err(ScopeError::Empty);
         }
-        let mut seen = HashSet::new();
-        let mut keys: Vec<ScopeKey> = Vec::new();
-        for raw in &self.scopes {
-            if !seen.insert(*raw) {
-                continue;
+        let mut seen: Vec<ScopeDef> = Vec::new();
+        let mut keys: Vec<(ScopeKey, ScopeDef)> = Vec::new();
+        for def in &self.defs {
+            if let Some(earlier) = seen.iter().find(|earlier| earlier.key == def.key) {
+                if earlier == def {
+                    continue;
+                }
+                return Err(ScopeError::ConflictingScope {
+                    key: def.key.to_string(),
+                });
             }
-            let key = ScopeKey::new(*raw).map_err(|validation| ScopeError::MalformedKey {
-                key: (*raw).to_string(),
+            seen.push(*def);
+            let key = ScopeKey::new(def.key).map_err(|validation| ScopeError::MalformedKey {
+                key: def.key.to_string(),
                 validation,
             })?;
-            keys.push(key);
+            keys.push((key, *def));
         }
-        let service_segment = keys[0].service_segment().to_string();
-        if let Some(other) = keys
+        let service_segment = keys[0].0.service_segment().to_string();
+        if let Some((other, _)) = keys
             .iter()
-            .find(|key| key.service_segment() != service_segment)
+            .find(|(key, _)| key.service_segment() != service_segment)
         {
             return Err(ScopeError::MixedServices {
                 first: service_segment,
@@ -70,12 +153,16 @@ impl ScopeManifest {
                 validation,
             }
         })?;
-        let manifest = ServiceManifest::new(service.clone(), service.as_str(), service.as_str());
+        let manifest = match self.service {
+            Some(labels) => {
+                ServiceManifest::new(service.clone(), labels.label_key, labels.description_key)
+            }
+            None => ServiceManifest::new(service.clone(), service.as_str(), service.as_str()),
+        };
         let specs = keys
             .into_iter()
-            .map(|key| {
-                let label = key.as_str().to_string();
-                ScopeSpec::new(key, label.clone(), label, false)
+            .map(|(key, def)| {
+                ScopeSpec::new(key, def.label_key, def.description_key, def.platform_only)
             })
             .collect();
         ScopeDeclaration::new(manifest, specs).map_err(ScopeError::Declaration)
@@ -96,6 +183,11 @@ pub enum ScopeError {
         #[source]
         validation: KeyValidationError,
     },
+
+    #[error(
+        "scope {key} is declared twice with different labels or platform_only; one key has one spec"
+    )]
+    ConflictingScope { key: String },
 
     #[error(
         "the manifest mixes scopes of {first} and {other}; a service declares only its own scopes"
@@ -146,6 +238,105 @@ mod tests {
             .map(|spec| spec.key.as_str())
             .collect();
         assert_eq!(keys, ["project:read", "project:archive", "project:write"]);
+    }
+
+    #[test]
+    fn a_bare_key_declares_its_key_as_both_i18n_keys_and_no_platform_restriction() {
+        let declaration = ScopeManifest::of(&[&["project:read"]])
+            .declaration()
+            .expect("a bare key declares");
+        assert_eq!(declaration.manifest().label_key, "project");
+        assert_eq!(declaration.manifest().description_key, "project");
+        let spec = &declaration.scopes()[0];
+        assert_eq!(spec.label_key, "project:read");
+        assert_eq!(spec.description_key, "project:read");
+        assert!(!spec.platform_only);
+    }
+
+    #[test]
+    fn a_full_spec_reaches_the_declaration_unchanged() {
+        const READ: ScopeDef = ScopeDef::new(
+            "project:read",
+            "scopes.project.read.label",
+            "scopes.project.read.description",
+        );
+        const ADMIN: ScopeDef = ScopeDef::new(
+            "project:admin",
+            "scopes.project.admin.label",
+            "scopes.project.admin.description",
+        )
+        .platform_only();
+        let declaration = ScopeManifest::of_defs(&[&[READ], &[ADMIN]])
+            .with_service_labels("services.project.label", "services.project.description")
+            .declaration()
+            .expect("a full-spec manifest declares");
+        assert_eq!(declaration.manifest().key.as_str(), "project");
+        assert_eq!(declaration.manifest().label_key, "services.project.label");
+        assert_eq!(
+            declaration.manifest().description_key,
+            "services.project.description"
+        );
+        let specs: Vec<(&str, &str, &str, bool)> = declaration
+            .scopes()
+            .iter()
+            .map(|spec| {
+                (
+                    spec.key.as_str(),
+                    spec.label_key.as_str(),
+                    spec.description_key.as_str(),
+                    spec.platform_only,
+                )
+            })
+            .collect();
+        assert_eq!(
+            specs,
+            [
+                (
+                    "project:read",
+                    "scopes.project.read.label",
+                    "scopes.project.read.description",
+                    false
+                ),
+                (
+                    "project:admin",
+                    "scopes.project.admin.label",
+                    "scopes.project.admin.description",
+                    true
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn one_key_with_two_different_specs_is_refused() {
+        let manifest = ScopeManifest::of_defs(&[
+            &[ScopeDef::bare("project:read")],
+            &[ScopeDef::bare("project:read").platform_only()],
+        ]);
+        match manifest.declaration() {
+            Err(ScopeError::ConflictingScope { key }) => assert_eq!(key, "project:read"),
+            other => panic!("expected a conflicting-scope error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn full_specs_keep_the_checks_of_bare_keys() {
+        assert!(matches!(
+            ScopeManifest::of_defs(&[]).declaration(),
+            Err(ScopeError::Empty)
+        ));
+        assert!(matches!(
+            ScopeManifest::of_defs(&[&[
+                ScopeDef::bare("project:read"),
+                ScopeDef::bare("billing:read")
+            ]])
+            .declaration(),
+            Err(ScopeError::MixedServices { .. })
+        ));
+        assert!(matches!(
+            ScopeManifest::of_defs(&[&[ScopeDef::new("project:Read", "l", "d")]]).declaration(),
+            Err(ScopeError::MalformedKey { .. })
+        ));
     }
 
     #[test]

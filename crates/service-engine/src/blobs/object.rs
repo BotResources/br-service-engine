@@ -11,6 +11,9 @@ use crate::blobs::post_policy::{PostPolicyInput, presign_post};
 use crate::blobs::{Disposition, DownloadUrl, UploadUrl};
 use crate::error::EngineError;
 
+const CHECKSUM_MODE_HEADER: &str = "x-amz-checksum-mode";
+const CHECKSUM_MODE_ENABLED: &str = "ENABLED";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ObjectHead {
     pub size: u64,
@@ -128,15 +131,24 @@ impl ObjectStore {
         }
     }
 
-    pub(crate) async fn head(&self, object_key: &str) -> Result<Option<ObjectHead>, EngineError> {
-        let url = self
+    /// The checksum-mode header is part of the signature: a SigV4-strict store
+    /// refuses an unsigned `x-amz-*` header on a presigned request, and without
+    /// the header no `x-amz-checksum-sha256` comes back to check `expect` against.
+    fn head_url(&self, object_key: &str) -> reqwest::Url {
+        let mut action = self
             .internal
-            .head_object(Some(&self.credentials), object_key)
-            .sign(Duration::from_secs(60));
+            .head_object(Some(&self.credentials), object_key);
+        action
+            .headers_mut()
+            .insert(CHECKSUM_MODE_HEADER, CHECKSUM_MODE_ENABLED);
+        action.sign(Duration::from_secs(60))
+    }
+
+    pub(crate) async fn head(&self, object_key: &str) -> Result<Option<ObjectHead>, EngineError> {
         let response = self
             .http
-            .head(url)
-            .header("x-amz-checksum-mode", "ENABLED")
+            .head(self.head_url(object_key))
+            .header(CHECKSUM_MODE_HEADER, CHECKSUM_MODE_ENABLED)
             .send()
             .await
             .map_err(|error| EngineError::Blob(crate::chain::describe(&error)))?;
@@ -262,6 +274,30 @@ impl std::fmt::Debug for ObjectStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_head_signs_the_checksum_mode_header_it_sends() {
+        let config = BlobConfig::new(
+            "http://127.0.0.1:9000",
+            "us-east-1",
+            "bucket",
+            "access",
+            "secret",
+        );
+        let store = ObjectStore::from_config(&config).expect("a valid config");
+        let url = store.head_url("kind/object");
+        let signed = url
+            .query_pairs()
+            .find(|(name, _)| name == "X-Amz-SignedHeaders")
+            .map(|(_, value)| value.into_owned())
+            .expect("a presigned url names its signed headers");
+        assert!(
+            signed
+                .split(';')
+                .any(|header| header == CHECKSUM_MODE_HEADER),
+            "the checksum-mode header is signed, got {signed}"
+        );
+    }
 
     #[test]
     fn the_disposition_renders_the_requested_keyword() {

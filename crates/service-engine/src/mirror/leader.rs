@@ -43,6 +43,40 @@ impl MirrorGate {
     }
 }
 
+/// Whether this pod may lead: the lease is its own, expired, or never taken. A
+/// plain read, so a standby answers "not me" without touching the advisory lock
+/// or the lease row while the leader projects.
+pub(super) async fn lease_open_to(
+    conn: &mut PgConnection,
+    slot_name: &str,
+    pod: &str,
+) -> Result<bool, EngineError> {
+    let open: bool = sqlx::query_scalar(&format!(
+        "SELECT NOT EXISTS ( \
+           SELECT 1 FROM {TABLE_LEADER_SLOT} \
+            WHERE name = $1 AND slot = 'epoch'::timestamptz \
+              AND pod <> $2 AND lease_until > now())"
+    ))
+    .bind(slot_name)
+    .bind(pod)
+    .fetch_one(conn)
+    .await?;
+    Ok(open)
+}
+
+/// Waits for the mirror's projection lock. Only a pod the lease is open to asks
+/// for it, so the wait is bounded by one projection of the other contender.
+pub(super) async fn advisory_xact_lock(
+    conn: &mut PgConnection,
+    key: i64,
+) -> Result<(), EngineError> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(key)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 pub(super) async fn hold_lease(
     conn: &mut PgConnection,
     slot_name: &str,

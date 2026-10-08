@@ -3,10 +3,9 @@ use std::hash::Hash;
 use sqlx::PgConnection;
 
 use crate::error::EngineError;
-use crate::housekeeping::leader::try_advisory_xact_lock;
 use crate::impact::Impact;
 
-use super::super::leader::hold_lease;
+use super::super::leader::{advisory_xact_lock, hold_lease, lease_open_to};
 use super::super::projection::{Project, Projection};
 use super::super::shadow::Shadows;
 use super::super::watermark::{self, Mark};
@@ -65,12 +64,20 @@ where
         }
         let mut tx = self.pool.begin().await?;
         if let Some(gate) = &self.leader {
-            if !try_advisory_xact_lock(&mut tx, gate.advisory_key).await? {
+            if !lease_open_to(&mut tx, &gate.slot_name, gate.pod.as_str()).await? {
                 let _ = tx.rollback().await;
                 return Ok(false);
             }
+            advisory_xact_lock(&mut tx, gate.advisory_key).await?;
             if !hold_lease(&mut tx, &gate.slot_name, gate.pod.as_str(), gate.lease).await? {
                 let _ = tx.rollback().await;
+                tracing::warn!(
+                    mirror = %self.name,
+                    pod = %gate.pod,
+                    keys = keys.len(),
+                    "a mirror lost its lease while waiting to project; the new leader projects \
+                     the change from its own watch",
+                );
                 return Ok(false);
             }
         }
