@@ -181,13 +181,7 @@ impl StubDispatch {
         {
             return DispatchOutcome::Failed(classify(error));
         }
-        if self
-            .crash_remaining
-            .fetch_update(AtomicOrdering::SeqCst, AtomicOrdering::SeqCst, |n| {
-                (n > 0).then(|| n - 1)
-            })
-            .is_ok()
-        {
+        if take_one(&self.crash_remaining) {
             drop(tx);
             return DispatchOutcome::Failed(DispatchError::retry("simulated crash before commit"));
         }
@@ -236,4 +230,20 @@ impl Dispatch for StubDispatch {
     fn dispatch<'a>(&'a self, msg: &'a Incoming) -> BoxFuture<'a, DispatchOutcome> {
         Box::pin(self.apply(msg))
     }
+}
+
+fn take_one(counter: &AtomicUsize) -> bool {
+    let mut left = counter.load(AtomicOrdering::SeqCst);
+    while left > 0 {
+        match counter.compare_exchange(
+            left,
+            left - 1,
+            AtomicOrdering::SeqCst,
+            AtomicOrdering::SeqCst,
+        ) {
+            Ok(_) => return true,
+            Err(actual) => left = actual,
+        }
+    }
+    false
 }
