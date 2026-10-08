@@ -141,7 +141,28 @@ impl<P: Principal> Engine<P> {
     }
 
     pub fn contribute_scopes(&mut self, scopes: &[&'static str]) -> Result<(), EngineError> {
+        self.contributed_scopes
+            .extend(scopes.iter().copied().map(crate::scopes::ScopeDef::bare));
+        Ok(())
+    }
+
+    pub fn contribute_scope_defs(
+        &mut self,
+        scopes: &[crate::scopes::ScopeDef],
+    ) -> Result<(), EngineError> {
         self.contributed_scopes.extend_from_slice(scopes);
+        Ok(())
+    }
+
+    pub fn describe_scope_service(
+        &mut self,
+        label_key: &'static str,
+        description_key: &'static str,
+    ) -> Result<(), EngineError> {
+        self.scope_service_labels = Some(crate::scopes::ScopeServiceLabels {
+            label_key,
+            description_key,
+        });
         Ok(())
     }
 
@@ -149,7 +170,11 @@ impl<P: Principal> Engine<P> {
         if self.contributed_scopes.is_empty() {
             return Ok(());
         }
-        let manifest = crate::scopes::ScopeManifest::of(&[self.contributed_scopes.as_slice()]);
+        let mut manifest =
+            crate::scopes::ScopeManifest::of_defs(&[self.contributed_scopes.as_slice()]);
+        if let Some(labels) = self.scope_service_labels {
+            manifest = manifest.with_service_labels(labels.label_key, labels.description_key);
+        }
         self.declare_scopes(manifest)
     }
 

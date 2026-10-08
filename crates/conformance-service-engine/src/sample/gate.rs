@@ -33,12 +33,7 @@ impl Gate {
     }
 
     pub async fn pass(&self) {
-        let claimed = self
-            .remaining
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
-                left.checked_sub(1)
-            });
-        if claimed.is_err() {
+        if !take_one(&self.remaining) {
             return;
         }
         self.entered.add_permits(1);
@@ -60,4 +55,15 @@ impl Gate {
     pub fn release(&self) {
         self.released.add_permits(1);
     }
+}
+
+fn take_one(counter: &AtomicUsize) -> bool {
+    let mut left = counter.load(Ordering::SeqCst);
+    while left > 0 {
+        match counter.compare_exchange(left, left - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(actual) => left = actual,
+        }
+    }
+    false
 }

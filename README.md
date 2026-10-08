@@ -15,7 +15,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.4.0", version = "0.4.0" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.4.1", version = "0.4.1" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -25,6 +25,7 @@ engine minor pins one exact `br-rust-common` tag.
 
 | Engine version | `br-rust-common` |
 |---|---|
+| 0.4.1 | `v1.3.0` |
 | 0.4.0 | `v1.3.0` |
 | 0.3.4 | `v1.3.0` |
 | 0.3.3 | `v1.3.0` |
@@ -456,6 +457,15 @@ slice contributes its keys with `engine.contribute_scopes(&[..])`, and
 `declare_contributed_scopes` unions them into one `ScopeManifest` and runs
 the boot scope-declaration handshake that gates readiness until Identity confirms
 (`declare_scopes` remains for a service that assembles the manifest itself).
+A bare key declares the key itself as its label and description i18n keys and
+`platform_only = false`. A service that declares translated labels or a
+platform-only scope contributes full specs instead —
+`engine.contribute_scope_defs(&[ScopeDef::new(key, label_key, description_key)])`,
+with `.platform_only()` on a `ScopeDef` the platform alone may hold — and names its
+own i18n keys with `engine.describe_scope_service(label_key, description_key)`
+(absent, both are the service key). `ScopeManifest::of_defs` and
+`with_service_labels` are the same for `declare_scopes`. One key contributed twice
+with two different specs is refused at boot (`ScopeError::ConflictingScope`).
 `register_blobs` records a `BlobPolicy` per blob kind and, at
 boot, binds the service's S3-compatible object-storage bucket (bind-only,
 fail-loud, never created — configured with `EngineConfig::with_blob_storage`). A
@@ -1635,7 +1645,8 @@ an explicit pair, so their row names the engine releases they shipped beside.
 
 | Chart | Engine | Note |
 |---|---|---|
-| `br-service-engine-chart` **2.0.0** | **0.4.0** | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
+| `br-service-engine-chart` **2.0.0** | **0.4.1** | a patch of the engine; the chart is unchanged |
+| `br-service-engine-chart` 2.0.0 | 0.4.0 | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
 | `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
 | `br-engine-service` 1.1.0 (deprecated) | shipped beside 0.3.1 – 0.3.4 | hardened pod, `startupProbe`, neutral fields |
 | `br-engine-service` 1.0.0 (deprecated) | shipped with 0.3.0 | ops contract v1 introduced |

@@ -81,7 +81,8 @@ pub struct Engine<P: Principal> {
     shutdown: Arc<tokio::sync::Notify>,
     stream_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     declared_scopes: Option<ScopeDeclaration>,
-    contributed_scopes: Vec<&'static str>,
+    contributed_scopes: Vec<crate::scopes::ScopeDef>,
+    scope_service_labels: Option<crate::scopes::ScopeServiceLabels>,
     reaction_principal: Option<Arc<dyn crate::principal::ReactionPrincipalResolver>>,
     blob_reaper_log: Option<crate::blobs::ReaperRoundLog>,
 }
@@ -147,6 +148,7 @@ impl<P: Principal> Engine<P> {
             stream_shutdown: Arc::new(tokio::sync::watch::channel(false).0),
             declared_scopes: None,
             contributed_scopes: Vec::new(),
+            scope_service_labels: None,
             reaction_principal: None,
             blob_reaper_log: None,
         })
