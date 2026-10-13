@@ -24,5 +24,5 @@ guarantee of reward.
 
 ## Supported versions
 
-We support the latest unified workspace tag (`v{version}`). Older tags receive
+We support the latest unified workspace tag (`br-service-engine/v{version}`, `v{version}` up to 0.4.1). Older tags receive
 no fixes; upgrade to the latest.

@@ -2,8 +2,13 @@ name: release-tags
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (the version the workspace declares)
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,9 +18,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
-    name: Auto-tag the unified workspace version
+  detect:
+    name: Detect the release
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      refused: ${{ steps.detect.outputs.refused }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+      - name: Detect
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: bash .github/scripts/release-detect.sh
+
+  release-line-law:
+    name: Release-line law
+    needs: detect
+    if: needs.detect.outputs.refused != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report refused versions
+        env:
+          REFUSED: ${{ needs.detect.outputs.refused }}
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json, os
+          for entry in json.loads(os.environ["REFUSED"]):
+              print("::error::" + entry)
+          '
+          exit 1
+
+  release:
+    name: Release ${{ matrix.version }}
+    needs: detect
+    if: needs.detect.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.matrix) }}
+    env:
+      VERSION: ${{ matrix.version }}
+      LINE: ${{ matrix.line }}
+      COMMIT: ${{ matrix.commit }}
+      BR_REGISTRY_KEY: ${{ secrets.BR_REGISTRY_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
@@ -26,52 +79,46 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Verify changelog entry before tagging
-        run: bash .github/scripts/check-changelog.sh
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: release
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+        with:
+          tool: cargo-public-api
 
-      - name: Tag and release the unified version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve the release tag
         run: |
           set -euo pipefail
-          version=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "([^"]+)".*/\1/')
-          if [ -z "$version" ]; then
-            echo "::error file=Cargo.toml::could not extract the workspace version"
-            exit 1
-          fi
-          tag="v${version}"
+          source .github/scripts/library-meta.sh
+          echo "RELEASE_TAG=$(release_tag "$VERSION")" >>"$GITHUB_ENV"
 
-          if git rev-parse --verify "refs/tags/${tag}" >/dev/null 2>&1; then
-            echo "✓ tag ${tag} already exists"
-          else
-            echo "→ creating tag ${tag}"
-            git tag -a "${tag}" \
-              -m "br-service-engine ${version}" \
-              -m "Auto-tagged from main. See CHANGELOG.md for the entry."
-            git push origin "${tag}"
-          fi
+      - name: Verify the changelog entry
+        run: bash .github/scripts/check-changelog.sh "$COMMIT"
 
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            echo "✓ release ${tag} already exists"
-          else
-            echo "→ creating release ${tag}"
-            notes_file=$(mktemp)
-            awk -v target="## ${version}" '
-              !in_section && substr($0, 1, length(target)) == target &&
-              (length($0) == length(target) || substr($0, length(target) + 1, 1) == " ") {
-                in_section = 1; print; next
-              }
-              in_section && /^## / { exit }
-              in_section { print }
-            ' CHANGELOG.md > "$notes_file"
-            if [ ! -s "$notes_file" ]; then
-              echo "::warning file=CHANGELOG.md::could not extract notes for ${tag}; using placeholder"
-              printf 'See [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md) for changes.\n' \
-                "$GITHUB_REPOSITORY" "$tag" > "$notes_file"
-            fi
-            gh release create "${tag}" \
-              --title "br-service-engine ${version}" \
-              --notes-file "$notes_file" \
-              --verify-tag
-            rm -f "$notes_file"
-          fi
+      - name: Registry gate
+        id: gate
+        run: bash .github/scripts/registry-gate.sh "$VERSION" "$RELEASE_TAG"
+        env:
+          GATE_REV: ${{ matrix.commit }}
+
+      - name: Compute API listing, API diff and dependencies
+        if: steps.gate.outputs.implemented != 'true'
+        env:
+          BASELINE_TAG: ${{ steps.gate.outputs.baseline_tag }}
+        run: bash .github/scripts/registry-prepare.sh "$VERSION" "$COMMIT" "$BASELINE_TAG"
+
+      - name: Tag and release
+        if: steps.gate.outputs.implemented != 'true'
+        run: bash .github/scripts/release-library.sh "$VERSION" "refs/heads/$LINE" "$COMMIT"
+
+      - name: Record in the registry
+        if: steps.gate.outputs.implemented != 'true'
+        env:
+          BASELINE_TAG: ${{ steps.gate.outputs.baseline_tag }}
+        run: bash .github/scripts/registry-record.sh "$VERSION" "$RELEASE_TAG" "$COMMIT" "$BASELINE_TAG"

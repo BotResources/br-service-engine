@@ -3,7 +3,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -117,13 +117,15 @@ jobs:
       - name: cargo semver-checks (unified baseline)
         run: |
           set -euo pipefail
-          baseline=$(git tag --list 'v*' | sort -V | tail -n1)
+          current=$(bash .github/scripts/library-version.sh)
+          baseline=$(bash .github/scripts/release-tags.sh "$current" | tail -n1)
           if [ -z "$baseline" ]; then
-            echo "::notice::no prior unified v* tag, skipping semver-checks (first lockstep release)"
+            echo "::notice::no prior release tag, skipping semver-checks (first lockstep release)"
             exit 0
           fi
-          current=$(awk -F'"' '/^\[workspace.package\]/{p=1; next} /^\[/{p=0} p && /^version *=/{print $2; exit}' Cargo.toml)
-          IFS=. read -r base_major base_minor _ <<<"${baseline#v}"
+          baseline_version="${baseline##*/}"
+          baseline_version="${baseline_version#v}"
+          IFS=. read -r base_major base_minor _ <<<"${baseline_version}"
           IFS=. read -r cur_major cur_minor _ <<<"${current}"
           breaking=0
           if [ "$cur_major" != "$base_major" ] || { [ "$cur_major" = 0 ] && [ "$cur_minor" != "$base_minor" ]; }; then
@@ -197,6 +199,32 @@ jobs:
           set -euo pipefail
           shellcheck --version
           shellcheck --severity=warning .github/scripts/*.sh
+
+  release-tooling:
+    name: release-line law and registry wiring tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: release-line decision table
+        run: bash .github/scripts/test-release-line.sh
+      - name: release detection and registry wiring
+        run: bash .github/scripts/test-release-pipeline.sh
+      - name: registry gate, tag and record wiring
+        run: bash .github/scripts/test-registry-wiring.sh
+
+  registry-gate:
+    name: registry gate
+    if: github.event_name == 'pull_request' && (github.base_ref == 'main' || startsWith(github.base_ref, 'release/'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+      - name: release-line law and registry gate when the version is bumped
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BR_REGISTRY_KEY: ${{ secrets.BR_REGISTRY_KEY }}
+        run: bash .github/scripts/pr-registry-gate.sh
 
   chart:
     name: helm library chart

@@ -2,7 +2,8 @@
 
 All notable changes to `br-service-engine` are documented here. The whole
 workspace ships **one version**: every crate inherits `version.workspace = true`,
-and a single git tag `v{version}` releases the set. Format follows
+and a single git tag releases the set: `v{version}` up to 0.4.1, `br-service-engine/v{version}`
+after it. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 The library chart `br-service-engine-chart` has its own version line, independent
 of the crate version (a compatibility matrix kept by the deploying platform pairs

@@ -6,7 +6,7 @@ streaming sources, boot, relays, cron, and mirror supervision. Two crates share
 one workspace version: the `service-engine` library a service builds on, and
 `conformance-service-engine`, its black-box conformance battery run against real
 PostgreSQL and NATS JetStream. Not published on crates.io and shipped as no
-image and no CLI: the git tag is the release.
+image and no CLI: the git tag is the release (`v0.4.1` and earlier, `br-service-engine/v{version}` after).
 
 ## Install
 
@@ -1255,7 +1255,7 @@ other difference still fails as `VersionMismatch`. Only the engine's own version
 listed there are read or written, so the library and service rows on the shared
 ledger are never touched. The one entry today is `9113000023`, whose header comment
 v0.3.0 removed after v0.2.0 had applied it. CI
-(`.github/scripts/check-released-migrations.sh`) exports every `v*` tag's engine
+(`.github/scripts/check-released-migrations.sh`) exports every release tag's engine
 migrations and fails when a released file is gone or differs from HEAD without its
 released checksum registered.
 `compose_service!` takes each slice's module, cargo feature and root objects on
@@ -1833,7 +1833,7 @@ spec:
 The chart itself is published to
 `oci://ghcr.io/botresources/charts/br-service-engine-chart` by `chart-release.yml`
 on the first `main` push that changes `Chart.yaml` `version`, tagged
-`chart/br-service-engine-chart/v<version>`, independent of the crate's `v*` tag.
+`chart/br-service-engine-chart/v<version>`, independent of the library's release tag.
 A version already published is never pushed again. The deprecated
 `oci://ghcr.io/botresources/charts/br-engine-service` (1.0.0 – 1.1.1) and its
 `chart/br-engine-service/v*` tags stay as they are; nothing in this repository
