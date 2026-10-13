@@ -48,14 +48,14 @@ fi
 : >"$OUT/listing.txt"
 : >"$OUT/diff.txt"
 for package in $LIBRARY_PACKAGES; do
-    listing="$(cd "$SRC" && cargo public-api -p "$package" --color never)"
+    listing="$(cd "$SRC" && cargo public-api -p "$package" --color never --omit blanket-impls,auto-trait-impls,auto-derived-impls)"
     if [[ -z "$listing" ]]; then
         echo "::error::registry prepare: cargo public-api printed an empty API for ${package} at ${COMMIT}." >&2
         exit 1
     fi
     printf '## %s\n%s\n' "$package" "$listing" >>"$OUT/listing.txt"
     if [[ -n "$BASELINE_TAG" ]]; then
-        changes="$(cd "$SRC" && cargo public-api -p "$package" --color never diff "${BASELINE_TAG}..${COMMIT}")"
+        changes="$(cd "$SRC" && cargo public-api -p "$package" --color never --omit blanket-impls,auto-trait-impls,auto-derived-impls diff "${BASELINE_TAG}..${COMMIT}")"
         printf '## %s\n%s\n' "$package" "$changes" >>"$OUT/diff.txt"
     fi
 done
