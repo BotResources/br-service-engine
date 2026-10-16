@@ -62,7 +62,7 @@ pub async fn pids_still_alive(db: &TestDb, pids: &[i32]) -> i64 {
 }
 
 pub async fn terminate_and_wait(db: &TestDb, application_name: &str) {
-    let terminated = db.terminate_backends(application_name).await;
+    let terminated = db.terminate_listeners(application_name).await;
     if terminated.is_empty() {
         return;
     }

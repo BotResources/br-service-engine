@@ -75,7 +75,7 @@ async fn s031_the_beat_alone_repairs_a_pending_session_with_no_impact_after_the_
     assert_eq!(opening.revision().get(), 1);
 
     switch.store(true, Ordering::Relaxed);
-    db.terminate_backends(REPAIR_LISTENER).await;
+    db.terminate_listeners(REPAIR_LISTENER).await;
     let deadline = tokio::time::Instant::now() + OUTAGE_SETTLES;
     while tokio::time::Instant::now() < deadline {
         assert!(

@@ -214,9 +214,10 @@ impl TestDb {
         pool
     }
 
-    pub async fn terminate_backends(&self, application_name: &str) -> Vec<i32> {
+    pub async fn terminate_listeners(&self, application_name: &str) -> Vec<i32> {
         let sql = "SELECT pid FROM pg_stat_activity \
-                   WHERE datname = $1 AND application_name = $2 AND pid <> pg_backend_pid()";
+                   WHERE datname = $1 AND application_name = $2 AND pid <> pg_backend_pid() \
+                   AND query ILIKE 'LISTEN %'";
         let pids: Vec<i32> = sqlx::query_scalar(sql)
             .bind(&self.database)
             .bind(application_name)
