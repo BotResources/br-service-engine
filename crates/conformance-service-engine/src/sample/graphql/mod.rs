@@ -16,7 +16,9 @@ pub use boot::{
     boot_rls_query_service, root_field_collision, type_collision,
 };
 pub use counted::{CountedQueryRoot, boot_counted_service};
-pub use facts::boot_fact_service;
+pub use facts::{
+    FactResolver, boot_bare_schema_fact_service, boot_fact_service, boot_fact_service_resolving,
+};
 pub use forbidden::{SAMPLE_REFUSED, boot_forbidden_service};
 pub use negative::{
     boot_colliding_slices, boot_field_outside_prefix, boot_undeclared_root_field,

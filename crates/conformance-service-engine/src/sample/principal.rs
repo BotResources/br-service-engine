@@ -103,6 +103,18 @@ impl PrincipalResolver<SamplePrincipal> for FailingPrincipalResolver {
     }
 }
 
+pub struct EchoPrincipalResolver;
+
+impl PrincipalResolver<SamplePrincipal> for EchoPrincipalResolver {
+    fn resolve<'a>(
+        &'a self,
+        _pg: &'a PgPool,
+        current: &'a SamplePrincipal,
+    ) -> BoxFuture<'a, Result<Option<SamplePrincipal>, EngineError>> {
+        Box::pin(async move { Ok(Some(current.clone())) })
+    }
+}
+
 pub struct SamplePrincipalResolver;
 
 impl PrincipalResolver<SamplePrincipal> for SamplePrincipalResolver {

@@ -2,6 +2,7 @@ mod body;
 mod compose;
 mod convert;
 mod error;
+mod fresh;
 mod multipart;
 mod mutation;
 mod prefix;
