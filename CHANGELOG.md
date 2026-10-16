@@ -21,6 +21,7 @@ A patch of 0.4.1. No adopter source changes, but the pins move together: in one 
 ### Changed
 
 - Every `br-rust-common` dependency moves from the legacy workspace tag `v1.3.0` to the per-crate tags `{crate}/v{version}`, each at its latest release (`br-util-postgres/v0.1.1`, the other seven at `v0.1.0`).
+- The `conformance-service-engine` dev-dependency on `br-test-harness` moves from `v1.2.0` to `br-test-harness/v0.1.1`, so the tests share one copy of each `br-rust-common` type with the engine.
 - `rustls` moves to 0.23.46 in the lockfile, which clears the RUSTSEC-2026-0346, -0347 and -0348 advisories `cargo deny` reported.
 - The release is tagged `br-service-engine/v0.4.2` and recorded in the Libraries registry.
 
