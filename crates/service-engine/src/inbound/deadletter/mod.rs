@@ -93,5 +93,3 @@ impl DeadLetters {
 
 mod record;
 mod store;
-
-pub(crate) use record::stage_published_value_in;

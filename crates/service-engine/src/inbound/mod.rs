@@ -20,10 +20,10 @@ pub use budget::{
     Budgets, DEFAULT_BACKOFF_BASE, DEFAULT_BACKOFF_MAX, DEFAULT_DELIVERY_BUDGET,
     DEFAULT_PARKING_BUDGET, Route, route,
 };
+pub(crate) use deadletter::StagedDeadLetter;
 pub use deadletter::{
     DEAD_LETTER_NOUN, DeadLetter, DeadLetterSource, DeadLetters, DiscardOutcome, RetryOutcome,
 };
-pub(crate) use deadletter::{StagedDeadLetter, stage_published_value_in};
 pub use dispatch::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
 pub(crate) use disposition::log_reaction_db_fault;
 pub use disposition::{Disposition, ReactionError, sqlx_is_terminal};

@@ -161,6 +161,57 @@ async fn s282_the_dead_letter_survives_a_drain_that_rolls_back_after_the_key_is_
     db.cleanup().await;
 }
 
+#[tokio::test]
+async fn s282_a_relay_without_dead_letters_fails_closed_and_leaves_the_bad_value_untouched() {
+    let db = TestDb::fresh().await;
+    let nats = TestNats::spawn().await;
+    nats.provision().await;
+    let fabric = nats.nats().await;
+    let reader = fabric
+        .published_language::<SampleRoster>()
+        .await
+        .expect("the fixed bucket binds");
+    let key = KvKey::new(ROSTER_KEY).expect("a valid published-language key");
+
+    let mut engine = runtime("se-leader-0");
+    engine
+        .register(
+            KvDrainRelay::open(
+                RelayName::from_static("kv_drain"),
+                &fabric,
+                SampleKvSource::new(Duration::ZERO),
+            )
+            .await
+            .expect("the relay binds the published-language bucket"),
+        )
+        .expect("the kv relay registers");
+
+    nats.put_raw(ROSTER_KEY, b"not json").await;
+    queue(db.app_pool(), 1, Some("first")).await;
+    tokio::time::sleep(SLOT).await;
+    let round = engine.beat(db.app_pool()).await;
+
+    assert_eq!(round.failed, 1, "the beat reports the refused isolation");
+    assert_eq!(round.rows, 0);
+    assert!(
+        reader.get(&key).await.is_err(),
+        "the bad bytes are still under the key"
+    );
+    assert!(nats.holds(ROSTER_KEY).await, "the key was not touched");
+    let pending: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sample_kv_pending WHERE applied_at IS NULL")
+            .fetch_one(db.app_pool())
+            .await
+            .expect("count pending changes");
+    assert_eq!(pending, 1, "the change is still pending");
+    assert!(
+        dead_letter_rows(db.app_pool()).await.is_empty(),
+        "no dead letter exists"
+    );
+
+    db.cleanup().await;
+}
+
 fn runtime(pod: &str) -> RelayRuntime {
     RelayRuntime::new(PodId::new(pod).expect("a valid pod id"))
         .with_batch(8)

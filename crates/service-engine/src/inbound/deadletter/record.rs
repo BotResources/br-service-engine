@@ -1,7 +1,5 @@
-use sqlx::PgConnection;
 use uuid::Uuid;
 
-use super::store::upsert;
 use crate::inbound::deadletter::{DeadLetterSource, DeadLetters, StagedDeadLetter};
 use crate::inbound::message::Incoming;
 
@@ -25,19 +23,8 @@ fn published_value_entry<'a>(owner: &'a str, key: &'a str, error: &'a str) -> St
     }
 }
 
-pub(crate) async fn stage_published_value_in(
-    conn: &mut PgConnection,
-    owner: &str,
-    key: &str,
-    error: &str,
-) -> Result<(), sqlx::Error> {
-    upsert(conn, &published_value_entry(owner, key, error))
-        .await
-        .map(|_| ())
-}
-
 impl DeadLetters {
-    pub async fn record_published_value(
+    pub(crate) async fn record_published_value(
         &self,
         owner: &str,
         key: &str,

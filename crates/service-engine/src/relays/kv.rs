@@ -4,7 +4,7 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::error::RelayError;
-use crate::inbound::{DeadLetters, stage_published_value_in};
+use crate::inbound::DeadLetters;
 use crate::name::RelayName;
 use crate::nats::{KvBucket, KvKey, Nats, NatsError, Slot};
 use crate::relay::{Claim, Discipline, Drained, Relay};
@@ -104,22 +104,16 @@ where
         kv_watermark::clear(conn, &self.name).await
     }
 
-    async fn dead_letter(
-        &self,
-        conn: &mut PgConnection,
-        key: &KvKey,
-        reason: &str,
-    ) -> Result<(), RelayError> {
-        match &self.dead_letters {
-            Some(dead_letters) => {
-                dead_letters
-                    .record_published_value(self.name.as_str(), key.as_str(), reason)
-                    .await?
-            }
-            None => {
-                stage_published_value_in(conn, self.name.as_str(), key.as_str(), reason).await?
-            }
-        }
+    async fn dead_letter(&self, key: &KvKey, reason: &str) -> Result<(), RelayError> {
+        let dead_letters = self.dead_letters.as_ref().ok_or_else(|| {
+            RelayError::Publish(format!(
+                "relay {} met an undecodable published value without dead letters; attach them with with_dead_letters before it can be isolated",
+                self.name
+            ))
+        })?;
+        dead_letters
+            .record_published_value(self.name.as_str(), key.as_str(), reason)
+            .await?;
         Ok(())
     }
 
@@ -139,7 +133,7 @@ where
                     reason = %reason,
                     "an undecodable value sits under a published key; it is dead-lettered and overwritten or retracted",
                 );
-                self.dead_letter(conn, &change.key, &reason).await?;
+                self.dead_letter(&change.key, &reason).await?;
             }
             let published = observed.as_ref().and_then(|(slot, _)| match slot {
                 Slot::Value(value) => Some(value.version()),
