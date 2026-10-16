@@ -3,8 +3,7 @@ mod blackbox_support;
 use std::time::{Duration, Instant};
 
 use blackbox_support::sse::{EVENT_STREAM, Frame, SseFrames, stalled_request};
-use blackbox_support::{SessionBounds, World, human, ok, passport};
-use br_test_harness::SseSubscription;
+use blackbox_support::{SessionBounds, World, ok, passport};
 use uuid::Uuid;
 
 const BOARD_ARCHIVE: &str = "example:board_archive";
@@ -52,12 +51,7 @@ async fn bb16_a_gateway_sse_subscription_resets_then_upserts_on_a_contiguous_rev
     let board = Uuid::now_v7();
     create_board(&world, &pass, board).await;
 
-    let mut sse = SseSubscription::open(
-        world.base_url(),
-        &human(user, org, &[BOARD_ARCHIVE], false),
-        SUB,
-    )
-    .await;
+    let mut sse = SseFrames::open(world.base_url(), Some(&pass), SUB).await;
     let reset = sse.expect_event_on("exampleBoardDeltas", RECV).await;
     assert_eq!(
         reset["__typename"], "BoardReset",
