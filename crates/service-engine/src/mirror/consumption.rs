@@ -6,10 +6,11 @@ use futures_util::stream::BoxStream;
 use sqlx::PgPool;
 
 use crate::error::EngineError;
-use crate::nats::{KvEvent, KvKey, Nats, Watched};
+use crate::nats::{KvKey, Nats, Seen, Slot};
 
 use super::change::{Change, ChangeOp};
 use super::consumed::{Consumed, ConsumedManifest};
+use super::rejection::{undecodable_reason, wire_version_reason};
 use super::scope::{KeyScope, ScopeRefusal};
 use super::shadow::Shadows;
 
@@ -20,11 +21,7 @@ pub(super) type ReconcileKeysFn<K> =
 
 pub(super) enum Effect {
     Apply(Applier),
-    WireVersionRejected {
-        expected: u16,
-        found: u16,
-        retire: Applier,
-    },
+    Rejected { reason: String, retire: Applier },
     Boundary,
 }
 
@@ -74,12 +71,25 @@ fn scope_of<C: Consumed>() -> Result<KeyScope, EngineError> {
     KeyScope::parse(C::PREFIX).map_err(|refusal| refused(C::PREFIX, &refusal))
 }
 
+fn retire<C: Consumed>(key: KvKey, revision: u64) -> Applier {
+    Box::new(move |shadows: &mut Shadows| shadows.remove_at::<C>(&key, revision))
+}
+
+fn slot_effect<C: Consumed>(key: KvKey, slot: Slot<C>, revision: u64) -> Effect {
+    match slot {
+        Slot::Value(value) => wire_effect::<C>(key, value, revision),
+        Slot::Undecodable(fault) => Effect::Rejected {
+            reason: undecodable_reason(&fault),
+            retire: retire::<C>(key, revision),
+        },
+    }
+}
+
 fn wire_effect<C: Consumed>(key: KvKey, value: C, revision: u64) -> Effect {
     match C::wire_version(&value) {
-        Some(found) if found != C::VERSION => Effect::WireVersionRejected {
-            expected: C::VERSION,
-            found,
-            retire: Box::new(move |shadows: &mut Shadows| shadows.remove_at::<C>(&key, revision)),
+        Some(found) if found != C::VERSION => Effect::Rejected {
+            reason: wire_version_reason(C::VERSION, found),
+            retire: retire::<C>(key, revision),
         },
         _ => Effect::Apply(Box::new(move |shadows: &mut Shadows| {
             shadows.put_at::<C>(key, value, revision)
@@ -93,22 +103,21 @@ impl Consumption {
             Box::pin(async move {
                 let bucket = nats.bind_kv::<C>(C::bucket()).await.map_err(service)?;
                 let entries = match scope_of::<C>()? {
-                    KeyScope::Prefix { prefix, .. } => bucket
-                        .entries_with_revisions(&prefix)
-                        .await
-                        .map_err(service)?,
+                    KeyScope::Prefix { prefix, .. } => {
+                        bucket.entries_isolating(&prefix).await.map_err(service)?
+                    }
                     KeyScope::Key(key) => bucket
-                        .get_with_revision(&key)
+                        .get_isolating(&key)
                         .await
                         .map_err(service)?
-                        .map(|(value, revision)| (key, value, revision))
+                        .map(|(slot, revision)| (key, slot, revision))
                         .into_iter()
                         .collect(),
                 };
                 let entries = entries
                     .into_iter()
-                    .map(|(key, value, revision)| {
-                        let effect = wire_effect::<C>(key.clone(), value, revision.get());
+                    .map(|(key, slot, revision)| {
+                        let effect = slot_effect::<C>(key.clone(), slot, revision.get());
                         (key, effect)
                     })
                     .collect();
@@ -122,7 +131,7 @@ impl Consumption {
                 let stream = futures_util::stream::unfold(
                     (bucket.watch_all_from(from).await.map_err(service)?, scope),
                     |(mut watch, scope)| async move {
-                        match watch.next_where::<C>(|key| scope.matches(key)).await {
+                        match watch.next_seen_where::<C>(|key| scope.matches(key)).await {
                             None => None,
                             Some(Err(error)) => Some((Err(service(error)), (watch, scope))),
                             Some(Ok(watched)) => {
@@ -162,26 +171,26 @@ impl Consumption {
     }
 }
 
-fn into_update<C: Consumed>(watched: Watched<C>) -> Update {
-    match watched {
-        Watched::Boundary(revision) => Update {
+fn into_update<C: Consumed>(seen: Seen<C>) -> Update {
+    match seen {
+        Seen::Boundary(revision) => Update {
             bucket: C::bucket(),
             change: None,
             effect: Effect::Boundary,
             revision,
         },
-        Watched::Event(KvEvent::Put {
+        Seen::Put {
             key,
-            value,
+            slot,
             revision,
-        }) => {
+        } => {
             let change = Change {
                 prefix: C::PREFIX,
                 key: key.clone(),
                 op: ChangeOp::Put,
             };
             let revision = revision.get();
-            let effect = wire_effect::<C>(key, value, revision);
+            let effect = slot_effect::<C>(key, slot, revision);
             Update {
                 bucket: C::bucket(),
                 change: Some(change),
@@ -189,16 +198,14 @@ fn into_update<C: Consumed>(watched: Watched<C>) -> Update {
                 revision,
             }
         }
-        Watched::Event(KvEvent::Delete { key, revision }) => {
+        Seen::Delete { key, revision } => {
             let change = Change {
                 prefix: C::PREFIX,
                 key: key.clone(),
                 op: ChangeOp::Delete,
             };
             let revision = revision.get();
-            let effect = Effect::Apply(Box::new(move |shadows: &mut Shadows| {
-                shadows.remove_at::<C>(&key, revision)
-            }));
+            let effect = Effect::Apply(retire::<C>(key, revision));
             Update {
                 bucket: C::bucket(),
                 change: Some(change),
@@ -210,59 +217,4 @@ fn into_update<C: Consumed>(watched: Watched<C>) -> Update {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Clone, Serialize, Deserialize)]
-    struct CutMidSegment {
-        #[allow(dead_code)]
-        v: u32,
-    }
-    impl Consumed for CutMidSegment {
-        const PREFIX: &'static str = "catalog/item_";
-    }
-
-    #[derive(Clone, Serialize, Deserialize)]
-    struct Single {
-        #[allow(dead_code)]
-        v: u32,
-    }
-    impl Consumed for Single {
-        const PREFIX: &'static str = "catalog.settings";
-    }
-
-    #[derive(Clone, Serialize, Deserialize)]
-    struct Dotted {
-        #[allow(dead_code)]
-        v: u32,
-    }
-    impl Consumed for Dotted {
-        const PREFIX: &'static str = "catalog.item.";
-    }
-
-    #[test]
-    fn a_consumption_cut_mid_segment_defers_the_error_instead_of_panicking() {
-        let consumption = Consumption::of::<CutMidSegment>();
-        assert_eq!(consumption.scope, Err(ScopeRefusal::MidSegment('_')));
-    }
-
-    #[test]
-    fn a_single_key_consumption_carries_no_manifest() {
-        let consumption = Consumption::of::<Single>();
-        let scope = consumption.scope.expect("a whole key is accepted");
-        assert_eq!(scope.manifest(), None);
-    }
-
-    #[test]
-    fn a_dot_prefix_consumption_carries_its_sibling_manifest() {
-        let consumption = Consumption::of::<Dotted>();
-        let scope = consumption
-            .scope
-            .expect("a dot-terminated prefix is accepted");
-        assert_eq!(
-            scope.manifest().map(KvKey::as_str),
-            Some("catalog.item_manifest")
-        );
-    }
-}
+mod tests;
