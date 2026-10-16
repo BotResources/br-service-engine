@@ -26,6 +26,13 @@ A patch of 0.4.1. No adopter source changes, but the pins move together: in one 
 - `rustls` moves to 0.23.46 in the lockfile, which clears the RUSTSEC-2026-0346, -0347, -0348 and -0349 advisories `cargo deny` reported.
 - The release is tagged `br-service-engine/v0.4.2` and recorded in the Libraries registry.
 - `conformance-service-engine` no longer depends on `br-test-harness`: its tests read server-sent events with a reader of their own, and the `deny.toml` git source for the harness repository is gone.
+- **Behavior change on `/graphql/ws`.** A query or a mutation on the socket now needs a registered `PrincipalResolver`, and every socket operation needs a principal that the resolver can resolve. A service whose resolver returns nothing for a principal gets `UNAUTHENTICATED` on the socket for that operation; a service with no registered `PrincipalResolver` gets `INTERNAL`. A schema not built with `engine_schema` serves no principal on the socket.
+
+### Added
+
+- `config::MIN_DURATION` (one microsecond), the floor `EngineConfig::validate` applies to every duration.
+- `EngineError::SchemaClaimLost { engine_version, service_version }`, returned by `Engine::run` when the pod loses the schema-version claim.
+- `EngineError::SignalHandlers`, returned when the process signal handlers cannot be installed.
 
 ### Fixed
 
@@ -34,6 +41,11 @@ A patch of 0.4.1. No adopter source changes, but the pins move together: in one 
 
 - **An undecodable value under an offer or consumed prefix no longer stops the offer or restarts the mirror in a loop.** It is dead-lettered like a wrong-wire-version value (own reason code, idempotent per reaction or mirror and key, the value is never stored in the row), it is not applied, and the other values keep projecting, draining and publishing. Every KV decode site in the offer, relay and mirror code is isolated. `KvDrainRelay` fails closed (`RelayError::Publish`) when it meets an undecodable value without `DeadLetters` attached through `with_dead_letters`: the value is left untouched and the change stays pending.
 - `conformance-service-engine` reconnect scenarios (`s031`, `s033`, `s034`) no longer fail one run in ten under load. `terminate_backends` kills in one statement, `terminate_and_wait` targets only the backend that holds the `LISTEN`, and fails when there is none, so a killed pooled sibling can no longer cause a second `Reconnected` and a second `Reset`.
+- **`POST /graphql` and the `/graphql/ws` upgrade answer a refused passport with a GraphQL error envelope.** An absent, malformed or rejected passport on `POST /graphql` (JSON, multipart and event stream) and on the `/graphql/ws` upgrade is answered HTTP `401` with `Content-Type: application/json` and a body of one error, message `unauthorized` and `extensions.code` `UNAUTHENTICATED`. The body used to be plain text. The rejection detail goes to the `debug` log only and never reaches the client. Covered by `s270`.
+- **A WebSocket operation no longer runs under the principal of the upgrade.** `engine_schema` registers an extension (`graphql/fresh.rs`) that, for every operation on `/graphql/ws` (an attach, a query, a mutation, a gated read), resolves the principal again through the registered `PrincipalResolver`, reloads its facts and hands that principal to the resolvers; the upgrade-time principal is no longer reachable from a socket resolver. A principal that resolves to nothing is refused `UNAUTHENTICATED` at that operation; a resolver fault, a fact-loader fault or a missing `PrincipalResolver` is answered `INTERNAL`; the socket stays open. The refresh runs once per operation, before any resolver takes a pooled connection. Covered by `s271` and `s272`.
+- **Boot refuses durations that never worked.** `EngineConfig::validate` refuses a blob `download_ttl` outside 1 second to 7 days and a blob `upload_ttl` outside 1 millisecond to 7 days, before the schema claim, and refuses every other `EngineConfig` duration under `config::MIN_DURATION` (one microsecond), not only zero. Earlier a zero `blob_reaper_interval` booted and the reaper never ran, and a sub-second `download_ttl` booted and signed every download URL with `X-Amz-Expires=0`.
+- **A pod that loses the schema-version claim now stops.** When the beat's heartbeat updates no row because another version holds the claim, the pod stops all its workers through the graceful shutdown path, lowers readiness with `REASON_SCHEMA_VERSION_DISPLACED`, and `Engine::run` returns `EngineError::SchemaClaimLost`. Earlier the pod only lowered readiness while its relays, cron and mirrors kept writing.
+- **`run_service` handles `SIGTERM` and `SIGINT` as a graceful shutdown.** Its `serve` entry point installs the handlers and requests the same shutdown as `Engine::shutdown_handle`; a signal that arrives while the pod is still booting exits `Ok` before it serves. `Engine::run` and `Engine::run_with` install no handler, so a service that drives `Engine` itself and installs its own signal task is unaffected.
 
 The compatibility entry for this release is chart `br-service-engine-chart` 2.0.0 ↔ engine 0.4.2.
 

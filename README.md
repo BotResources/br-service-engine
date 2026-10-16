@@ -52,7 +52,7 @@ battery-backed.
 
 | Module | Responsibility |
 |---|---|
-| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies the engine, library and service migration sets in that order, waits for the app role, grants it every schema), `serve` (app role, refuses an unmigrated store and names the pending set, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies the engine, library and service migration sets in that order, waits for the app role, grants it every schema), `serve` (app role, refuses an unmigrated store and names the pending set, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, handles `SIGTERM` and `SIGINT` as a graceful shutdown (the path of `Engine::shutdown_handle`; a signal that arrives while it is still booting exits `Ok` before it serves), and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
@@ -660,10 +660,14 @@ kit does authZ only, never authN. On `POST /graphql` it does so from the headers
 alone, **before it reads a byte of the request body**: a request whose passport is
 absent, does not decode or is rejected is answered `401` with the body untouched,
 whatever its content type, so an unauthenticated client can make the pod neither
-buffer nor write anything. The `401` body is plain text, not JSON: the message
-clients have always received (`the X-Passport header is absent`, `… is malformed:
-…`, `the passport is rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
-(below), also before the body is read.
+buffer nor write anything. The `/graphql/ws` upgrade is refused the same way. The
+`401` body is a GraphQL error envelope (`Content-Type: application/json`) with the
+message `unauthorized` and `extensions.code` `UNAUTHENTICATED`, for all three
+causes, on JSON, multipart and event-stream requests and on the upgrade. The
+cause (`the X-Passport header is absent`, `… is malformed: …`, `the passport is
+rejected: …`) goes to the `debug` log only and never reaches the client. Principal
+facts the pod cannot load are answered `500` `INTERNAL` (below), also before the
+body is read.
 
 The principal contract. `PassportPrincipal::from_passport(passport) ->
 Result<Self, PrincipalRejected>` is pure and synchronous: it gets no pool and
@@ -683,6 +687,20 @@ answered `INTERNAL`; only a `PrincipalResolver` answering `None` refuses it with
 outcome: a denial read from local data is authorization (`FORBIDDEN`, or an
 affordance `reasonCode`), never a `401`, because authentication belongs to the
 gateway.
+
+On `/graphql/ws` the upgrade principal is kept only to be resolved again:
+`engine_schema` registers an extension (`graphql/fresh.rs`) that, for every
+operation on the socket — an attach, a query, a mutation, a gated read — resolves
+the principal again through the registered `PrincipalResolver`, reloads its
+facts, and hands that principal to the resolvers. The upgrade-time principal is
+not reachable from a socket resolver. A principal that resolves to nothing is
+refused `UNAUTHENTICATED` at that operation; a resolver fault, a fact-loader fault
+or a missing `PrincipalResolver` is answered `INTERNAL`; the socket stays open in
+all three cases. A query or a mutation on the socket therefore needs a registered
+`PrincipalResolver`, and a schema not built with `engine_schema` serves no
+principal on the socket at all (it fails closed). The refresh runs once per
+operation, before any resolver takes a pooled connection. `POST /graphql` is
+unchanged: its principal is resolved once, from the request headers.
 
 | Thing | Why it is the way it is |
 |---|---|
@@ -1608,14 +1626,19 @@ environment): a live pod's heartbeat must never lapse between two of its own bea
 
 A stopping pod does not expire its own heartbeat. Between such an expiry and a
 same-version sibling's next beat, another version could claim the row; the
-displaced sibling would only lower readiness while its relays, cron and mirrors
-keep writing — two versions on one store.
+displaced sibling then stops, so two versions never write one store.
 
 If the beat's heartbeat later updates **no** row — another version claimed the
 singleton while this pod ran, because its beat stalled past that version's
-`schema_version_liveness` — the pod has been displaced: it lowers readiness to
-DOWN rather than keep serving over a store it no longer owns, and it recovers when
-it once again owns the row.
+`schema_version_liveness` — the pod has been displaced. It runs the graceful
+shutdown path (the same one `Engine::shutdown_handle` starts): it lowers readiness
+to DOWN with the reason `REASON_SCHEMA_VERSION_DISPLACED` and stops every worker
+(render, beat, flush, mirrors, presence, scheduled messages, inbound loop,
+ingress and purge), so its relays, cron and mirrors write nothing more, and
+`Engine::run` returns `EngineError::SchemaClaimLost` naming both versions instead
+of `Ok`. The pod does not recover in place and does not take the claim back by
+itself: a pod that is started again claims the row at boot, through the handover
+above.
 
 ## Ops contract v1 — chart `br-service-engine-chart` 2.x
 
@@ -1860,24 +1883,27 @@ promotion step writes the promoted chart version into the wrapper.
 ## Configuration, degradation and observability
 
 `EngineConfig` carries one clock and a handful of bounds, every one validated
-at `Engine::boot`: durations and capacities are non-zero,
-`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` and
+at `Engine::boot`: every duration is at least `config::MIN_DURATION` (one
+microsecond), capacities are non-zero, a blob `download_ttl` lies between 1 second
+and 7 days and a blob `upload_ttl` between 1 millisecond and 7 days (the bounds
+S3 presigning accepts), `listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` and
 `schema_version_liveness` outlast the `beat`, `session_max_age` outlasts the
 idle `session_ttl`, `max_body_bytes` is non-zero, a multipart `max_file_bytes`
 the service sets is non-zero and within `max_body_bytes` (unset, it follows a
-lower `max_body_bytes` down), and `body_read_timeout` is non-zero. A session
+lower `max_body_bytes` down). A session
 lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
 reaps an attach still not live after it (a dropped stream is reaped at the next
 pass). The bound is on the connection, not
-only the session: the WebSocket principal is resolved once at the handshake and
-serves every operation on that socket — subscriptions and mutations alike — so
-the kit closes the `graphql-transport-ws` connection itself at `session_max_age`
-measured from the handshake, with a `1001` going-away close frame the client
-recognises as a reconnect. A revoked scope therefore cannot keep an affordance
-allowed by keeping the socket open and re-subscribing, and a mutation over the
-socket runs under a principal no older than the bound. The client opens a new
+only the session: the passport of a WebSocket is read once at the handshake and
+serves every operation on that socket — subscriptions and mutations alike —
+while the principal built from it is resolved again, and its facts reloaded, at
+each operation. So the kit closes the `graphql-transport-ws` connection itself at
+`session_max_age` measured from the handshake, with a `1001` going-away close frame
+the client recognises as a reconnect. A revoked scope therefore cannot keep an
+affordance allowed by keeping the socket open and re-subscribing, and a mutation
+over the socket runs under a passport no older than the bound. The client opens a new
 upgrade on which the gateway re-injects the resolved `X-Passport`, so the fresh
 socket carries the current passport. An event stream on `POST /graphql` — the
 gateway's subscription leg — is bounded the same way: its principal is resolved
