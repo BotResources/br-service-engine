@@ -6,6 +6,7 @@ use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::graphql::{
     SAMPLE_REFUSED, boot_forbidden_service, boot_graphql_service, passport_for,
 };
+use conformance_service_engine::sample::render::member;
 use graphql_support::{GraphqlWs, post_json};
 use uuid::Uuid;
 
@@ -52,7 +53,9 @@ async fn s115_a_resolver_refusal_is_a_coded_graphql_error_never_a_transport_erro
     nats.provision().await;
 
     let service = boot_forbidden_service(&db, nats.nats().await, "se_s115f", "pod-s115f").await;
-    let passport = passport_for(Uuid::now_v7(), Uuid::now_v7()).to_header();
+    let (user, tenant) = (Uuid::now_v7(), Uuid::now_v7());
+    member(db.app_pool(), user, tenant).await;
+    let passport = passport_for(user, tenant).to_header();
 
     let (status, body) = post_json(
         &service.base_url,
@@ -106,7 +109,9 @@ async fn s115_a_refusal_forwarded_with_question_mark_answers_its_reason_code() {
     nats.provision().await;
 
     let service = boot_forbidden_service(&db, nats.nats().await, "se_s115q", "pod-s115q").await;
-    let passport = passport_for(Uuid::now_v7(), Uuid::now_v7()).to_header();
+    let (user, tenant) = (Uuid::now_v7(), Uuid::now_v7());
+    member(db.app_pool(), user, tenant).await;
+    let passport = passport_for(user, tenant).to_header();
     let refused = serde_json::json!(SAMPLE_REFUSED.code());
 
     let (status, body) = post_json(

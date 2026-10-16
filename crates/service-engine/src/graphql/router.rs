@@ -14,8 +14,8 @@ use tokio::net::TcpListener;
 
 use crate::error::EngineError;
 use crate::graphql::body::{self, BodyPolicy};
-use crate::graphql::current::SocketOrigin;
 use crate::graphql::error::UNAUTHENTICATED_MESSAGE;
+use crate::graphql::fresh::UpgradePrincipal;
 use crate::graphql::multipart::{MultipartPolicy, declares_upload_scalar};
 use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
 use crate::graphql::refusal::coded_refusal;
@@ -175,8 +175,7 @@ where
         .protocols(ALL_WEBSOCKET_PROTOCOLS)
         .on_upgrade(move |socket| async move {
             let mut data = Data::default();
-            data.insert(principal);
-            data.insert(SocketOrigin);
+            data.insert(UpgradePrincipal(principal));
             crate::graphql::ws::serve_bounded(socket, schema, protocol, data, max_age, shutdown)
                 .await
         })

@@ -112,7 +112,7 @@ async fn s271_a_new_operation_on_a_socket_after_a_revocation_is_refused_not_serv
 }
 
 #[tokio::test]
-async fn s271_a_new_subscription_on_a_socket_loads_the_facts_of_the_moment_not_those_of_the_upgrade()
+async fn s271_a_new_subscription_on_a_socket_resolves_the_principal_of_the_moment_not_the_one_of_the_upgrade()
  {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
