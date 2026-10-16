@@ -1626,7 +1626,7 @@ environment): a live pod's heartbeat must never lapse between two of its own bea
 
 A stopping pod does not expire its own heartbeat. Between such an expiry and a
 same-version sibling's next beat, another version could claim the row; the
-displaced sibling then stops, so two versions never write one store.
+displaced sibling then stops at its next heartbeat, so two versions write one store only until that heartbeat and the drain of the frames in flight end.
 
 If the beat's heartbeat later updates **no** row — another version claimed the
 singleton while this pod ran, because its beat stalled past that version's

@@ -17,7 +17,6 @@ const RETRY_FLOOR: Duration = Duration::from_millis(250);
 
 pub(crate) async fn migrate<Q, M, S, R>(plan: BootPlan<Q, M, S, R>) -> Result<(), EngineError> {
     init_logging(plan.component);
-    plan.config.validate()?;
 
     let owner_url = owner_database_url()?;
     let owner = connect_owner(&owner_url, plan.config.migrate_connect_timeout).await?;

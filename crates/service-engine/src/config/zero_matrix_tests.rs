@@ -41,9 +41,6 @@ const DURATIONS: &[(&str, SetDuration)] = &[
     ("schema_version_liveness", |c, value| {
         c.schema_version_liveness = value
     }),
-    ("migrate_connect_timeout", |c, value| {
-        c.migrate_connect_timeout = value
-    }),
 ];
 
 const ZERO_BOUNDS: &[(&str, Zero)] = &[
@@ -75,7 +72,7 @@ fn refusal_naming(label: &str, zero: impl FnOnce(&mut EngineConfig)) -> String {
 
 #[test]
 fn every_duration_the_engine_waits_on_is_refused_below_one_microsecond_by_name() {
-    assert_eq!(DURATIONS.len(), 18);
+    assert_eq!(DURATIONS.len(), 17);
     for (label, set) in DURATIONS {
         for value in [
             Duration::ZERO,
@@ -194,7 +191,7 @@ fn every_engine_config_field_is_classified_so_a_new_one_cannot_skip_validation()
         blob_reaper_interval,
         schema_version_liveness,
         http_addr: _,
-        migrate_connect_timeout,
+        migrate_connect_timeout: _,
         channel: _,
         pod_id: _,
         nats_url: _,
@@ -206,7 +203,7 @@ fn every_engine_config_field_is_classified_so_a_new_one_cannot_skip_validation()
         multipart: _,
         body_read_timeout,
     } = config();
-    let durations: [(&str, Duration); 18] = [
+    let durations: [(&str, Duration); 17] = [
         ("window", window),
         ("beat", beat),
         ("session_ttl", session_ttl),
@@ -224,7 +221,6 @@ fn every_engine_config_field_is_classified_so_a_new_one_cannot_skip_validation()
         ("body_read_timeout", body_read_timeout),
         ("blob_reaper_interval", blob_reaper_interval),
         ("schema_version_liveness", schema_version_liveness),
-        ("migrate_connect_timeout", migrate_connect_timeout),
     ];
     let counts: [(&str, u64); 11] = [
         ("session_buffer", session_buffer as u64),

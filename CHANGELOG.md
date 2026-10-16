@@ -16,7 +16,7 @@ continues its version line.
 
 ## 0.4.2 - 2026-10-16
 
-A patch of 0.4.1. No adopter source changes, but the pins move together: in one change a service re-pins every br-rust-common crate whose types the engine API names (br-core-auth for Passport, br-core-kernel for Actor, br-core-integration for EventCoords and CommandCoords, br-core-scope for the ScopeError payloads, br-util-axum-readiness for Readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
+A patch of 0.4.1. It needs no source change in a service that builds, but it refuses some configurations and database URLs that 0.4.1 accepted (see Changed and Fixed: foreign-scheme or hostless database URLs, `host=`/`hostaddr=` overrides, durations under one microsecond, blob TTLs outside their ranges, socket operations without a resolvable principal). The pins move together: in one change a service re-pins every br-rust-common crate whose types the engine API names (br-core-auth for Passport, br-core-kernel for Actor, br-core-integration for EventCoords and CommandCoords, br-core-scope for the ScopeError payloads, br-util-axum-readiness for Readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
 
 ### Changed
 
