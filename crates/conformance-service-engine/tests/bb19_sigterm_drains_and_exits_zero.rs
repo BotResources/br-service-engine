@@ -5,10 +5,12 @@ use std::time::Duration;
 use blackbox_support::bin::{read_log, wait_exit};
 use blackbox_support::signal::send_signal;
 use blackbox_support::{GraphqlWs, World, ok, passport};
+use service_engine::housekeeping::ready::REASON_SHUTTING_DOWN;
 use uuid::Uuid;
 
 const BOARD_ARCHIVE: &str = "example:board_archive";
 const RECV: Duration = Duration::from_secs(15);
+const CLOSE_CODE_GOING_AWAY: u16 = 1001;
 const CLOSE_WITHIN: Duration = Duration::from_secs(15);
 const EXIT_WITHIN: Duration = Duration::from_secs(30);
 const SUB: &str = "subscription{exampleBoardDeltas{__typename \
@@ -38,7 +40,11 @@ async fn bb19_a_sigterm_to_the_serve_binary_ends_every_session_and_exits_zero() 
 
     send_signal(world.service.pid(), "TERM");
 
-    ws.expect_close(CLOSE_WITHIN).await;
+    let (code, reason) = ws.expect_close(CLOSE_WITHIN).await;
+    assert_eq!(
+        code, CLOSE_CODE_GOING_AWAY,
+        "the session is closed as going away, got {code} {reason}"
+    );
     let status = wait_exit(world.service.child_mut(), EXIT_WITHIN)
         .await
         .expect("the binary exits by itself after SIGTERM instead of being killed");
@@ -50,6 +56,11 @@ async fn bb19_a_sigterm_to_the_serve_binary_ends_every_session_and_exits_zero() 
     assert!(
         log.contains("process signal received") && log.contains("SIGTERM"),
         "the binary logs the signal that started the shutdown, got:\n{log}"
+    );
+
+    assert!(
+        log.contains(REASON_SHUTTING_DOWN),
+        "readiness is lowered with the shutting-down reason before the engine drains, got:\n{log}"
     );
 
     world.cleanup().await;

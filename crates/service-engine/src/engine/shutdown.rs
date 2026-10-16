@@ -79,6 +79,10 @@ pub(crate) async fn finish<P: Principal>(
     readiness_guard: &ReadinessHandle,
 ) -> Result<(), EngineError> {
     readiness_guard.set_not_ready(REASON_SHUTTING_DOWN);
+    tracing::info!(
+        reason = REASON_SHUTTING_DOWN,
+        "readiness lowered: the engine drains"
+    );
     tasks.render_handle.begin_shutdown();
     stops.render.stop();
     stops.beat.stop();
