@@ -19,10 +19,12 @@ enum Boot {
 
 impl<P: Principal> Engine<P> {
     pub async fn run(self) -> Result<(), EngineError> {
-        let slices =
-            crate::graphql::SchemaSlices::assemble(&self.schema_slices, self.root_prefix.as_ref())?;
+        let slices = Arc::new(crate::graphql::SchemaSlices::assemble(
+            &self.schema_slices,
+            self.root_prefix.as_ref(),
+        )?);
         if let Some(sdl) = &self.schema_sdl {
-            slices.verify(sdl)?;
+            slices.verify_on_known_stack(sdl.clone()).await?;
         }
         self.policy_seams
             .verify(&self.post_save, &self.post_delete, &self.post_upload)?;
