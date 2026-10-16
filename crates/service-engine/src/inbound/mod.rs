@@ -23,7 +23,7 @@ pub use budget::{
 pub use deadletter::{
     DEAD_LETTER_NOUN, DeadLetter, DeadLetterSource, DeadLetters, DiscardOutcome, RetryOutcome,
 };
-pub(crate) use deadletter::{StagedDeadLetter, stage_offer_value};
+pub(crate) use deadletter::{StagedDeadLetter, stage_published_value_in};
 pub use dispatch::{Applied, Dispatch, DispatchError, DispatchOutcome, NoOp};
 pub(crate) use disposition::log_reaction_db_fault;
 pub use disposition::{Disposition, ReactionError, sqlx_is_terminal};

@@ -5,10 +5,9 @@ use sqlx::PgPool;
 use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
 use crate::mirror::{OfferManifest, manifest_key};
-use crate::name::RelayName;
 use crate::nats::{KvBucket, KvKey, KvPrefix, Slot};
 use crate::offer::Offer;
-use crate::offers::fault;
+use crate::offers::fault::Isolation;
 use crate::offers::leader::OfferLeader;
 use crate::offers::marker;
 use crate::persistence::Aggregate;
@@ -16,14 +15,15 @@ use crate::wire::KeyBytes;
 
 pub(crate) async fn reconcile<O: Offer>(
     pg: &PgPool,
-    name: &RelayName,
+    isolation: &Isolation<'_>,
     bucket: &KvBucket<O::Published>,
     manifest: &KvBucket<OfferManifest>,
     leader: &OfferLeader,
     lease: &mut Lease,
     chunk: usize,
 ) -> Result<(), RelayError> {
-    publish_manifest::<O>(pg, name, manifest).await?;
+    let name = isolation.offer();
+    publish_manifest::<O>(isolation, manifest).await?;
     let mut conn = pg.acquire().await?;
     let rows = O::all(&mut conn).await.map_err(relay)?;
     drop(conn);
@@ -50,7 +50,7 @@ pub(crate) async fn reconcile<O: Offer>(
         .await
         .map_err(RelayError::published_language)?
     {
-        fault::isolate(pg, name, &kv_key, &slot, "the value").await?;
+        isolation.isolate(&kv_key, &slot, "the value").await?;
         if !live.contains(&kv_key) {
             retracts.push(kv_key);
         }
@@ -83,8 +83,7 @@ pub(crate) async fn reconcile<O: Offer>(
 }
 
 async fn publish_manifest<O: Offer>(
-    pg: &PgPool,
-    name: &RelayName,
+    isolation: &Isolation<'_>,
     manifest: &KvBucket<OfferManifest>,
 ) -> Result<(), RelayError> {
     let key = manifest_key(O::PREFIX).map_err(relay)?;
@@ -97,7 +96,7 @@ async fn publish_manifest<O: Offer>(
         .await
         .map_err(RelayError::published_language)?;
     if let Some((slot, _)) = &held {
-        fault::isolate(pg, name, &key, slot, "the offer manifest").await?;
+        isolation.isolate(&key, slot, "the offer manifest").await?;
     }
     match held {
         Some((Slot::Value(found), _)) if found == want => Ok(()),

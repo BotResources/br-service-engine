@@ -25,6 +25,7 @@ pub(super) fn wire_beat<P: Principal>(
     transport: &Arc<PgListenNotify>,
     readiness: ReadinessHandle,
     mirrors: &mut MirrorSupervisor,
+    offer_dead_letters: &crate::offers::DeadLetterSlot,
     accumulators: &Arc<AccumulatorRuntime>,
     render: &Arc<SessionRuntime<P>>,
     erasure_drain: Option<Arc<dyn crate::erase::ErasureDrain>>,
@@ -32,6 +33,7 @@ pub(super) fn wire_beat<P: Principal>(
     let dead_letters =
         DeadLetters::new(pg.clone()).with_transport(transport.clone() as Arc<dyn ImpactTransport>);
     mirrors.set_dead_letters(dead_letters.clone());
+    offer_dead_letters.bind(dead_letters.clone());
     render.set_dead_letters(dead_letters.clone());
     let (inbound_health, inbound_health_rx) = InboundHealth::new();
 

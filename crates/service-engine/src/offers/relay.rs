@@ -13,7 +13,7 @@ use crate::name::RelayName;
 use crate::nats::{KvBucket, Nats};
 use crate::offer::Offer;
 use crate::offers::apply::{self, KvOutcome, Observed, Write};
-use crate::offers::fault;
+use crate::offers::fault::{DeadLetterSlot, Isolation};
 use crate::offers::leader::OfferLeader;
 use crate::offers::marker::{self, Marker};
 use crate::offers::reconcile;
@@ -24,6 +24,7 @@ pub(crate) struct OfferRelay<O: Offer> {
     name: RelayName,
     nats: Nats,
     leader: OfferLeader,
+    dead_letters: DeadLetterSlot,
     bucket: OnceCell<KvBucket<O::Published>>,
     manifest: OnceCell<KvBucket<OfferManifest>>,
     reconcile_period: Duration,
@@ -35,6 +36,7 @@ impl<O: Offer> OfferRelay<O> {
     pub(crate) fn new(
         nats: Nats,
         leader: OfferLeader,
+        dead_letters: DeadLetterSlot,
         reconcile_period: Duration,
     ) -> Result<Self, RelayError> {
         Ok(Self {
@@ -47,12 +49,17 @@ impl<O: Offer> OfferRelay<O> {
             })?,
             nats,
             leader,
+            dead_letters,
             bucket: OnceCell::new(),
             manifest: OnceCell::new(),
             reconcile_period,
             last_reconcile: Mutex::new(None),
             _offer: PhantomData,
         })
+    }
+
+    fn isolation(&self) -> Isolation<'_> {
+        Isolation::new(&self.dead_letters, &self.name)
     }
 
     fn reconcile_due(&self) -> bool {
@@ -106,7 +113,7 @@ impl<O: Offer> OfferRelay<O> {
             let manifest = self.manifest().await?;
             reconcile::reconcile::<O>(
                 pg,
-                &self.name,
+                &self.isolation(),
                 bucket,
                 manifest,
                 &self.leader,
@@ -187,7 +194,9 @@ impl<O: Offer> OfferRelay<O> {
                 .await
                 .map_err(RelayError::published_language)?;
             if let Some((slot, _)) = &held {
-                fault::isolate(pg, &self.name, &marker.kv_key, slot, "the value").await?;
+                self.isolation()
+                    .isolate(&marker.kv_key, slot, "the value")
+                    .await?;
             }
             observed.push(held);
         }

@@ -4,7 +4,7 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::error::RelayError;
-use crate::inbound::stage_offer_value;
+use crate::inbound::{DeadLetters, stage_published_value_in};
 use crate::name::RelayName;
 use crate::nats::{KvBucket, KvKey, Nats, NatsError, Slot};
 use crate::relay::{Claim, Discipline, Drained, Relay};
@@ -68,6 +68,7 @@ pub struct KvDrainRelay<V, S> {
     bucket: KvBucket<V>,
     source: S,
     cas_retries: usize,
+    dead_letters: Option<DeadLetters>,
 }
 
 impl<V, S> KvDrainRelay<V, S>
@@ -85,6 +86,7 @@ where
             bucket,
             source,
             cas_retries: DEFAULT_CAS_RETRIES,
+            dead_letters: None,
         })
     }
 
@@ -93,8 +95,32 @@ where
         self
     }
 
+    pub fn with_dead_letters(mut self, dead_letters: DeadLetters) -> Self {
+        self.dead_letters = Some(dead_letters);
+        self
+    }
+
     pub async fn reset_watermarks(&self, conn: &mut PgConnection) -> Result<u64, RelayError> {
         kv_watermark::clear(conn, &self.name).await
+    }
+
+    async fn dead_letter(
+        &self,
+        conn: &mut PgConnection,
+        key: &KvKey,
+        reason: &str,
+    ) -> Result<(), RelayError> {
+        match &self.dead_letters {
+            Some(dead_letters) => {
+                dead_letters
+                    .record_published_value(self.name.as_str(), key.as_str(), reason)
+                    .await?
+            }
+            None => {
+                stage_published_value_in(conn, self.name.as_str(), key.as_str(), reason).await?
+            }
+        }
+        Ok(())
     }
 
     async fn apply(&self, conn: &mut PgConnection, change: &KvChange<V>) -> Result<(), RelayError> {
@@ -113,7 +139,7 @@ where
                     reason = %reason,
                     "an undecodable value sits under a published key; it is dead-lettered and overwritten or retracted",
                 );
-                stage_offer_value(conn, self.name.as_str(), change.key.as_str(), &reason).await?;
+                self.dead_letter(conn, &change.key, &reason).await?;
             }
             let published = observed.as_ref().and_then(|(slot, _)| match slot {
                 Slot::Value(value) => Some(value.version()),
