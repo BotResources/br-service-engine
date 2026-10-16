@@ -97,7 +97,15 @@ async fn s242_an_authenticated_json_body_over_max_body_bytes_is_refused_with_its
     let (status, body) = post_json(&service, None, json_query_padded_to(32 * 1024)).await;
     assert_eq!(
         (status, body),
-        (401, serde_json::json!("the X-Passport header is absent")),
+        (
+            401,
+            serde_json::json!({
+                "errors": [{
+                    "message": "unauthorized",
+                    "extensions": { "code": "UNAUTHENTICATED" },
+                }],
+            })
+        ),
         "the passport is still judged first: an anonymous oversized body is a 401, not a 413"
     );
 

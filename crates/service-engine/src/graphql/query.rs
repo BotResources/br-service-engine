@@ -7,6 +7,7 @@ use crate::blobs::{BlobRef, Disposition, DownloadUrl};
 use crate::dyn_compat::{ErasedPopulation, ErasedProjector};
 use crate::error::{AttachError, EngineError};
 use crate::graphql::convert::one_key_refusal;
+use crate::graphql::current::CurrentPrincipal;
 use crate::graphql::error::{OrInternal, engine_data, internal_fault};
 use crate::graphql::state::GraphqlState;
 use crate::page::KeyCeiling;
@@ -24,14 +25,14 @@ pub use read::Behind;
 
 pub struct Query<'a, P: Principal> {
     state: &'a Arc<GraphqlState<P>>,
-    principal: &'a P,
+    principal: CurrentPrincipal<'a, P>,
 }
 
 impl<'a, P: Principal> Query<'a, P> {
     pub fn new(ctx: &'a Context<'_>) -> Result<Self, Error> {
         Ok(Self {
             state: engine_data::<Arc<GraphqlState<P>>>(ctx)?,
-            principal: engine_data::<P>(ctx)?,
+            principal: CurrentPrincipal::new(ctx)?,
         })
     }
 
@@ -75,7 +76,8 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         match self.load_visible::<V>(key).await? {
             Some(row) => Ok(Some(
-                V::project(&row, self.principal).or_internal("project a query view")?,
+                V::project(&row, self.principal.get().await?)
+                    .or_internal("project a query view")?,
             )),
             None => Ok(None),
         }
@@ -155,9 +157,16 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
+        let principal = self.principal.get().await?;
         let key_bytes = KeyBytes::encode(key).or_internal("encode a query key")?;
         let members = self
-            .admitted_members(&projector, &erased, &WindowParams::none(), one_key_refusal)
+            .admitted_members(
+                &projector,
+                &erased,
+                &WindowParams::none(),
+                principal,
+                one_key_refusal,
+            )
             .await?;
         if !members.contains(&key_bytes) {
             return Ok(None);
@@ -166,6 +175,7 @@ impl<'a, P: Principal> Query<'a, P> {
             .render(
                 &erased,
                 erased.renders_under_rls(),
+                principal,
                 std::slice::from_ref(&key_bytes),
             )
             .await
@@ -179,11 +189,12 @@ impl<'a, P: Principal> Query<'a, P> {
     {
         let projector = Pr::default();
         let erased = self.erased(&projector)?;
+        let principal = self.principal.get().await?;
         let keys = self
-            .admitted_members(&projector, &erased, &params, Error::from)
+            .admitted_members(&projector, &erased, &params, principal, Error::from)
             .await?;
         let rendered = self
-            .render(&erased, erased.renders_under_rls(), &keys)
+            .render(&erased, erased.renders_under_rls(), principal, &keys)
             .await
             .or_internal("render a query window")?;
         Ok(keys
@@ -197,6 +208,7 @@ impl<'a, P: Principal> Query<'a, P> {
         projector: &Pr,
         erased: &Arc<dyn ErasedProjector<P>>,
         params: &WindowParams,
+        principal: &P,
         refusal: fn(AttachError) -> Error,
     ) -> Result<Vec<KeyBytes>, Error>
     where
@@ -208,7 +220,7 @@ impl<'a, P: Principal> Query<'a, P> {
                 self.state.pg(),
                 params,
                 KeyCeiling::admission(capacity),
-                self.principal,
+                principal,
             )
             .await
             .or_internal("populate a query window")?;
@@ -234,6 +246,7 @@ impl<'a, P: Principal> Query<'a, P> {
         &self,
         erased: &Arc<dyn ErasedProjector<P>>,
         rls: bool,
+        principal: &P,
         keys: &[KeyBytes],
     ) -> Result<crate::render::group::Rendered, EngineError> {
         let runtime = self.state.runtime();
@@ -243,9 +256,9 @@ impl<'a, P: Principal> Query<'a, P> {
             rls: runtime.registry().rls(),
             dead_letters: None,
         };
-        let cohort = erased.cohort(self.principal);
+        let cohort = erased.cohort(principal);
         let (rendered, _cost) = renderer
-            .render(erased, rls, cohort, self.principal, keys)
+            .render(erased, rls, cohort, principal, keys)
             .await?;
         Ok(rendered)
     }

@@ -31,7 +31,8 @@ impl<'a, P: Principal> Query<'a, P> {
                 .await
                 .or_internal("load an aggregate behind its view's visibility")?
         };
-        Ok(loaded.filter(|row| V::visible(row, self.principal)))
+        let principal = self.principal.get().await?;
+        Ok(loaded.filter(|row| V::visible(row, principal)))
     }
 
     pub fn behind<'q, V>(&'q self, key: &'q ViewKey<V>) -> Behind<'q, 'a, P, V>
@@ -71,7 +72,7 @@ impl<'a, P: Principal> Query<'a, P> {
             .or_internal("make a gated read one read-only snapshot")?;
         if let Some(applier) = applier {
             applier
-                .apply(&mut tx, self.principal)
+                .apply(&mut tx, self.principal.get().await?)
                 .await
                 .or_internal("apply the principal's RLS context to a read")?;
         }
@@ -91,9 +92,10 @@ impl<P: Principal, V: Projector<Principal = P>> Behind<'_, '_, P, V> {
         F: for<'c> FnOnce(Row<V>, &'c mut PgConnection) -> BoxFuture<'c, Result<T, EngineError>>
             + Send,
     {
+        let principal = self.query.principal.get().await?;
         let mut tx = self.query.begin_read(V::RLS).await?;
         let outcome = match V::Store::load(&mut tx, self.key).await {
-            Ok(Some(parent)) if V::visible(&parent, self.query.principal) => {
+            Ok(Some(parent)) if V::visible(&parent, principal) => {
                 read(parent, &mut tx).await.map(Some)
             }
             Ok(_) => Ok(None),

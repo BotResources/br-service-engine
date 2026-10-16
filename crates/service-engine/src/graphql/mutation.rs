@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_graphql::{Context, Error, SimpleObject};
 
+use crate::graphql::current;
 use crate::graphql::error::engine_data;
 use crate::graphql::state::GraphqlState;
 use crate::pipeline::MutationInput;
@@ -24,7 +25,7 @@ where
     M: MutationInput,
 {
     let state = engine_data::<Arc<GraphqlState<P>>>(ctx)?;
-    let principal = engine_data::<P>(ctx)?.clone();
+    let principal = current::owned::<P>(ctx).await?;
     Ok(state.executor().run::<M>(principal, input).await?)
 }
 
@@ -34,7 +35,7 @@ where
     M: MutationInput,
 {
     let state = engine_data::<Arc<GraphqlState<P>>>(ctx)?;
-    let principal = engine_data::<P>(ctx)?.clone();
+    let principal = current::owned::<P>(ctx).await?;
     Ok(state.executor().run_bulk::<M>(principal, input).await?)
 }
 

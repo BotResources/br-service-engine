@@ -145,13 +145,17 @@ async fn s115_a_refusal_forwarded_with_question_mark_answers_its_reason_code() {
 }
 
 #[tokio::test]
-async fn s115_an_anonymous_json_request_is_refused_with_its_documented_body() {
+async fn s115_an_anonymous_json_request_is_refused_with_the_unauthenticated_envelope() {
     use br_core_auth::PassportHeader;
 
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let service = boot_graphql_service(&db, nats.nats().await, "se_s115j", "pod-s115j").await;
+
+    let unauthenticated = serde_json::json!({
+        "errors": [{ "message": "unauthorized", "extensions": { "code": "UNAUTHENTICATED" } }],
+    });
 
     let response = reqwest::Client::new()
         .post(service.http("/graphql"))
@@ -161,9 +165,12 @@ async fn s115_an_anonymous_json_request_is_refused_with_its_documented_body() {
         .expect("the POST reaches the server");
     assert_eq!(response.status().as_u16(), 401);
     assert_eq!(
-        response.text().await.unwrap_or_default(),
-        "the X-Passport header is absent",
-        "the anonymous JSON refusal keeps its status and its body, the body never read"
+        response
+            .json::<serde_json::Value>()
+            .await
+            .expect("the anonymous JSON refusal is a JSON body"),
+        unauthenticated,
+        "the anonymous JSON refusal is the platform envelope, the body never read"
     );
 
     let response = reqwest::Client::new()
@@ -174,13 +181,13 @@ async fn s115_an_anonymous_json_request_is_refused_with_its_documented_body() {
         .await
         .expect("the POST reaches the server");
     assert_eq!(response.status().as_u16(), 401);
-    assert!(
+    assert_eq!(
         response
-            .text()
+            .json::<serde_json::Value>()
             .await
-            .unwrap_or_default()
-            .starts_with("the X-Passport header is malformed"),
-        "the malformed-passport JSON refusal keeps its body"
+            .expect("the malformed-passport JSON refusal is a JSON body"),
+        unauthenticated,
+        "the malformed-passport refusal is the same envelope and names no detail"
     );
 
     let (status, body) = post_json(

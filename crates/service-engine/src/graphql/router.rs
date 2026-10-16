@@ -14,12 +14,14 @@ use tokio::net::TcpListener;
 
 use crate::error::EngineError;
 use crate::graphql::body::{self, BodyPolicy};
+use crate::graphql::current::SocketOrigin;
+use crate::graphql::error::UNAUTHENTICATED_MESSAGE;
 use crate::graphql::multipart::{MultipartPolicy, declares_upload_scalar};
 use crate::graphql::principal::{AuthReject, PASSPORT_HEADER, PassportPrincipal, resolve};
 use crate::graphql::refusal::coded_refusal;
 use crate::graphql::sse;
 use crate::graphql::state::GraphqlState;
-use crate::graphql::{INTERNAL_CODE, INTERNAL_MESSAGE};
+use crate::graphql::{INTERNAL_CODE, INTERNAL_MESSAGE, UNAUTHENTICATED_CODE};
 use crate::readiness::{ReadinessHandle, readiness_route};
 use crate::stop::Stop;
 
@@ -174,6 +176,7 @@ where
         .on_upgrade(move |socket| async move {
             let mut data = Data::default();
             data.insert(principal);
+            data.insert(SocketOrigin);
             crate::graphql::ws::serve_bounded(socket, schema, protocol, data, max_age, shutdown)
                 .await
         })
@@ -226,7 +229,15 @@ fn facts_unavailable(error: &EngineError) -> Response {
 }
 
 fn unauthorized(reject: AuthReject) -> Response {
-    (StatusCode::UNAUTHORIZED, reject.message()).into_response()
+    tracing::debug!(
+        reason = %reject.message(),
+        "a request carried no acceptable passport; the client receives UNAUTHENTICATED"
+    );
+    coded_refusal(
+        StatusCode::UNAUTHORIZED,
+        UNAUTHENTICATED_CODE,
+        UNAUTHENTICATED_MESSAGE,
+    )
 }
 
 #[cfg(test)]

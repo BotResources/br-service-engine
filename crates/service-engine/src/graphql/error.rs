@@ -5,6 +5,7 @@ pub const FORBIDDEN_CODE: &str = "FORBIDDEN";
 pub const INTERNAL_CODE: &str = "INTERNAL";
 pub const INTERNAL_MESSAGE: &str = "internal error";
 pub const UNAUTHENTICATED_CODE: &str = "UNAUTHENTICATED";
+pub(crate) const UNAUTHENTICATED_MESSAGE: &str = "unauthorized";
 pub const WINDOW_TOO_LARGE_CODE: &str = "WINDOW_TOO_LARGE";
 
 pub fn coded_error(code: &'static str, message: impl Into<String>) -> Error {
