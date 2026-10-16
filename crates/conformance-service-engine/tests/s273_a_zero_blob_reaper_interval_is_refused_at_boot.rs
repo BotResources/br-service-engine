@@ -7,14 +7,14 @@ use service_engine::error::EngineError;
 use service_engine::{Engine, ReadinessHandle};
 
 #[tokio::test]
-async fn s270_a_zero_blob_reaper_interval_is_refused_at_boot_and_claims_nothing() {
+async fn s273_a_zero_blob_reaper_interval_is_refused_at_boot_and_claims_nothing() {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
     let pool = db.app_pool().clone();
 
     let refused = Engine::<SamplePrincipal>::boot(
-        engine_config("se_s270", "pod-s270").with_blob_reaper_interval(Duration::ZERO),
+        engine_config("se_s273", "pod-s273").with_blob_reaper_interval(Duration::ZERO),
         pool.clone(),
         nats.nats().await,
         ReadinessHandle::not_ready("boot"),
@@ -36,7 +36,7 @@ async fn s270_a_zero_blob_reaper_interval_is_refused_at_boot_and_claims_nothing(
     );
 
     Engine::<SamplePrincipal>::boot(
-        engine_config("se_s270", "pod-s270"),
+        engine_config("se_s273", "pod-s273"),
         pool,
         nats.nats().await,
         ReadinessHandle::not_ready("boot"),
