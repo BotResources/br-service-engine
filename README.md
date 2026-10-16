@@ -28,6 +28,8 @@ engine release pins one exact `br-rust-common` tag per crate it uses
 |---|---|
 | 0.4.2 | `br-core-auth/v0.1.0`, `br-core-integration/v0.1.0`, `br-core-kernel/v0.1.0`, `br-core-scope/v0.1.0`, `br-scope-declaration-contract/v0.1.0`, `br-util-axum-readiness/v0.1.0`, `br-util-observability/v0.1.0`, `br-util-postgres/v0.1.1` |
 
+The engine API names types of these crates (`Passport`, `Actor`, `EventCoords`, `CommandCoords`, `Readiness`), so a service moves its pins together: in one change it re-pins every `br-rust-common` crate it names to the tags of this table and writes the engine pin as `br-service-engine/v0.4.2`. A service left on `v1.3.0` or `v1.4.0` gets two copies of each type and stops compiling.
+
 | Engine version | `br-rust-common` |
 |---|---|
 | 0.4.1 | `v1.3.0` |

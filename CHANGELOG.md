@@ -16,7 +16,7 @@ continues its version line.
 
 ## 0.4.2 - 2026-10-16
 
-A patch of 0.4.1. No adopter code changes; a service bumps its pin.
+A patch of 0.4.1. No adopter source changes, but the pins move together: in one change a service re-pins every br-rust-common crate it names (br-core-auth, br-core-integration, br-core-scope, br-scope-declaration-contract, br-util-axum-readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
 
 ### Changed
 
