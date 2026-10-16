@@ -1405,8 +1405,8 @@ whichever mode it lives:
   binary at `session_max_age` measured from the handshake, so a client that holds
   it open must reconnect with a fresh passport (`bb06`); the gateway's subscription
   transport — `POST /graphql` with `Accept: text/event-stream`, graphql-sse — carries
-  the same `Reset` then `Upsert` on a contiguous revision (read with
-  `br-test-harness`'s `SseSubscription`, the client service e2e suites use), refuses a
+  the same `Reset` then `Upsert` on a contiguous revision (read with the battery's own
+  event-stream reader), refuses a
   passport that is absent, undecodable or not a passport with the very `401` a JSON
   request gets, before a byte of the body is read, and completes the stream at
   `session_max_age` then ends it, a new request attaching afresh (`bb16`); and `main`'s one call to

@@ -410,21 +410,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "br-test-harness"
-version = "0.1.1"
-source = "git+https://github.com/BotResources/br-e2e-harness?tag=br-test-harness%2Fv0.1.1#7d104afd1ee8eff3b141a07140ecc163611dc34b"
-dependencies = [
- "br-core-auth",
- "bytes",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "br-util-axum-readiness"
 version = "0.1.0"
 source = "git+https://github.com/BotResources/br-rust-common?tag=br-util-axum-readiness%2Fv0.1.0#d7fd2f174735b5c6a24cc87b41daaa0ea890baaa"
@@ -576,7 +561,6 @@ dependencies = [
  "br-core-integration",
  "br-core-kernel",
  "br-core-scope",
- "br-test-harness",
  "bytes",
  "chrono",
  "example-contract",

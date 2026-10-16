@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 
 pub mod bin;
+pub mod event_stream;
 pub mod pg;
 pub mod scopes;
 pub mod sdl;

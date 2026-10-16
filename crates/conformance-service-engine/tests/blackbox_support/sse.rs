@@ -1,8 +1,3 @@
-//! The gateway's subscription leg read frame by frame: `POST /graphql` with
-//! `Accept: text/event-stream`, answered in graphql-sse "distinct connections" framing. The
-//! harness's `SseSubscription` hands back the data of `next` frames; this reader also sees the
-//! `complete` frame, the keep-alive comments and the end of the body, which the gateway acts on.
-
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -11,10 +6,10 @@ use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+use super::event_stream::{Block, EventStreamParser};
+
 pub const EVENT_STREAM: &str = "text/event-stream";
 
-/// A graphql-sse frame: a `next` carrying its GraphQL response, the `complete`, or a
-/// keep-alive comment.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Frame {
     Next(serde_json::Value),
@@ -27,11 +22,10 @@ pub struct SseFrames {
     pub content_type: String,
     pub cache_control: String,
     body: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
-    buffer: String,
+    parser: EventStreamParser,
 }
 
 impl SseFrames {
-    /// Opens `query` on the gateway's transport, with `passport` in `X-Passport` when given.
     pub async fn open(base_url: &str, passport: Option<&str>, query: &str) -> Self {
         let mut request = reqwest::Client::new()
             .post(format!("{base_url}/graphql"))
@@ -56,44 +50,39 @@ impl SseFrames {
             status: response.status().as_u16(),
             content_type: header("content-type"),
             cache_control: header("cache-control"),
-            buffer: String::new(),
+            parser: EventStreamParser::default(),
             body: Box::pin(response.bytes_stream()),
         }
     }
 
-    /// The next whole frame, `None` once the body has ended. Panics if nothing arrives
-    /// `within`, or on a block that is not graphql-sse.
     pub async fn next_frame(&mut self, within: Duration) -> Option<Frame> {
         let deadline = tokio::time::Instant::now() + within;
         loop {
-            if let Some(end) = self.buffer.find("\n\n") {
-                let block: String = self.buffer.drain(..end + 2).collect();
-                return Some(parse(block.trim_end_matches('\n')));
+            if let Some(block) = self.parser.next_block() {
+                return Some(parse(&block));
             }
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             match tokio::time::timeout(remaining, self.body.next()).await {
                 Err(_) => panic!(
-                    "no whole frame within {within:?}; pending: {:?}",
-                    self.buffer
+                    "no whole frame within {within:?}; pending: {}",
+                    self.parser.unterminated()
                 ),
                 Ok(None) => {
                     assert!(
-                        self.buffer.is_empty(),
-                        "the body ended inside a frame: {:?}",
-                        self.buffer
+                        !self.parser.has_unterminated_input(),
+                        "the body ended inside a frame: {}",
+                        self.parser.unterminated()
                     );
                     return None;
                 }
                 Ok(Some(chunk)) => {
-                    let chunk = chunk.expect("the event stream is readable");
-                    self.buffer
-                        .push_str(std::str::from_utf8(&chunk).expect("UTF-8"));
+                    self.parser
+                        .push(&chunk.expect("the event stream is readable"));
                 }
             }
         }
     }
 
-    /// The next frame that is not a keep-alive comment.
     pub async fn next_event(&mut self, within: Duration) -> Option<Frame> {
         loop {
             match self.next_frame(within).await {
@@ -102,31 +91,40 @@ impl SseFrames {
             }
         }
     }
+
+    pub async fn expect_event_on(&mut self, field: &str, within: Duration) -> serde_json::Value {
+        assert_eq!(self.status, 200, "the subscription request is answered 200");
+        match self.next_event(within).await {
+            Some(Frame::Next(payload)) => {
+                assert!(
+                    payload["errors"].is_null(),
+                    "the subscription returned errors: {payload}"
+                );
+                let delta = payload["data"][field].clone();
+                assert!(
+                    !delta.is_null(),
+                    "the event carries no field {field:?}: {payload}"
+                );
+                delta
+            }
+            other => panic!("expected a next frame carrying {field:?}, got {other:?}"),
+        }
+    }
 }
 
-fn parse(block: &str) -> Frame {
-    if block.lines().all(|line| line.starts_with(':')) {
+fn parse(block: &Block) -> Frame {
+    if block.is_comment_only() {
         return Frame::Comment;
     }
-    let mut lines = block.lines();
-    let event = lines.next().and_then(|line| line.strip_prefix("event: "));
-    let data = lines.next().and_then(|line| line.strip_prefix("data:"));
-    assert!(
-        lines.next().is_none(),
-        "a graphql-sse frame is one event line and one data line: {block:?}"
-    );
-    match (event, data) {
+    match (block.event.as_deref(), block.data.as_deref()) {
         (Some("next"), Some(data)) => {
-            Frame::Next(serde_json::from_str(data.trim_start()).expect("a next frame carries JSON"))
+            Frame::Next(serde_json::from_str(data).expect("a next frame carries JSON"))
         }
         (Some("complete"), Some("")) => Frame::Complete,
         _ => panic!("not a graphql-sse frame: {block:?}"),
     }
 }
 
-/// Sends an event-stream `POST /graphql` whose body stops after its first bytes, with a
-/// `Content-Length` promising a kibibyte more that never comes, and waits `wait` for the
-/// status line. `None`: the pod is still waiting for the body, so it reads before it judges.
 pub async fn stalled_request(
     base_url: &str,
     passport: Option<&str>,
