@@ -1,15 +1,53 @@
 use std::sync::Arc;
 
+use tokio::sync::watch;
 use tokio::task::{JoinError, JoinHandle};
+
+use crate::config::EngineConfig;
 
 use crate::engine::loops::join_presence;
 use crate::error::EngineError;
-use crate::housekeeping::ready::{REASON_SHUTTING_DOWN, REASON_WORKER_STOPPED};
+use crate::housekeeping::ready::{
+    REASON_SCHEMA_VERSION_DISPLACED, REASON_SHUTTING_DOWN, REASON_WORKER_STOPPED,
+};
 use crate::inbound::InboundLoop;
 use crate::principal::Principal;
 use crate::readiness::ReadinessHandle;
 use crate::runtime::SessionRuntime;
 use crate::stop::Stop;
+
+pub(crate) enum Stopped {
+    Worker {
+        worker: &'static str,
+        result: Result<(), JoinError>,
+    },
+    ClaimLost {
+        engine_version: String,
+        service_version: String,
+    },
+}
+
+impl Stopped {
+    pub(crate) fn worker(worker: &'static str, result: Result<(), JoinError>) -> Self {
+        Self::Worker { worker, result }
+    }
+
+    pub(crate) fn claim_lost(config: &EngineConfig) -> Self {
+        Self::ClaimLost {
+            engine_version: crate::schema::ENGINE_SCHEMA_VERSION.to_string(),
+            service_version: config.schema_service_version().to_string(),
+        }
+    }
+}
+
+pub(crate) async fn claim_lost(displaced: Option<watch::Receiver<bool>>) {
+    if let Some(mut displaced) = displaced
+        && displaced.wait_for(|lost| *lost).await.is_ok()
+    {
+        return;
+    }
+    std::future::pending::<()>().await
+}
 
 pub(crate) struct StopHandles {
     pub render: Arc<Stop>,
@@ -35,7 +73,7 @@ pub(crate) struct RunTasks<P: Principal> {
 }
 
 pub(crate) async fn finish<P: Principal>(
-    stopped: Option<(&'static str, Result<(), JoinError>)>,
+    stopped: Option<Stopped>,
     stops: StopHandles,
     mut tasks: RunTasks<P>,
     readiness_guard: &ReadinessHandle,
@@ -71,7 +109,26 @@ pub(crate) async fn finish<P: Principal>(
             let _ = tasks.flush_task.await;
             Ok(())
         }
-        Some((worker, result)) => {
+        Some(Stopped::ClaimLost {
+            engine_version,
+            service_version,
+        }) => {
+            let _ = tasks.beat_task.await;
+            let _ = tasks.render_task.await;
+            let _ = tasks.flush_task.await;
+            readiness_guard.set_not_ready(REASON_SCHEMA_VERSION_DISPLACED);
+            tracing::error!(
+                %engine_version,
+                %service_version,
+                "the schema-version heartbeat updated no row: another version holds the claim, so \
+                 every worker of this pod was stopped and run returns the lost claim"
+            );
+            Err(EngineError::SchemaClaimLost {
+                engine_version,
+                service_version,
+            })
+        }
+        Some(Stopped::Worker { worker, result }) => {
             if let Err(join) = &result {
                 tracing::error!(worker, %join, "an engine worker panicked before shutdown");
             }

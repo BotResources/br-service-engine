@@ -222,6 +222,18 @@ impl Spawned {
         &self.base_url
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    pub fn log_path(&self) -> &std::path::Path {
+        &self.log
+    }
+
+    pub fn child_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+
     async fn wait_ready(&mut self) {
         let http = reqwest::Client::new();
         let readyz = format!("{}/readyz", self.base_url);

@@ -19,6 +19,9 @@ impl EngineConfig {
             ("message_retention", self.message_retention),
             ("publish_ack_timeout", self.publish_ack_timeout),
             ("body_read_timeout", self.body_read_timeout),
+            ("blob_reaper_interval", self.blob_reaper_interval),
+            ("schema_version_liveness", self.schema_version_liveness),
+            ("migrate_connect_timeout", self.migrate_connect_timeout),
         ] {
             if value.is_zero() {
                 return Err(EngineError::Config(format!("{label} must be non-zero")));

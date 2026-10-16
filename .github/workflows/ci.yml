@@ -490,4 +490,5 @@ jobs:
             --test bb16_gateway_sse_subscription \
             --test bb17_paging_by_arguments_across_replicas \
             --test bb18_migrate_refuses_an_owner_dsn_the_tls_rule_rejects \
+            --test bb19_sigterm_drains_and_exits_zero \
             --test s202_serve_derives_message_retention

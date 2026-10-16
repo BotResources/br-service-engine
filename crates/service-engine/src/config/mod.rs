@@ -3,6 +3,8 @@ mod builder;
 mod validate;
 #[cfg(test)]
 mod validate_tests;
+#[cfg(test)]
+mod zero_matrix_tests;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;

@@ -141,6 +141,16 @@ pub enum EngineError {
         service_version: String,
     },
 
+    #[error(
+        "schema version claim lost: another engine or service version now holds the store's \
+         claim, so this pod (engine {engine_version} / service {service_version}) stopped all \
+         its workers"
+    )]
+    SchemaClaimLost {
+        engine_version: String,
+        service_version: String,
+    },
+
     #[error("the {probe} probe did not complete within {timeout:?}")]
     ProbeTimeout {
         probe: &'static str,
@@ -254,6 +264,9 @@ pub enum EngineError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("installing the process signal handlers failed")]
+    SignalHandlers(#[source] std::io::Error),
 
     #[error("a policy refused the write with reason {code}")]
     PolicyRefused { code: &'static str },
