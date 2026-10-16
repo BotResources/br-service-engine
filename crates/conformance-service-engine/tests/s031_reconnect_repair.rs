@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use conformance_service_engine::infra::listener::{engine_config, pool_named};
+use conformance_service_engine::infra::listener::{engine_config, pool_named, terminate_and_wait};
 use conformance_service_engine::infra::{TestDb, TestNats};
 use conformance_service_engine::sample::assignment::Assignment;
 use conformance_service_engine::sample::principal::{SamplePrincipalResolver, SampleRls};
@@ -75,7 +75,7 @@ async fn s031_the_beat_alone_repairs_a_pending_session_with_no_impact_after_the_
     assert_eq!(opening.revision().get(), 1);
 
     switch.store(true, Ordering::Relaxed);
-    db.terminate_listeners(REPAIR_LISTENER).await;
+    terminate_and_wait(&db, REPAIR_LISTENER).await;
     let deadline = tokio::time::Instant::now() + OUTAGE_SETTLES;
     while tokio::time::Instant::now() < deadline {
         assert!(

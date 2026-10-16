@@ -88,7 +88,10 @@ async fn s033_a_transport_reconnect_resets_every_session_and_resumes() {
         .await
         .expect("the pod renders what it heard");
     assert_eq!(before.revision().get(), 2);
-    assert!(matches!(before, Delta::Upsert { .. }));
+    assert!(
+        matches!(before, Delta::Upsert { .. }),
+        "the first impact renders as an Upsert, got {before:?}"
+    );
 
     sqlx::query("UPDATE sample_assignment SET title = $1 WHERE id = $2")
         .bind("changed while deaf")
@@ -128,7 +131,11 @@ async fn s033_a_transport_reconnect_resets_every_session_and_resumes() {
         4,
         "the revision keeps running across the reconnect"
     );
-    assert!(matches!(resumed, Delta::Upsert { .. }));
+    assert!(
+        matches!(resumed, Delta::Upsert { .. }),
+        "delivery resumes as an Upsert of the restaged row, got {resumed:?} with {:?}",
+        engine.metrics()
+    );
 
     stop.stop();
     running.await.expect("the render task stops");
