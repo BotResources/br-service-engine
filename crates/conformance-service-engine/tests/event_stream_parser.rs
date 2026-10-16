@@ -164,3 +164,33 @@ fn unterminated_input_is_reported_for_a_diagnostic() {
     parser.push(b"event: next\ndata: {");
     assert!(parser.unterminated().contains("data: {"));
 }
+
+#[test]
+#[should_panic(expected = "invalid UTF-8")]
+fn bytes_that_are_not_utf8_fail_closed() {
+    let mut parser = EventStreamParser::default();
+    parser.push(b"data: a\xFFb\n\n");
+}
+
+#[test]
+fn a_line_without_its_line_end_is_unterminated_input() {
+    let mut parser = EventStreamParser::default();
+    parser.push(b"data: x");
+    assert!(parser.has_unterminated_input());
+}
+
+#[test]
+fn an_event_line_without_its_blank_line_is_unterminated_input() {
+    let mut parser = EventStreamParser::default();
+    parser.push(b"event: next\n");
+    assert!(parser.next_block().is_none());
+    assert!(parser.has_unterminated_input());
+}
+
+#[test]
+fn a_data_line_without_its_blank_line_is_unterminated_input() {
+    let mut parser = EventStreamParser::default();
+    parser.push(b"data: x\n");
+    assert!(parser.next_block().is_none());
+    assert!(parser.has_unterminated_input());
+}

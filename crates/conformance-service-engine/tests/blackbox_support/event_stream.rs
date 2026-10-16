@@ -32,11 +32,15 @@ impl EventStreamParser {
     pub fn push(&mut self, bytes: &[u8]) {
         self.partial_utf8.extend_from_slice(bytes);
         let complete_len = match std::str::from_utf8(&self.partial_utf8) {
+            Ok(_) => self.partial_utf8.len(),
             Err(error) if error.error_len().is_none() => error.valid_up_to(),
-            _ => self.partial_utf8.len(),
+            Err(error) => panic!("the event stream carries invalid UTF-8: {error}"),
         };
         let complete: Vec<u8> = self.partial_utf8.drain(..complete_len).collect();
-        for c in String::from_utf8_lossy(&complete).chars() {
+        for c in std::str::from_utf8(&complete)
+            .expect("validated above")
+            .chars()
+        {
             match c {
                 '\r' => {
                     self.end_line();
