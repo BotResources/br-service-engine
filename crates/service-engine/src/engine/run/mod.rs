@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::engine::Engine;
 use crate::engine::loops::{join_presence, run_scheduled_messages};
+use crate::engine::shutdown::Stopped;
 use crate::error::EngineError;
 use crate::housekeeping::ready::REASON_WORKER_STOPPED;
 use crate::pipeline::Policies;
@@ -79,6 +80,7 @@ impl<P: Principal> Engine<P> {
             erasure_drain,
         )?;
 
+        let displaced = beat.displacement();
         let stop_render = Stop::new();
         let stop_beat = Stop::new();
         let stop_flush = Stop::new();
@@ -264,10 +266,13 @@ impl<P: Principal> Engine<P> {
 
         let stopped = tokio::select! {
             () = &mut stopping => None,
-            outcome = &mut render_task => Some(("render", outcome)),
-            outcome = &mut beat_task => Some(("beat", outcome)),
-            outcome = &mut flush_task => Some(("flush", outcome)),
-            () = mirror_tasks.any_stopped() => Some(("mirror", Ok(()))),
+            outcome = &mut render_task => Some(Stopped::worker("render", outcome)),
+            outcome = &mut beat_task => Some(Stopped::worker("beat", outcome)),
+            outcome = &mut flush_task => Some(Stopped::worker("flush", outcome)),
+            () = mirror_tasks.any_stopped() => Some(Stopped::worker("mirror", Ok(()))),
+            () = crate::engine::shutdown::claim_lost(displaced) => {
+                Some(Stopped::claim_lost(&config))
+            }
         };
 
         let outcome = crate::engine::shutdown::finish(

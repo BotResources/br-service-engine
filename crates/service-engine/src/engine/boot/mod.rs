@@ -3,6 +3,7 @@ mod libraries;
 mod migrate;
 mod owner;
 mod serve;
+mod signals;
 
 pub use libraries::LibraryMigrations;
 pub use migrate::apply_migration_chain;
