@@ -29,28 +29,31 @@ async fn assert_one_shutdown_request(shutdown: &Notify) {
     );
 }
 
-#[tokio::test]
-async fn a_sigterm_triggers_the_engine_shutdown_handle() {
+async fn assert_received(signal: &str, expected: &'static str) {
+    let mut signals = ProcessSignals::install().expect("the signal handlers install");
+    send_to_self(signal);
+    let received = tokio::time::timeout(WITHIN, signals.received())
+        .await
+        .unwrap_or_else(|_| panic!("{signal} must be handled by ProcessSignals"));
+    assert_eq!(received, expected);
+}
+
+async fn assert_signal_requests_shutdown(signal: &str) {
     let shutdown = Arc::new(Notify::new());
     ProcessSignals::install()
         .expect("the signal handlers install")
         .request_shutdown_on_signal(shutdown.clone());
-    send_to_self("TERM");
+    send_to_self(signal);
     assert_one_shutdown_request(&shutdown).await;
 }
 
 #[tokio::test]
-async fn a_sigint_triggers_the_engine_shutdown_handle() {
-    let shutdown = Arc::new(Notify::new());
-    ProcessSignals::install()
-        .expect("the signal handlers install")
-        .request_shutdown_on_signal(shutdown.clone());
-    send_to_self("INT");
-    assert_one_shutdown_request(&shutdown).await;
-}
+async fn each_process_signal_is_handled_and_triggers_the_engine_shutdown_handle() {
+    assert_received("TERM", "SIGTERM").await;
+    assert_received("INT", "SIGINT").await;
+    assert_signal_requests_shutdown("TERM").await;
+    assert_signal_requests_shutdown("INT").await;
 
-#[tokio::test]
-async fn a_service_task_notifying_beside_the_signal_task_still_requests_one_shutdown() {
     let shutdown = Arc::new(Notify::new());
     ProcessSignals::install()
         .expect("the signal handlers install")

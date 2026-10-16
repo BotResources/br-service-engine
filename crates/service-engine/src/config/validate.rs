@@ -107,6 +107,9 @@ impl EngineConfig {
                     .into(),
             ));
         }
+        if let Some(blob) = &self.blob {
+            blob.validate_ttls()?;
+        }
         self.validate_body_bounds()
     }
 }
