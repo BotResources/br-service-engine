@@ -9,7 +9,7 @@ use crate::error::EngineError;
 use super::super::consumption::{Effect, Update};
 use super::super::projection::Project;
 use super::super::watermark::{self, Mark, Snapshot};
-use super::{MirrorRuntime, Revisions, dedup, merge_forward, wire_version_reason};
+use super::{MirrorRuntime, Revisions, dedup, merge_forward};
 
 const ZERO_BOUNDARY_RESCANS: u32 = 3;
 
@@ -149,14 +149,9 @@ where
                 self.project_under_lease(Vec::new(), &advance, Mark::Advance)
                     .await?;
             }
-            Effect::WireVersionRejected {
-                expected,
-                found,
-                retire,
-            } => {
+            Effect::Rejected { reason, retire } => {
                 let touched = if let Some(change) = &update.change {
-                    self.dead_letter(change.key.as_str(), &wire_version_reason(expected, found))
-                        .await;
+                    self.dead_letter(change.key.as_str(), &reason).await;
                     let mut shadows = self.shadows.write().await;
                     let mut touched = (self.keyed_by)(&shadows, change);
                     retire(&mut shadows);

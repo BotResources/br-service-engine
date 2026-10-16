@@ -10,38 +10,46 @@ use crate::nats::{Nats, NatsError};
 use crate::schema::TABLE_DEAD_LETTER;
 use crate::wire::KeyBytes;
 
+pub(crate) async fn upsert(
+    conn: &mut sqlx::PgConnection,
+    entry: &StagedDeadLetter<'_>,
+) -> Result<(Uuid, bool), sqlx::Error> {
+    let id = Uuid::now_v7();
+    let sql = format!(
+        "INSERT INTO {TABLE_DEAD_LETTER} \
+           (id, source, reaction, subject, message_id, payload, producer, seq_key, seq, error, delivered) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
+         ON CONFLICT (reaction, message_id) DO UPDATE \
+           SET delivered = EXCLUDED.delivered, error = EXCLUDED.error, last_seen = now() \
+         RETURNING id, (xmax = 0) AS inserted"
+    );
+    let (row_id, inserted): (Uuid, bool) = sqlx::query_as(&sql)
+        .bind(id)
+        .bind(entry.source.as_str())
+        .bind(entry.reaction)
+        .bind(entry.subject)
+        .bind(entry.message_id)
+        .bind(entry.payload)
+        .bind(entry.producer)
+        .bind(entry.seq_key)
+        .bind(entry.seq)
+        .bind(entry.error)
+        .bind(entry.delivered)
+        .fetch_one(&mut *conn)
+        .await?;
+    if inserted {
+        crate::observe::record_dead_letter(entry.source.as_str());
+    }
+    Ok((row_id, inserted))
+}
+
 impl DeadLetters {
     pub(crate) async fn stage(
         &self,
         conn: &mut sqlx::PgConnection,
         entry: &StagedDeadLetter<'_>,
     ) -> Result<bool, sqlx::Error> {
-        let id = Uuid::now_v7();
-        let sql = format!(
-            "INSERT INTO {TABLE_DEAD_LETTER} \
-               (id, source, reaction, subject, message_id, payload, producer, seq_key, seq, error, delivered) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
-             ON CONFLICT (reaction, message_id) DO UPDATE \
-               SET delivered = EXCLUDED.delivered, error = EXCLUDED.error, last_seen = now() \
-             RETURNING id, (xmax = 0) AS inserted"
-        );
-        let (row_id, inserted): (Uuid, bool) = sqlx::query_as(&sql)
-            .bind(id)
-            .bind(entry.source.as_str())
-            .bind(entry.reaction)
-            .bind(entry.subject)
-            .bind(entry.message_id)
-            .bind(entry.payload)
-            .bind(entry.producer)
-            .bind(entry.seq_key)
-            .bind(entry.seq)
-            .bind(entry.error)
-            .bind(entry.delivered)
-            .fetch_one(&mut *conn)
-            .await?;
-        if inserted {
-            crate::observe::record_dead_letter(entry.source.as_str());
-        }
+        let (row_id, _) = upsert(conn, entry).await?;
         let Some(transport) = &self.transport else {
             return Ok(false);
         };

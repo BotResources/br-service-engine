@@ -146,7 +146,7 @@ pub use linked::{LINK_NAMESPACE, LinkedAssignments, link_assignment};
 pub use note::{Note, NoteFacts, NoteKey, NoteProjector, NoteView};
 pub use offer::{
     MintThenReject, PublishedWidget, WIDGET_OFFER_PREFIX, WidgetOffer, mint_then_reject,
-    offer_dirty_keys, published_widget, seed_bucket, widget_key,
+    offer_bucket, offer_dirty_keys, published_widget, seed_bucket, widget_key,
 };
 pub use outbox::{Relayed, delivered_event_ids, relayed_coords, stage_outbox_row};
 pub use paged::{

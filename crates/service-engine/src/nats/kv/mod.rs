@@ -1,7 +1,10 @@
 mod create;
+mod slot;
 mod ttl;
 mod watch;
 
+pub(crate) use slot::{Slot, Undecodable};
+pub(crate) use watch::Seen;
 pub use watch::{KvEvent, KvWatch, Watched};
 
 use std::marker::PhantomData;
@@ -98,6 +101,16 @@ where
     }
 
     pub async fn get_with_revision(&self, key: &KvKey) -> Result<Option<(V, Revision)>, NatsError> {
+        match self.get_isolating(key).await? {
+            None => Ok(None),
+            Some((slot, revision)) => Ok(Some((slot.strict(key)?, revision))),
+        }
+    }
+
+    pub(crate) async fn get_isolating(
+        &self,
+        key: &KvKey,
+    ) -> Result<Option<(Slot<V>, Revision)>, NatsError> {
         let Some(entry) = self
             .store
             .entry(key.as_str())
@@ -109,8 +122,10 @@ where
         if matches!(entry.operation, Operation::Delete | Operation::Purge) {
             return Ok(None);
         }
-        let value = decode::<V>(key, &entry.value)?;
-        Ok(Some((value, Revision::new(entry.revision))))
+        Ok(Some((
+            Slot::<V>::from_json(&entry.value),
+            Revision::new(entry.revision),
+        )))
     }
 
     pub async fn update_if(
@@ -173,6 +188,20 @@ where
         &self,
         prefix: &KvPrefix,
     ) -> Result<Vec<(KvKey, V, Revision)>, NatsError> {
+        self.entries_isolating(prefix)
+            .await?
+            .into_iter()
+            .map(|(key, slot, revision)| {
+                let value = slot.strict(&key)?;
+                Ok((key, value, revision))
+            })
+            .collect()
+    }
+
+    pub(crate) async fn entries_isolating(
+        &self,
+        prefix: &KvPrefix,
+    ) -> Result<Vec<(KvKey, Slot<V>, Revision)>, NatsError> {
         use futures_util::StreamExt;
         let mut keys = self
             .store
@@ -193,8 +222,8 @@ where
                 continue;
             }
             let Ok(key) = KvKey::new(raw) else { continue };
-            if let Some((value, revision)) = self.get_with_revision(&key).await? {
-                out.push((key, value, revision));
+            if let Some((slot, revision)) = self.get_isolating(&key).await? {
+                out.push((key, slot, revision));
             }
         }
         Ok(out)
@@ -228,13 +257,6 @@ where
 
 fn encode<V: Serialize>(value: &V) -> Result<Vec<u8>, NatsError> {
     serde_json::to_vec(value).map_err(NatsError::Encode)
-}
-
-fn decode<V: DeserializeOwned>(key: &KvKey, bytes: &[u8]) -> Result<V, NatsError> {
-    serde_json::from_slice(bytes).map_err(|source| NatsError::Decode {
-        key: key.as_str().to_string(),
-        source,
-    })
 }
 
 fn kv_error(key: &KvKey, detail: &dyn std::fmt::Display) -> NatsError {

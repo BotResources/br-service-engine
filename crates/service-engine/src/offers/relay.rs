@@ -10,16 +10,15 @@ use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
 use crate::mirror::OfferManifest;
 use crate::name::RelayName;
-use crate::nats::{KvBucket, Nats, Revision};
+use crate::nats::{KvBucket, Nats};
 use crate::offer::Offer;
-use crate::offers::apply::{self, KvOutcome, Write};
+use crate::offers::apply::{self, KvOutcome, Observed, Write};
+use crate::offers::fault;
 use crate::offers::leader::OfferLeader;
 use crate::offers::marker::{self, Marker};
 use crate::offers::reconcile;
 use crate::relay::{Claim, Discipline, Drained, Relay};
 use crate::relays::kv_watermark;
-
-type Observed<V> = Option<(V, Revision)>;
 
 pub(crate) struct OfferRelay<O: Offer> {
     name: RelayName,
@@ -183,12 +182,14 @@ impl<O: Offer> OfferRelay<O> {
         let bucket = self.bucket().await?;
         let mut observed = Vec::with_capacity(markers.len());
         for marker in &markers {
-            observed.push(
-                bucket
-                    .get_with_revision(&marker.kv_key)
-                    .await
-                    .map_err(RelayError::published_language)?,
-            );
+            let held = bucket
+                .get_isolating(&marker.kv_key)
+                .await
+                .map_err(RelayError::published_language)?;
+            if let Some((slot, _)) = &held {
+                fault::isolate(pg, &self.name, &marker.kv_key, slot, "the value").await?;
+            }
+            observed.push(held);
         }
 
         #[cfg(feature = "test-support")]

@@ -1,4 +1,5 @@
 mod apply;
+mod fault;
 mod leader;
 mod marker;
 #[cfg(feature = "test-support")]

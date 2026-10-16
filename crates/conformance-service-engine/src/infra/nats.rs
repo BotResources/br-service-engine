@@ -105,6 +105,33 @@ impl TestNats {
             .expect("the engine nats layer dials the ephemeral broker")
     }
 
+    pub async fn put_raw(&self, key: &str, bytes: &[u8]) {
+        let store = self
+            .jetstream()
+            .await
+            .get_key_value(KV_PUBLISHED_LANGUAGE)
+            .await
+            .expect("bind the PUBLISHED_LANGUAGE bucket");
+        store
+            .put(key, bytes.to_vec().into())
+            .await
+            .expect("write raw bytes under a published-language key");
+    }
+
+    pub async fn holds(&self, key: &str) -> bool {
+        let store = self
+            .jetstream()
+            .await
+            .get_key_value(KV_PUBLISHED_LANGUAGE)
+            .await
+            .expect("bind the PUBLISHED_LANGUAGE bucket");
+        store
+            .get(key)
+            .await
+            .expect("read a published-language key")
+            .is_some()
+    }
+
     pub async fn provision(&self) {
         self.provision_integration(INTEGRATION_MAX_AGE).await;
     }

@@ -4,8 +4,9 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::error::RelayError;
+use crate::inbound::stage_offer_value;
 use crate::name::RelayName;
-use crate::nats::{KvBucket, KvKey, Nats, NatsError};
+use crate::nats::{KvBucket, KvKey, Nats, NatsError, Slot};
 use crate::relay::{Claim, Discipline, Drained, Relay};
 use crate::relays::kv_watermark;
 
@@ -101,10 +102,24 @@ where
         for _ in 0..=self.cas_retries {
             let observed = self
                 .bucket
-                .get_with_revision(&change.key)
+                .get_isolating(&change.key)
                 .await
                 .map_err(RelayError::published_language)?;
-            let published = observed.as_ref().map(|(value, _)| value.version());
+            if let Some((Slot::Undecodable(fault), _)) = &observed {
+                let reason = fault.reason();
+                tracing::warn!(
+                    relay = %self.name,
+                    key = change.key.as_str(),
+                    reason = %reason,
+                    "an undecodable value sits under a published key; it is dead-lettered and overwritten or retracted",
+                );
+                stage_offer_value(conn, self.name.as_str(), change.key.as_str(), &reason).await?;
+            }
+            let published = observed.as_ref().and_then(|(slot, _)| match slot {
+                Slot::Value(value) => Some(value.version()),
+                Slot::Undecodable(_) => None,
+            });
+            let observed = observed.map(|(_, revision)| revision);
             let floor = [watermark, published].into_iter().flatten().max();
             if floor.is_some_and(|floor| !supersedes(floor, change.version)) {
                 return Ok(());
@@ -116,7 +131,7 @@ where
                         Err(NatsError::RevisionConflict { .. }) => continue,
                         Err(error) => return Err(RelayError::published_language(error)),
                     },
-                    Some((_, revision)) => {
+                    Some(revision) => {
                         match self.bucket.update_if(&change.key, value, revision).await {
                             Ok(_) => {}
                             Err(NatsError::RevisionConflict { .. }) => continue,
@@ -126,8 +141,7 @@ where
                 },
                 KvWrite::Retract => match observed {
                     None => {}
-                    Some((_, revision)) => match self.bucket.delete_if(&change.key, revision).await
-                    {
+                    Some(revision) => match self.bucket.delete_if(&change.key, revision).await {
                         Ok(()) => {}
                         Err(NatsError::RevisionConflict { .. }) => continue,
                         Err(error) => return Err(RelayError::published_language(error)),

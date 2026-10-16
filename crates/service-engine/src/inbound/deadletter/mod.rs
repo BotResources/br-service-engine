@@ -91,5 +91,8 @@ impl DeadLetters {
     }
 }
 
+mod offer_value;
 mod record;
 mod store;
+
+pub(crate) use offer_value::stage_offer_value;

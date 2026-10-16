@@ -3,10 +3,12 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::error::RelayError;
-use crate::nats::{KvBucket, KvKey, NatsError, Revision};
+use crate::nats::{KvBucket, KvKey, NatsError, Revision, Slot};
 use crate::offer::Offer;
 use crate::offers::marker::Marker;
 use crate::persistence::{Aggregate, Persistence, PersistenceExt};
+
+pub(crate) type Observed<V> = Option<(Slot<V>, Revision)>;
 
 pub(crate) enum Write<V> {
     Put(V),
@@ -44,7 +46,7 @@ pub(crate) async fn apply_cas<V>(
     bucket: &KvBucket<V>,
     key: &KvKey,
     write: &Write<V>,
-    observed: Option<(V, Revision)>,
+    observed: Observed<V>,
 ) -> Result<KvOutcome, RelayError>
 where
     V: Serialize + DeserializeOwned + PartialEq,
@@ -56,7 +58,7 @@ where
             Err(error) => Err(RelayError::published_language(error)),
         },
         (Write::Put(value), Some((current, revision))) => {
-            if current == *value {
+            if matches!(&current, Slot::Value(held) if held == value) {
                 return Ok(KvOutcome::Applied);
             }
             match bucket.update_if(key, value, revision).await {

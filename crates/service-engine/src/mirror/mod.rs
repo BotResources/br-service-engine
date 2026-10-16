@@ -8,6 +8,7 @@ mod handle;
 mod known;
 mod leader;
 mod projection;
+mod rejection;
 mod required;
 mod row_scope;
 mod rows;
