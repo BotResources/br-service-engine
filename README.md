@@ -15,13 +15,18 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.4.1", version = "0.4.1" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "br-service-engine/v0.4.2", version = "0.4.2" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
 `*` version requirement, which `cargo-deny`'s `wildcards = "deny"` rejects. The
 engine has its own version line and depends on `br-rust-common` alone; each
-engine minor pins one exact `br-rust-common` tag.
+engine release pins one exact `br-rust-common` tag per crate it uses
+(`{crate}/v{version}`) up from 0.4.2, one workspace tag `v1.3.0` before.
+
+| Engine version | Per-crate tags |
+|---|---|
+| 0.4.2 | `br-core-auth/v0.1.0`, `br-core-integration/v0.1.0`, `br-core-kernel/v0.1.0`, `br-core-scope/v0.1.0`, `br-scope-declaration-contract/v0.1.0`, `br-util-axum-readiness/v0.1.0`, `br-util-observability/v0.1.0`, `br-util-postgres/v0.1.1` |
 
 | Engine version | `br-rust-common` |
 |---|---|

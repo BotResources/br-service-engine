@@ -14,6 +14,16 @@ named `br-engine-service` (tags `chart/br-engine-service/v{version}`, sections
 `## chart br-engine-service {version}`); that name is deprecated and 2.0.0
 continues its version line.
 
+## 0.4.2 - 2026-10-16
+
+A patch of 0.4.1. No adopter code changes; a service bumps its pin.
+
+### Changed
+
+- Every `br-rust-common` dependency moves from the legacy workspace tag `v1.3.0` to the per-crate tags `{crate}/v{version}`, each at its latest release (`br-util-postgres/v0.1.1`, the other seven at `v0.1.0`).
+- `rustls` moves to 0.23.46 in the lockfile, which clears the RUSTSEC-2026-0346, -0347 and -0348 advisories `cargo deny` reported.
+- The release is tagged `br-service-engine/v0.4.2` and recorded in the Libraries registry.
+
 ## 0.4.1 - 2026-10-08
 
 A patch of 0.4.0: two defects and one additive gap found by the first
