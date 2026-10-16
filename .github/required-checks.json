@@ -10,6 +10,7 @@
     "release-line law and registry wiring tests",
     "registry gate",
     "trufflehog (secret scan)",
-    "conformance-service-engine (real infra)"
+    "conformance-service-engine (real infra)",
+    "musl boot (verify past pest)"
   ]
 }
