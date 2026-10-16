@@ -16,8 +16,9 @@ impl<'a, P: Principal> Query<'a, P> {
     where
         V: Projector<Principal = P>,
     {
+        let principal = self.principal.get().await?;
         let loaded = if V::RLS {
-            let mut tx = self.begin_read(true).await?;
+            let mut tx = self.begin_read(true, principal).await?;
             let outcome = V::Store::load(&mut tx, key).await;
             finish(tx, outcome).await?
         } else {
@@ -31,7 +32,6 @@ impl<'a, P: Principal> Query<'a, P> {
                 .await
                 .or_internal("load an aggregate behind its view's visibility")?
         };
-        let principal = self.principal.get().await?;
         Ok(loaded.filter(|row| V::visible(row, principal)))
     }
 
@@ -47,12 +47,17 @@ impl<'a, P: Principal> Query<'a, P> {
         T: Send,
         F: for<'c> FnOnce(&'c mut PgConnection) -> BoxFuture<'c, Result<T, EngineError>> + Send,
     {
-        let mut tx = self.begin_read(true).await?;
+        let principal = self.principal.get().await?;
+        let mut tx = self.begin_read(true, principal).await?;
         let outcome = read(&mut tx).await;
         finish(tx, outcome).await
     }
 
-    async fn begin_read(&self, under_rls: bool) -> Result<Transaction<'static, Postgres>, Error> {
+    async fn begin_read(
+        &self,
+        under_rls: bool,
+        principal: &P,
+    ) -> Result<Transaction<'static, Postgres>, Error> {
         let applier = if under_rls {
             Some(self.state.runtime().registry().rls().ok_or_else(|| {
                 internal_fault("a read under RLS was asked for but no RlsApplier is registered")
@@ -72,7 +77,7 @@ impl<'a, P: Principal> Query<'a, P> {
             .or_internal("make a gated read one read-only snapshot")?;
         if let Some(applier) = applier {
             applier
-                .apply(&mut tx, self.principal.get().await?)
+                .apply(&mut tx, principal)
                 .await
                 .or_internal("apply the principal's RLS context to a read")?;
         }
@@ -93,7 +98,7 @@ impl<P: Principal, V: Projector<Principal = P>> Behind<'_, '_, P, V> {
             + Send,
     {
         let principal = self.query.principal.get().await?;
-        let mut tx = self.query.begin_read(V::RLS).await?;
+        let mut tx = self.query.begin_read(V::RLS, principal).await?;
         let outcome = match V::Store::load(&mut tx, self.key).await {
             Ok(Some(parent)) if V::visible(&parent, principal) => {
                 read(parent, &mut tx).await.map(Some)
