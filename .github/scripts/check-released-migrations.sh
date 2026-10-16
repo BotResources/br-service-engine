@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# A released engine migration is immutable. sqlx stores the SHA-384 of every
-# applied file and fails `migrate` (VersionMismatch) when the embedded file no
-# longer matches it, so an edit to a file a release shipped breaks every
-# database that release migrated. v0.3.0 did exactly that to
-# 9113000023_mirror_stream_identity.sql, which v0.2.0 had applied.
-#
-# This guard exports the engine migrations of every release tag and runs
-# the service-engine test that holds each released file against HEAD: the file
-# must still exist with the same bytes, or the SHA-384 of its released bytes
-# must be registered for its version in EDITED_AFTER_RELEASE
-# (crates/service-engine/src/schema/released.rs), which `migrate` then adopts.
-# Every tag is checked, not only the last one, so a checksum registered for an
-# older release can never be dropped silently.
 set -euo pipefail
 
 migrations="crates/service-engine/migrations"

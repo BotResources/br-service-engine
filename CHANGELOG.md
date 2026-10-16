@@ -16,14 +16,22 @@ continues its version line.
 
 ## 0.4.2 - 2026-10-16
 
-A patch of 0.4.1. No adopter source changes, but the pins move together: in one change a service re-pins every br-rust-common crate it names (br-core-auth, br-core-integration, br-core-scope, br-scope-declaration-contract, br-util-axum-readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
+A patch of 0.4.1. No adopter source changes, but the pins move together: in one change a service re-pins every br-rust-common crate whose types the engine API names (br-core-auth for Passport, br-core-kernel for Actor, br-core-integration for EventCoords and CommandCoords, br-core-scope for the ScopeError payloads, br-util-axum-readiness for Readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
 
 ### Changed
 
 - Every `br-rust-common` dependency moves from the legacy workspace tag `v1.3.0` to the per-crate tags `{crate}/v{version}`, each at its latest release (`br-util-postgres/v0.1.1`, the other seven at `v0.1.0`).
 - The `conformance-service-engine` dev-dependency on `br-test-harness` moves from `v1.2.0` to `br-test-harness/v0.1.1`, so the tests share one copy of each `br-rust-common` type with the engine.
-- `rustls` moves to 0.23.46 in the lockfile, which clears the RUSTSEC-2026-0346, -0347 and -0348 advisories `cargo deny` reported.
+- `serve`, `migrate`, `connect_pool` and `validate_database_tls` now validate the database URL with `br-util-postgres` 0.1.1 and read its host from the URL authority only. A URL with no scheme, a foreign scheme, no explicit host, or a value `sqlx` cannot parse is refused even on loopback, so a pod can fail to boot on a URL that booted before.
+- `migrate` grants app access in one transaction under an advisory lock with a bounded retry (`br-util-postgres` 0.1.1), so replicas that migrate together no longer fail with `tuple concurrently updated`.
+- `rustls` moves to 0.23.46 in the lockfile, which clears the RUSTSEC-2026-0346, -0347, -0348 and -0349 advisories `cargo deny` reported.
 - The release is tagged `br-service-engine/v0.4.2` and recorded in the Libraries registry.
+
+### Fixed
+
+- **`migrate` and the public `validate_database_tls` / `connect_pool` no longer accept a remote database URL without TLS.** They carried the engine's own copy of the TLS check, which took the host after the first `@` of the whole URL: `postgres://db.remote.example/app?options=@127.0.0.1` read as loopback and `postgres:///db?sslmode=require` read as an empty host, and both passed while `serve` refused them. The copy is deleted; every entry point calls `br-util-postgres`, which also refuses a `host=` or `hostaddr=` override. Covered by a unit test and by `bb18`, which runs the real `migrate` binary against both URLs.
+
+The compatibility entry for this release is chart `br-service-engine-chart` 2.0.0 ↔ engine 0.4.2.
 
 ## 0.4.1 - 2026-10-08
 

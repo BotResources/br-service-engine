@@ -72,7 +72,7 @@ battery-backed.
 | `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode; built in Rust with `WindowSize::new(u32) -> Result<_, WindowSizeOutOfRange>`, which refuses 0 and anything above `WindowSize::MAX`, `i32::MAX`, the largest GraphQL `Int`) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, at a one-shot window fetch and at a raw one-key `fetch`, `KeyCeiling::NONE` for a repopulation after attach); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling, and a populate with no page binds `cx.limit_all()`, the ceiling itself |
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
-| `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
+| `db` | `connect_pool` + `validate_database_tls`: the engine's pooled Postgres connect, thin calls to `br-util-postgres`, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
 | `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view::<View>(key)`, one row read through `load_visible` and projected, never the view's population; `fetch_view_window` over a typed `Query`, a window above `window_capacity` refused with `WINDOW_TOO_LARGE` as at attach; the raw projector's `fetch` / `fetch_json` decide membership from the projector's default window, read under the same admission ceiling and refused with `WINDOW_TOO_LARGE` above `window_capacity`, so a large collection is read by key through a view; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see, in the parent's snapshot (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a `REPEATABLE READ READ ONLY` transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; async-graphql's `custom-error-conversion` on, so `?` converts an engine refusal (`Reason`, `MutationError`, `AttachError`, `WindowSizeOutOfRange`) to its coded error, and `?` on any other error type does not compile — except a bare `String` or `&'static str`, which async-graphql still converts to an error with no code, so a refusal the engine has no type for goes through `coded_error` and a fault through `or_internal`; `OrInternal::or_internal(context)` for a fault (`INTERNAL`, cause logged); `coded_error`/`forbidden` for a refusal the engine has no type for; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
@@ -1192,8 +1192,8 @@ constraint and dead-lettering a legitimate replay.
 A service depends on `br-rust-common` for frontier types (the Passport, the
 integration envelope and coordinates, the scope declaration and its handshake, the
 shared value types) and for the boot-time primitives it does not re-invent: the
-engine keeps its own `connect_pool` / `validate_database_tls` (the secure-by-default
-Postgres connect) but re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
+engine exposes `connect_pool` / `validate_database_tls` (the secure-by-default
+Postgres connect) as thin calls to `br-util-postgres`, and re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
 from `br-util-axum-readiness` rather than carrying a copy, and `serve` reads the
 migration ledger through `br-util-postgres`.
 
@@ -1471,7 +1471,8 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb14_migrate_needs_only_the_owner_env \
     --test bb15_migrate_refuses_an_owner_subject_to_rls \
     --test bb16_gateway_sse_subscription \
-    --test bb17_paging_by_arguments_across_replicas
+    --test bb17_paging_by_arguments_across_replicas \
+    --test bb18_migrate_refuses_an_owner_dsn_the_tls_rule_rejects
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1652,7 +1653,8 @@ an explicit pair, so their row names the engine releases they shipped beside.
 
 | Chart | Engine | Note |
 |---|---|---|
-| `br-service-engine-chart` **2.0.0** | **0.4.1** | a patch of the engine; the chart is unchanged |
+| `br-service-engine-chart` **2.0.0** | **0.4.2** | a patch of the engine; the chart is unchanged |
+| `br-service-engine-chart` 2.0.0 | 0.4.1 | a patch of the engine; the chart is unchanged |
 | `br-service-engine-chart` 2.0.0 | 0.4.0 | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
 | `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
 | `br-engine-service` 1.1.0 (deprecated) | shipped beside 0.3.1 – 0.3.4 | hardened pod, `startupProbe`, neutral fields |
@@ -1666,7 +1668,7 @@ GitOps and the NATS fabric.
 | Surface | Contract |
 |---|---|
 | Entry points | `<binary> migrate` (owner role; exits 0 when the engine, library and service sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
-| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
+| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule, `br-util-postgres`'s, as `serve`) |
 | App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (the binary falls back to `8080` when it is unset; the chart always sets it, from the required `port` value) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
 | Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled`, plus `S3_PUBLIC_ENDPOINT` from `objectStore.publicEndpoint` when set (chart 1.1) |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
