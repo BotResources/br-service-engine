@@ -14,6 +14,7 @@ use crate::graphql::MultipartConfig;
 use crate::inbound::{DEFAULT_ACK_WAIT, DEFAULT_MAX_ACK_PENDING};
 use crate::name::{ChannelName, PodId};
 
+pub const MIN_DURATION: Duration = Duration::from_micros(1);
 pub const DEFAULT_WINDOW: Duration = Duration::from_millis(100);
 pub const DEFAULT_BEAT: Duration = Duration::from_secs(1);
 pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(30);

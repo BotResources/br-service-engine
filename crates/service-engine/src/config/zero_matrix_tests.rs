@@ -12,39 +12,36 @@ fn config() -> EngineConfig {
 }
 
 type Zero = fn(&mut EngineConfig);
+type SetDuration = fn(&mut EngineConfig, Duration);
 
-const ZERO_DURATIONS: &[(&str, Zero)] = &[
-    ("window", |c| c.window = Duration::ZERO),
-    ("beat", |c| c.beat = Duration::ZERO),
-    ("session_ttl", |c| c.session_ttl = Duration::ZERO),
-    ("seal_retention", |c| c.seal_retention = Duration::ZERO),
-    ("lease", |c| c.lease = Duration::ZERO),
-    ("offer_reconcile", |c| c.offer_reconcile = Duration::ZERO),
-    ("mirror_reconcile", |c| c.mirror_reconcile = Duration::ZERO),
-    ("listener_probe_timeout", |c| {
-        c.listener_probe_timeout = Duration::ZERO
+const DURATIONS: &[(&str, SetDuration)] = &[
+    ("window", |c, value| c.window = value),
+    ("beat", |c, value| c.beat = value),
+    ("session_ttl", |c, value| c.session_ttl = value),
+    ("seal_retention", |c, value| c.seal_retention = value),
+    ("lease", |c, value| c.lease = value),
+    ("offer_reconcile", |c, value| c.offer_reconcile = value),
+    ("mirror_reconcile", |c, value| c.mirror_reconcile = value),
+    ("listener_probe_timeout", |c, value| {
+        c.listener_probe_timeout = value
     }),
-    ("session_max_age", |c| c.session_max_age = Duration::ZERO),
-    ("lock_timeout", |c| c.lock_timeout = Duration::ZERO),
-    ("ack_wait", |c| c.ack_wait = Duration::ZERO),
-    ("nats_grace", |c| c.nats_grace = Duration::ZERO),
-    ("message_retention", |c| {
-        c.message_retention = Duration::ZERO
+    ("session_max_age", |c, value| c.session_max_age = value),
+    ("lock_timeout", |c, value| c.lock_timeout = value),
+    ("ack_wait", |c, value| c.ack_wait = value),
+    ("nats_grace", |c, value| c.nats_grace = value),
+    ("message_retention", |c, value| c.message_retention = value),
+    ("publish_ack_timeout", |c, value| {
+        c.publish_ack_timeout = value
     }),
-    ("publish_ack_timeout", |c| {
-        c.publish_ack_timeout = Duration::ZERO
+    ("body_read_timeout", |c, value| c.body_read_timeout = value),
+    ("blob_reaper_interval", |c, value| {
+        c.blob_reaper_interval = value
     }),
-    ("body_read_timeout", |c| {
-        c.body_read_timeout = Duration::ZERO
+    ("schema_version_liveness", |c, value| {
+        c.schema_version_liveness = value
     }),
-    ("blob_reaper_interval", |c| {
-        c.blob_reaper_interval = Duration::ZERO
-    }),
-    ("schema_version_liveness", |c| {
-        c.schema_version_liveness = Duration::ZERO
-    }),
-    ("migrate_connect_timeout", |c| {
-        c.migrate_connect_timeout = Duration::ZERO
+    ("migrate_connect_timeout", |c, value| {
+        c.migrate_connect_timeout = value
     }),
 ];
 
@@ -64,24 +61,42 @@ const ZERO_BOUNDS: &[(&str, Zero)] = &[
     ("max_body_bytes", |c| c.max_body_bytes = 0),
 ];
 
-fn refusal_naming(label: &str, zero: Zero) -> String {
+fn refusal_naming(label: &str, zero: impl FnOnce(&mut EngineConfig)) -> String {
     let mut candidate = config();
     zero(&mut candidate);
     match candidate.validate() {
         Err(EngineError::Config(message)) => message,
-        other => panic!("a zero {label} must be refused as a configuration error, got {other:?}"),
+        other => panic!(
+            "{label} below its floor must be refused as a configuration error, got {other:?}"
+        ),
     }
 }
 
 #[test]
-fn every_duration_the_engine_waits_on_is_refused_at_zero_by_name() {
-    for (label, zero) in ZERO_DURATIONS {
-        let message = refusal_naming(label, *zero);
-        assert!(
-            message.contains(label),
-            "the refusal of a zero {label} must name it, got: {message}"
-        );
+fn every_duration_the_engine_waits_on_is_refused_below_one_microsecond_by_name() {
+    assert_eq!(DURATIONS.len(), 18);
+    for (label, set) in DURATIONS {
+        for value in [
+            Duration::ZERO,
+            Duration::from_nanos(1),
+            Duration::from_nanos(999),
+        ] {
+            let message = refusal_naming(label, |c| set(c, value));
+            assert!(
+                message.contains(label),
+                "the refusal of {label} at {value:?} must name it, got: {message}"
+            );
+        }
     }
+}
+
+#[test]
+fn exactly_one_microsecond_is_the_smallest_accepted_blob_reaper_interval() {
+    let mut candidate = config();
+    candidate.blob_reaper_interval = Duration::from_micros(1);
+    candidate
+        .validate()
+        .expect("one microsecond is the finest slot a Postgres interval can hold");
 }
 
 #[test]

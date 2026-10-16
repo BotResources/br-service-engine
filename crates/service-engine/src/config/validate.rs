@@ -1,4 +1,4 @@
-use crate::config::EngineConfig;
+use crate::config::{EngineConfig, MIN_DURATION};
 use crate::error::EngineError;
 
 impl EngineConfig {
@@ -23,8 +23,10 @@ impl EngineConfig {
             ("schema_version_liveness", self.schema_version_liveness),
             ("migrate_connect_timeout", self.migrate_connect_timeout),
         ] {
-            if value.is_zero() {
-                return Err(EngineError::Config(format!("{label} must be non-zero")));
+            if value < MIN_DURATION {
+                return Err(EngineError::Config(format!(
+                    "{label} must be at least one microsecond"
+                )));
             }
         }
         if self.publish_ack_timeout >= self.ack_wait {
