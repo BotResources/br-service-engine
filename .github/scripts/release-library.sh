@@ -34,14 +34,17 @@ if gh release view "${tag}" >/dev/null 2>&1; then
 else
   echo "→ creating release ${tag}"
   notes_file=$(mktemp)
-  git show "${commit}:${changelog}" | awk -v target="## ${version}" '
+  changelog_file=$(mktemp)
+  git show "${commit}:${changelog}" > "$changelog_file"
+  awk -v target="## ${version}" '
     !in_section && substr($0, 1, length(target)) == target &&
     (length($0) == length(target) || substr($0, length(target) + 1, 1) == " ") {
       in_section = 1; print; next
     }
     in_section && /^## / { exit }
     in_section { print }
-  ' > "$notes_file"
+  ' "$changelog_file" > "$notes_file"
+  rm -f "$changelog_file"
   if [ ! -s "$notes_file" ]; then
     echo "::warning file=${changelog}::could not extract notes for ${tag}; using placeholder"
     printf 'See [%s](https://github.com/%s/blob/%s/%s) for changes.\n' \

@@ -86,6 +86,20 @@ expect 0 "creating tag $LIBRARY/v0.4.2" "tag from a release line" release 0.4.2 
 expect_file_has "$gh_log" '--latest=false' "a release line never moves Latest"
 expect 1 'does not declare' "tagging a version the commit does not carry: refuses" release 0.9.0 refs/heads/main "$RELEASE_COMMIT"
 
+echo "== release notes from a changelog far larger than a pipe buffer"
+set_version 0.4.3
+python3 - "$DEV/CHANGELOG.md" <<'BIGLOG'
+import sys
+with open(sys.argv[1], "w") as f:
+    f.write("# Changelog\n\n## 0.4.3 - 2026-10-17\n\n- notes of the new version\n\n## 0.4.2 - 2026-10-16\n\n")
+    f.write("- older entry that must stay out of the notes\n" * 8000)
+BIGLOG
+BIG_COMMIT="$(commit_all "0.4.3")"
+rm -f "$STUB_DIR/notes.last"
+expect 0 "creating release $LIBRARY/v0.4.3" "the notes of a large changelog are extracted" release 0.4.3 refs/heads/main "$BIG_COMMIT"
+expect_file_has "$STUB_DIR/notes.last" 'notes of the new version' "the notes carry the section of the version"
+expect 1 '' "the notes stop at the next version heading" grep -q 'older entry' "$STUB_DIR/notes.last"
+
 echo "== record: both packages, dependencies kept only on a real line"
 stub_reset
 rm -rf "$WORK/reg"
