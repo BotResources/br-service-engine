@@ -112,6 +112,12 @@ STUB
     cat >"$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "gh $*" >>"$STUB_DIR/gh.log"
+if [ "${1:-}" = release ] && [ "${2:-}" = create ]; then
+    for arg in "$@"; do
+        if [ "${previous:-}" = --notes-file ]; then cp "$arg" "$STUB_DIR/notes.last"; fi
+        previous="$arg"
+    done
+fi
 [ "${1:-}" = release ] && [ "${2:-}" = view ] && exit 1
 exit 0
 STUB
