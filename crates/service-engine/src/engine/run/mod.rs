@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::engine::Engine;
 use crate::engine::loops::{join_presence, run_scheduled_messages};
+use crate::engine::shutdown::Stopped;
 use crate::error::EngineError;
 use crate::housekeeping::ready::REASON_WORKER_STOPPED;
 use crate::pipeline::Policies;
@@ -19,10 +20,12 @@ enum Boot {
 
 impl<P: Principal> Engine<P> {
     pub async fn run(self) -> Result<(), EngineError> {
-        let slices =
-            crate::graphql::SchemaSlices::assemble(&self.schema_slices, self.root_prefix.as_ref())?;
+        let slices = Arc::new(crate::graphql::SchemaSlices::assemble(
+            &self.schema_slices,
+            self.root_prefix.as_ref(),
+        )?);
         if let Some(sdl) = &self.schema_sdl {
-            slices.verify(sdl)?;
+            slices.verify_on_known_stack(sdl.clone()).await?;
         }
         self.policy_seams
             .verify(&self.post_save, &self.post_delete, &self.post_upload)?;
@@ -44,6 +47,7 @@ impl<P: Principal> Engine<P> {
             mut mirrors,
             inbound_reactions,
             offers,
+            offer_dead_letters,
             post_save,
             post_delete,
             post_upload,
@@ -70,11 +74,13 @@ impl<P: Principal> Engine<P> {
             &transport,
             readiness,
             &mut mirrors,
+            &offer_dead_letters,
             &accumulators,
             &render,
             erasure_drain,
         )?;
 
+        let displaced = beat.displacement();
         let stop_render = Stop::new();
         let stop_beat = Stop::new();
         let stop_flush = Stop::new();
@@ -260,10 +266,13 @@ impl<P: Principal> Engine<P> {
 
         let stopped = tokio::select! {
             () = &mut stopping => None,
-            outcome = &mut render_task => Some(("render", outcome)),
-            outcome = &mut beat_task => Some(("beat", outcome)),
-            outcome = &mut flush_task => Some(("flush", outcome)),
-            () = mirror_tasks.any_stopped() => Some(("mirror", Ok(()))),
+            outcome = &mut render_task => Some(Stopped::worker("render", outcome)),
+            outcome = &mut beat_task => Some(Stopped::worker("beat", outcome)),
+            outcome = &mut flush_task => Some(Stopped::worker("flush", outcome)),
+            () = mirror_tasks.any_stopped() => Some(Stopped::worker("mirror", Ok(()))),
+            () = crate::engine::shutdown::claim_lost(displaced) => {
+                Some(Stopped::claim_lost(&config))
+            }
         };
 
         let outcome = crate::engine::shutdown::finish(

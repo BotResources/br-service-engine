@@ -9,6 +9,7 @@ use sqlx::migrate::Migrator;
 use crate::engine::Engine;
 use crate::engine::boot::env::app_database_url;
 use crate::engine::boot::libraries::LibraryMigrations;
+use crate::engine::boot::signals::ProcessSignals;
 use crate::engine::boot::{BootPlan, REASON_MIGRATIONS_PENDING, pg_error};
 use crate::error::EngineError;
 use crate::graphql::PassportPrincipal;
@@ -37,44 +38,57 @@ where
     } = plan;
 
     init_logging(component);
+    config.validate()?;
 
-    let readiness = ReadinessHandle::not_ready("booting");
-    let pool = init_pool(&app_database_url()?).await.map_err(pg_error)?;
-    if let Err(error) = ensure_migrated(&pool, &libraries, &service_migrator).await {
-        if matches!(error, EngineError::MigrationsPending { .. }) {
-            readiness.set_not_ready(REASON_MIGRATIONS_PENDING);
-            tracing::error!(error = %crate::chain::describe(&error), "refusing to serve a store that migrate has not finished");
-        }
-        return Err(error);
-    }
-
-    let nats = Nats::connect(&config.nats_url).await?;
-    let metrics = init_metrics(component).map_err(|error| {
-        EngineError::Config(format!(
-            "metrics recorder install failed: {}",
-            crate::chain::describe(&error)
-        ))
-    })?;
+    let mut signals = ProcessSignals::install()?;
     let http_addr = config.http_addr;
+    let prepare = async {
+        let readiness = ReadinessHandle::not_ready("booting");
+        let pool = init_pool(&app_database_url()?).await.map_err(pg_error)?;
+        if let Err(error) = ensure_migrated(&pool, &libraries, &service_migrator).await {
+            if matches!(error, EngineError::MigrationsPending { .. }) {
+                readiness.set_not_ready(REASON_MIGRATIONS_PENDING);
+                tracing::error!(error = %crate::chain::describe(&error), "refusing to serve a store that migrate has not finished");
+            }
+            return Err(error);
+        }
 
-    let mut engine = Engine::<P>::boot(config, pool, nats, readiness.clone()).await?;
-    register(&mut engine)?;
-    derive_retention(&mut engine, &readiness).await?;
-    if declare_scopes {
-        engine.declare_contributed_scopes()?;
-    }
+        let nats = Nats::connect(&config.nats_url).await?;
+        let metrics = init_metrics(component).map_err(|error| {
+            EngineError::Config(format!(
+                "metrics recorder install failed: {}",
+                crate::chain::describe(&error)
+            ))
+        })?;
 
-    let state = Arc::new(engine.graphql_state());
-    let schema = crate::graphql::engine_schema(query, mutation, subscription, state.clone());
-    let sdl = schema.sdl();
-    engine.set_schema_sdl(sdl.clone());
+        let mut engine = Engine::<P>::boot(config, pool, nats, readiness.clone()).await?;
+        register(&mut engine)?;
+        derive_retention(&mut engine, &readiness).await?;
+        if declare_scopes {
+            engine.declare_contributed_scopes()?;
+        }
 
-    let app = crate::graphql::with_edge_observability(
-        crate::graphql::app(schema, state, readiness),
-        sdl,
-        metrics,
-    );
+        let state = Arc::new(engine.graphql_state());
+        let schema = crate::graphql::engine_schema(query, mutation, subscription, state.clone());
+        let sdl = schema.sdl();
+        engine.set_schema_sdl(sdl.clone());
 
+        let app = crate::graphql::with_edge_observability(
+            crate::graphql::app(schema, state, readiness),
+            sdl,
+            metrics,
+        );
+        Ok::<_, EngineError>((engine, app))
+    };
+    let (engine, app) = tokio::select! {
+        prepared = prepare => prepared?,
+        signal = signals.received() => {
+            tracing::info!(signal, "process signal received while booting: exiting before serving");
+            return Ok(());
+        }
+    };
+
+    signals.request_shutdown_on_signal(engine.shutdown_handle());
     tracing::info!(component, %http_addr, "boot kit is serving");
     engine.run_with(app).await
 }

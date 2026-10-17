@@ -80,6 +80,10 @@ impl Beat {
         })
     }
 
+    pub(crate) fn displacement(&self) -> Option<watch::Receiver<bool>> {
+        self.schema_displaced.as_ref().map(watch::Sender::subscribe)
+    }
+
     pub fn relays(&mut self) -> &mut RelayRuntime {
         &mut self.relays
     }

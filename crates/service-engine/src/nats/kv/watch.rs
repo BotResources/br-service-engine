@@ -1,7 +1,7 @@
 use async_nats::jetstream::kv::Operation;
 use serde::de::DeserializeOwned;
 
-use super::{KvBucket, Revision, decode};
+use super::{KvBucket, Revision, Slot};
 use crate::nats::NatsError;
 use crate::nats::key::{KvKey, KvPrefix};
 
@@ -54,6 +54,34 @@ impl KvWatch {
         &mut self,
         matches: impl Fn(&str) -> bool,
     ) -> Option<Result<Watched<V>, NatsError>> {
+        Some(
+            self.next_seen_where::<V>(matches)
+                .await?
+                .and_then(|seen| match seen {
+                    Seen::Boundary(revision) => Ok(Watched::Boundary(revision)),
+                    Seen::Delete { key, revision } => {
+                        Ok(Watched::Event(KvEvent::Delete { key, revision }))
+                    }
+                    Seen::Put {
+                        key,
+                        slot,
+                        revision,
+                    } => {
+                        let value = slot.strict(&key)?;
+                        Ok(Watched::Event(KvEvent::Put {
+                            key,
+                            value,
+                            revision,
+                        }))
+                    }
+                }),
+        )
+    }
+
+    pub(crate) async fn next_seen_where<V: DeserializeOwned>(
+        &mut self,
+        matches: impl Fn(&str) -> bool,
+    ) -> Option<Result<Seen<V>, NatsError>> {
         use futures_util::StreamExt;
         let entry = match self.inner.next().await {
             Some(Ok(entry)) => entry,
@@ -62,28 +90,55 @@ impl KvWatch {
         };
         let revision = entry.revision;
         if !matches(&entry.key) {
-            return Some(Ok(Watched::Boundary(revision)));
+            return Some(Ok(Seen::Boundary(revision)));
         }
-        match entry_to_event::<V>(entry) {
-            Some(Ok(event)) => Some(Ok(Watched::Event(event))),
-            Some(Err(error)) => Some(Err(error)),
-            None => Some(Ok(Watched::Boundary(revision))),
-        }
+        Some(Ok(
+            entry_to_seen::<V>(entry).unwrap_or(Seen::Boundary(revision))
+        ))
     }
+}
+
+pub(crate) enum Seen<V> {
+    Put {
+        key: KvKey,
+        slot: Slot<V>,
+        revision: Revision,
+    },
+    Delete {
+        key: KvKey,
+        revision: Revision,
+    },
+    Boundary(u64),
+}
+
+fn entry_to_seen<V: DeserializeOwned>(entry: async_nats::jetstream::kv::Entry) -> Option<Seen<V>> {
+    let key = KvKey::new(entry.key.clone()).ok()?;
+    let revision = Revision::new(entry.revision);
+    Some(match entry.operation {
+        Operation::Delete | Operation::Purge => Seen::Delete { key, revision },
+        Operation::Put => Seen::Put {
+            key,
+            slot: Slot::<V>::from_json(&entry.value),
+            revision,
+        },
+    })
 }
 
 fn entry_to_event<V: DeserializeOwned>(
     entry: async_nats::jetstream::kv::Entry,
 ) -> Option<Result<KvEvent<V>, NatsError>> {
-    let key = KvKey::new(entry.key.clone()).ok()?;
-    let revision = Revision::new(entry.revision);
-    Some(match entry.operation {
-        Operation::Delete | Operation::Purge => Ok(KvEvent::Delete { key, revision }),
-        Operation::Put => decode::<V>(&key, &entry.value).map(|value| KvEvent::Put {
+    Some(match entry_to_seen::<V>(entry)? {
+        Seen::Delete { key, revision } => Ok(KvEvent::Delete { key, revision }),
+        Seen::Put {
+            key,
+            slot,
+            revision,
+        } => slot.strict(&key).map(|value| KvEvent::Put {
             key,
             value,
             revision,
         }),
+        Seen::Boundary(_) => return None,
     })
 }
 

@@ -5,9 +5,9 @@ use sqlx::PgPool;
 use crate::error::RelayError;
 use crate::housekeeping::leader::Lease;
 use crate::mirror::{OfferManifest, manifest_key};
-use crate::name::RelayName;
-use crate::nats::{KvBucket, KvKey, KvPrefix};
+use crate::nats::{KvBucket, KvKey, KvPrefix, Slot};
 use crate::offer::Offer;
+use crate::offers::fault::Isolation;
 use crate::offers::leader::OfferLeader;
 use crate::offers::marker;
 use crate::persistence::Aggregate;
@@ -15,14 +15,15 @@ use crate::wire::KeyBytes;
 
 pub(crate) async fn reconcile<O: Offer>(
     pg: &PgPool,
-    name: &RelayName,
+    isolation: &Isolation<'_>,
     bucket: &KvBucket<O::Published>,
     manifest: &KvBucket<OfferManifest>,
     leader: &OfferLeader,
     lease: &mut Lease,
     chunk: usize,
 ) -> Result<(), RelayError> {
-    publish_manifest::<O>(manifest).await?;
+    let name = isolation.offer();
+    publish_manifest::<O>(isolation, manifest).await?;
     let mut conn = pg.acquire().await?;
     let rows = O::all(&mut conn).await.map_err(relay)?;
     drop(conn);
@@ -44,11 +45,12 @@ pub(crate) async fn reconcile<O: Offer>(
         ))
     })?;
     let mut retracts: Vec<KvKey> = Vec::new();
-    for (kv_key, _) in bucket
-        .entries(&prefix)
+    for (kv_key, slot, _) in bucket
+        .entries_isolating(&prefix)
         .await
         .map_err(RelayError::published_language)?
     {
+        isolation.isolate(&kv_key, &slot, "the value").await?;
         if !live.contains(&kv_key) {
             retracts.push(kv_key);
         }
@@ -80,18 +82,24 @@ pub(crate) async fn reconcile<O: Offer>(
     Ok(())
 }
 
-async fn publish_manifest<O: Offer>(manifest: &KvBucket<OfferManifest>) -> Result<(), RelayError> {
+async fn publish_manifest<O: Offer>(
+    isolation: &Isolation<'_>,
+    manifest: &KvBucket<OfferManifest>,
+) -> Result<(), RelayError> {
     let key = manifest_key(O::PREFIX).map_err(relay)?;
     let want = OfferManifest {
         prefix: O::PREFIX.to_string(),
         version: O::VERSION,
     };
-    match manifest
-        .get_with_revision(&key)
+    let held = manifest
+        .get_isolating(&key)
         .await
-        .map_err(RelayError::published_language)?
-    {
-        Some((found, _)) if found == want => Ok(()),
+        .map_err(RelayError::published_language)?;
+    if let Some((slot, _)) = &held {
+        isolation.isolate(&key, slot, "the offer manifest").await?;
+    }
+    match held {
+        Some((Slot::Value(found), _)) if found == want => Ok(()),
         Some((_, revision)) => manifest
             .update_if(&key, &want, revision)
             .await

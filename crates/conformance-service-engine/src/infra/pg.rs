@@ -215,21 +215,26 @@ impl TestDb {
     }
 
     pub async fn terminate_backends(&self, application_name: &str) -> Vec<i32> {
-        let sql = "SELECT pid FROM pg_stat_activity \
-                   WHERE datname = $1 AND application_name = $2 AND pid <> pg_backend_pid()";
-        let pids: Vec<i32> = sqlx::query_scalar(sql)
+        self.terminate_matching(application_name, false).await
+    }
+
+    pub(crate) async fn terminate_listening_backends(&self, application_name: &str) -> Vec<i32> {
+        self.terminate_matching(application_name, true).await
+    }
+
+    async fn terminate_matching(&self, application_name: &str, listening_only: bool) -> Vec<i32> {
+        const SQL: &str = "SELECT pid FROM ( \
+                 SELECT pid, pg_terminate_backend(pid) AS terminated FROM pg_stat_activity \
+                 WHERE datname = $1 AND application_name = $2 AND pid <> pg_backend_pid() \
+                   AND (NOT $3 OR query LIKE 'LISTEN %') \
+             ) AS killed WHERE terminated";
+        sqlx::query_scalar::<_, i32>(SQL)
             .bind(&self.database)
             .bind(application_name)
+            .bind(listening_only)
             .fetch_all(&self.admin)
             .await
-            .unwrap_or_default();
-        for pid in &pids {
-            let _ = sqlx::query("SELECT pg_terminate_backend($1)")
-                .bind(pid)
-                .execute(&self.admin)
-                .await;
-        }
-        pids
+            .unwrap_or_default()
     }
 
     pub async fn cleanup(self) {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 use crate::error::CompositionError;
 
@@ -250,4 +252,75 @@ fn two_subscription_slices_sharing_one_delta_union_verify_without_a_synthetic_sl
     slices
         .verify(sdl)
         .expect("one shared delta union across two slices needs no reactive slice");
+}
+
+fn widget_slices() -> Arc<SchemaSlices> {
+    Arc::new(
+        SchemaSlices::assemble(
+            &[fragment("widget", &["sampleWidget"], &["WidgetView"])],
+            Some(&prefix()),
+        )
+        .unwrap(),
+    )
+}
+
+const WIDGET_SDL: &str = "type Query {\n\tsampleWidget(id: UUID!): WidgetView\n}\n\
+                          type WidgetView {\n\tid: UUID!\n}\n";
+
+#[tokio::test]
+async fn a_faithful_sdl_verifies_through_the_known_stack_path() {
+    widget_slices()
+        .verify_on_known_stack(WIDGET_SDL.to_string())
+        .await
+        .expect("a declared schema verifies on the dedicated thread");
+}
+
+#[tokio::test]
+async fn the_known_stack_path_returns_the_same_composition_error_as_verify() {
+    let sdl = "type Query {\n\tsampleWidget(id: UUID!): WidgetView\n\t\
+               sampleAssignment(id: UUID!): AssignmentView\n}\n\
+               type WidgetView {\n\tid: UUID!\n}\ntype AssignmentView {\n\tid: UUID!\n}\n";
+    let err = widget_slices()
+        .verify_on_known_stack(sdl.to_string())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, EngineError::Composition(CompositionError::UndeclaredSchemaMember { ref member }) if member == "sampleAssignment")
+    );
+}
+
+#[tokio::test]
+async fn a_malformed_sdl_is_a_schema_parse_error_through_the_known_stack_path() {
+    let err = widget_slices()
+        .verify_on_known_stack("type Query {".to_string())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Composition(CompositionError::SchemaParse { .. })
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_work_runs_on_a_named_thread_other_than_the_caller_even_on_a_current_thread_runtime() {
+    let caller = std::thread::current().id();
+    let (id, name) = isolated::run_on_known_stack(|| {
+        let current = std::thread::current();
+        (current.id(), current.name().map(str::to_string))
+    })
+    .await
+    .expect("the thread starts");
+    assert_ne!(id, caller);
+    assert_eq!(name.as_deref(), Some("schema-verify"));
+}
+
+#[tokio::test]
+async fn a_panic_in_the_verification_thread_is_an_explicit_engine_error() {
+    let err = isolated::run_on_known_stack(|| -> () { panic!("verification blew up") })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        EngineError::Composition(CompositionError::SchemaParse { ref detail }) if detail.contains("panicked")
+    ));
 }

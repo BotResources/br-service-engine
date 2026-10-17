@@ -3,7 +3,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -117,13 +117,15 @@ jobs:
       - name: cargo semver-checks (unified baseline)
         run: |
           set -euo pipefail
-          baseline=$(git tag --list 'v*' | sort -V | tail -n1)
+          current=$(bash .github/scripts/library-version.sh)
+          baseline=$(bash .github/scripts/release-tags.sh "$current" | tail -n1)
           if [ -z "$baseline" ]; then
-            echo "::notice::no prior unified v* tag, skipping semver-checks (first lockstep release)"
+            echo "::notice::no prior release tag, skipping semver-checks (first lockstep release)"
             exit 0
           fi
-          current=$(awk -F'"' '/^\[workspace.package\]/{p=1; next} /^\[/{p=0} p && /^version *=/{print $2; exit}' Cargo.toml)
-          IFS=. read -r base_major base_minor _ <<<"${baseline#v}"
+          baseline_version="${baseline##*/}"
+          baseline_version="${baseline_version#v}"
+          IFS=. read -r base_major base_minor _ <<<"${baseline_version}"
           IFS=. read -r cur_major cur_minor _ <<<"${current}"
           breaking=0
           if [ "$cur_major" != "$base_major" ] || { [ "$cur_major" = 0 ] && [ "$cur_minor" != "$base_minor" ]; }; then
@@ -197,6 +199,32 @@ jobs:
           set -euo pipefail
           shellcheck --version
           shellcheck --severity=warning .github/scripts/*.sh
+
+  release-tooling:
+    name: release-line law and registry wiring tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: release-line decision table
+        run: bash .github/scripts/test-release-line.sh
+      - name: release detection and registry wiring
+        run: bash .github/scripts/test-release-pipeline.sh
+      - name: registry gate, tag and record wiring
+        run: bash .github/scripts/test-registry-wiring.sh
+
+  registry-gate:
+    name: registry gate
+    if: github.event_name == 'pull_request' && (github.base_ref == 'main' || startsWith(github.base_ref, 'release/'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+      - name: release-line law and registry gate when the version is bumped
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BR_REGISTRY_KEY: ${{ secrets.BR_REGISTRY_KEY }}
+        run: bash .github/scripts/pr-registry-gate.sh
 
   chart:
     name: helm library chart
@@ -393,6 +421,52 @@ jobs:
           df -h /
           cargo test -p example-service --all-targets --locked -- --test-threads=3
 
+  musl-boot:
+    name: musl boot (verify past pest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      E2E_PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: musl-boot
+      - name: install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - name: tune the ephemeral CI Postgres for the 2-core runner
+        run: bash .github/scripts/tune-ci-postgres.sh
+      - name: install nats-server
+        env:
+          NATS_SERVER_VERSION: v2.14.1
+        run: |
+          set -euo pipefail
+          url="https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_VERSION}/nats-server-${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL "$url" -o /tmp/nats-server.tar.gz
+          tar -xzf /tmp/nats-server.tar.gz -C /tmp
+          sudo install "/tmp/nats-server-${NATS_SERVER_VERSION}-linux-amd64/nats-server" /usr/local/bin/nats-server
+          nats-server --version
+      - name: boot a static musl example-service on pest >= 2.9.3
+        run: bash .github/scripts/musl-boot-verify.sh
+
   conformance-blackbox:
     name: conformance-service-engine black-box (real binary)
     runs-on: ubuntu-latest
@@ -461,4 +535,6 @@ jobs:
             --test bb15_migrate_refuses_an_owner_subject_to_rls \
             --test bb16_gateway_sse_subscription \
             --test bb17_paging_by_arguments_across_replicas \
+            --test bb18_migrate_refuses_an_owner_dsn_the_tls_rule_rejects \
+            --test bb19_sigterm_drains_and_exits_zero \
             --test s202_serve_derives_message_retention

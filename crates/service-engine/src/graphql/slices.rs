@@ -6,6 +6,8 @@ use crate::error::{CompositionError, EngineError};
 use crate::graphql::prefix::RootPrefix;
 use crate::graphql::sdl;
 
+mod isolated;
+
 #[derive(Clone, Debug)]
 pub struct SliceFragment {
     slice: &'static str,

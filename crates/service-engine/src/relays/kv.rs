@@ -4,8 +4,9 @@ use serde::de::DeserializeOwned;
 use sqlx::PgConnection;
 
 use crate::error::RelayError;
+use crate::inbound::DeadLetters;
 use crate::name::RelayName;
-use crate::nats::{KvBucket, KvKey, Nats, NatsError};
+use crate::nats::{KvBucket, KvKey, Nats, NatsError, Slot};
 use crate::relay::{Claim, Discipline, Drained, Relay};
 use crate::relays::kv_watermark;
 
@@ -67,6 +68,7 @@ pub struct KvDrainRelay<V, S> {
     bucket: KvBucket<V>,
     source: S,
     cas_retries: usize,
+    dead_letters: Option<DeadLetters>,
 }
 
 impl<V, S> KvDrainRelay<V, S>
@@ -84,6 +86,7 @@ where
             bucket,
             source,
             cas_retries: DEFAULT_CAS_RETRIES,
+            dead_letters: None,
         })
     }
 
@@ -92,8 +95,26 @@ where
         self
     }
 
+    pub fn with_dead_letters(mut self, dead_letters: DeadLetters) -> Self {
+        self.dead_letters = Some(dead_letters);
+        self
+    }
+
     pub async fn reset_watermarks(&self, conn: &mut PgConnection) -> Result<u64, RelayError> {
         kv_watermark::clear(conn, &self.name).await
+    }
+
+    async fn dead_letter(&self, key: &KvKey, reason: &str) -> Result<(), RelayError> {
+        let dead_letters = self.dead_letters.as_ref().ok_or_else(|| {
+            RelayError::Publish(format!(
+                "relay {} met an undecodable published value without dead letters; attach them with with_dead_letters before it can be isolated",
+                self.name
+            ))
+        })?;
+        dead_letters
+            .record_published_value(self.name.as_str(), key.as_str(), reason)
+            .await?;
+        Ok(())
     }
 
     async fn apply(&self, conn: &mut PgConnection, change: &KvChange<V>) -> Result<(), RelayError> {
@@ -101,10 +122,24 @@ where
         for _ in 0..=self.cas_retries {
             let observed = self
                 .bucket
-                .get_with_revision(&change.key)
+                .get_isolating(&change.key)
                 .await
                 .map_err(RelayError::published_language)?;
-            let published = observed.as_ref().map(|(value, _)| value.version());
+            if let Some((Slot::Undecodable(fault), _)) = &observed {
+                let reason = fault.reason();
+                tracing::warn!(
+                    relay = %self.name,
+                    key = change.key.as_str(),
+                    reason = %reason,
+                    "an undecodable value sits under a published key; it is dead-lettered and overwritten or retracted",
+                );
+                self.dead_letter(&change.key, &reason).await?;
+            }
+            let published = observed.as_ref().and_then(|(slot, _)| match slot {
+                Slot::Value(value) => Some(value.version()),
+                Slot::Undecodable(_) => None,
+            });
+            let observed = observed.map(|(_, revision)| revision);
             let floor = [watermark, published].into_iter().flatten().max();
             if floor.is_some_and(|floor| !supersedes(floor, change.version)) {
                 return Ok(());
@@ -116,7 +151,7 @@ where
                         Err(NatsError::RevisionConflict { .. }) => continue,
                         Err(error) => return Err(RelayError::published_language(error)),
                     },
-                    Some((_, revision)) => {
+                    Some(revision) => {
                         match self.bucket.update_if(&change.key, value, revision).await {
                             Ok(_) => {}
                             Err(NatsError::RevisionConflict { .. }) => continue,
@@ -126,8 +161,7 @@ where
                 },
                 KvWrite::Retract => match observed {
                     None => {}
-                    Some((_, revision)) => match self.bucket.delete_if(&change.key, revision).await
-                    {
+                    Some(revision) => match self.bucket.delete_if(&change.key, revision).await {
                         Ok(()) => {}
                         Err(NatsError::RevisionConflict { .. }) => continue,
                         Err(error) => return Err(RelayError::published_language(error)),

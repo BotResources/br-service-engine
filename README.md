@@ -6,7 +6,7 @@ streaming sources, boot, relays, cron, and mirror supervision. Two crates share
 one workspace version: the `service-engine` library a service builds on, and
 `conformance-service-engine`, its black-box conformance battery run against real
 PostgreSQL and NATS JetStream. Not published on crates.io and shipped as no
-image and no CLI: the git tag is the release.
+image and no CLI: the git tag is the release (`v0.4.1` and earlier, `br-service-engine/v{version}` after).
 
 ## Install
 
@@ -15,13 +15,20 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "v0.4.1", version = "0.4.1" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "br-service-engine/v0.4.2", version = "0.4.2" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
 `*` version requirement, which `cargo-deny`'s `wildcards = "deny"` rejects. The
 engine has its own version line and depends on `br-rust-common` alone; each
-engine minor pins one exact `br-rust-common` tag.
+engine release pins one exact `br-rust-common` tag per crate it uses
+(`{crate}/v{version}`) up from 0.4.2, one workspace tag `v1.3.0` before.
+
+| Engine version | Per-crate tags |
+|---|---|
+| 0.4.2 | `br-core-auth/v0.1.0`, `br-core-integration/v0.1.0`, `br-core-kernel/v0.1.0`, `br-core-scope/v0.1.0`, `br-scope-declaration-contract/v0.1.0`, `br-util-axum-readiness/v0.1.0`, `br-util-observability/v0.1.0`, `br-util-postgres/v0.1.1` |
+
+The engine API names types of these crates (`Passport`, `Actor`, `EventCoords`, `CommandCoords`, `Readiness`), so a service moves its pins together: in one change it re-pins every `br-rust-common` crate it names to the tags of this table and writes the engine pin as `br-service-engine/v0.4.2`. A service left on `v1.3.0` or `v1.4.0` gets two copies of each type and stops compiling.
 
 | Engine version | `br-rust-common` |
 |---|---|
@@ -45,7 +52,7 @@ battery-backed.
 
 | Module | Responsibility |
 |---|---|
-| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies the engine, library and service migration sets in that order, waits for the app role, grants it every schema), `serve` (app role, refuses an unmigrated store and names the pending set, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
+| `engine` | `Engine::boot` and the `register_*` / `contribute_scopes` / `declare_scopes` / `register_principal_fact` / `erase` surface; `engine::boot` also holds the boot kit (`run_service` / `BootPlan`) — the one call from a service `main` that dispatches on argv over three entry points: `migrate` (owner role, from `DATABASE_URL_OWNER` only, applies the engine, library and service migration sets in that order, waits for the app role, grants it every schema), `serve` (app role, refuses an unmigrated store and names the pending set, derives `message_retention` from the bound streams, installs logging + `/livez` + `/metrics` + `/sdl`, handles `SIGTERM` and `SIGINT` as a graceful shutdown (the path of `Engine::shutdown_handle`; a signal that arrives while it is still booting exits `Ok` before it serves), and serves), and `schema` (prints the SDL, touches no infra). A service reads no engine env by hand: `EngineConfig::from_env()` reads the ops contract in one place |
 | `nats` | Engine-owned NATS: stream/bucket bind, KV read/write/watch, outbox publish |
 | `inbound` | Inbound NATS loop: durable consumer, poison/dead-letter, `Disposition` |
 | `pipeline` | Direct write pipeline; `Mutation` / `Reaction` / `Bulk` contexts; `OneShot` |
@@ -65,7 +72,7 @@ battery-backed.
 | `page` | the window arguments of a paged view: `WindowSize` (a GraphQL `Int` argument refused below 1 with `WINDOW_SIZE_INVALID`, and refused on decode; built in Rust with `WindowSize::new(u32) -> Result<_, WindowSizeOutOfRange>`, which refuses 0 and anything above `WindowSize::MAX`, `i32::MAX`, the largest GraphQL `Int`) and `Page<K>` (`before` cursor + size, carried in a view's `Query`; `population(keys)` for the shape: an open head without a cursor, a fixed ordered page behind one), and `KeyCeiling`, the most keys a `populate` needs to read (`window_capacity + 1` at attach, at a one-shot window fetch and at a raw one-key `fetch`, `KeyCeiling::NONE` for a repopulation after attach); a view binds `cx.limit(&page)` from `view::Populate` as its `LIMIT`: the page size under that ceiling, and a populate with no page binds `cx.limit_all()`, the ceiling itself |
 | `session` | `attach` of an `AttachRequest` (the principal and its `WindowSpec`s; `WindowSpec::view::<V>(&query, rls)` encodes a view's typed arguments): one session per subscription, its `SessionId` minted by the engine, its window what `populate` returns for the arguments, refused with `AttachError::WindowTooLarge` above `window_capacity` and never ended for its size after; the `SessionStream` delivers `Reset` / `Upsert` / `Remove` on a contiguous revision, and dropping it releases the session at the next pass |
 | `readiness` | `Readiness`/`ReadinessHandle` and the `/readyz` route, re-exported from `br-util-axum-readiness` (the engine holds no copy); the shared crate's `readiness: UP` / `readiness: DOWN` tracing wording is the one the black-box battery greps |
-| `db` | `connect_pool` + `validate_database_tls`: the engine's own pooled Postgres connect, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
+| `db` | `connect_pool` + `validate_database_tls`: the engine's pooled Postgres connect, thin calls to `br-util-postgres`, secure-by-default (remote hosts need TLS; `TRUSTED_NETWORK_HOSTS` is the per-host opt-out) |
 | `graphql` | async-graphql kit; `compose_service!` (one line per slice generates the merged roots + `register`, with a mandatory `prefix = <snake_ident>;` and a `slice … from <lib>::<macro>` arm that embeds a library slice at the host's prefix and principal), `RootPrefix` (validate + `owns`, declared once and gated at `assemble`/`verify`, boot errors `CompositionError::{RootPrefixInvalid, RootPrefixUndeclared, RootPrefixRedeclared, RootFieldOutsidePrefix}`), the generic `gated! { generics [P: …] ; … }` and `subscription_union! { generics [P: …] ; … }` arms so a library writes its gate and delta union once over the principal, `pastey` re-exported for library slices, `app` answering `POST /graphql` as JSON or — on `Accept: text/event-stream`, the gateway's subscription leg — as a graphql-sse stream bounded like a `/graphql/ws` session, `run_with` boot, the edge (`/livez` + `/metrics` + `/sdl` and the HTTP metrics layer beside `app`) mounted by `serve` (`with_edge_observability` is crate-private), typed `Query` context (`fetch_view::<View>(key)`, one row read through `load_visible` and projected, never the view's population; `fetch_view_window` over a typed `Query`, a window above `window_capacity` refused with `WINDOW_TOO_LARGE` as at attach; the raw projector's `fetch` / `fetch_json` decide membership from the projector's default window, read under the same admission ceiling and refused with `WINDOW_TOO_LARGE` above `window_capacity`, so a large collection is read by key through a view; `load_visible::<View>(key)`, one aggregate behind its view's `Visibility` and RLS regime; `behind::<View>(&key).read(|parent, conn| …)`, hand SQL that runs only behind a parent the principal can see, in the parent's snapshot (the one type argument is the view; the closure's types are inferred); `read_under_rls(|conn| …)`, hand SQL in a `REPEATABLE READ READ ONLY` transaction under the principal's RLS context; `GraphqlState` exposes no pool, so a resolver reads through these or a view), per-projector typed subscription union, `SliceFragment::derive` reading each capability's root fields and owned object types from its `#[Object]` impls, the composed schema parsed and gated against the fragments at boot (unclaimed root field or object type fails loud) — the subscription delta-envelope object types are derived from any union that also lists `LanesPaused`/`LanesResumed` and exempted from the gate, so two subscription slices share one delta union with no synthetic slice; async-graphql's `custom-error-conversion` on, so `?` converts an engine refusal (`Reason`, `MutationError`, `AttachError`, `WindowSizeOutOfRange`) to its coded error, and `?` on any other error type does not compile — except a bare `String` or `&'static str`, which async-graphql still converts to an error with no code, so a refusal the engine has no type for goes through `coded_error` and a fault through `or_internal`; `OrInternal::or_internal(context)` for a fault (`INTERNAL`, cause logged); `coded_error`/`forbidden` for a refusal the engine has no type for; each slice's SDL fragment is emitted as a committed `schema.graphql` |
 
 No `register_*` method or engine gesture returns `EngineError::NotYet`; every
@@ -653,10 +660,14 @@ kit does authZ only, never authN. On `POST /graphql` it does so from the headers
 alone, **before it reads a byte of the request body**: a request whose passport is
 absent, does not decode or is rejected is answered `401` with the body untouched,
 whatever its content type, so an unauthenticated client can make the pod neither
-buffer nor write anything. The `401` body is plain text, not JSON: the message
-clients have always received (`the X-Passport header is absent`, `… is malformed:
-…`, `the passport is rejected: …`). Principal facts the pod cannot load are answered `500` `INTERNAL`
-(below), also before the body is read.
+buffer nor write anything. The `/graphql/ws` upgrade is refused the same way. The
+`401` body is a GraphQL error envelope (`Content-Type: application/json`) with the
+message `unauthorized` and `extensions.code` `UNAUTHENTICATED`, for all three
+causes, on JSON, multipart and event-stream requests and on the upgrade. The
+cause (`the X-Passport header is absent`, `… is malformed: …`, `the passport is
+rejected: …`) goes to the `debug` log only and never reaches the client. Principal
+facts the pod cannot load are answered `500` `INTERNAL` (below), also before the
+body is read.
 
 The principal contract. `PassportPrincipal::from_passport(passport) ->
 Result<Self, PrincipalRejected>` is pure and synchronous: it gets no pool and
@@ -676,6 +687,20 @@ answered `INTERNAL`; only a `PrincipalResolver` answering `None` refuses it with
 outcome: a denial read from local data is authorization (`FORBIDDEN`, or an
 affordance `reasonCode`), never a `401`, because authentication belongs to the
 gateway.
+
+On `/graphql/ws` the upgrade principal is kept only to be resolved again:
+`engine_schema` registers an extension (`graphql/fresh.rs`) that, for every
+operation on the socket — an attach, a query, a mutation, a gated read — resolves
+the principal again through the registered `PrincipalResolver`, reloads its
+facts, and hands that principal to the resolvers. The upgrade-time principal is
+not reachable from a socket resolver. A principal that resolves to nothing is
+refused `UNAUTHENTICATED` at that operation; a resolver fault, a fact-loader fault
+or a missing `PrincipalResolver` is answered `INTERNAL`; the socket stays open in
+all three cases. A query or a mutation on the socket therefore needs a registered
+`PrincipalResolver`, and a schema not built with `engine_schema` serves no
+principal on the socket at all (it fails closed). The refresh runs once per
+operation, before any resolver takes a pooled connection. `POST /graphql` is
+unchanged: its principal is resolved once, from the request headers.
 
 | Thing | Why it is the way it is |
 |---|---|
@@ -1185,8 +1210,8 @@ constraint and dead-lettering a legitimate replay.
 A service depends on `br-rust-common` for frontier types (the Passport, the
 integration envelope and coordinates, the scope declaration and its handshake, the
 shared value types) and for the boot-time primitives it does not re-invent: the
-engine keeps its own `connect_pool` / `validate_database_tls` (the secure-by-default
-Postgres connect) but re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
+engine exposes `connect_pool` / `validate_database_tls` (the secure-by-default
+Postgres connect) as thin calls to `br-util-postgres`, and re-exports `Readiness` / `ReadinessHandle` / `readiness_route`
 from `br-util-axum-readiness` rather than carrying a copy, and `serve` reads the
 migration ledger through `br-util-postgres`.
 
@@ -1255,7 +1280,7 @@ other difference still fails as `VersionMismatch`. Only the engine's own version
 listed there are read or written, so the library and service rows on the shared
 ledger are never touched. The one entry today is `9113000023`, whose header comment
 v0.3.0 removed after v0.2.0 had applied it. CI
-(`.github/scripts/check-released-migrations.sh`) exports every `v*` tag's engine
+(`.github/scripts/check-released-migrations.sh`) exports every release tag's engine
 migrations and fails when a released file is gone or differs from HEAD without its
 released checksum registered.
 `compose_service!` takes each slice's module, cargo feature and root objects on
@@ -1398,8 +1423,8 @@ whichever mode it lives:
   binary at `session_max_age` measured from the handshake, so a client that holds
   it open must reconnect with a fresh passport (`bb06`); the gateway's subscription
   transport — `POST /graphql` with `Accept: text/event-stream`, graphql-sse — carries
-  the same `Reset` then `Upsert` on a contiguous revision (read with
-  `br-test-harness`'s `SseSubscription`, the client service e2e suites use), refuses a
+  the same `Reset` then `Upsert` on a contiguous revision (read with the battery's own
+  event-stream reader), refuses a
   passport that is absent, undecodable or not a passport with the very `401` a JSON
   request gets, before a byte of the body is read, and completes the stream at
   `session_max_age` then ends it, a new request attaching afresh (`bb16`); and `main`'s one call to
@@ -1464,7 +1489,8 @@ E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
     --test bb14_migrate_needs_only_the_owner_env \
     --test bb15_migrate_refuses_an_owner_subject_to_rls \
     --test bb16_gateway_sse_subscription \
-    --test bb17_paging_by_arguments_across_replicas
+    --test bb17_paging_by_arguments_across_replicas \
+    --test bb18_migrate_refuses_an_owner_dsn_the_tls_rule_rejects
 
 # the reference service's own functional spec (same infra, plus MinIO for blobs)
 E2E_PG_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres \
@@ -1600,14 +1626,19 @@ environment): a live pod's heartbeat must never lapse between two of its own bea
 
 A stopping pod does not expire its own heartbeat. Between such an expiry and a
 same-version sibling's next beat, another version could claim the row; the
-displaced sibling would only lower readiness while its relays, cron and mirrors
-keep writing — two versions on one store.
+displaced sibling then stops at its next heartbeat, so two versions write one store only until that heartbeat and the drain of the frames in flight end.
 
 If the beat's heartbeat later updates **no** row — another version claimed the
 singleton while this pod ran, because its beat stalled past that version's
-`schema_version_liveness` — the pod has been displaced: it lowers readiness to
-DOWN rather than keep serving over a store it no longer owns, and it recovers when
-it once again owns the row.
+`schema_version_liveness` — the pod has been displaced. It runs the graceful
+shutdown path (the same one `Engine::shutdown_handle` starts): it lowers readiness
+to DOWN with the reason `REASON_SCHEMA_VERSION_DISPLACED` and stops every worker
+(render, beat, flush, mirrors, presence, scheduled messages, inbound loop,
+ingress and purge), so its relays, cron and mirrors write nothing more, and
+`Engine::run` returns `EngineError::SchemaClaimLost` naming both versions instead
+of `Ok`. The pod does not recover in place and does not take the claim back by
+itself: a pod that is started again claims the row at boot, through the handover
+above.
 
 ## Ops contract v1 — chart `br-service-engine-chart` 2.x
 
@@ -1645,7 +1676,8 @@ an explicit pair, so their row names the engine releases they shipped beside.
 
 | Chart | Engine | Note |
 |---|---|---|
-| `br-service-engine-chart` **2.0.0** | **0.4.1** | a patch of the engine; the chart is unchanged |
+| `br-service-engine-chart` **2.0.0** | **0.4.2** | a patch of the engine; the chart is unchanged |
+| `br-service-engine-chart` 2.0.0 | 0.4.1 | a patch of the engine; the chart is unchanged |
 | `br-service-engine-chart` 2.0.0 | 0.4.0 | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
 | `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
 | `br-engine-service` 1.1.0 (deprecated) | shipped beside 0.3.1 – 0.3.4 | hardened pod, `startupProbe`, neutral fields |
@@ -1659,7 +1691,7 @@ GitOps and the NATS fabric.
 | Surface | Contract |
 |---|---|
 | Entry points | `<binary> migrate` (owner role; exits 0 when the engine, library and service sets are current), `<binary> serve` (app role; the default with no argv), `<binary> schema` (prints SDL, reads no env, touches no infra) |
-| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule) |
+| Owner env — `migrate` only | `DATABASE_URL_OWNER` **strict**: no fallback to `DATABASE_URL`; `APP_ROLE` (the grant target — `migrate` waits until the role exists before granting app access); `TRUSTED_NETWORK_HOSTS` (the owner connect follows the same secure-by-default TLS rule, `br-util-postgres`'s, as `serve`) |
 | App env — `serve`, all read by `EngineConfig::from_env` | required: `DATABASE_URL`, `APP_ROLE` (read into the config but only `migrate` acts on it — the grant target; `serve` performs no check against it), `NATS_URL`, `ENGINE_CHANNEL`, `HOSTNAME` (pod identity, from `metadata.name`); with engine defaults: `PORT` (the binary falls back to `8080` when it is unset; the chart always sets it, from the required `port` value) and `HOST` (default `0.0.0.0`) — **not `HTTP_ADDR`**; `RUST_LOG`, `SESSION_TTL_MS`, `SESSION_MAX_AGE_MS`, `ENGINE_LEASE_MS`, `ENGINE_BEAT_MS`, `TRUSTED_NETWORK_HOSTS` |
 | Optional S3 group | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`, and optional `S3_PUBLIC_ENDPOINT` — the engine reads none of these; the service `main` reads the group and passes it to `with_blob_storage` (the reference `example-service` requires the first four, defaults `S3_REGION`, and maps `S3_PUBLIC_ENDPOINT` through `with_public_endpoint` when set, else falls through to no blob storage); the library chart emits the five core vars under `objectStore.enabled`, plus `S3_PUBLIC_ENDPOINT` from `objectStore.publicEndpoint` when set (chart 1.1) |
 | Derived, never env | `message_retention`: `serve` derives it from the bound streams' `max_age`. No `MESSAGE_RETENTION_*` variable exists |
@@ -1833,7 +1865,7 @@ spec:
 The chart itself is published to
 `oci://ghcr.io/botresources/charts/br-service-engine-chart` by `chart-release.yml`
 on the first `main` push that changes `Chart.yaml` `version`, tagged
-`chart/br-service-engine-chart/v<version>`, independent of the crate's `v*` tag.
+`chart/br-service-engine-chart/v<version>`, independent of the library's release tag.
 A version already published is never pushed again. The deprecated
 `oci://ghcr.io/botresources/charts/br-engine-service` (1.0.0 – 1.1.1) and its
 `chart/br-engine-service/v*` tags stay as they are; nothing in this repository
@@ -1851,24 +1883,27 @@ promotion step writes the promoted chart version into the wrapper.
 ## Configuration, degradation and observability
 
 `EngineConfig` carries one clock and a handful of bounds, every one validated
-at `Engine::boot`: durations and capacities are non-zero,
-`listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` and
+at `Engine::boot`: every duration is at least `config::MIN_DURATION` (one
+microsecond), capacities are non-zero, a blob `download_ttl` lies between 1 second
+and 7 days and a blob `upload_ttl` between 1 millisecond and 7 days (the bounds
+S3 presigning accepts), `listener_queue_threshold` lies in `(0.0, 1.0]`, the `lease` and
 `schema_version_liveness` outlast the `beat`, `session_max_age` outlasts the
 idle `session_ttl`, `max_body_bytes` is non-zero, a multipart `max_file_bytes`
 the service sets is non-zero and within `max_body_bytes` (unset, it follows a
-lower `max_body_bytes` down), and `body_read_timeout` is non-zero. A session
+lower `max_body_bytes` down). A session
 lives at most `session_max_age`; when it does
 the engine ends it with the same stream-closing signal as a shutdown, so the
 client reconnects with a fresh passport — distinct from `session_ttl`, which
 reaps an attach still not live after it (a dropped stream is reaped at the next
 pass). The bound is on the connection, not
-only the session: the WebSocket principal is resolved once at the handshake and
-serves every operation on that socket — subscriptions and mutations alike — so
-the kit closes the `graphql-transport-ws` connection itself at `session_max_age`
-measured from the handshake, with a `1001` going-away close frame the client
-recognises as a reconnect. A revoked scope therefore cannot keep an affordance
-allowed by keeping the socket open and re-subscribing, and a mutation over the
-socket runs under a principal no older than the bound. The client opens a new
+only the session: the passport of a WebSocket is read once at the handshake and
+serves every operation on that socket — subscriptions and mutations alike —
+while the principal built from it is resolved again, and its facts reloaded, at
+each operation. So the kit closes the `graphql-transport-ws` connection itself at
+`session_max_age` measured from the handshake, with a `1001` going-away close frame
+the client recognises as a reconnect. A revoked scope therefore cannot keep an
+affordance allowed by keeping the socket open and re-subscribing, and a mutation
+over the socket runs under a passport no older than the bound. The client opens a new
 upgrade on which the gateway re-injects the resolved `X-Passport`, so the fresh
 socket carries the current passport. An event stream on `POST /graphql` — the
 gateway's subscription leg — is bounded the same way: its principal is resolved

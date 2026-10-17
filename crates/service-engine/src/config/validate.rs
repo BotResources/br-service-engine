@@ -1,4 +1,4 @@
-use crate::config::EngineConfig;
+use crate::config::{EngineConfig, MIN_DURATION};
 use crate::error::EngineError;
 
 impl EngineConfig {
@@ -19,9 +19,13 @@ impl EngineConfig {
             ("message_retention", self.message_retention),
             ("publish_ack_timeout", self.publish_ack_timeout),
             ("body_read_timeout", self.body_read_timeout),
+            ("blob_reaper_interval", self.blob_reaper_interval),
+            ("schema_version_liveness", self.schema_version_liveness),
         ] {
-            if value.is_zero() {
-                return Err(EngineError::Config(format!("{label} must be non-zero")));
+            if value < MIN_DURATION {
+                return Err(EngineError::Config(format!(
+                    "{label} must be at least one microsecond"
+                )));
             }
         }
         if self.publish_ack_timeout >= self.ack_wait {
@@ -101,6 +105,9 @@ impl EngineConfig {
                 "service label, when set, must name the service so its metrics are attributable"
                     .into(),
             ));
+        }
+        if let Some(blob) = &self.blob {
+            blob.validate_ttls()?;
         }
         self.validate_body_bounds()
     }

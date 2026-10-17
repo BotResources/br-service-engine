@@ -9,7 +9,6 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use uuid::Uuid;
 
 const FACT_QUERY: &str = "{ sampleRegisteredTenant }";
-const REJECTED_BODY: &str = "the passport is rejected: the passport carries no tenant claim";
 
 async fn post(service: &GraphqlService, passport: &str) -> (u16, String) {
     let response = reqwest::Client::new()
@@ -43,6 +42,29 @@ async fn refused_upgrade(service: &GraphqlService, passport: &str) -> (u16, Stri
             String::from_utf8_lossy(response.body().as_deref().unwrap_or_default()).into_owned(),
         ),
         Err(other) => panic!("the upgrade failed below HTTP: {other}"),
+    }
+}
+
+fn assert_unauthenticated(channel: &str, status: u16, body: &str) {
+    assert_eq!(
+        status, 401,
+        "{channel}: a rejected passport answers 401: {body}"
+    );
+    let json: serde_json::Value = serde_json::from_str(body).unwrap_or_else(|_| {
+        panic!("{channel}: the refusal answers the GraphQL error shape: {body}")
+    });
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "errors": [{ "message": "unauthorized", "extensions": { "code": "UNAUTHENTICATED" } }]
+        }),
+        "{channel}: the refusal is the UNAUTHENTICATED envelope: {body}"
+    );
+    for leak in ["tenant", "rejected"] {
+        assert!(
+            !body.contains(leak),
+            "{channel}: the client learns the code, never the rejection detail (`{leak}`): {body}"
+        );
     }
 }
 
@@ -103,7 +125,8 @@ async fn set_fact_grant(db: &TestDb, grant: bool) {
 }
 
 #[tokio::test]
-async fn s243_a_fact_loader_fault_answers_a_coded_500_while_a_rejected_passport_keeps_its_401() {
+async fn s243_a_fact_loader_fault_answers_a_coded_500_while_a_rejected_passport_answers_the_unauthenticated_envelope()
+ {
     let db = TestDb::fresh().await;
     let nats = TestNats::spawn().await;
     nats.provision().await;
@@ -135,17 +158,11 @@ async fn s243_a_fact_loader_fault_answers_a_coded_500_while_a_rejected_passport_
     let (status, body) = refused_upgrade(&service, &passport).await;
     assert_coded_internal("GET /graphql/ws", status, &body, db.app_role());
 
-    assert_eq!(
-        post(&service, &rejected).await,
-        (401, REJECTED_BODY.to_string()),
-        "a passport the principal rejects keeps its exact 401 while the fact table faults: \
-         rejection is decided before any fact is read"
-    );
-    assert_eq!(
-        refused_upgrade(&service, &rejected).await,
-        (401, REJECTED_BODY.to_string()),
-        "the WebSocket upgrade answers a rejected passport with the same exact 401"
-    );
+    let (status, body) = post(&service, &rejected).await;
+    assert_unauthenticated("POST /graphql", status, &body);
+
+    let (status, body) = refused_upgrade(&service, &rejected).await;
+    assert_unauthenticated("GET /graphql/ws", status, &body);
 
     set_fact_grant(&db, true).await;
 

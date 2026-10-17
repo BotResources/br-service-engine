@@ -29,7 +29,6 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-br-test-harness = { git = "https://github.com/BotResources/br-e2e-harness", package = "br-test-harness", tag = "v1.2.0", version = "1.2.0", default-features = false, features = ["sse"] }
 example-contract = { workspace = true }
 example-service = { workspace = true }
 example-twin = { workspace = true }

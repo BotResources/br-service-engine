@@ -81,6 +81,7 @@ impl<P: Principal> Engine<P> {
         let relay = crate::offers::OfferRelay::<O>::new(
             self.nats.clone(),
             leader,
+            self.offer_dead_letters.clone(),
             self.config.offer_reconcile,
         )
         .map_err(|error| EngineError::Service(Box::new(error)))?;

@@ -14,18 +14,19 @@ use crate::config::DEFAULT_BEAT;
 use crate::error::EngineError;
 use crate::inbound::DeadLetters;
 use crate::name::MirrorName;
-use crate::nats::{Nats, NatsError};
+use crate::nats::{Nats, NatsError, Slot};
 use crate::transport::ImpactTransport;
 
 const LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
-use self::util::{dedup, merge_forward, wire_version_reason};
+use self::util::{dedup, merge_forward};
 use super::change::{Change, ChangeOp};
 use super::consumed::OfferManifest;
 use super::consumption::{Consumption, Effect, ReconcileKeysFn, refused};
 use super::handle::MirrorRun;
 use super::leader::MirrorGate;
 use super::projection::Project;
+use super::rejection::manifest_undecodable_reason;
 use super::required::RequiredKey;
 use super::shadow::Shadows;
 use super::watermark::{self, Mark, Snapshot};
@@ -180,11 +181,8 @@ where
                         });
                         apply(&mut shadows);
                     }
-                    Effect::WireVersionRejected {
-                        expected, found, ..
-                    } => {
-                        self.dead_letter(key.as_str(), &wire_version_reason(expected, found))
-                            .await;
+                    Effect::Rejected { reason, .. } => {
+                        self.dead_letter(key.as_str(), &reason).await;
                     }
                     Effect::Boundary => {}
                 }
@@ -214,12 +212,16 @@ where
             .bind_kv::<OfferManifest>(consumption.bucket)
             .await
             .map_err(EngineError::Nats)?;
-        let Some(found) = manifests
-            .get(manifest_key)
+        let Some((found, _)) = manifests
+            .get_isolating(manifest_key)
             .await
             .map_err(EngineError::Nats)?
         else {
             return Ok(None);
+        };
+        let found = match found {
+            Slot::Value(found) => found,
+            Slot::Undecodable(fault) => return Ok(Some(manifest_undecodable_reason(&fault))),
         };
         match consumption
             .expected_manifest

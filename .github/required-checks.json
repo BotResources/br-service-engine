@@ -1,0 +1,16 @@
+{
+  "required": [
+    "cargo fmt + clippy + test",
+    "MSRV 1.89 build",
+    "cargo-deny check",
+    "cargo-machete (unused deps)",
+    "cargo semver-checks",
+    "changelog entry per Cargo.toml version",
+    "shellcheck",
+    "release-line law and registry wiring tests",
+    "registry gate",
+    "trufflehog (secret scan)",
+    "conformance-service-engine (real infra)",
+    "musl boot (verify past pest)"
+  ]
+}

@@ -1,4 +1,5 @@
 mod apply;
+mod fault;
 mod leader;
 mod marker;
 #[cfg(feature = "test-support")]
@@ -7,6 +8,7 @@ mod reconcile;
 mod relay;
 mod stager;
 
+pub(crate) use fault::DeadLetterSlot;
 pub(crate) use leader::OfferLeader;
 pub(crate) use relay::OfferRelay;
 pub(crate) use stager::{OfferDirty, OfferStagers};

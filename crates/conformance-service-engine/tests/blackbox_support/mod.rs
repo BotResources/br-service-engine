@@ -2,9 +2,11 @@
 #![allow(unused_imports)]
 
 pub mod bin;
+pub mod event_stream;
 pub mod pg;
 pub mod scopes;
 pub mod sdl;
+pub mod signal;
 pub mod sse;
 
 #[path = "../graphql_support/mod.rs"]

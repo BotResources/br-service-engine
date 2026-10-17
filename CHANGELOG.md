@@ -2,7 +2,8 @@
 
 All notable changes to `br-service-engine` are documented here. The whole
 workspace ships **one version**: every crate inherits `version.workspace = true`,
-and a single git tag `v{version}` releases the set. Format follows
+and a single git tag releases the set: `v{version}` up to 0.4.1, `br-service-engine/v{version}`
+after it. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver.
 The library chart `br-service-engine-chart` has its own version line, independent
 of the crate version (a compatibility matrix kept by the deploying platform pairs
@@ -12,6 +13,41 @@ chart and engine versions), and its own tag
 named `br-engine-service` (tags `chart/br-engine-service/v{version}`, sections
 `## chart br-engine-service {version}`); that name is deprecated and 2.0.0
 continues its version line.
+
+## 0.4.2 - 2026-10-16
+
+A patch of 0.4.1. It needs no source change in a service that builds, but it refuses some configurations and database URLs that 0.4.1 accepted (see Changed and Fixed: foreign-scheme or hostless database URLs, `host=`/`hostaddr=` overrides, durations under one microsecond, blob TTLs outside their ranges, socket operations without a resolvable principal). The pins move together: in one change a service re-pins every br-rust-common crate whose types the engine API names (br-core-auth for Passport, br-core-kernel for Actor, br-core-integration for EventCoords and CommandCoords, br-core-scope for the ScopeError payloads, br-util-axum-readiness for Readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
+
+### Changed
+
+- Every `br-rust-common` dependency moves from the legacy workspace tag `v1.3.0` to the per-crate tags `{crate}/v{version}`, each at its latest release (`br-util-postgres/v0.1.1`, the other seven at `v0.1.0`).
+- `serve`, `migrate`, `connect_pool` and `validate_database_tls` now validate the database URL with `br-util-postgres` 0.1.1 and read its host from the URL authority only. A URL with a foreign scheme or no explicit host is now refused even on loopback or with `sslmode=require`, so a pod can fail to boot on a URL that booted before. A URL with no scheme or a value `sqlx` cannot parse never booted, and is now refused earlier with a configuration error.
+- `migrate` grants app access in one transaction under an advisory lock with a bounded retry (`br-util-postgres` 0.1.1), so replicas that migrate together no longer fail with `tuple concurrently updated`.
+- `rustls` moves to 0.23.46 in the lockfile, which clears the RUSTSEC-2026-0346, -0347, -0348 and -0349 advisories `cargo deny` reported.
+- The release is tagged `br-service-engine/v0.4.2` and recorded in the Libraries registry.
+- `conformance-service-engine` no longer depends on `br-test-harness`: its tests read server-sent events with a reader of their own, and the `deny.toml` git source for the harness repository is gone.
+- **Behavior change on `/graphql/ws`.** A query or a mutation on the socket now needs a registered `PrincipalResolver`, and every socket operation needs a principal that the resolver can resolve. A service whose resolver returns nothing for a principal gets `UNAUTHENTICATED` on the socket for that operation; a service with no registered `PrincipalResolver` gets `INTERNAL`. A schema not built with `engine_schema` serves no principal on the socket.
+
+### Added
+
+- `config::MIN_DURATION` (one microsecond), the floor `EngineConfig::validate` applies to every duration.
+- `EngineError::SchemaClaimLost { engine_version, service_version }`, returned by `Engine::run` when the pod loses the schema-version claim.
+- `EngineError::SignalHandlers`, returned when the process signal handlers cannot be installed.
+
+### Fixed
+
+- **`serve`, `migrate`, `connect_pool` and `validate_database_tls` no longer accept a remote database URL without TLS.** In 0.4.1 the TLS check of `migrate`, `connect_pool` and `validate_database_tls` was an engine copy, and the check `serve` ran through `br_util_postgres::init_pool` came from `br-rust-common` `v1.3.0`; both took the host after the first `@` of the whole URL. `postgres://db.remote.example/app?options=@127.0.0.1` read as loopback and `postgres:///db?sslmode=require` read as an empty host, and both passed in all four entry points while `sqlx` connected to the remote host. A `TRUSTED_NETWORK_HOSTS` entry could be matched the same way: `postgres://evil.example.com/db?x=a@cnpg-rw` read as the trusted `cnpg-rw`. The engine copy is deleted and `serve` gets the fix from the re-pin to `br-util-postgres/v0.1.1`; every entry point now calls `br-util-postgres`, which takes the host from the URL authority with the parser `sqlx` uses and also refuses a `host=` or `hostaddr=` override. Covered by unit tests and by `bb18`, which runs the real `migrate` binary against both URLs.
+- **`Engine::run` no longer fails at boot with `SchemaParse "stack limit reached"` on a static musl binary.** `run` parsed the composed SDL on the thread that polls it, the main thread under `#[tokio::main]`. From `pest` 2.9.3 the parser refuses to run when `stacker::remaining_stack()` reports under 64 KiB, and on musl that figure covers only the mapped part of the main-thread stack, so a valid schema was refused at the first rule and the pod crash-looped. Any service built for a static musl target (for example with `cargo zigbuild`) that resolves `pest` 2.9.3 or later was hit; glibc builds were not. The slice verification now runs on a dedicated thread with an explicit 8 MiB stack; a failed thread start or a panic in it ends `run` with an explicit `EngineError::Composition(SchemaParse)`. No API change and no change to what `verify` accepts or refuses. A new CI job, `musl boot (verify past pest)`, boots a static musl `example-service` on `pest` 2.9.4 and drives it through readiness and GraphQL requests.
+
+- **An undecodable value under an offer or consumed prefix no longer stops the offer or restarts the mirror in a loop.** It is dead-lettered like a wrong-wire-version value (own reason code, idempotent per reaction or mirror and key, the value is never stored in the row), it is not applied, and the other values keep projecting, draining and publishing. Every KV decode site in the offer, relay and mirror code is isolated. `KvDrainRelay` fails closed (`RelayError::Publish`) when it meets an undecodable value without `DeadLetters` attached through `with_dead_letters`: the value is left untouched and the change stays pending.
+- `conformance-service-engine` reconnect scenarios (`s031`, `s033`, `s034`) no longer fail one run in ten under load. `terminate_backends` kills in one statement, `terminate_and_wait` targets only the backend that holds the `LISTEN`, and fails when there is none, so a killed pooled sibling can no longer cause a second `Reconnected` and a second `Reset`.
+- **`POST /graphql` and the `/graphql/ws` upgrade answer a refused passport with a GraphQL error envelope.** An absent, malformed or rejected passport on `POST /graphql` (JSON, multipart and event stream) and on the `/graphql/ws` upgrade is answered HTTP `401` with `Content-Type: application/json` and a body of one error, message `unauthorized` and `extensions.code` `UNAUTHENTICATED`. The body used to be plain text. The rejection detail goes to the `debug` log only and never reaches the client. Covered by `s270`.
+- **A WebSocket operation no longer runs under the principal of the upgrade.** `engine_schema` registers an extension (`graphql/fresh.rs`) that, for every operation on `/graphql/ws` (an attach, a query, a mutation, a gated read), resolves the principal again through the registered `PrincipalResolver`, reloads its facts and hands that principal to the resolvers; the upgrade-time principal is no longer reachable from a socket resolver. A principal that resolves to nothing is refused `UNAUTHENTICATED` at that operation; a resolver fault, a fact-loader fault or a missing `PrincipalResolver` is answered `INTERNAL`; the socket stays open. The refresh runs once per operation, before any resolver takes a pooled connection. Covered by `s271` and `s272`.
+- **Boot refuses durations that never worked.** `EngineConfig::validate` refuses a blob `download_ttl` outside 1 second to 7 days and a blob `upload_ttl` outside 1 millisecond to 7 days, before the schema claim, and refuses every other `EngineConfig` duration under `config::MIN_DURATION` (one microsecond), not only zero. Earlier a zero `blob_reaper_interval` booted and the reaper never ran, and a sub-second `download_ttl` booted and signed every download URL with `X-Amz-Expires=0`.
+- **A pod that loses the schema-version claim now stops.** When the beat's heartbeat updates no row because another version holds the claim, the pod stops all its workers through the graceful shutdown path, lowers readiness with `REASON_SCHEMA_VERSION_DISPLACED`, and `Engine::run` returns `EngineError::SchemaClaimLost`. Earlier the pod only lowered readiness while its relays, cron and mirrors kept writing.
+- **`run_service` handles `SIGTERM` and `SIGINT` as a graceful shutdown.** Its `serve` entry point installs the handlers and requests the same shutdown as `Engine::shutdown_handle`; a signal that arrives while the pod is still booting exits `Ok` before it serves. `Engine::run` and `Engine::run_with` install no handler, so a service that drives `Engine` itself and installs its own signal task is unaffected.
+
+The compatibility entry for this release is chart `br-service-engine-chart` 2.0.0 ↔ engine 0.4.2.
 
 ## 0.4.1 - 2026-10-08
 

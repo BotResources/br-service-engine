@@ -62,10 +62,11 @@ pub async fn pids_still_alive(db: &TestDb, pids: &[i32]) -> i64 {
 }
 
 pub async fn terminate_and_wait(db: &TestDb, application_name: &str) {
-    let terminated = db.terminate_backends(application_name).await;
-    if terminated.is_empty() {
-        return;
-    }
+    let terminated = db.terminate_listening_backends(application_name).await;
+    assert!(
+        !terminated.is_empty(),
+        "no listening backend named {application_name} to terminate"
+    );
     let deadline = tokio::time::Instant::now() + BACKEND_GONE_TIMEOUT;
     loop {
         if pids_still_alive(db, &terminated).await == 0 {

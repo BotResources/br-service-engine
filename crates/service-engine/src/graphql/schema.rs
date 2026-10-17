@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_graphql::{ObjectType, Schema, SubscriptionType};
 
+use crate::graphql::fresh::FreshPrincipal;
 use crate::graphql::state::GraphqlState;
 use crate::principal::Principal;
 
@@ -18,6 +19,7 @@ where
     S: SubscriptionType + 'static,
 {
     Schema::build(query, mutation, subscription)
+        .extension(FreshPrincipal::new(state.clone()))
         .data(state)
         .finish()
 }
