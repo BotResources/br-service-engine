@@ -32,6 +32,7 @@ The birth patch of the new line 0.5 (Libraries registry: library `br-service-eng
 ### Changed
 
 - The reaper's promotion and failure statements and its expectation check move to `blobs/promotion.rs`, shared with `promote_blob`. Its behavior does not change.
+- The lockfile moves `tokio` to 1.54.1, `rustls-webpki` to 0.103.16, `webpki-roots` to 1.0.11 and `ctutils` to 0.4.8, which clears the RUSTSEC-2026-0381, -0382, -0385 and -0386 advisories `cargo deny` reported.
 
 ## 0.4.2 - 2026-10-16
 
