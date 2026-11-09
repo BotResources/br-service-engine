@@ -38,12 +38,45 @@ impl BlobHandle {
         Self { kinds, store }
     }
 
-    fn store(&self) -> Result<&BlobStore, EngineError> {
+    pub(crate) fn store(&self) -> Result<&BlobStore, EngineError> {
         self.store.get().ok_or_else(|| {
             EngineError::Blob(
                 "the object-storage bucket is not bound yet; run() binds it at boot".into(),
             )
         })
+    }
+
+    pub(crate) fn kind_named(&self, kind: &str) -> Option<&'static str> {
+        self.kinds
+            .iter()
+            .find(|(_, name, _)| *name == kind)
+            .map(|(_, name, _)| *name)
+    }
+
+    pub(crate) async fn delete_after_commit(&self, object_keys: &[String]) {
+        if object_keys.is_empty() {
+            return;
+        }
+        let store = match self.store() {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::warn!(
+                    reason = %crate::chain::describe(&error),
+                    "failed blob objects could not be deleted after the mutation committed; \
+                     the reaper deletes them with their failed rows after orphan_after"
+                );
+                return;
+            }
+        };
+        for object_key in object_keys {
+            if let Err(error) = store.object().delete_object(object_key).await {
+                tracing::warn!(
+                    reason = %crate::chain::describe(&error),
+                    "a failed blob object could not be deleted after the mutation committed; \
+                     the reaper deletes it with its failed row after orphan_after"
+                );
+            }
+        }
     }
 
     fn policy_of<B: Blobs>(&self) -> Result<BlobPolicy, EngineError> {

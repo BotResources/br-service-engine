@@ -4,6 +4,7 @@ use br_core_integration::Actor;
 use futures_util::future::BoxFuture;
 use uuid::Uuid;
 
+use crate::blobs::{BlobPromotion, BlobRef};
 use crate::error::EngineError;
 use crate::impact::Impact;
 use crate::inbound::MessageMetadata;
@@ -126,6 +127,10 @@ impl<'a, P: Principal> Mutation<'a, P> {
 
     pub fn principal(&self) -> &P {
         self.principal
+    }
+
+    pub async fn promote_blob(&mut self, reference: BlobRef) -> Result<BlobPromotion, EngineError> {
+        self.ops.promote_blob(reference).await
     }
 
     pub fn present<Pr: Presence>(&mut self, key: &PresenceKey<Pr>, value: &Pr::Value) {
