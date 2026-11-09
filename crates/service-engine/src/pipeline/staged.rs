@@ -58,11 +58,32 @@ pub(crate) struct Staged {
     pub offer_dirty: Vec<OfferDirty>,
     pub blob_ops: Vec<BlobRowOp>,
     pub sealed_keys: Vec<(AccumulatorName, KeyBytes)>,
+    pub promotion_fault: Option<String>,
+    pub object_deletes: Vec<String>,
 }
 
 impl Staged {
     pub(crate) fn is_within(&self, impacts_per_commit: usize) -> bool {
         self.impacts.len() <= impacts_per_commit
+    }
+
+    // A refusal the policy recorded is not absorbed: under promote_blob a refusal fails the
+    // blob row, never the mutation, exactly as under the reaper.
+    pub(crate) fn absorb(&mut self, other: Staged) {
+        self.impacts.extend(other.impacts);
+        self.scheduled_impacts.extend(other.scheduled_impacts);
+        self.outbox.extend(other.outbox);
+        self.scheduled_messages.extend(other.scheduled_messages);
+        self.offer_dirty.extend(other.offer_dirty);
+        self.blob_ops.extend(other.blob_ops);
+        self.sealed_keys.extend(other.sealed_keys);
+        self.object_deletes.extend(other.object_deletes);
+        if self.terminal_violation.is_none() {
+            self.terminal_violation = other.terminal_violation;
+        }
+        if self.promotion_fault.is_none() {
+            self.promotion_fault = other.promotion_fault;
+        }
     }
 
     pub(crate) async fn flush(

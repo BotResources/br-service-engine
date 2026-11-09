@@ -68,7 +68,7 @@ impl<'a> Ops<'a> {
         )
     }
 
-    fn blob_handle(&self) -> Result<&'a BlobHandle, EngineError> {
+    pub(super) fn blob_handle(&self) -> Result<&'a BlobHandle, EngineError> {
         self.blobs.ok_or_else(|| {
             EngineError::Blob(
                 "no object storage is configured; call EngineConfig::with_blob_storage and \

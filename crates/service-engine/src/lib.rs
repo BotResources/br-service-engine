@@ -87,7 +87,8 @@ pub use accumulator::{
     SealHash, SealMarker, Swept,
 };
 pub use blobs::{
-    Blob, BlobConfig, BlobPolicy, BlobRef, Blobs, DownloadUrl, PostUpload, ReaperRound, UploadUrl,
+    Blob, BlobConfig, BlobPolicy, BlobPromotion, BlobRef, Blobs, DownloadUrl, PostUpload,
+    ReaperRound, UploadUrl,
 };
 pub use cohort::{Cohort, CohortKey, CohortValue};
 pub use config::EngineConfig;

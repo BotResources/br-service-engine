@@ -14,6 +14,25 @@ named `br-engine-service` (tags `chart/br-engine-service/v{version}`, sections
 `## chart br-engine-service {version}`); that name is deprecated and 2.0.0
 continues its version line.
 
+## 0.5.0 - 2026-11-09
+
+The birth patch of the new line 0.5 (Libraries registry: library `br-service-engine`, minor 0.5, patch 0.5.0). A minor of 0.4.2 with one additive API: a mutation promotes a blob reference at once instead of waiting up to one reaper interval. A service that does not call it needs no source change; it bumps its pin to `tag = "br-service-engine/v0.5.0", version = "0.5.0"`. The `br-rust-common` pins are those of 0.4.2. The compatibility entry for this release is chart `br-service-engine-chart` 2.0.0 ↔ engine 0.5.0.
+
+### Added
+
+- **`Mutation::promote_blob(reference) -> Result<BlobPromotion, EngineError>`** and the public enum **`BlobPromotion`** (`Promoted`, `AlreadyUploaded`, `NotLanded`, `Failed { reason }`), re-exported at the crate root and in `blobs`. The engine reads the storage `HEAD` and applies the reaper's rule: it promotes the row when the object exists and, for a row with a verified expectation, when size and SHA-256 match.
+  - The `HEAD` runs before the row lock, as in the reaper. The engine then locks the row (`SELECT … FOR UPDATE`), and the `state = 'pending'`-guarded promotion and the post-upload policy run in a savepoint of the mutation's transaction, so the policy's writes, impacts and outbox rows commit with the mutation.
+  - The policy runs as under the reaper. `PostSave` exposes no principal; `emit`/`command` go out as `service_actor(service)` with correlation = the blob row id and no causation; and the engine applies no RLS context to a mutation transaction (a registered `RlsApplier` runs only on the read paths), so the policy sees no principal and no RLS session context. The engine cannot see session variables a handler sets by hand on `cx.connection()`: such a handler must call `promote_blob` before it sets them. A role switched by the handler (`current_user <> session_user`) is refused with `EngineError::Blob` before the policy runs.
+  - A size or SHA-256 mismatch (`size_mismatch`, `sha256_mismatch`) or a policy refusal (`policy:<code>`) fails the row as the reaper does and answers `Failed`; the mutation still commits. The object is deleted after the commit, best effort; a failure is logged and the reaper deletes the object with the failed row after `orphan_after`.
+  - A policy fault or a panic in the policy rolls the savepoint back, leaves the row `pending`, returns the error to the handler and fails the mutation (`INTERNAL`) even when the handler swallows the error.
+  - A row is promoted once. The promotion holds only for a `pending` row and the row lock serialises it with the reaper: the reaper skips a row a mutation promoted, and a mutation that meets a row the reaper promoted, or is promoting, answers `AlreadyUploaded` without running the policy again.
+  - `NotLanded` answers when the object is not in storage yet, and for a reference staged by the same mutation (its row is written at commit). An unknown reference, a reference of a blob kind this service did not register, and an `orphaned` reference are errors (`EngineError::Blob`). A `failed` row answers `Failed` with its recorded reason.
+- Conformance scenarios `s283` (promotion at commit with the policy's outbound identity and no caller context, checksum mismatch, not landed and unknown reference, policy refusal, policy fault with and without a swallowing handler, a kind with no policy) and `s284` (a mutation finds a reaper-promoted row `uploaded`, the reaper skips a mutation-promoted row, and mutations racing a sweep in progress run the policy exactly once per row).
+
+### Changed
+
+- The reaper's promotion and failure statements and its expectation check move to `blobs/promotion.rs`, shared with `promote_blob`. Its behavior does not change.
+
 ## 0.4.2 - 2026-10-16
 
 A patch of 0.4.1. It needs no source change in a service that builds, but it refuses some configurations and database URLs that 0.4.1 accepted (see Changed and Fixed: foreign-scheme or hostless database URLs, `host=`/`hostaddr=` overrides, durations under one microsecond, blob TTLs outside their ranges, socket operations without a resolvable principal). The pins move together: in one change a service re-pins every br-rust-common crate whose types the engine API names (br-core-auth for Passport, br-core-kernel for Actor, br-core-integration for EventCoords and CommandCoords, br-core-scope for the ScopeError payloads, br-util-axum-readiness for Readiness) to the same {crate}/v{version} tags as the README table, and writes the engine pin as tag = "br-service-engine/v0.4.2". The engine API names types of these crates (Passport, Actor, EventCoords, CommandCoords, Readiness): a service left on the legacy v1.3.0 or v1.4.0 tag gets two copies of each type and stops compiling.
