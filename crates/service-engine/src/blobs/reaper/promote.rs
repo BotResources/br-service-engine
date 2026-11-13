@@ -4,8 +4,9 @@ use uuid::Uuid;
 use super::{BATCH, BlobReaper, ReaperRound};
 use crate::blobs::head::{BlobHead, BlobState};
 use crate::blobs::policy::Uploaded;
+use crate::blobs::promotion::{expectation, mark_failed, mark_uploaded, mismatch};
 use crate::blobs::store::BlobStore;
-use crate::blobs::{BlobRef, ObjectHead, Sha256Digest, UploadExpectation};
+use crate::blobs::{BlobRef, UploadExpectation};
 use crate::erase::PersonId;
 use crate::error::EngineError;
 use crate::pipeline::PromotionOutcome;
@@ -32,7 +33,7 @@ impl BlobReaper {
             let id: Uuid = row.get("id");
             let object_key: String = row.get("object_key");
             let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
-            let expected = expectation(row)?;
+            let expected = expectation_of(row)?;
             match store.object().head(&object_key).await? {
                 None if created_at < cutoff => {
                     let done = sqlx::query(&format!(
@@ -77,18 +78,7 @@ impl BlobReaper {
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
         let mut tx = pg.begin().await?;
-        let promoted: Option<(String, String, Option<Uuid>)> = sqlx::query_as(&format!(
-            "UPDATE {TABLE_BLOB} \
-             SET state = 'uploaded', uploaded_at = now(), size = $2, etag = $3, sha256 = $4 \
-             WHERE id = $1 AND state = 'pending' \
-             RETURNING file_name, content_type, owner_id"
-        ))
-        .bind(id)
-        .bind(head.size as i64)
-        .bind(&head.etag)
-        .bind(head.sha256.map(|digest| digest.as_bytes().to_vec()))
-        .fetch_optional(&mut *tx)
-        .await?;
+        let promoted = mark_uploaded(&mut *tx, id, head).await?;
         let Some((file_name, content_type, owner)) = promoted else {
             let _ = tx.rollback().await;
             return Ok(());
@@ -133,16 +123,8 @@ impl BlobReaper {
         reason: String,
         round: &mut ReaperRound,
     ) -> Result<(), EngineError> {
-        let done = sqlx::query(&format!(
-            "UPDATE {TABLE_BLOB} \
-             SET state = 'failed', failed_reason = $2, failed_at = now() \
-             WHERE id = $1 AND state = 'pending'"
-        ))
-        .bind(id)
-        .bind(&reason)
-        .execute(pg)
-        .await?;
-        if done.rows_affected() == 0 {
+        let failed = mark_failed(pg, id, &reason).await?;
+        if failed == 0 {
             return Ok(());
         }
         if let Err(error) = store.object().delete_object(object_key).await {
@@ -151,7 +133,7 @@ impl BlobReaper {
                 "a failed blob object could not be deleted; reap_detached finishes it later"
             );
         }
-        round.failed += done.rows_affected();
+        round.failed += failed;
         Ok(())
     }
 
@@ -189,30 +171,6 @@ impl BlobReaper {
     }
 }
 
-fn expectation(row: &sqlx::postgres::PgRow) -> Result<Option<UploadExpectation>, EngineError> {
-    let size: Option<i64> = row.get("expected_size");
-    let sha: Option<Vec<u8>> = row.get("expected_sha256");
-    match (size, sha) {
-        (Some(size), Some(bytes)) => {
-            let array: [u8; 32] = bytes.try_into().map_err(|_| {
-                EngineError::Blob("a recorded expected_sha256 is not 32 bytes".into())
-            })?;
-            Ok(Some(UploadExpectation::new(
-                size as u64,
-                Sha256Digest::from_bytes(array),
-            )))
-        }
-        _ => Ok(None),
-    }
-}
-
-fn mismatch(object: &ObjectHead, expected: Option<&UploadExpectation>) -> Option<String> {
-    let expected = expected?;
-    if object.size != expected.size {
-        return Some("size_mismatch".to_string());
-    }
-    if object.sha256 != Some(expected.sha256) {
-        return Some("sha256_mismatch".to_string());
-    }
-    None
+fn expectation_of(row: &sqlx::postgres::PgRow) -> Result<Option<UploadExpectation>, EngineError> {
+    expectation(row.get("expected_size"), row.get("expected_sha256"))
 }
