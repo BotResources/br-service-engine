@@ -6,6 +6,7 @@ mod effect;
 mod mutation;
 mod ops;
 mod ops_blob;
+mod ops_promote;
 mod ops_seal;
 mod outbound;
 mod policy;

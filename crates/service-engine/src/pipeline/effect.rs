@@ -121,6 +121,13 @@ where
         let mut cx = Mutation::new(ops, &principal, &services.presence, &mut presence_puts);
         handler(&mut cx, input).await
     };
+    if let Some(fault) = staged.promotion_fault.take() {
+        let _ = tx.rollback().await;
+        return Err(internal_engine_failure(
+            "promote a blob under its post-upload policy",
+            EngineError::Blob(fault),
+        ));
+    }
     if let Some(refusal) = staged.policy_refusal {
         let _ = tx.rollback().await;
         return Err(MutationError::refused(
@@ -151,6 +158,9 @@ where
         .accumulators
         .purge_committed_seals(&staged.sealed_keys)
         .await;
+    if let Some(blobs) = &services.blobs {
+        blobs.delete_after_commit(&staged.object_deletes).await;
+    }
     for put in presence_puts {
         if let Err(error) = put().await {
             tracing::warn!(

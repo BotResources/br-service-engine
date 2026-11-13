@@ -1,6 +1,7 @@
 pub mod assignment;
 pub mod blob;
 pub mod blob_boot;
+pub mod blob_promote;
 pub mod blob_verified;
 pub mod blob_view;
 pub mod counted;
@@ -116,6 +117,10 @@ pub use blob::{
 };
 pub use blob_boot::{
     boot_blob_fault_engine, boot_blob_policy_engine, boot_unhonoured_upload_seam_engine,
+};
+pub use blob_promote::{
+    PROBE_SUBJECT_PREFIX, PromoteDoc, PromotePolicy, PromoteReference, PromotionProbed,
+    boot_blob_promote_engine, probe_on_upload, promote_doc, promote_reference,
 };
 pub use blob_verified::{
     AttachVerifiedDoc, AttachmentUploaded, attach_verified_doc, fault_on_upload,

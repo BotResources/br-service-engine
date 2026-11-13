@@ -1,5 +1,24 @@
 # br-service-engine
 
+> [!IMPORTANT]
+> **This repository is maintained for BotResources and its authorized clients.**
+> It is published under Apache-2.0 and made available read-only for visibility and
+> reuse. The Apache-2.0 license governs your rights to use, modify, and fork the code;
+> the rest of this notice describes our operational stance, not a legal
+> restriction.
+>
+> **We do not accept external pull requests, issues, or support requests.**
+> Issues and Discussions are disabled. PRs from accounts that are not on the
+> internal contributor allowlist will be closed without review. Forks are
+> permitted by Apache-2.0 and we do not (and cannot) prevent them; we simply do not
+> monitor, support, or accept contributions from forks outside the BR
+> commercial relationship.
+>
+> - Clients with a commercial relationship: contact your BR account manager.
+> - Security reports: see [SECURITY.md](SECURITY.md) (private email channel).
+> - This is not a community-supported project. No support is provided through
+>   GitHub.
+
 The reactive personalized delivery and process skeleton a service built on it
 runs on — sessions, cohorts, impacts, projection, diff, multi-pod fan-out,
 streaming sources, boot, relays, cron, and mirror supervision. Two crates share
@@ -15,7 +34,7 @@ is not a kit to import: it is this repository's own executable spec and lives he
 
 ```toml
 [dependencies]
-service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "br-service-engine/v0.4.2", version = "0.4.2" }
+service-engine = { git = "https://github.com/BotResources/br-service-engine", package = "service-engine", tag = "br-service-engine/v0.5.0", version = "0.5.0" }
 ```
 
 The `version` beside the `tag` is required: a tag-only git dependency carries a
@@ -26,9 +45,10 @@ engine release pins one exact `br-rust-common` tag per crate it uses
 
 | Engine version | Per-crate tags |
 |---|---|
+| 0.5.0 | `br-core-auth/v0.1.0`, `br-core-integration/v0.1.0`, `br-core-kernel/v0.1.0`, `br-core-scope/v0.1.0`, `br-scope-declaration-contract/v0.1.0`, `br-util-axum-readiness/v0.1.0`, `br-util-observability/v0.1.0`, `br-util-postgres/v0.1.1` |
 | 0.4.2 | `br-core-auth/v0.1.0`, `br-core-integration/v0.1.0`, `br-core-kernel/v0.1.0`, `br-core-scope/v0.1.0`, `br-scope-declaration-contract/v0.1.0`, `br-util-axum-readiness/v0.1.0`, `br-util-observability/v0.1.0`, `br-util-postgres/v0.1.1` |
 
-The engine API names types of these crates (`Passport`, `Actor`, `EventCoords`, `CommandCoords`, `Readiness`), so a service moves its pins together: in one change it re-pins every `br-rust-common` crate it names to the tags of this table and writes the engine pin as `br-service-engine/v0.4.2`. A service left on `v1.3.0` or `v1.4.0` gets two copies of each type and stops compiling.
+The engine API names types of these crates (`Passport`, `Actor`, `EventCoords`, `CommandCoords`, `Readiness`), so a service moves its pins together: in one change it re-pins every `br-rust-common` crate it names to the tags of this table and writes the engine pin as `br-service-engine/v{version}` (`br-service-engine/v0.5.0` for this release). A service left on `v1.3.0` or `v1.4.0` gets two copies of each type and stops compiling.
 
 | Engine version | `br-rust-common` |
 |---|---|
@@ -564,7 +584,28 @@ retries it on the next sweep. There is no attempt budget in 0.3.0: a persistent
 fault retries every sweep rather than resolving to `failed`. The promotion
 connection carries no
 principal and no RLS context, so a policy reading a row over an RLS-scoped table
-must query it unscoped. The reaper still deletes an **incomplete
+must query it unscoped. A mutation need not wait for the sweep:
+`cx.promote_blob(reference)` promotes a pending reference at once and answers a
+`BlobPromotion` — `Promoted`, `AlreadyUploaded` (the reaper or an earlier mutation
+got there first), `NotLanded` (no object yet, or a reference staged by this same
+mutation), or `Failed { reason }`. It reads the storage HEAD before it takes the
+row lock and applies the reaper's rule; the `state='pending'`-guarded promotion
+and the post-upload policy run in a savepoint of the mutation's transaction, so the
+policy's writes, impacts and outbox rows commit with the mutation. The policy runs
+as under the reaper: `PostSave` exposes no principal, its `emit`/`command` go out
+as the service actor (correlation = the blob row id, no causation), and the engine
+applies no RLS context to a mutation transaction (an `RlsApplier` only runs on the
+read paths), so the policy sees none. A handler that sets session variables by hand
+on `cx.connection()` must promote before it does; a role the handler switched to is refused
+with an error before a policy runs. A size or checksum mismatch or a policy refusal fails the row
+(`failed_reason` as under the reaper) and the mutation still commits; the object is
+deleted after the commit, best effort (the reaper deletes it with the failed row
+otherwise). A policy fault or panic rolls the savepoint back, leaves the row
+`pending`, and fails the mutation (`INTERNAL`) even when the handler swallows the
+error. The promotion holds once: the row lock makes the reaper skip a row a
+mutation promoted, and a mutation that meets a row the reaper is promoting waits
+for it and answers `AlreadyUploaded`. An unknown reference, a reference of a kind
+this service did not register, or an `orphaned` one is an error. The reaper still deletes an **incomplete
 upload** (a `pending` row past `orphan_after` whose object never landed) and an
 **unreferenced** or **failed** blob (past `orphan_after`; the object is deleted
 first — an idempotent DELETE — then the row, so a crash between the two leaves a
@@ -1676,7 +1717,8 @@ an explicit pair, so their row names the engine releases they shipped beside.
 
 | Chart | Engine | Note |
 |---|---|---|
-| `br-service-engine-chart` **2.0.0** | **0.4.2** | a patch of the engine; the chart is unchanged |
+| `br-service-engine-chart` **2.0.0** | **0.5.0** | a minor of the engine (`promote_blob`); the chart is unchanged |
+| `br-service-engine-chart` 2.0.0 | 0.4.2 | a patch of the engine; the chart is unchanged |
 | `br-service-engine-chart` 2.0.0 | 0.4.1 | a patch of the engine; the chart is unchanged |
 | `br-service-engine-chart` 2.0.0 | 0.4.0 | the rename and the required `port`; renders what 1.1.1 renders once `port` is set and the thin chart uses the new names |
 | `br-engine-service` 1.1.1 (deprecated) | 0.4.0 | the pair recorded with engine 0.4.0; renders what 1.1.0 renders |
