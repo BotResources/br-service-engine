@@ -28,19 +28,12 @@ fn locate_or_build(package: &str, bin: &str, env_var: &str) -> PathBuf {
         );
         return path;
     }
-    // Ask cargo where it put the binary rather than deriving it from this test's
-    // own path: Cargo 1.100 moved test executables out of <target>/<profile>/deps
-    // into the build dir, while binaries stay in the artifact dir.
+    // Cargo reports where it put the binary. The target directory's layout is
+    // Cargo's to change (1.100 moved test executables under build/), so the
+    // path is not derived from this test executable's location.
     let output = Command::new(env!("CARGO"))
-        .args([
-            "build",
-            "--locked",
-            "-p",
-            package,
-            "--bin",
-            bin,
-            "--message-format=json-render-diagnostics",
-        ])
+        .args(["build", "--locked", "-p", package, "--bin", bin])
+        .arg("--message-format=json-render-diagnostics")
         .stderr(Stdio::inherit())
         .output()
         .expect("cargo builds the example binary for the black-box battery");
@@ -48,8 +41,10 @@ fn locate_or_build(package: &str, bin: &str, env_var: &str) -> PathBuf {
     let path = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|msg| msg["reason"] == "compiler-artifact" && msg["target"]["name"] == bin)
-        .find_map(|msg| msg["executable"].as_str().map(PathBuf::from))
+        .filter(|message| {
+            message["reason"] == "compiler-artifact" && message["target"]["name"] == bin
+        })
+        .find_map(|message| message["executable"].as_str().map(PathBuf::from))
         .unwrap_or_else(|| panic!("cargo reported no executable for the {bin} binary"));
     assert!(
         path.exists(),
