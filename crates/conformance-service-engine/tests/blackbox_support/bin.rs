@@ -18,18 +18,6 @@ pub fn example_twin_bin() -> PathBuf {
         .clone()
 }
 
-fn target_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
-        return PathBuf::from(dir);
-    }
-    let exe = std::env::current_exe().expect("the test executable has a path");
-    exe.parent()
-        .and_then(|deps| deps.parent())
-        .and_then(|profile| profile.parent())
-        .expect("the test executable lives under <target>/<profile>/deps")
-        .to_path_buf()
-}
-
 fn locate_or_build(package: &str, bin: &str, env_var: &str) -> PathBuf {
     if let Ok(explicit) = std::env::var(env_var) {
         let path = PathBuf::from(explicit);
@@ -40,12 +28,29 @@ fn locate_or_build(package: &str, bin: &str, env_var: &str) -> PathBuf {
         );
         return path;
     }
-    let status = Command::new(env!("CARGO"))
-        .args(["build", "--locked", "-p", package, "--bin", bin])
-        .status()
+    // Ask cargo where it put the binary rather than deriving it from this test's
+    // own path: Cargo 1.100 moved test executables out of <target>/<profile>/deps
+    // into the build dir, while binaries stay in the artifact dir.
+    let output = Command::new(env!("CARGO"))
+        .args([
+            "build",
+            "--locked",
+            "-p",
+            package,
+            "--bin",
+            bin,
+            "--message-format=json-render-diagnostics",
+        ])
+        .stderr(Stdio::inherit())
+        .output()
         .expect("cargo builds the example binary for the black-box battery");
-    assert!(status.success(), "building the {bin} binary failed");
-    let path = target_dir().join("debug").join(bin);
+    assert!(output.status.success(), "building the {bin} binary failed");
+    let path = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|msg| msg["reason"] == "compiler-artifact" && msg["target"]["name"] == bin)
+        .find_map(|msg| msg["executable"].as_str().map(PathBuf::from))
+        .unwrap_or_else(|| panic!("cargo reported no executable for the {bin} binary"));
     assert!(
         path.exists(),
         "the built {bin} binary is not at {}",
