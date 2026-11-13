@@ -18,18 +18,6 @@ pub fn example_twin_bin() -> PathBuf {
         .clone()
 }
 
-fn target_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
-        return PathBuf::from(dir);
-    }
-    let exe = std::env::current_exe().expect("the test executable has a path");
-    exe.parent()
-        .and_then(|deps| deps.parent())
-        .and_then(|profile| profile.parent())
-        .expect("the test executable lives under <target>/<profile>/deps")
-        .to_path_buf()
-}
-
 fn locate_or_build(package: &str, bin: &str, env_var: &str) -> PathBuf {
     if let Ok(explicit) = std::env::var(env_var) {
         let path = PathBuf::from(explicit);
@@ -40,12 +28,24 @@ fn locate_or_build(package: &str, bin: &str, env_var: &str) -> PathBuf {
         );
         return path;
     }
-    let status = Command::new(env!("CARGO"))
+    // Cargo reports where it put the binary. The target directory's layout is
+    // Cargo's to change (1.100 moved test executables under build/), so the
+    // path is not derived from this test executable's location.
+    let output = Command::new(env!("CARGO"))
         .args(["build", "--locked", "-p", package, "--bin", bin])
-        .status()
+        .arg("--message-format=json-render-diagnostics")
+        .stderr(Stdio::inherit())
+        .output()
         .expect("cargo builds the example binary for the black-box battery");
-    assert!(status.success(), "building the {bin} binary failed");
-    let path = target_dir().join("debug").join(bin);
+    assert!(output.status.success(), "building the {bin} binary failed");
+    let path = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|message| {
+            message["reason"] == "compiler-artifact" && message["target"]["name"] == bin
+        })
+        .find_map(|message| message["executable"].as_str().map(PathBuf::from))
+        .unwrap_or_else(|| panic!("cargo reported no executable for the {bin} binary"));
     assert!(
         path.exists(),
         "the built {bin} binary is not at {}",

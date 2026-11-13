@@ -174,8 +174,7 @@ fn route_impact<P: Principal>(
     match impact {
         Impact::ResourceChanged { noun, key, .. } => {
             let rendering: BTreeSet<&ProjectorName> = registry.on_noun(noun).iter().collect();
-            for window_index in 0..session.windows.len() {
-                let window = &session.windows[window_index];
+            for (window_index, window) in session.windows.iter().enumerate() {
                 let renders = rendering.contains(&window.projector);
                 let query = window.shape.query();
                 let interested = query.is_some_and(|q| q.interest().intersects(impact));
@@ -202,8 +201,7 @@ fn route_impact<P: Principal>(
             }
         }
         Impact::ForeignChanged { .. } => {
-            for window_index in 0..session.windows.len() {
-                let window = &session.windows[window_index];
+            for (window_index, window) in session.windows.iter().enumerate() {
                 if let Some(reason) = inverses.blindness(&window.projector) {
                     return Err(EngineError::Service(reason.to_string().into()));
                 }
@@ -235,8 +233,7 @@ fn route_impact<P: Principal>(
         }
         Impact::ProjectorReset { projector } => {
             let mut matched = false;
-            for window_index in 0..session.windows.len() {
-                let window = &session.windows[window_index];
+            for (window_index, window) in session.windows.iter().enumerate() {
                 if &window.projector != projector {
                     continue;
                 }
@@ -255,8 +252,7 @@ fn route_impact<P: Principal>(
             if session.principal.id() != *principal {
                 return Ok(());
             }
-            for window_index in 0..session.windows.len() {
-                let window = &session.windows[window_index];
+            for (window_index, window) in session.windows.iter().enumerate() {
                 let entry = work.window(window_index);
                 for key in &window.members {
                     entry.touch(key, index);
